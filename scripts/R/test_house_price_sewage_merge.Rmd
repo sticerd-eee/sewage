@@ -1,0 +1,647 @@
+---
+title: "Test Merge House Price Data"
+author: "Jacopo Olivieri"
+date: "2024-01-31"
+output:
+  html_document:
+    fig_width: 6
+    fig_aspect_ratio: 0.618
+knitr:
+  opts_chunk:
+    echo: false
+    warning: false
+    message: false
+    fig.align: "center"
+---
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library # nolint
+# renv::restore()  # Restore the environment if running for first time # nolint
+# renv::snapshot()  # After adding/updating packages, snapshot the state # nolint
+
+
+# Load required packages
+required_packages <- c(
+  "rmarkdown", "rio", "tidyverse", "purrr", "here",
+  "janitor", "data.table", "lubridate", "rnrfa", "sf",
+  "furrr", "future", "tmap"
+)
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+# set up parallel processing
+setup_parallel <- function() {
+  n_workers <- parallelly::availableCores() - 1
+  machine_ram <- memuse::Sys.meminfo()$totalram
+  ram_limit <- as.numeric(0.7 * machine_ram)
+
+  options(future.globals.maxSize = ram_limit)
+  future::plan(future::multisession, workers = n_workers)
+  logger::log_info("Parallel processing initialized with {n_workers} workers")
+}
+setup_parallel()
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "test_merge_house_price_data.log")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+```
+
+## Load Data
+
+### Load EDM Data
+
+```{r, load_data}
+dat <- import(here(
+  "data", "processed",
+  "individual_edm_location.RDATA"
+), trust = TRUE)
+
+dat_yr <- dat$yearly
+dat_mo <- dat$monthly
+```
+
+### Load House Price Data
+
+```{r}
+house_price_data <- import(here("data", "processed", "house_price.rds"),
+  trust = TRUE
+)
+spill_sites <- import(here("data", "processed", "unique_spill_sites.rds"),
+  trust = TRUE
+)
+# spill_lookup <- import(here("data", "processed", "spill_lookup.rds"),
+#   trust = TRUE
+# )
+```
+
+## Merge Data
+
+### Prepare unique spill sites
+
+```{r}
+set.seed(1)
+spill_sites_sample <- spill_sites %>%
+  slice_sample(n = 4000) %>%
+  st_as_sf(coords = c("easting", "northing"), crs = 27700)
+
+spill_sites_sf <- spill_sites_sample %>%
+  rename(spill_geom = geometry)
+```
+
+### Prepare House Price Data
+
+```{r}
+houses_sf <- house_price_data %>%
+  filter(!is.na(easting) & !is.na(northing)) %>%
+  mutate(house_id = row_number()) %>%
+  st_as_sf(coords = c("easting", "northing"), crs = 27700) %>%
+  select(house_id, transaction_id, year, geometry)
+```
+
+### Merge Data by Chunk
+
+```{r}
+# Set matching radius (in kilometres)
+radius_km <- 10
+radius_m <- radius_km * 1000
+
+# Prepare spill site data for the join:
+spill_sites_sf <- spill_sites_sample %>%
+  rename(spill_geom = geometry)
+
+# Map each house sale to every spill site within the defined radius.
+house_spill_matches <- st_join(houses_sf, spill_sites_sf,
+  join = st_is_within_distance,
+  dist = radius_m,
+  left = FALSE
+)
+
+# Reattach the spill site's geometry using a lookup table (by site_id)
+spill_lookup <- spill_sites_sf %>%
+  st_set_geometry(NULL) %>% # Remove active geometry to avoid join issues
+  mutate(spill_geom = spill_sites_sf$spill_geom) %>%
+  select(site_id, spill_geom)
+
+house_spill_matches <- house_spill_matches %>%
+  left_join(spill_lookup, by = "site_id")
+
+# Calculate the straight-line (Euclidean) distance for each house–spill pair
+house_spill_matches <- house_spill_matches %>%
+  mutate(
+    distance_m = as.numeric(st_distance(geometry, spill_geom, by_element = TRUE)),
+    distance_km = distance_m / 1000
+  )
+```
+
+
+### Sample
+
+Sanity check
+```{r}
+small_spill_sites <- spill_sites_sample %>%
+  slice_sample(n = 50)
+
+matched_houses <- house_spill_matches_sample %>%
+  filter(site_id %in% small_spill_sites$site_id) %>%
+  distinct(house_id, .keep_all = TRUE) %>%
+  left_join(house_price_data)
+
+# Create 10 km buffers around the house and spill site geometries
+houses_buffer <- st_buffer(matched_houses, dist = 10000)
+small_spill_buffer <- st_buffer(small_spill_sites, dist = 10000)
+
+tmap_mode("view")
+map <- tm_shape(small_spill_buffer) +
+  tm_polygons(fill = "lightgreen", fill_alpha = 0.3, col_alpha = 0) +
+  tm_shape(matched_houses) +
+  tm_dots(fill = "darkblue", size = .5, fill_alpha = 0.8) +
+  tm_shape(small_spill_sites) +
+  tm_dots(fill = "red", size = 1, fill_alpha = 0.9) +
+  tm_title("Matched House Sales & Spill Sites with 10km Buffers") +
+  tm_layout(legend.outside = TRUE)
+map
+
+tm_shape(small_spill_buffer) +
+  tm_polygons(
+    fill = "lightgreen",
+    fill_alpha = 0.1,
+    col_alpha = 0
+  ) +
+  tm_shape(matched_houses) +
+  tm_bubbles(
+    size = "price",
+    fill = "price",
+    fill.scale = tm_scale_intervals(
+      values = "brewer.blues",
+      n = 8
+    ),
+    size.scale = tm_scale_continuous(
+      values.scale = 3
+    ),
+    size.legend = tm_legend_hide(),
+    fill.legend = tm_legend(
+      title = "Price Paid (?)"
+    )
+  ) +
+  tm_shape(small_spill_sites) +
+  tm_dots(
+    fill = "red",
+    size = 1,
+    fill_alpha = 0.8
+  ) +
+  tm_title("Matched House Sales & Spill Sites with 10km Buffers") +
+  tm_layout(legend.outside = TRUE)
+```
+
+
+### All observations
+
+```{r}
+chunk_size <- 1000
+
+# Split house_sample into a list of chunks
+house_chunks <- split(
+  houses_sf,
+  (seq_len(nrow(houses_sf)) - 1) %/% chunk_size
+)
+
+# Function to process each chunk:
+#   - Perform the spatial join on the chunk with spill_sites_sf
+#   - Reattach spill_geom from the lookup table
+#   - Calculate the straight-line distance for each match
+process_chunk <- function(chunk) {
+  joined <- st_join(chunk, spill_sites_sf,
+    join = st_is_within_distance,
+    dist = radius_m,
+    left = FALSE
+  )
+
+  joined <- joined %>%
+    left_join(spill_lookup, by = "site_id") %>%
+    mutate(
+      distance_m = as.numeric(
+        st_distance(geometry, spill_geom, by_element = TRUE)
+      ),
+      distance_km = distance_m / 1000
+    )
+
+  return(joined)
+}
+
+# Process each chunk in parallel and combine the results into one long-format table.
+house_spill_matches <- future_map_dfr(house_chunks, process_chunk,
+  .progress = TRUE,
+  .options = furrr_options(seed = TRUE)
+)
+saveRDS(house_spill_matches, here("data", "processed", "spill_lookup.rds"))
+```
+
+
+
+
+
+### Archive
+
+```{r}
+process_chunk <- function(chunk) {
+  chunk %>%
+    st_join(
+      spill_sites,
+      join = st_is_within_distance,
+      dist = 10000 # 10km buffer
+    ) %>%
+    mutate(
+      distance = as.numeric(st_distance(geometry.x, geometry.y, by_element = TRUE))
+    ) %>%
+    st_drop_geometry() %>%
+    select(house_id, site_id, distance, water_company)
+}
+
+results <- seq(1, nrow(house_sample), by = 1000) %>%
+  future_map_dfr(function(i) {
+    chunk <- house_sample[i:pmin(i + 999, nrow(house_sample)), ]
+    gc()
+    process_chunk(chunk)
+  }, .progress = TRUE, .options = furrr_options(seed = TRUE))
+```
+
+```{r}
+test_chunk <- house_sample[1:1000, ] # First 1000 houses
+
+# Process the chunk
+test_results <- test_chunk %>%
+  st_join(
+    spill_sites,
+    join = st_is_within_distance,
+    dist = 10000 # 10km buffer
+  ) %>%
+  # After st_join, we just use 'geometry' as the column name
+  mutate(
+    distance = as.numeric(st_distance(geometry, spill_sites[match(site_id, spill_sites$site_id), ], by_element = TRUE))
+  )
+```
+
+### Parallelisation testing
+
+```{r}
+# --- Chunk Size Performance Test ---
+
+house_price_data <- import(here("data", "processed", "house_price.rds"),
+  trust = TRUE
+)
+spill_sites <- import(here("data", "processed", "unique_spill_sites.rds"),
+  trust = TRUE
+)
+
+spill_sites_sf <- spill_sites %>%
+  # slice_sample(n = 4000) %>%
+  st_as_sf(coords = c("easting", "northing"), crs = 27700) %>% 
+  select(site_id, geometry) %>%
+  rename(spill_geom = geometry)
+
+houses_sf <- house_price_data %>%
+  filter(!is.na(easting) & !is.na(northing)) %>%
+  mutate(house_id = row_number()) %>%
+  st_as_sf(coords = c("easting", "northing"), crs = 27700) %>%
+  select(house_id, geometry)
+
+# Set matching radius (in kilometres)
+radius_km <- 10
+radius_m <- radius_km * 1000
+
+# Process chunk function (mimicking the one used in your test script):
+# Reduce spill_sites_sf for testing by taking a random sample of 100 sites.
+# Load required libraries:
+library(tidyverse)
+library(sf)
+library(furrr)
+library(ggplot2)
+library(microbenchmark)
+
+# The following objects must be defined beforehand:
+#   • house_sample: an sf object with house sale data (with geometry)
+#   • spill_sites_sf: an sf object with sewage spill site data (with geometry)
+#   • spill_lookup: a lookup tibble providing additional spill site details 
+#                   (includes a "site_id" column and matching geometry column "spill_geom")
+#   • radius_m: matching radius in metres (e.g. 10000 for 10 km)
+
+# Reduce spill_sites_sf for testing by taking a random sample of 300 sites.
+set.seed(123)  # for reproducibility
+spill_sites_sf_sample <- spill_sites_sf #%>% slice_sample(n = 300)
+
+# Define the function to process a chunk of houses.
+process_chunk <- function(chunk) {
+  # Perform a spatial join to find houses within the specified radius of any spill site.
+  joined <- st_join(chunk, spill_sites_sf,
+                    join = st_is_within_distance,
+                    dist = radius_m,
+                    left = FALSE)
+  # Optionally, you can join additional lookup details here if needed.
+  return(joined)
+}
+
+# Define candidate chunk sizes based on our discussion:
+candidate_chunk_sizes <- c(100, 500, 1000)
+
+# Data frame to store performance results for both methods.
+performance_results <- tibble(
+  method = character(),
+  chunk_size = integer(),
+  num_chunks = integer(),
+  execution_time_sec = numeric()
+)
+
+# Loop over each candidate chunk size.
+for (cs in candidate_chunk_sizes) {
+  # Split the houses_sf data into chunks based on the current chunk size.
+  house_chunks <- split(
+    houses_sf,
+    (seq_len(nrow(houses_sf)) - 1) %/% cs
+  )
+  
+  num_chunks <- length(house_chunks)
+  cat("Testing with chunk size:", cs, "->", num_chunks, "chunks.\n")
+  
+  # Measure the sequential processing time using purrr::map_dfr.
+  mb_seq <- microbenchmark(
+    seq_result <- map_dfr(house_chunks, process_chunk),
+    times = 1
+  )
+  elapsed_seq <- median(mb_seq$time) / 1e9
+  cat("Sequential (map_dfr) for chunk size", cs, "took", elapsed_seq, "seconds.\n")
+  
+  # performance_results <- performance_results %>%
+  #   add_row(method = "sequential", chunk_size = cs, num_chunks = num_chunks, execution_time_sec = elapsed_seq)
+  
+  # Measure the parallel processing time using furrr::future_map_dfr.
+  mb_par <- microbenchmark(
+    par_result <- future_map_dfr(house_chunks, process_chunk,
+                                 .progress = FALSE,
+                                 .options = furrr::furrr_options(seed = TRUE)),
+    times = 1
+  )
+  elapsed_par <- median(mb_par$time) / 1e9
+  cat("Parallel (future_map_dfr) for chunk size", cs, "took", elapsed_par, "seconds.\n\n")
+  
+  performance_results <- performance_results %>%
+    add_row(method = "parallel", chunk_size = cs, num_chunks = num_chunks, execution_time_sec = elapsed_par)
+}
+
+# Display the performance results.
+print(performance_results)
+
+# Plot the benchmark results.
+ggplot(performance_results, aes(x = as.factor(chunk_size), y = execution_time_sec, fill = method)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Benchmarking: Chunk Size vs Execution Time",
+    x = "Chunk Size",
+    y = "Execution Time (seconds)",
+    fill = "Method"
+  ) +
+  theme_minimal()
+# ggsave(here("output", "code_testing", "spill_sites_house_sales_merge_parallelisation.png"))
+
+```
+
+```{r}
+############################################################
+# Merge House Price Data with Nearby Spill Sites
+# Project: Spatial Data Integration
+# Date: 04/02/2025
+# Author: Jacopo Olivieri
+############################################################
+
+# Set Up
+############################################################
+
+#' Initialise the R environment with required packages and settings
+#' @return NULL
+initialise_environment <- function() {
+  # Package management with renv
+  if (!requireNamespace("renv", quietly = TRUE)) {
+    install.packages("renv")
+    renv::init()
+  }
+
+  # Define required packages
+  required_packages <- c(
+    "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue", "fs", "rnrfa", "sf"
+  )
+
+  # Install and load packages
+  invisible(sapply(required_packages, function(pkg) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      install.packages(pkg)
+    }
+    library(pkg, character.only = TRUE)
+  }))
+}
+
+#' Set up logging configuration
+#' @return NULL
+setup_logging <- function() {
+  log_path <- here::here("output", "log", "10_10km_site_house_sale_match.log")
+  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
+
+  logger::log_appender(logger::appender_file(log_path))
+  logger::log_layout(logger::layout_glue_colors)
+  logger::log_threshold(logger::DEBUG)
+  logger::log_info("Script started at {Sys.time()}")
+}
+
+############################################################
+# Configuration
+############################################################
+
+CONFIG <- list(
+  processed_dir = here::here("data", "processed")
+)
+
+############################################################
+# Functions
+############################################################
+
+#' Load spatial datasets for house prices and spill sites.
+#' @return List containing house price data and spill sites data
+load_data <- function() {
+  logger::log_info("Loading spatial datasets")
+
+  house_data <- rio::import(here::here("data", "processed", "house_price.rds"),
+    trust = TRUE
+  )
+  spill_data <- rio::import(here::here("data", "processed", "unique_spill_sites.rds"),
+    trust = TRUE
+  )
+
+  return(list(house = house_data, spill = spill_data))
+}
+
+#' Prepare spill sites spatial data and create a lookup table.
+#' @param spill_data DataFrame of spill sites
+#' @return List containing the spatial spill sites and a lookup table
+prepare_spill_sites <- function(spill_data) {
+  logger::log_info("Preparing spill sites spatial data")
+
+  spill_sites_sf <- spill_data %>%
+    st_as_sf(coords = c("easting", "northing"), crs = 27700) %>%
+    rename(spill_geom = geometry)
+
+  spill_lookup <- spill_sites_sf %>%
+    st_set_geometry(NULL) %>%
+    mutate(spill_geom = spill_sites_sf$spill_geom) %>%
+    select(site_id, spill_geom)
+
+  return(list(spill_sf = spill_sites_sf, lookup = spill_lookup))
+}
+
+#' Prepare house price spatial data.
+#' @param house_data DataFrame of house price records
+#' @return sf object containing the house price data
+prepare_house_data <- function(house_data) {
+  logger::log_info("Preparing house price spatial data")
+
+  houses_sf <- house_data %>%
+    filter(!is.na(easting) & !is.na(northing)) %>%
+    mutate(house_id = row_number()) %>%
+    st_as_sf(coords = c("easting", "northing"), crs = 27700) %>%
+    select(house_id, geometry)
+
+  return(houses_sf)
+}
+
+#' Perform spatial join to match houses with nearby spill sites.
+#' @param houses_sf sf object containing house price data
+#' @param spill_sites_sf sf object containing spill sites
+#' @param spill_lookup Lookup table for spill sites
+#' @param radius_km Numeric radius in kilometres for matching (default: 10)
+#' @return sf object with merged house and spill data, including distance calculations
+perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup, radius_km = 10) {
+  logger::log_info("Performing spatial join between houses and spill sites")
+  
+  radius_m <- radius_km * 1000
+  chunk_size <- 2000
+  
+  house_chunks <- split(
+    houses_sf,
+    (seq_len(nrow(houses_sf)) - 1) %/% chunk_size
+  )
+  
+  merged_chunks <- purrr::map(house_chunks, function(chunk) {
+    logger::log_info(glue::glue("Processing chunk with {nrow(chunk)} houses"))
+    
+    st_join(chunk, spill_sites_sf,
+            join = st_is_within_distance,
+            dist = radius_m,
+            left = TRUE
+    ) %>%
+      left_join(spill_lookup, by = "site_id") %>%
+      mutate(
+        # Calculate the straight-line distance to the spill site
+        distance_m = if_else(is.na(spill_geom), NA_real_,
+                             as.numeric(st_distance(geometry, spill_geom, by_element = TRUE))
+        ),
+        distance_km = distance_m / 1000
+      ) %>%
+      group_by(house_id) %>%
+      mutate(n_discharge_outlet = sum(!is.na(site_id))) %>%
+      ungroup() %>%
+      st_drop_geometry() %>%
+      select(house_id, site_id, transaction_id, year, distance_m, distance_km, n_discharge_outlet)
+  })
+  
+  merged_data <- dplyr::bind_rows(merged_chunks)
+  return(merged_data)
+}
+
+
+#' Process the spatial data by loading, preparing, and merging house price and spill site data.
+#' @param radius_km Numeric radius in kilometres for the spatial join (default: 10)
+#' @return sf object containing the merged data
+process_spatial_data <- function(radius_km = 10) {
+  datasets <- load_data()
+
+  houses_sf <- prepare_house_data(datasets$house)
+  spill_data <- prepare_spill_sites(datasets$spill)
+
+  merged_spatial_data <- perform_spatial_join(houses_sf, spill_data$spill_sf, spill_data$lookup, radius_km)
+
+  return(merged_spatial_data)
+}
+
+# New export function added here
+export_data <- function(df) {
+  # Define output paths
+  rds_path <- file.path(CONFIG$processed_dir, "spill_house_lookup.rds")
+  csv_path <- file.path(CONFIG$processed_dir, "spill_house_lookup.csv")
+
+  # Export data with error handling
+  tryCatch(
+    {
+      saveRDS(df, rds_path)
+      write_csv(df, csv_path)
+
+      logger::log_info(glue::glue("Data exported successfully to:"))
+      logger::log_info(glue::glue("  - RDS: {rds_path}"))
+      logger::log_info(glue::glue("  - CSV: {csv_path}"))
+    },
+    error = function(e) {
+      err_msg <- glue::glue("Failed to export data: {e$message}")
+      logger::log_error(err_msg)
+      stop(err_msg)
+    }
+  )
+}
+
+############################################################
+# Main Execution
+############################################################
+
+#' Main function to execute the spatial data integration pipeline.
+#' @return Invisible NULL
+main <- function() {
+  tryCatch(
+    {
+      initialise_environment()
+      setup_logging()
+
+      logger::log_info("Starting spatial data processing pipeline")
+      merged_data <- process_spatial_data()
+      logger::log_info("Spatial join completed successfully")
+
+      # Export the merged data using the export_data function
+      logger::log_info("Exporting data")
+      export_data(merged_data)
+    },
+    error = function(e) {
+      logger::log_error(glue::glue("Pipeline failed: {e$message}"))
+      stop(e)
+    }
+  )
+
+  invisible(NULL)
+}
+
+if (sys.nframe() == 0) {
+  main()
+}
+
+```
+

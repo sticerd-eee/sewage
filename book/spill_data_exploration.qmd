@@ -1,0 +1,695 @@
+---
+author: "Jacopo Olivieri"
+date: 2024-01-02
+editor: source
+format: html
+number-sections: true
+number-depth: 4
+execute: 
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+  fig-width: 9
+  fig-asp: 0.618 
+  fig-align: center
+---
+
+# Sewage Spill Data Exploration {#sec-03-spill-exploration}
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+
+# Load required packages
+required_packages <- c("rmarkdown", "rio", "tidyverse", "purrr", "here",
+                       "janitor", "sf", "sp", "rnaturalearth", 
+                       "rnaturalearthdata", "rnrfa", "DescTools",
+                       "gridExtra", "modelsummary", "rgeoboundaries",
+                       "tmap", "leaflet", "htmltools", "servr",
+                       "viridis")
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "spill_data_exploration.log")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+
+# Ggplot theme
+theme_pref <- theme_minimal() +
+    theme(
+      text = element_text(size = 12),
+      plot.title = element_text(face = "bold", size = 12, 
+                                margin = ggplot2::margin(b = 10, unit = "pt")),
+      axis.title = element_text(face = "bold", size = 10),
+      axis.text = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = "gray95"),
+      panel.grid.major.y = element_line(color = "gray95"),
+      legend.position = "bottom",
+      legend.title = element_text(face = "bold", size = 10),
+      legend.text = element_text(size = 8),
+      plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
+    ) 
+```
+
+```{css, echo = FALSE}
+/* Custom CSS for modelsummary tables */
+.table, th, td {
+  font-size: 0.9em;  /* Base font size (matches reactable's cell style) */
+}
+
+/* Headers */
+.table th {
+  font-size: 0.95em !important;     /* Header font size */
+  white-space: normal !important;  /* Allow header text wrapping */
+  padding: 0.25em 0.5em !important;  /* Compact padding */
+}
+
+/* Cells */
+.table td {
+  white-space: nowrap !important;  /* Prevent cell text wrapping */
+  padding: 0.25em 0.5em !important;  /* Compact padding */
+}
+```
+
+```{r, load_data}
+# Aggregated spill data
+dat <- import(here("data", "processed", 
+                   "individual_edm_location.RDATA"), trust = TRUE)
+
+dat_yr <- dat$yearly
+dat_mo <- dat$monthly
+
+# Spill sites
+spill_sites <- import(here("data", "processed", "unique_spill_sites.rds"),
+  trust = TRUE
+)
+```
+
+## Geographic Distribution in 2023 {#sec-03-01-geo-distribution}
+
+Sewage spill sites are spread relatively uniformly around England. Spills appear to be more frequent near the coast, particularly in the South and South West, which is expected as these regions have a higher concentration of water channels. Beyond this, there doesn't seem to be any other visual pattern.
+
+```{r, plot-spill-stats}
+
+dat_yr_clean <- left_join(
+  dat_yr, spill_sites, 
+  by = join_by(water_company, outlet_discharge_ngr, site_id))
+
+# Create spill map functions
+plot_spill_map <- function(data, value_col, legend_title) {
+  ggplot() +
+    # Maximize plot area by adjusting margins and expanding plot limits
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      plot.margin = unit(c(.1,.1,.1,.1), "cm"),
+      legend.title = element_text(size = 14, hjust = 0),  
+      legend.position = "bottom"
+    ) +
+    # Base map
+    geom_sf(data = uk_map, fill = "grey90", colour = "white") +
+    # Data points
+    geom_sf(
+      data = data, 
+      aes(colour = .data[[value_col]],
+          size = .data[[value_col]]), 
+      alpha = 0.7,
+      size = 1
+    ) +
+    scale_colour_viridis_c(
+      option = "magma",
+      direction = -1,
+      guide = guide_colourbar(
+        barwidth = 15,  
+        barheight = 1.5 
+      )) +
+    coord_sf(
+      xlim = c(-8, 2), 
+      ylim = c(50, 59),
+      expand = FALSE
+    ) +
+    labs(
+      colour = str_wrap(legend_title, width = 20)  # Wrap title text
+    )
+}
+
+plot_spill_map_tmap <- function(data, value_col, legend_title) {
+  data <- data %>% 
+    select(water_company, # site_name_ea, site_name_wa_sc, 
+           all_of(value_col))
+  
+  tm_shape(uk_map) +
+    tm_polygons(
+      fill = "grey90",
+      col = "white"
+    ) +
+    tm_shape(data) +
+    tm_dots(
+      size = 0.4,
+      fill = value_col,
+      fill_alpha = 0.7,
+      fill.scale = tm_scale(
+        values = "-magma",
+        interval = "continuous"
+      ),
+      fill.legend = tm_legend(
+        title = legend_title,
+        position = c("left", "bottom")
+      )
+    ) +
+    tm_layout(
+      legend.text.size = 0.8,
+      legend.title.size = 1
+    ) +
+    tm_view(
+      set_view = c(-2, 53, 5.5)  
+    )
+}
+
+# UK Map
+uk_map <- ne_countries(scale = "medium", returnclass = "sf") %>%
+  filter(sovereignt %in% c("United Kingdom"))
+
+# Function to process yearly data
+process_yearly_data <- function(data, year) {
+  data %>%
+    filter(year == !!year) %>%
+    mutate(
+      across(
+        contains("spill"),
+        ~ Winsorize(.x, 
+                    val = quantile(.x, probs = c(0.01, 0.99), na.rm = TRUE))
+      ),
+      across(contains("spill"), ~ log(1 + .), .names = "log_{.col}")
+    ) %>%
+    st_as_sf(coords = c("easting", "northing"), crs = 27700) %>%
+    st_transform(crs = 4326)
+}
+
+# Create plots for multiple years
+create_yearly_plots <- function(sf_data, year) {
+  list(
+    hrs = plot_spill_map(
+      sf_data,
+      "log_spill_hrs_yr",
+      glue::glue("Log\nAnnual Spill\nDuration")
+    ),
+    hrs_tmap = plot_spill_map_tmap(
+      sf_data,
+      "log_spill_hrs_yr",
+      glue::glue("Log\nAnnual Spill\nDuration")
+    ),
+    count = plot_spill_map(
+      sf_data,
+      "log_spill_count_yr",
+      glue::glue("Log\nAnnual Spill\nCount")
+    ),
+    count_tmap = plot_spill_map_tmap(
+      sf_data,
+      "log_spill_count_yr",
+      glue::glue("Log\nAnnual Spill\nCount")
+    )
+  )
+}
+
+# Process data and create plots for all years
+years <- c(2021, 2022, 2023)
+plots <- years %>%
+  set_names(paste0("dat_sf", str_sub(., 3, 4))) %>%
+  map(~process_yearly_data(dat_yr_clean, .)) %>%
+  imap(~create_yearly_plots(.x, .y))
+```
+
+```{r}
+#| eval: false
+
+# Function to save tmap plots
+save_tmap_plots <- function(plot_list, base_name) {
+  tmap_mode("view")
+  
+  # Save hours plot
+  tmap_save(
+    plot_list$hrs_tmap,
+    filename = file.path("book_figs", paste0(base_name, "_hours.html")),
+    width = 800,
+    height = 600
+  )
+  
+  # Save count plot
+  tmap_save(
+    plot_list$count_tmap,
+    filename = file.path("book_figs", paste0(base_name, "_count.html")),
+    width = 800,
+    height = 600
+  )
+}
+
+# Save all plots for each year
+walk2(
+  plots,
+  names(plots),
+  ~save_tmap_plots(.x, .y)
+)
+```
+
+### Spill Count
+
+```{=html}
+<iframe src="book_figs/dat_sf23_count.html" width="800" height="600" frameborder="0"></iframe>
+```
+
+```{r, geo-spill-plots-count-23}
+#| fig-width: 16
+#| fig-asp: 0.618 
+#| eval: false
+
+#plots$dat_sf23$count_tmap
+plots$dat_sf23$count
+```
+
+### Spill Duration
+
+```{=html}
+<iframe src="book_figs/dat_sf23_hours.html" width="800" height="600" frameborder="0"></iframe>
+```
+
+```{r, geo-spill-plots-hrs-23}
+#| fig-width: 16
+#| fig-asp: 0.618 
+#| eval: false
+
+# plots$dat_sf23$hrs_tmap
+plots$dat_sf23$hrs
+```
+
+## Frequency and Duration of Sewage Spills {#sec-03-02-frequency-duration}
+
+Both the summary tables and the histograms show that the frequency and duration are very positively skewed. A priori, this could be due various factors (also considering that left side is bound at zero):
+
+1.  **Malfunctioning of EDM sensors**: Malfunctioning EDM sensors may detect 'blank' sewage overflows, creating outliers in the right tail.
+2.  **Extreme weather events**: Sewage overflows are (theoretically) caused by rainfall. Episodic heavy rain could create temporal clusters of long-duration events, stretching the right tail.
+3.  **Aging or Inconsistent Infrastructure**: Older sewer systems or uneven maintenance across regions could lead to chronic sewage spills, stretching the right tail
+
+### Summary Tables {#sec-03-02-01-summary-tables}
+
+```{r, }
+dat_yr_clean_list <- map(
+  2023:2021, 
+  function(yr) {
+    # Get required variables
+    dat_yr_clean %>%
+      filter(year == yr) %>% 
+      select(
+      water_company,
+      contains("spill"),
+      -ends_with("ea"),
+      -contains("log")
+    ) %>% 
+      mutate(
+        `Sites with Spill Count > 0` = if_else(spill_count_yr > 0, 1, 0),
+        `Sites with Spill Duration >= 15m` = if_else(spill_hrs_yr >= 0.25, 1, 0)
+        ) %>% 
+      rename(
+        `Spill Count` = spill_count_yr,
+        `Spill Duration (hrs)` = spill_hrs_yr,
+        `Water Company` = water_company
+      ) 
+})
+```
+
+::: panel-tabset
+#### 2023
+
+```{r}
+datasummary_skim(dat_yr_clean_list[[1]], fmt = 2)
+```
+
+#### 2022
+
+```{r}
+datasummary_skim(dat_yr_clean_list[[2]], fmt = 2)
+```
+
+#### 2021
+
+```{r}
+datasummary_skim(dat_yr_clean_list[[1]], fmt = 2)
+```
+:::
+
+### Histogram in 2023 {#sec-03-02-02-histogram}
+
+```{r}
+plot_hist <- function(data=dat_yr_clean, yr, x_var, x_label, bins, title) {
+  filter(data, year == yr) %>% 
+  ggplot(., aes(x = {{x_var}})) +
+    geom_histogram(
+      bins = bins, 
+      fill = viridis(1, option = "magma"), alpha = 0.7, col = "black") +
+    labs(
+      title = title,
+      x = x_label,
+      y = "Count"
+    ) +
+    theme_pref
+}
+
+plot_hist_norm <- function(data = dat_yr_clean, yr, x_var, x_label, bins, title) {
+  data <- filter(data, year == yr) %>% 
+    mutate({{ x_var }} := log(1 + {{ x_var }}))
+  
+  mu <- mean(data %>% pull({{ x_var }}), na.rm = TRUE)
+  sigma <- sd(data %>% pull({{ x_var }}), na.rm = TRUE)
+  
+  ggplot(data, aes(x = {{ x_var }})) +
+    geom_histogram(
+      aes(y = ..density..),
+      bins = bins, 
+      fill = viridis(1, option = "magma"), alpha = 0.7, col = "black"
+    ) +
+    stat_function(
+      fun = dnorm,
+      args = list(mean = mu, sd = sigma),
+      color = viridis(3, option = "magma")[2],
+      alpha = 0.7,
+      linewidth = 0.8
+    ) + 
+    labs(
+      title = title,
+      x = x_label,
+      y = "Density"
+    ) +
+    theme_pref
+}
+
+```
+
+::: panel-tabset
+#### Spill Duration
+
+```{r}
+plot_hist(yr = 2023, 
+          x_var = spill_hrs_yr, x_label = "Spill Hours",
+          bins =50,
+          title = "Duration of Sewage Spills of all Water Companies in 2023")
+```
+
+#### Spill Count
+
+```{r}
+plot_hist(yr = 2023, 
+          x_var = spill_count_yr, x_label = "Spill Count",
+          bins =60,
+          title = "Count of Sewage Spills of all Water Companies")
+```
+
+#### Log Spill Duration
+
+```{r}
+plot_hist_norm(
+  yr = 2023,
+  x_var = spill_hrs_yr, 
+  x_label = "Spill Hours",
+  bins = 50,
+  title = "(1+Log) Duration of Sewage Spills of all Water Companies in 2023
+  with Normal Curve"
+)
+```
+
+#### Log Spill Count
+
+```{r}
+plot_hist_norm(
+  yr = 2023,
+  x_var = spill_count_yr, 
+  x_label = "Spill Count",
+  bins = 50,
+  title = "(1+Log) (1+Log) Count of Sewage Spills of all Water Companies
+  with Normal Curve"
+)
+```
+:::
+
+## Temporal Sewage Spill Distribution {#sec-03-03-temporal}
+
+Sewage Spills are seasonal, peaking between October and February, which aligns with the wettest months of the year. Given this seasonality, the analysis will need to use time fixed effects.
+
+```{r, clean-data-mo}
+dat_mo_clean <- dat_mo %>%
+  filter(spill_hrs_mo >=0) %>% 
+  mutate(
+    month = factor(month, levels = 1:12, labels = month.abb),
+    year = factor(year)
+  ) %>% 
+  group_by(year) %>%  
+  mutate(
+    across(
+      contains("spill"),
+      ~ Winsorize(.x, val = quantile(.x, probs = c(0.01, 0.99), na.rm = TRUE)))
+  ) %>%
+  group_by(year, month) %>% 
+  summarize(
+    spill_hrs_mo = sum(spill_hrs_mo), 
+    spill_count_mo = sum(spill_count_mo),
+    unique_spill_sites = n_distinct(outlet_discharge_ngr),
+    .groups = "drop") %>% 
+  mutate(
+    across(starts_with("spill"), ~ log(1 + .), .names = "log_{.col}"),
+    across(starts_with("spill"), ~ ./unique_spill_sites, .names = "{.col}_site")
+    )
+```
+
+### Total Spill Duration and Count {#sec-03-03-01-total}
+
+::: panel-tabset
+#### Spill Duration
+
+```{r, temporal-hrs-plot}
+plot_monthly_bars <- function(data, y_var, title, y_label) {
+  ggplot(data, aes(x = month, y = {{y_var}}, fill = year)) +
+    geom_bar(
+      stat = "identity", 
+      position = position_dodge(width = 0.9),
+      width = 0.8,
+      alpha = 0.9
+    ) +
+    scale_fill_viridis_d(option = "magma") +
+    labs(
+      title = title,
+      y = y_label,
+      x = NULL,
+      fill = "Year"
+    ) +
+    theme_pref +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+}
+
+# For your original spill hours plot
+fig23_temporal_hrs <- plot_monthly_bars(
+  dat_mo_clean, spill_hrs_mo, 
+  "Monthly Spill Duration by Year",
+  "Spill Duration per Month (hrs)")
+
+fig23_temporal_hrs
+```
+
+#### Spill Count
+
+```{r, temporal-count-plot}
+fig23_temporal_count <- plot_monthly_bars(
+  dat_mo_clean, spill_count_mo,
+  "Monthly Spill Count by Year",
+  "Spill Count per Month")
+
+fig23_temporal_count
+```
+:::
+
+### Per Unique Spill Site {#sec-03-03-02-unique}
+
+::: panel-tabset
+#### Spill Duration
+
+```{r, temporal-hrs-plot-standardised}
+plot_monthly_bars(
+  dat_mo_clean, spill_hrs_mo_site, 
+  "Monthly Spill Duration by Year per Unique Active Spill Site",
+  "Spill Duration per Month (hrs)")
+```
+
+#### Spill Count
+
+```{r, temporal-count-plot-standardised}
+plot_monthly_bars(
+  dat_mo_clean, spill_count_mo_site,
+  "Monthly Spill Count by Year",
+  "Spill Count per Month")
+```
+:::
+
+## Sewage Spill Distribution by Water Company {#sec-03-04-company}
+
+The violin plots and bar charts below show the sewage spill count and duration, normalised by the number of sewage sites, for each water company. Certain water companies---particularly South West Water---experience sewage spills more frequently than others.
+
+### Violin Plots
+
+```{r}
+# Generate a plot for each year
+plots_list_violin <- map(2023:2021, function(yr) {
+  
+  # Filter data by year
+  data_year <- dat_yr_clean %>% 
+    filter(year == yr)
+  
+  # Reshape data to long format for both spill_count_yr and spill_hrs_yr
+  data_long <- data_year %>% 
+    pivot_longer(
+      cols = c(spill_count_yr, spill_hrs_yr),
+      names_to = "spill_metric",
+      values_to = "value"
+    ) %>%
+    mutate(spill_metric = recode(spill_metric,
+                                 spill_count_yr = "Spill Count",
+                                 spill_hrs_yr = "Spill Duration"))
+  
+  # Create the violin plot with overlaid boxplots and facets by spill_metric
+  ggplot(data_long, aes(x = water_company, y = value, fill = water_company)) +
+    geom_violin(trim = FALSE, alpha = 0.7) +
+    geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) +
+    scale_fill_viridis_d(option = "magma") + 
+    facet_wrap(~ spill_metric, scales = "free_y") +
+    labs(
+      title = paste("Distribution of Sewage Spill Statistics by Water Company in", yr),
+      x = "Water Company",
+      y = "Value"
+    ) +
+    theme_pref +
+    theme(legend.position = "none")
+})
+```
+
+::: panel-tabset
+#### 2023
+
+```{r}
+plots_list_violin[[1]]
+```
+
+#### 2022
+
+```{r}
+plots_list_violin[[2]]
+```
+
+#### 2021
+
+```{r}
+plots_list_violin[[3]]
+```
+:::
+
+### Bar Charts {#sec-03-04-02-bar}
+
+```{r}
+plots_list_bar <- map(2023:2021, function(yr) {
+  
+  # Filter data for the specified year
+  data_year <- dat_yr_clean %>% 
+    filter(year == yr)
+  
+  # Reshape data to long format and calculate average values by water company and metric
+  data_summary <- data_year %>% 
+    pivot_longer(
+      cols = c(spill_count_yr, spill_hrs_yr),
+      names_to = "spill_metric",
+      values_to = "value"
+    ) %>% 
+    group_by(water_company, spill_metric) %>% 
+    summarise(avg_value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+    mutate(spill_metric = recode(spill_metric,
+                                 spill_count_yr = "Spill Count",
+                                 spill_hrs_yr = "Spill Duration"))
+  
+  # Create the bar chart with uniform fill colour from viridis magma, alpha 0.7 and black borders
+  ggplot(data_summary, aes(x = water_company, y = avg_value)) +
+    geom_bar(stat = "identity", 
+             fill = viridis::viridis(1, option = "magma"), 
+             alpha = 0.7, 
+             colour = "black",
+             position = "dodge") +
+    facet_wrap(~ spill_metric, scales = "free_y") +
+    labs(
+      title = paste("Average Sewage Spill Statistics by Water Company in", yr),
+      x = "Water Company",
+      y = "Average Value"
+    ) +
+    theme_pref
+})
+```
+
+::: panel-tabset
+#### 2023
+
+```{r}
+plots_list_bar[[1]]
+```
+
+#### 2022
+
+```{r}
+plots_list_bar[[2]]
+```
+
+#### 2021
+
+```{r}
+plots_list_bar[[3]]
+```
+:::
+
+
+## Temporal Coverage {#sec-03-05-coverage}
+
+Water companies installed EDM sensors at sewage spill sites gradually, resulting in incomplete coverage for some sites between 2021 and 2023. A total of 23,585 observations have full coverage.
+
+```{r}
+# Create a new variable to indicate complete panel observations
+dat_panel <- dat_yr_clean %>%
+  mutate(panel_complete = if_else(
+    available_year_2021 == 1 & available_year_2022 == 1 & available_year_2023 == 1,
+    "Complete", "Incomplete"
+  ))
+
+# Summarise counts and percentages
+panel_summary <- dat_panel %>%
+  group_by(panel_complete) %>%
+  summarise(n = dplyr::n()) %>%
+  mutate(percentage = round(n / sum(n) * 100, 1))
+
+# Display the summary table
+knitr::kable(panel_summary, 
+             caption = "Observations by Panel Completeness (2021-2023)",
+             col.names = c("Panel Status", "Count", "Percentage (%)"))
+```
+

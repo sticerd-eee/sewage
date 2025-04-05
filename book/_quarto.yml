@@ -1,0 +1,25 @@
+project:
+  type: book
+  output-dir: _site
+
+book:
+  title: "Sewage in Our Waters"
+  author: "Jacopo Olivieri"
+  date: "last-modified"
+  chapters:
+    - index.qmd
+    - data_limitations.qmd
+    - spill_data_exploration.qmd
+    - house_data_exploration.qmd
+    - event_study.qmd
+
+bibliography: ../docs/lit_review/sewage_literature_review/refs.bib
+
+format:
+  html:
+    theme: lux
+    embed-resources: false
+    css: styles.css
+
+editor: source
+

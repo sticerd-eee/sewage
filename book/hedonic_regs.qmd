@@ -1,0 +1,757 @@
+---
+author: "Jacopo Olivieri"
+date: 2025-03-04
+editor: source
+format: html
+number-sections: true
+number-depth: 4
+execute: 
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+  fig-width: 9
+  fig-asp: 0.618 
+  fig-align: center
+---
+
+# Hedonics Regressions {#sec-06-hedonics-regs}
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+
+# Load required packages
+required_packages <- c(
+  "rmarkdown", "rio", "tidyverse", "purrr", "here",
+  "janitor", "viridis", "data.table", "arrow"
+)
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "house_data_exploration")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+
+# Ggplot theme
+theme_pref <- theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    plot.title = element_text(
+      face = "bold", size = 12,
+      margin = ggplot2::margin(b = 10, unit = "pt")
+    ),
+    axis.title = element_text(face = "bold", size = 10),
+    axis.text = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(color = "gray95"),
+    panel.grid.major.y = element_line(color = "gray95"),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(size = 8),
+    plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
+  )
+```
+
+```{r}
+rad <- 5000
+con <- DBI::dbConnect(duckdb::duckdb(), dbdir = here("data", "duckdb.duckdb"))
+
+# import house regression data
+dat_panel_house_weighted <- open_dataset(
+  here::here("data", "processed", "dat_panel_house_weighted")) %>% 
+  filter(radius==rad) %>% 
+  collect()
+
+dat_panel_house_nearest <- open_dataset(
+  here::here("data", "processed", "dat_panel_house_nearest")) %>% 
+  filter(radius==rad) %>% 
+  collect()
+
+# Import house data
+house_tbl <- tbl(con, "house_price_data")
+``` 
+
+```{r}
+set.seed(123)
+dat_panel_house_nearest_sample <- dat_panel_house_nearest %>% 
+  filter(month_id_transfer >= 13, distance_m <= rad) %>% 
+  group_by(house_id, month_id_transfer) %>% 
+  filter(n() >= 6) %>% 
+  ungroup() %>%
+  inner_join(
+    (.) %>% 
+      distinct(house_id) %>%
+      slice_sample(n = 100000),
+    by = "house_id"
+  ) %>% 
+  mutate(lag = month_id_transfer - month_id_spill) %>%  
+  relocate(lag, .after = month_id_spill) %>% 
+  arrange(house_id, month_id_transfer, month_id_spill)
+
+dat_panel_house_nearest_sample <- dat_panel_house_nearest_sample %>% 
+  left_join(house_tbl, by = join_by(house_id, price), copy = TRUE)
+```
+
+
+```{r}
+# Option 1: No lags
+model1 <- dat_panel_house_nearest_sample %>% 
+  filter(lag == 1) %>% 
+  feols(log(price) ~ log(spill_count), data = .)
+summary(model1)
+
+# Option 2: 6 lags
+model2 <- dat_panel_house_nearest_sample %>% 
+  filter(lag >= 0 & lag <= 6) %>% 
+  feols(log(price) ~ i(lag, log(spill_count), ref = 0) | 
+               month_id_transfer, # WILL TRY ADDING LOCATION FIXED EFFECT LATER
+  data = .
+)
+summary(model2)
+
+# Visualize the effects by lag period
+iplot(model2, main = "Effect of Spills by Months Prior to Sale")
+
+# Option 3: Current effect with inverse distance interaction (lag = 0)
+model3 <- dat_panel_house_nearest_sample %>% 
+  filter(lag == 1) %>% 
+  mutate(inv_distance = 1/distance_m) %>%
+  feols(log(price) ~ log(spill_count)*inv_distance,
+  data = .
+)
+summary(model3)
+
+
+# Option 4: Full model with lag structure and inverse distance interactions
+model4 <- dat_panel_house_nearest_sample %>% 
+  filter(lag >= 0 & lag <= 6) %>% 
+  mutate(
+    inv_distance = 1/distance_m,
+    log_spill_count = log(spill_count)
+  ) %>%
+  feols(log(price) ~ i(lag, log_spill_count, ref = 0) +
+                     i(lag, inv_distance, ref = 0) +
+                     i(lag, I(log_spill_count * inv_distance), ref = 0)
+         | site_id + month_id_transfer, data = .)
+summary(model4)
+
+# Compare models
+etable(model1, model2, model3)
+
+model5 <- dat_panel_house_nearest_sample %>% 
+  filter(lag == 1) %>% 
+  mutate(
+    inv_spill_count = log(spill_count)/distance_m
+  ) %>% 
+  feols(log(price) ~ inv_spill_count, data = .)
+summary(model5)
+```
+
+
+
+
+
+```{r}
+# Example dataset in long format
+data <- data.frame(
+  house_id = c(1, 2, 3, 4, 5, 6),
+  neighborhood = c("A", "B", "A", "B", "A", "B"),
+  year = c(2020, 2020, 2021, 2021, 2022, 2022),
+  price = c(250000, 280000, 265000, 300000, 290000, 325000),
+  env_feature = c(75, 60, 80, 65, 85, 70)
+)
+
+data <- data %>%
+  arrange(neighborhood, year) %>%
+  group_by(neighborhood) %>%
+  mutate(
+    env_feature_lag1 = lag(env_feature, 1),
+    env_feature_lag2 = lag(env_feature, 2)
+  ) %>%
+  ungroup()
+
+# Calculate log(price)
+data$ln_price <- log(data$price)
+
+data %>% 
+  arrange(house_id, year)
+
+# Run the model with fixest
+library(fixest)
+
+# Basic model with current environmental feature only
+model1 <- feols(ln_price ~ env_feature | neighborhood + year, data = data)
+summary(model1)
+
+# Model with one lag
+model2 <- feols(ln_price ~ env_feature + env_feature_lag1 | neighborhood + year, 
+                data = data %>% filter(!is.na(env_feature_lag1)))
+summary(model2)
+
+# Model with two lags
+model3 <- feols(ln_price ~ env_feature + env_feature_lag1 + env_feature_lag2 | 
+                neighborhood + year, 
+                data = data %>% filter(!is.na(env_feature_lag2)))
+summary(model3)
+```
+
+
+
+
+```{r}
+############################################################
+# Create House-Level Monthly Panel Dataset
+# Project: Sewage
+# Date: 12/03/2025
+# Author: Jacopo Olivieri
+############################################################
+
+#' This script creates a house-level monthly panel dataset based on radius
+#' from the DuckDB database and the site-level panel data. The resulting
+#' dataset is exported in parquet format for downstream analysis.
+
+# Setup Functions
+############################################################
+
+#' Initialize the R environment with required packages and settings
+#' @return NULL
+initialise_environment <- function() {
+  # Package management with renv
+  if (!requireNamespace("renv", quietly = TRUE)) {
+    install.packages("renv")
+    renv::init()
+  }
+
+  # Define required packages
+  required_packages <- c(
+    "rio", "tidyverse", "purrr", "here", "logger", "glue", "fs",
+    "lubridate", "DBI", "duckdb", "dbplyr", "arrow", "dtplyr",
+    "data.table"
+  )
+
+  # Install and load packages
+  invisible(sapply(required_packages, function(pkg) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      install.packages(pkg)
+    }
+    library(pkg, character.only = TRUE)
+  }))
+}
+
+#' Set up logging configuration
+#' @return NULL
+setup_logging <- function() {
+  log_path <- here::here("output", "log", "13_house_mo_panel_db.log")
+  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
+
+  logger::log_appender(logger::appender_file(log_path))
+  logger::log_layout(logger::layout_glue_colors)
+  logger::log_threshold(logger::DEBUG)
+  logger::log_info("Script started at {Sys.time()}")
+}
+
+# Configuration
+############################################################
+
+CONFIG <- list(
+  processed_dir = here::here("data", "processed"),
+  db_path = here::here("data", "duckdb.duckdb"),
+  radius_thresholds = c(250, 500, 1000, 2000, 5000, 10000)
+  #radius_thresholds = c(10000)
+)
+
+# Database Functions
+############################################################
+
+#' Connect to the DuckDB database
+#' @return DuckDB connection object
+connect_to_db <- function() {
+  logger::log_info("Connecting to DuckDB at {CONFIG$db_path}")
+
+  tryCatch(
+    {
+      con <- DBI::dbConnect(duckdb::duckdb(), dbdir = CONFIG$db_path)
+      dbExecute(con, "PRAGMA memory_limit='14GB'") 
+      dbExecute(con, "PRAGMA max_memory='13GB'")
+      dbExecute(con, "PRAGMA max_temp_directory_size='500GiB'")
+      logger::log_info("Database connection established")
+      return(con)
+    },
+    error = function(e) {
+      logger::log_error("Failed to connect to database: {e$message}")
+      stop(glue::glue("Database connection failed: {e$message}"))
+    }
+  )
+}
+
+#' Load datasets into DuckDB if not already present
+#' @param con DuckDB connection
+#' @return NULL
+load_data_to_db <- function(con) {
+  logger::log_info("Loading datasets into DuckDB")
+
+  # Check if tables already exist
+  existing_tables <- DBI::dbListTables(con)
+
+  # Load house price data if needed
+  if (!"house_price_data" %in% existing_tables) {
+    logger::log_info("Loading house price data")
+    house_price_data <- import(
+      file.path(CONFIG$processed_dir, "house_price.rds"),
+      trust = TRUE
+    )
+    copy_to(con, house_price_data, "house_price_data", temporary = FALSE)
+    rm(house_price_data)
+    logger::log_info("House price data loaded")
+  }
+
+  # Load spill lookup data if needed
+  if (!"spill_lookup" %in% existing_tables) {
+    logger::log_info("Loading spill lookup data")
+    spill_lookup <- import(
+      file.path(CONFIG$processed_dir, "spill_house_lookup.rds"),
+      trust = TRUE
+    )
+    copy_to(con, spill_lookup, "spill_lookup", temporary = FALSE)
+    rm(spill_lookup)
+    logger::log_info("Spill lookup data loaded")
+  }
+
+  # Load monthly spill data if needed
+  if (!"dat_mo" %in% existing_tables) {
+    logger::log_info("Loading monthly spill data")
+    dat_mo <- import(
+      file.path(CONFIG$processed_dir, "individual_edm_location.RDATA"),
+      trust = TRUE
+    )$monthly
+    copy_to(con, dat_mo, "dat_mo", temporary = FALSE)
+    rm(dat_mo)
+    logger::log_info("Monthly spill data loaded")
+  }
+}
+
+#' Create house-level monthly panel dataset for a specific radius
+#' @param con DuckDB connection
+#' @param rad Numeric radius threshold in metres
+#' @return NULL - data is exported directly to parquet format
+create_house_panel_for_radius <- function(con, rad) {
+  logger::log_info("Creating house-level panel for radius {rad}m")
+
+  # Create references to tables
+  house_tbl <- tbl(con, "house_price_data")
+  spill_lookup_tbl <- tbl(con, "spill_lookup")
+
+  # Load site-level panel data for this radius
+  logger::log_info("Loading site-level panel data for radius {rad}m")
+  dat_panel_site <- open_dataset(
+    here::here("data", "processed", "dat_panel_site_mo")
+  ) %>%
+    filter(radius == rad) %>%
+    select(site_id, month_id, year, spill_count, spill_hrs) %>%
+    to_duckdb(con = con)
+
+  # Prepare house data
+  logger::log_info("Preparing house data with spill site lookup")
+  house_dat <- house_tbl %>%
+    rename(transfer_date = date_of_transfer) %>%
+    mutate(
+      transfer_date = sql("DATE_TRUNC('month', transfer_date)"),
+      month_id = (year(transfer_date) - 2021) * 12 + month(transfer_date),
+      radius = as.integer(rad)
+    ) %>%
+    left_join(spill_lookup_tbl, by = "house_id") %>%
+    select(house_id, site_id, month_id, price, distance_m)
+
+  # Group houses into those within radius and those outside
+  logger::log_info("Separating houses by radius boundary")
+  house_dat_above_rad <- house_dat %>%
+    filter(distance_m > rad) %>%
+    distinct(house_id, .keep_all = TRUE) %>%
+    left_join(dat_panel_site,
+      by = join_by(site_id, month_id)
+    ) %>%
+    rename(month_id_transfer = month_id) %>%
+    mutate(
+      month_id_spill = month_id_transfer
+    ) %>%
+    relocate(month_id_spill, .after = month_id_transfer) %>%
+    select(
+      house_id, site_id, month_id_transfer, month_id_spill,
+      price, distance_m, spill_count, spill_hrs
+    )
+  gc(full = TRUE)
+
+  house_dat_below_rad <- house_dat %>%
+    filter(distance_m <= rad) %>%
+    inner_join(dat_panel_site,
+      by = join_by(site_id),
+      suffix = c("_transfer", "_spill")
+    ) %>%
+    filter(
+      month_id_spill <= month_id_transfer,
+      month_id_spill >= month_id_transfer - 12
+    ) %>%
+    relocate(month_id_spill, .after = month_id_transfer) %>%
+    select(
+      house_id, site_id, month_id_transfer, month_id_spill,
+      price, distance_m, spill_count, spill_hrs
+    )
+  gc(full = TRUE)
+
+  # Create house-level panel by combining both groups and joining with site-level data
+  logger::log_info("Creating unified panel with site-level spill data")
+  dat_panel_house <- union_all(house_dat_below_rad, house_dat_above_rad) %>%
+    mutate(
+      radius = as.integer(rad)
+    )
+  rm(house_dat_above_rad, house_dat_below_rad)
+  gc(full = TRUE)
+
+
+  # Export aggregated data
+  export_panel_data(dat_panel_house, rad)
+}
+
+#' Create the nearest site summary from the panel data
+#' @param panel_data Panel dataset to summarise
+#' @return Summarised nearest site dataset
+nearest_site_panel <- function(panel_data) {
+  logger::log_info("Creating nearest site summary")
+
+  panel_data %>%
+    group_by(house_id) %>%
+    slice_min(distance_m) %>%
+    slice_max(spill_hrs) %>%
+    ungroup() %>%
+    arrange(house_id, site_id, month_id_transfer, month_id_spill)
+}
+
+#' Create the weighted summary from the panel data
+#' @param panel_data Panel dataset to summarise
+#' @return Summarised weighted dataset
+distance_weighted_panel <- function(panel_data) {
+  logger::log_info("Creating weighted summary")
+
+  panel_data %>%
+    group_by(house_id) %>%
+    filter(!all(is.na(spill_count))) %>%
+    ungroup() %>%
+    group_by(house_id, month_id_transfer, month_id_spill) %>%
+    dplyr::summarise(
+      price = first(price),
+      distance_m = mean(distance_m, na.rm = TRUE),
+      spill_count = sum(spill_count / distance_m * 1000, na.rm = TRUE),
+      spill_duration = sum(spill_hrs / distance_m * 1000, na.rm = TRUE),
+      radius = first(radius),
+      .groups = "keep") %>%
+    ungroup() %>%
+    mutate(
+      across(
+        c(spill_count, spill_duration),
+        ~ log(.x + 1),
+        .names = "log_{.col}"
+      )
+    ) %>%
+    arrange(house_id, month_id_transfer, month_id_spill) 
+}
+
+#' Export panel dataset to parquet format
+#' @param panel_data Panel dataset to export
+#' @param rad The radius threshold for this dataset
+#' @return NULL
+export_panel_data <- function(panel_data, rad) {
+  export_path <- here::here("data", "processed")
+
+  # Create base directory
+  dir.create(export_path, recursive = TRUE, showWarnings = FALSE)
+  logger::log_info("Creating and exporting summarized datasets for radius {rad}m")
+
+  # Create and export nearest site summary
+  logger::log_info("Processing nearest site panel")
+  dat_panel_house_nearest <- nearest_site_panel(panel_data)
+  nearest_dir <- file.path(export_path, "dat_panel_house_nearest", paste0("radius=", rad))
+  dir.create(nearest_dir, recursive = TRUE, showWarnings = FALSE)
+  nearest_path <- file.path(nearest_dir, "data.parquet")
+  logger::log_info("Exporting nearest site panel to {nearest_path}")
+  dat_panel_house_nearest %>%
+    to_arrow() %>%
+    write_parquet(nearest_path)
+  rm(dat_panel_house_nearest)
+  gc(full = TRUE)
+
+  # Create and export weighted summary
+  logger::log_info("Processing distance weighted panel")
+  dat_panel_house_weighted <- distance_weighted_panel(panel_data)
+  weighted_dir <- file.path(export_path, "dat_panel_house_weighted", paste0("radius=", rad))
+  dir.create(weighted_dir, recursive = TRUE, showWarnings = FALSE)
+  weighted_path <- file.path(weighted_dir, "data.parquet")
+  logger::log_info("Exporting distance weighted panel to {weighted_path}")
+  dat_panel_house_weighted %>%
+    to_arrow() %>%
+    write_parquet(weighted_path)
+  rm(dat_panel_house_weighted)
+  gc(full = TRUE)
+
+  logger::log_info("Exported summarized data for radius {rad}m")
+}
+
+#' Create house-level panel datasets for all configured radius thresholds
+#' @param con DuckDB connection
+#' @return NULL
+create_all_house_panels <- function(con) {
+  logger::log_info("Creating house-level panel datasets for all radius thresholds")
+
+  # Process each radius threshold
+  for (rad in CONFIG$radius_thresholds) {
+    create_house_panel_for_radius(con, rad)
+    # Free memory
+    gc(full = TRUE)
+  }
+
+  logger::log_info("All house-level summarized panel datasets created successfully")
+}
+
+
+# Main Execution
+############################################################
+
+#' Main execution function
+#' @param refresh_db Boolean indicating whether to refresh the database
+#' @return NULL
+main <- function(refresh_db = FALSE) {
+  tryCatch({
+    # Setup
+    initialise_environment()
+    setup_logging()
+
+    # Connect to database
+    con <- connect_to_db()
+
+    # Clean up on exit
+    on.exit({
+      logger::log_info("Disconnecting from database")
+      DBI::dbDisconnect(con, shutdown = TRUE)
+    })
+
+    # Load data to database if needed or if refresh requested
+    if (refresh_db) {
+      logger::log_info("Refresh requested, reloading all data")
+      tables <- DBI::dbListTables(con)
+      for (table in c("house_price_data", "spill_lookup", "dat_mo")) {
+        if (table %in% tables) {
+          logger::log_info("Dropping table: {table}")
+          DBI::dbRemoveTable(con, table)
+        }
+      }
+    }
+    load_data_to_db(con)
+
+    # Create house-level panel datasets for all radius thresholds
+    create_all_house_panels(con)
+
+    logger::log_info("House-level monthly panel dataset creation completed successfully")
+  }, error = function(e) {
+    logger::log_error("Fatal error: {e$message}")
+    stop(e)
+  }, finally = {
+    logger::log_info("Script finished at {Sys.time()}")
+  })
+}
+
+# # Execute main function if script is run directly
+# if (sys.nframe() == 0) {
+#   main(refresh_db = FALSE)
+# }
+
+```
+
+```{r}
+#' Create house-level monthly panel dataset for a specific radius
+#' @param con DuckDB connection
+#' @param rad Numeric radius threshold in metres
+#' @return NULL - data is exported directly to parquet format
+create_house_panel_for_radius <- function(con, rad) {
+  logger::log_info("Creating house-level panel for radius {rad}m")
+
+  # Create references to tables
+  house_tbl <- tbl(con, "house_price_data")
+  spill_lookup_tbl <- tbl(con, "spill_lookup")
+
+  # Load site-level panel data for this radius
+  logger::log_info("Loading site-level panel data for radius {rad}m")
+  dat_panel_site <- open_dataset(
+    here::here("data", "processed", "dat_panel_site_mo")
+  ) %>%
+    filter(radius == rad) %>%
+    select(site_id, month_id, year, spill_count, spill_hrs) %>%
+    to_duckdb(con = con)
+
+  # Prepare house data
+  logger::log_info("Preparing house data with spill site lookup")
+  house_dat <- house_tbl %>%
+    rename(transfer_date = date_of_transfer) %>%
+    mutate(
+      transfer_date = sql("DATE_TRUNC('month', transfer_date)"),
+      month_id = (year(transfer_date) - 2021) * 12 + month(transfer_date),
+      radius = as.integer(rad)
+    ) %>%
+    left_join(spill_lookup_tbl, by = "house_id") %>%
+    select(house_id, site_id, month_id, price, distance_m)
+
+  # Group houses into those within radius and those outside
+  logger::log_info("Separating houses by radius boundary")
+  house_dat_above_rad <- house_dat %>%
+    filter(distance_m > rad) %>%
+    distinct(house_id, .keep_all = TRUE) %>%
+    left_join(dat_panel_site,
+      by = join_by(site_id, month_id)
+    ) %>%
+    rename(month_id_transfer = month_id) %>%
+    mutate(
+      month_id_spill = month_id_transfer
+    ) %>%
+    relocate(month_id_spill, .after = month_id_transfer) %>%
+    select(
+      house_id, site_id, month_id_transfer, month_id_spill,
+      price, distance_m, spill_count, spill_hrs
+    )
+  gc(full = TRUE)
+
+  house_dat_below_rad <- house_dat %>%
+    filter(distance_m <= rad) %>%
+    inner_join(dat_panel_site,
+      by = join_by(site_id),
+      suffix = c("_transfer", "_spill")
+    ) %>%
+    filter(
+      month_id_spill <= month_id_transfer,
+      month_id_spill >= month_id_transfer - 12
+    ) %>%
+    relocate(month_id_spill, .after = month_id_transfer) %>%
+    select(
+      house_id, site_id, month_id_transfer, month_id_spill,
+      price, distance_m, spill_count, spill_hrs
+    )
+  gc(full = TRUE)
+
+  # Create house-level panel by combining both groups and joining with site-level data
+  logger::log_info("Creating unified panel with site-level spill data")
+  dat_panel_house <- union_all(house_dat_below_rad, house_dat_above_rad) %>%
+    mutate(
+      radius = as.integer(rad)
+    )
+  rm(house_dat_above_rad, house_dat_below_rad)
+  gc(full = TRUE)
+
+
+  # Export aggregated data
+  export_panel_data(dat_panel_house, rad)
+}
+
+#' Create the nearest site summary from the panel data
+#' @param panel_data Panel dataset to summarise
+#' @return Summarised nearest site dataset
+nearest_site_panel <- function(panel_data) {
+  logger::log_info("Creating nearest site summary")
+
+  panel_data %>%
+    group_by(house_id) %>%
+    filter(!all(is.na(spill_count))) %>%
+    slice_min(distance_m) %>%
+    slice_max(spill_hrs) %>%
+    ungroup() %>%
+    arrange(house_id, site_id, month_id_transfer, month_id_spill)
+}
+
+#' Create the weighted summary from the panel data
+#' @param panel_data Panel dataset to summarise
+#' @return Summarised weighted dataset
+distance_weighted_panel <- function(panel_data) {
+  logger::log_info("Creating weighted summary")
+
+  panel_data %>%
+    group_by(house_id) %>%
+    filter(!all(is.na(spill_count))) %>%
+    ungroup() %>% 
+    group_by(house_id, month_id_transfer, month_id_spill) %>%
+    filter(!all(is.na(spill_count)) & !all(is.na(distance_m))) %>%
+    dplyr::summarise(
+      price = first(price),
+      distance_m = mean(distance_m, na.rm = TRUE),
+      spill_count = sum(spill_count / distance_m * 1000, na.rm = TRUE),
+      spill_duration = sum(spill_hrs / distance_m * 1000, na.rm = TRUE),
+      radius = first(radius),
+      .groups = "keep") %>%
+    ungroup() %>%
+    mutate(
+      across(
+        c(spill_count, spill_duration),
+        ~ log(.x + 1),
+        .names = "log_{.col}"
+      )
+    ) %>%
+    arrange(house_id, month_id_transfer, month_id_spill)
+}
+
+panel_data %>% 
+  arrange(house_id, month_id_transfer, month_id_spill)
+```
+
+```{r}
+panel_data %>%
+    group_by(house_id) %>%
+    filter(!all(is.na(spill_count))) %>%
+    ungroup() %>% 
+    group_by(house_id, month_id_transfer, month_id_spill) %>%
+    filter(!all(is.na(spill_count)) & !all(is.na(distance_m))) %>% 
+    slice_min(distance_m, n = 1, with_ties = FALSE) %>% 
+    ungroup() %>%
+    arrange(house_id, site_id, month_id_transfer, month_id_spill)
+```
+
+
+```{r}
+panel_data %>%
+    group_by(house_id) %>%
+    filter(!all(is.na(spill_count))) %>%
+    ungroup() %>% 
+    group_by(house_id, month_id_transfer, month_id_spill) %>%
+    filter(!all(is.na(spill_count)) & !all(is.na(distance_m))) %>%
+    dplyr::summarise(
+      price = first(price),
+      distance_m = mean(distance_m, na.rm = TRUE),
+      spill_count = sum(spill_count / distance_m * 1000, na.rm = TRUE),
+      spill_duration = sum(spill_hrs / distance_m * 1000, na.rm = TRUE),
+      radius = first(radius),
+      .groups = "keep") %>%
+    ungroup() %>%
+    mutate(
+      across(
+        c(spill_count, spill_duration),
+        ~ log(.x + 1),
+        .names = "log_{.col}"
+      )
+    ) %>%
+    arrange(house_id, month_id_transfer, month_id_spill)
+```
+

@@ -1,0 +1,707 @@
+---
+author: "Jacopo Olivieri"
+date: 2024-12-22
+editor: source
+number-sections: true
+number-depth: 4
+execute: 
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+  fig-width: 9
+  fig-asp: 0.618 
+  fig-align: center
+---
+
+# Current Data Limitations {#sec-02-limitations}
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+
+# Load required packages
+required_packages <- c("rmarkdown", "rio", "tidyverse", "purrr", "here",
+                       "janitor", "kableExtra", "reactable", "htmlwidgets",
+                       "reactablefmtr", "shiny", "plotly")
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "data_limitations.log")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+```
+
+```{r, load_data}
+data_summary <- import(
+  here("data", "processed", "merged_edm_data_with_summary.RData"), trust = TRUE)
+```
+
+
+## Individual-Annual EDM Data Merge Results {#sec-02-01-limitations-merge}
+
+The tables below show the results of the merge between: (i) the individual spill data (provided by the water companies) containing the start time and end time of each spill event, and (ii) the annual EDM data (published by the Environment Agency) containing additional useful information, such as the grid coordinates of the discharge points. 
+
+The merge between the individual and annual data is important for two reasons:
+
+1. **Enriching Spill Records**: The individual data mainly captures event timings. Merging incorporates valuable details from the annual data, such as site grid coordinates, into these individual records.
+2. **Assessing Data Quality**: The EA's Annual EDM data undergoes an audit to correct errors. By aggregating individual spills annually and comparing these totals against the audited annual data, we can evaluate the accuracy of the raw individual spill reports.
+
+A key challenge arises because **individual spill data prior to 2023 lacks unique identifiers for spill sites**. Consequently, matching records between the datasets must rely on other variables, such as site names. This approach can lead to varying degrees of merge success.
+
+- **Perfect match**: An individual spill record is matched to a single, unique discharge point in the annual data (a 1-to-1 match based on identifying information like site name).
+- **Partial match**: An individual spill record is matched to multiple discharge points in the annual data (a 1-to-many match). Aggregated statistics for these spills therefore relate to multiple discharge points. See @sec-02-01-02-01-location-data-integration for details.
+- **No match**: An individual spill record could not be matched to any discharge point in the annual data. See @sec-02-01-02-02-unmatched-observations for details.
+
+::: panel-tabset
+### Overall
+
+```{r, overall-merge-stats}
+dat_overall <- data_summary$summary$overall_stats %>% 
+  select(merge_quality, contains("records"), contains("site"), 
+         contains("outlet"), - contains("perc")) %>% 
+  mutate(merge_quality = str_replace_all(merge_quality, "_", " ") %>% 
+           str_to_sentence())
+
+reactable(dat_overall,
+  columns = list(
+    merge_quality = colDef(
+      name = "Merge Quality"
+    ),
+    # Observations group
+    total_records = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_records = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    ),
+    # Site Names group
+    total_site_name_ea = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_site_name_ea = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    ),
+    # Grid Locations group
+    total_outlet_ngr = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_outlet_ngr = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    )
+  ),
+  columnGroups = list(
+    colGroup(name = "Observations", columns = c("total_records", "frac_records")),
+    colGroup(name = "Site Names", columns = c("total_site_name_ea", "frac_site_name_ea")),
+    colGroup(name = "Grid Locations", columns = c("total_outlet_ngr", "frac_outlet_ngr"))
+  ),
+  defaultSorted = "total_records",
+  defaultSortOrder = "desc",
+  filterable = FALSE,
+  resizable = TRUE,
+  defaultPageSize = 10
+)
+```
+
+### Company
+
+```{r, company-merge-stats}
+dat_company <- data_summary$summary$by_company %>% 
+    select(water_company, merge_quality, contains("records"), contains("site"), 
+           contains("outlet"), - contains("perc")) %>% 
+  mutate(merge_quality = str_replace_all(merge_quality, "_", " ") %>% 
+           str_to_sentence())
+
+reactable(dat_company,
+  columns = list(
+    water_company = colDef(
+      name = "Water Company"
+    ),
+    merge_quality = colDef(
+      name = "Merge Quality"
+    ),
+    # Observations group
+    total_records = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_records = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    ),
+    # Site Names group
+    total_site_name_ea = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_site_name_ea = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    ),
+    # Grid Locations group
+    total_outlet_ngr = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_outlet_ngr = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    )
+  ),
+  columnGroups = list(
+    colGroup(name = "Observations", columns = c("total_records", "frac_records")),
+    colGroup(name = "Site Names", columns = c("total_site_name_ea", "frac_site_name_ea")),
+    colGroup(name = "Grid Locations", columns = c("total_outlet_ngr", "frac_outlet_ngr"))
+  ),
+  defaultSorted = "water_company",
+  defaultSortOrder = "asc",
+  filterable = TRUE,
+  resizable = TRUE,
+  defaultPageSize = 9
+)
+```
+
+### Year
+
+```{r, year-merge-stats}
+dat_year <- data_summary$summary$by_year %>% 
+  select(year, merge_quality, contains("records"), contains("site"), 
+       contains("outlet"), - contains("perc")) %>% 
+  mutate(merge_quality = str_replace_all(merge_quality, "_", " ") %>% 
+           str_to_sentence())
+
+reactable(dat_year,
+  columns = list(
+    year = colDef(
+      name = "Year"
+    ),
+    merge_quality = colDef(
+      name = "Merge Quality"
+    ),
+    # Observations group
+    total_records = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_records = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    ),
+    # Site Names group
+    total_site_name_ea = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_site_name_ea = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    ),
+    # Grid Locations group
+    total_outlet_ngr = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_outlet_ngr = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    )
+  ),
+  columnGroups = list(
+    colGroup(name = "Observations", columns = c("total_records", "frac_records")),
+    colGroup(name = "Site Names", columns = c("total_site_name_ea", "frac_site_name_ea")),
+    colGroup(name = "Grid Locations", columns = c("total_outlet_ngr", "frac_outlet_ngr"))
+  ),
+  defaultSorted = "year",
+  defaultSortOrder = "asc",
+  filterable = TRUE,
+  resizable = TRUE,
+  defaultPageSize = 9
+)
+```
+
+### Company-Year
+
+```{r, company-year-merge-stats}
+dat_company_year <- data_summary$summary$by_company_year %>% 
+  select(water_company, year, merge_quality, contains("records"), 
+         contains("site"), contains("outlet"), - contains("perc")) %>% 
+  mutate(merge_quality = str_replace_all(merge_quality, "_", " ") %>% 
+           str_to_sentence())
+
+reactable(dat_company_year,
+  columns = list(
+    water_company = colDef(
+      name = "Water Company"
+    ),
+    year = colDef(
+      name = "Year"
+    ),
+    merge_quality = colDef(
+      name = "Merge Quality"
+    ),
+    # Observations group
+    total_records = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_records = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    ),
+    # Site Names group
+    total_site_name_ea = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_site_name_ea = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    ),
+    # Grid Locations group
+    total_outlet_ngr = colDef(
+      name = "Count",
+      format = colFormat(separators = TRUE)
+    ),
+    frac_outlet_ngr = colDef(
+      name = "%",
+      format = colFormat(percent = TRUE, digits = 1)
+    )
+  ),
+  columnGroups = list(
+    colGroup(name = "Observations", columns = c("total_records", "frac_records")),
+        colGroup(name = "Grid Locations", columns = c("total_outlet_ngr", "frac_outlet_ngr")),
+    colGroup(name = "Site Names", columns = c("total_site_name_ea", "frac_site_name_ea"))
+  ),
+  defaultSorted = list(water_company = "asc", year = "asc"),
+  filterable = TRUE,
+  resizable = TRUE,
+  defaultPageSize = 9
+)
+```
+:::
+
+### Background {#sec-02-01-01-background}
+
+The Event Duration Monitoring (EDM) data shows sewage discharge events from storm overflows across England's 10 Water and Sewerage Companies (WaSCs) over three years. The data is comprised of:
+
+1.  **Individual spill data**: 30 separate datasets (one per company-year combination), containing logs of each discharge event, including start and end times. These records also contain various site identifiers, though their availability and format vary by company and year.
+2.  **Annual spill data**: Contain aggregated annual data on frequency and duration of sewage spills. These data contain additional environmental information not present in the individual records, particularly the **grid coordinates of discharge points**.
+
+We therefore want to merge discharge points grid location data from the annual data to individual spill data for subsequent geographic economic analysis.
+
+### Problems {#sec-02-01-02-problems}
+
+#### 1. Location Data Integration {#sec-02-01-02-01-location-data-integration}
+**Problem**: The individual data lack consistent unique identifiers to match with annual data.^[In 2023, the Environment Agency introduced standardised unique identifiers, partially mitigating this issue.] This means that we sometimes cannot match a location in the individual spill data with a unique discharge point grid coordinate (3.3% of total observations).
+
+**Current Solution**: When multiple discharge points in the annual data match a single site in the individual data, we assign the location of the discharge point with the highest annual spill duration. This seems reasonable if these discharge points are close to each other (yet to check but seems plausible).
+
+#### 2. Unmatched Observations {#sec-02-01-02-02-unmatched-observations}
+**Problem**: A portion of observations in the individual data cannot be matched with the annual data (3.5% of total observations).
+
+**Potential Solution**: The mismatches likely stem from inconsistent spelling and formatting of site names or variable names between datasets. Implementation of fuzzy matching algorithms or manual data editing could rectify this (yet to do).
+
+For example:
+
+1. Mismatch of site name
+
+::: panel-tabset
+### Individual
+
+```{r, problem1-individ}
+individ_data <- import(here("data","processed", "combined_edm_data.RData"),
+                       trust = TRUE) 
+
+# Yorkshire 2022 individual data
+individ_data_welsh22 <- individ_data %>% 
+  filter(year == 2022, water_company == "Welsh Water") %>%
+  select(where(~!all(is.na(.))))
+
+individ_data_welsh22 %>% 
+  filter(site_name_ea == "72 Cheyney Road CSO, Chester") %>%
+  select(-contains("og")) %>% 
+  head(1) %>% 
+  reactable(.,
+    columns = list(
+    water_company = colDef(
+      name = "Water Company"
+    ),
+    year = colDef(
+      name = "Year"
+    ),
+    site_name_ea = colDef(
+      name = "Site Name EA"
+    ),
+    start_time = colDef(
+      name = "Start Time"
+    ),
+    end_time = colDef(
+      name = "End Time"
+    )
+  ))
+```
+
+### Annual
+
+```{r, problem1-annual}
+annual_data <- import(here("data","processed", "annual_return_edm.rds"),
+                      trust = TRUE) 
+annual_data_welsh22 <- annual_data %>% 
+  filter(str_detect(site_name_wa_sc, "XX Cheyney Road CSO, Chester")) %>% 
+  select(water_company, year,
+         site_name_ea, site_name_wa_sc, outlet_discharge_ngr) 
+
+reactable(annual_data_welsh22,
+  columns = list(
+    water_company = colDef(
+      name = "Water Company"
+    ),
+    year = colDef(
+      name = "Year"
+    ),
+    site_name_ea = colDef(
+      name = "Site Name EA"
+    ),
+    site_name_wa_sc = colDef(
+      name = "Site Name WaSC"
+    ),
+    outlet_discharge_ngr = colDef(
+      name = "Discharge Grid Location"
+    )
+  ),
+  rowStyle = function(index) {
+    if (annual_data_welsh22[index, "year"] == 2022) {
+      list(backgroundColor = "#e6f3ff")
+    }
+  })
+```
+
+:::
+
+
+
+## *Incorrect* Spill Data {#sec-02-02-time-parsing}
+
+### Background {#sec-02-02-01-background}
+
+We aggregate individual sewage overflow spills into total spill counts and durations based on data affecting the same catchment area. To validate our aggregation, we can compare our results with the annual aggregated data published by the Environment Agency (EA). The comparison yields a correlations over 90% for both spill counts and durations between our manual aggregation and the EA's figures. The data that seems most problematic are Wessex Water's 2022 records and United Utilities' data for all years.
+
+```{r, correlation-plots-dataload}
+corr_spill_dat <- import(here("data", "processed", 
+                              "individual_edm_location.RDATA"), trust = TRUE)
+corr_spill_dat <- corr_spill_dat$yearly
+```
+
+::: panel-tabset
+
+#### Spill Count
+
+```{r, correlation-plot1}
+
+correlation_spill <- cor(
+  corr_spill_dat$spill_count_yr, 
+  corr_spill_dat$spill_count_yr_ea, 
+  use = "complete.obs")
+
+# Convert factors first
+corr_spill_dat$water_company <- as.factor(corr_spill_dat$water_company)
+corr_spill_dat$year <- as.factor(corr_spill_dat$year)
+
+# Create the base ggplot
+p_spill <- ggplot(
+  corr_spill_dat, 
+  aes(x = spill_count_yr, y = spill_count_yr_ea,
+      color = water_company, shape = year,
+      text = paste("Water Company:", water_company,
+                   "<br>Year:", year,
+                   "<br>Spill Count Aggregated:", spill_count_yr,
+                   "<br>Spill Count EA:", spill_count_yr_ea))) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_abline(slope = 1, color = "black", linewidth = 0.1) +
+  labs(title = "Spill Count Correlation",
+       subtitle = paste0("r = ", round(correlation_spill, 3)),
+       x = "Spill Count Aggregated",
+       y = "Spill Count EA",
+       color = "Water Company",
+       shape = "Year") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0),
+    plot.subtitle = element_text(hjust = 0, size=11),
+    legend.title = element_text(face = "bold", size = 11),
+    legend.text = element_text(size = 10),  
+    legend.position = "right"
+  )
+
+interactive_plot_spill <- ggplotly(
+  p_spill, 
+  tooltip = "text",
+  dynamicTicks = TRUE) %>%
+  layout(
+    showlegend = FALSE,
+    title = list(
+      text = paste0("Spill Count Correlation<br>",
+                   "<sup>r = ", round(correlation_spill, 3), "</sup>"),
+      x = 0.5,
+      font = list(size = 12, family = "Arial")
+    )) %>%
+  config(displayModeBar = FALSE)
+
+# Display the plot
+interactive_plot_spill
+```
+
+#### Spill Duration
+
+```{r, correlation-plo21}
+
+correlation_dur <- cor(
+  corr_spill_dat$spill_hrs_yr, 
+  corr_spill_dat$spill_hrs_yr_ea, 
+  use = "complete.obs")
+
+# correlation_dur_no_neg <- cor(
+#   corr_spill_dat$spill_hrs_yr[corr_spill_dat$spill_hrs_yr > 0], 
+#   corr_spill_dat$spill_hrs_yr_ea[corr_spill_dat$spill_hrs_yr > 0], 
+#   use = "complete.obs")
+
+# Convert factors first
+corr_spill_dat$water_company <- as.factor(corr_spill_dat$water_company)
+corr_spill_dat$year <- as.factor(corr_spill_dat$year)
+
+# Create the base ggplot
+p_dur <- ggplot(
+  corr_spill_dat, 
+  aes(x = spill_hrs_yr, y = spill_hrs_yr_ea, 
+      color = water_company, shape = year,
+      text = paste("Water Company:", water_company,
+      "<br>Year:", year,
+      "<br>Spill Count Aggregated:", spill_hrs_yr,
+      "<br>Spill Count EA:", spill_hrs_yr_ea))) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_abline(slope = 1, color = "black", linewidth = 0.1) +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(title = "Correlation between Aggregated and EA Spill Duration",
+       subtitle = paste0("r = ", round(correlation_dur, 3)),
+       x = "Spill Duration Aggregated",
+       y = "Spill Duration EA",
+       color = "Water Company",
+       shape = "Year") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0),
+    plot.subtitle = element_text(hjust = 0, size=11),
+    legend.title = element_text(face = "bold", size = 11),
+    legend.text = element_text(size = 10),  
+    legend.position = "right"
+  )
+
+interactive_plot_dur <- ggplotly(
+  p_dur, 
+  tooltip = "text",
+  dynamicTicks = TRUE) %>%
+  layout(
+    showlegend = FALSE,
+    title = list(
+      text = paste0(
+        "Spill Duration Correlation<br>",
+        "<sup>r = ", round(correlation_dur, 3)
+      ),
+      x = 0.5,
+      font = list(size = 12, family = "Arial")
+    )) %>%
+  config(displayModeBar = FALSE)
+
+interactive_plot_dur
+```
+
+:::
+
+### Problems {#sec-02-02-02-problems}
+
+#### Anomalous/Incorrect Spills {#sec-02-02-02-01-anomalous-incorrect-spills}
+
+**Problem**: The manually aggregated spill counts and spill durations are sometimes much larger than the corresponding EA figures despite the date-time parsing being correct. For example, there are some individual spill events lasting multiple days within the raw data (for which the date-time parsing is correct). These are likely outliers that the EA excludes from their official figures, possibly due to sensor malfunctions.
+
+**Potential Solution**: Since the criteria for excluding individual spills are unknown, we could experiment with different exclusion thresholds to determine which ones align most closely with the EA's data.
+
+
+```{r, extreme-data}
+corr_spill_dat %>% 
+  filter(water_company=="United Utilities", year==2022,
+         site_name_ea == "bury wastewater treatment works") %>% 
+  select(water_company, year, site_name_ea, 
+         spill_hrs_yr, spill_hrs_yr_ea,
+         spill_count_yr, spill_count_yr_ea) %>% 
+  reactable(.,
+  columns = list(
+    water_company = colDef(
+      name = "Water Company"
+    ),
+    year = colDef(
+      name = "Year"
+    ),
+    site_name_ea = colDef(
+      name = "Site Name EA",
+      format = colFormat(separators = TRUE)
+    ),
+    spill_count_yr = colDef(
+      name = "Spill Count Aggregated",
+      format = colFormat(digits = 0)
+    ),
+    # Site Names group
+    spill_count_yr_ea = colDef(
+      name = "Spill Count EA",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    spill_hrs_yr = colDef(
+      name = "Spill Duration Aggregated",
+      format = colFormat(digits = 0)
+    ),
+    # Grid Locations group
+    spill_hrs_yr_ea = colDef(
+      name = "Spill Duration EA",
+      format = colFormat(separators = TRUE, digits = 0)
+    )
+  ),
+  columnGroups = list(
+    colGroup(name = "Spill Count", columns = c("spill_count_yr",
+                                               "spill_count_yr_ea")),
+    colGroup(name = "Spill Duration", columns = c("spill_hrs_yr", 
+                                                  "spill_hrs_yr_ea"))
+  ),
+  defaultSorted = list(water_company = "asc", year = "asc"),
+  filterable = FALSE,
+  resizable = TRUE,
+  defaultPageSize = 9
+)
+
+individ_data %>% 
+  filter(water_company=="United Utilities", year==2021,
+         site_name_ea=="BURY WASTEWATER TREATMENT WORKS") %>% 
+  mutate(spill_hrs_yr = as.numeric(difftime(end_time, start_time, 
+                                            units = "hours"))) %>% 
+  arrange(desc(spill_hrs_yr)) %>% 
+  head(3) %>% 
+  select(water_company, year, site_name_ea, 
+         start_time, end_time, spill_hrs_yr) %>% 
+  reactable(.,
+  columns = list(
+    water_company = colDef(
+      name = "Water Company"
+    ),
+    year = colDef(
+      name = "Year"
+    ),
+    start_time = colDef(
+      name = "Start Time"
+    ),
+    end_time = colDef(
+      name = "End Time"
+    ),
+    spill_hrs_yr = colDef(
+      name = "Spill Duration",
+      format = colFormat(digits = 0)
+    )
+  ),
+  defaultSorted = list(water_company = "asc", year = "asc"),
+  filterable = FALSE,
+  resizable = TRUE,
+  defaultPageSize = 9
+)
+  
+```
+
+
+
+## Archive Problems {#sec-02-03-archive-problems}
+
+### *Incorrect* Spill Data {#sec-02-03-01-incorrect-spill-data}
+
+#### Negative Individual Spill Duration {#sec-02-03-01-01-negative-individual-spill-duration}
+
+```{r, negative-spill-count}
+neg_spills <- individ_data %>% 
+  mutate(spill_hrs_yr = as.numeric(difftime(end_time, start_time, 
+                                            units = "hours"))) %>% 
+  filter(spill_hrs_yr < 0) %>% 
+  nrow()
+```
+
+**Problem**: There are `{r} neg_spills` individual spills for which duration is negative. Many times, this issue occurs when the spill end time is at exactly midnight (00:00:00). Based on the examples below, these negative durations stem from a date parsing error where midnight timestamps are incorrectly assigned to the current day rather than the following day. For instance, a spill ending at "midnight on January 1st" should be interpreted as 00:00:00 on January 2nd.
+
+```{r}
+individ_data %>% 
+  filter(site_name_ea == "TIDEWAY COMBINED SEWER OVERFLOW") %>% 
+  mutate(spill_hrs_yr = as.numeric(difftime(end_time, start_time, 
+                                            units = "hours"))) %>% 
+  arrange(spill_hrs_yr) %>% 
+  head(2) %>% 
+  select(water_company, year, site_name_ea, 
+         start_time, end_time, spill_hrs_yr) %>% 
+  reactable(.,
+  columns = list(
+    water_company = colDef(
+      name = "Water Company"
+    ),
+    year = colDef(
+      name = "Year"
+    ),
+    site_name_ea = colDef(
+      name = "Site Name EA"
+    ),
+    start_time = colDef(
+      name = "Start Time"
+    ),
+    end_time = colDef(
+      name = "End Time"
+    ),
+    spill_hrs_yr = colDef(
+      name = "Spill Duration",
+      format = colFormat(digits = 0)
+    )
+  ),
+  defaultSorted = list(water_company = "asc", year = "asc"),
+  filterable = FALSE,
+  resizable = TRUE,
+  defaultPageSize = 9
+) 
+
+```
+
+**Solution**: I corrected the observations with a negative spill duration for which the end date was exactly midnight (00:00:00) by advancing the end date by one day. I removed the observations with a negative spill duration where it wasn't clear why the end date was before the start date.
+
+#### 2022 Wessex Water Data Does Not Match EA Data {#sec-02-03-01-02-2022-wessex-water-data-does-not-match-ea-data}
+
+**Problem**: For the 2022 Wessex Water data, none of the spill counts or durations in the manually aggregated data matches with the EA's figures.
+
+**Solution**: I addressed the observations with a negative spill duration as follows: 
+
+1. For cases where the end date was exactly midnight (00:00:00), I advanced the end date by one day.  
+2. For cases where the reason for the end date being earlier than the start date was unclear, I removed the observations.

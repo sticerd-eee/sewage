@@ -1,0 +1,258 @@
+---
+author: "Jacopo Olivieri"
+date: 2024-04-01
+editor: source
+format: html
+number-sections: true
+number-depth: 4
+execute: 
+  echo: true
+  warning: false
+  message: false
+  freeze: auto
+  fig-width: 9
+  fig-asp: 0.618 
+  fig-align: center
+---
+
+# Event Study Walkthrough {#sec-event-study-walkthrough}
+
+This document walks through estimating an event study using both the `DIDmultiplegtDYN` and `fixest` packages for a single specification.
+
+**Specification:**
+- Outcome: `log_price_median`
+- Treatment: Binary, `treated_spill_count_mean_mo` (monthly spill count > mean)
+- Radius: `250m`
+- Unit: `site_id`
+- Time: `month_id`
+
+## Setup and Data Loading
+
+```{r setup_walkthrough}
+#| message: true
+
+# Load required packages
+required_packages <- c(
+  "tidyverse", "here", "arrow", "dbplyr",
+  "DIDmultiplegtDYN", "fixest", "ggplot2"
+)
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+# Ggplot theme (simplified)
+theme_pref <- theme_minimal(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    legend.position = "bottom"
+  )
+```
+
+```{r data_load_and_sample}
+#| message: true
+
+# Specify radius and load data
+radius_to_load <- 500
+message(paste("Loading data for radius:", radius_to_load))
+
+dat_panel_site_250_full <- tryCatch(
+  {
+    open_dataset(
+      here::here("data", "processed", "dat_panel_site_mo")
+    ) %>%
+      filter(radius == radius_to_load) %>%
+      collect()
+  },
+  error = function(e) {
+    message("Error loading data: ", e$message)
+    return(NULL)
+  }
+)
+
+if (is.null(dat_panel_site_250_full)) {
+  stop("Data loading failed. Cannot proceed.")
+} else {
+  message("Full data loaded successfully.")
+
+  # Sample site_ids
+  set.seed(123) # for reproducibility
+  n_sample <- 10000
+  unique_sites <- unique(dat_panel_site_250_full$site_id)
+  n_unique_sites <- length(unique_sites)
+
+  if (n_unique_sites > n_sample) {
+    message(paste("Sampling", n_sample, "site_ids from", n_unique_sites, "unique sites."))
+    sampled_site_ids <- sample(unique_sites, n_sample)
+    dat_panel_site_250 <- dat_panel_site_250_full %>%
+      filter(site_id %in% sampled_site_ids)
+    message(paste("Using a sample of", n_sample, "sites."))
+  } else {
+    message(paste("Using all", n_unique_sites, "available sites (less than or equal to target sample size of", n_sample, ")."))
+    dat_panel_site_250 <- dat_panel_site_250_full
+  }
+
+  # Clear the full dataset if no longer needed, to save memory
+  # rm(dat_panel_site_250_full)
+  # gc()
+
+  # Optional: Glimpse the sampled data
+  # glimpse(dat_panel_site_250)
+}
+```
+
+## DIDmultiplegtDYN Analysis
+
+```{r did_multiplegt_dyn_walkthrough}
+#| message: true
+
+message("Running DIDmultiplegtDYN...")
+
+# Define parameters
+did_outcome <- "log_price_median"
+did_treatment <- "treated_spill_hrs_p90_mo"
+
+did_multi_results <- tryCatch(
+  {
+    did_multiplegt_dyn(
+      df = dat_panel_site_250,
+      outcome = did_outcome,
+      group = "site_id",
+      time = "month_id",
+      treatment = did_treatment,
+      effects = 8, # Same as your original setup
+      placebo = 0, # Same as your original setup
+      cluster = "site_id",
+      normalized = TRUE, # As per your original setup
+      same_switchers = TRUE, # As per your original setup
+      less_conservative_se = TRUE,
+      graph_off = FALSE # Keep the plot object
+    )
+  },
+  error = function(e) {
+    message("Error running did_multiplegt_dyn: ", e$message)
+    return(NULL)
+  }
+)
+
+# Check and display plot
+if (!is.null(did_multi_results) && !is.null(did_multi_results$plot)) {
+  message("DIDmultiplegtDYN estimation complete. Displaying plot.")
+
+  # Customize and print the plot
+  did_multi_plot <- did_multi_results$plot +
+    labs(
+      title = "DIDmultiplegtDYN Event Study",
+      subtitle = paste("Outcome:", did_outcome, " | Treatment:", did_treatment, " | Radius:", radius_to_load, "m"),
+      caption = "Normalized=TRUE, Same Switchers=TRUE"
+    ) +
+    theme_pref
+
+  print(did_multi_plot)
+} else {
+  message("DIDmultiplegtDYN estimation failed or produced no plot.")
+}
+
+```
+
+## Fixest (Sun & Abraham) Analysis
+
+This section uses `fixest::sunab` to estimate the same event study.
+
+```{r fixest_walkthrough}
+#| message: true
+
+message("Running fixest::sunab...")
+
+# 1. Prepare data: Create cohort_id
+fixest_treatment_var <- "treated_spill_hrs_p90_mo"
+
+dat_panel_fixest <- dat_panel_site_250 %>%
+  # Ensure treatment is 0/1, handle potential NAs if they mean untreated
+  mutate({{ fixest_treatment_var }} := ifelse(is.na(.data[[fixest_treatment_var]]), 0, .data[[fixest_treatment_var]])) %>%
+  # Remove observations with NA outcome *before* calculating cohort
+  filter(!is.na(log_price_median)) %>%
+  group_by(site_id) %>%
+  # Calculate first period of treatment
+  mutate(cohort_id = min(month_id[.data[[fixest_treatment_var]] == 1], na.rm = TRUE)) %>%
+  ungroup() %>%
+  # Set cohort_id to NA for never-treated (Inf becomes NA)
+  mutate(cohort_id = ifelse(is.infinite(cohort_id), NA, cohort_id))
+
+# Check if any units are treated
+if (all(is.na(dat_panel_fixest$cohort_id))) {
+  message("Warning: No site_id ever meets the treatment criteria for '", fixest_treatment_var, "'. Cannot run fixest::sunab.")
+  fixest_results <- NULL
+} else {
+  message("Cohort ID created. Proceeding with fixest estimation.")
+
+  # 2. Estimate model
+  fixest_outcome <- "log_price_median"
+  formula_fixest <- as.formula(paste0("`", fixest_outcome, "` ~ sunab(cohort_id, month_id) | site_id + month_id"))
+
+  fixest_results <- tryCatch(
+    {
+      feols(
+        fml = formula_fixest,
+        data = dat_panel_fixest,
+        cluster = ~site_id
+        # We can add , notes = FALSE to suppress default fixest notes if desired
+      )
+    },
+    error = function(e) {
+      message("Error running feols: ", e$message)
+      return(NULL)
+    }
+  )
+}
+
+# 3. Plot results
+if (!is.null(fixest_results)) {
+  message("Fixest estimation complete. Displaying plot.")
+
+  # Get model description elements
+  outcome_label <- "Log Price Median"
+  treat_label <- "Spill Count > Mean (Monthly)"
+
+  fixest_plot <- tryCatch(
+    {
+      gg_fixest <- iplot(fixest_results,
+        # Use labs() for titles/captions to work better with theme_pref
+        # main = paste("Fixest S&A Event Study | Radius:", radius_to_load, "m"),
+        xlab = "Months Relative to First Treatment",
+        ylab = "Estimate",
+        # sub = paste("Outcome:", outcome_label, " | Treatment:", treat_label), # Use labs subtitle
+        ggplot = TRUE # Render as ggplot object
+      )
+
+      # Add titles, theme, and horizontal line manually
+      gg_fixest +
+        theme_pref +
+        geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+        labs(
+          title = paste("Fixest S&A Event Study | Radius:", radius_to_load, "m"),
+          subtitle = paste("Outcome:", outcome_label, " | Treatment:", treat_label),
+          caption = paste("Model:", deparse(formula_fixest), "\nCluster SEs: site_id")
+        ) +
+        theme(plot.caption = element_text(hjust = 0))
+    },
+    error = function(e) {
+      message(paste("Error generating iplot:", e$message))
+      return(NULL)
+    }
+  )
+
+  if (!is.null(fixest_plot)) {
+    print(fixest_plot)
+  }
+} else {
+  message("Fixest estimation failed or was skipped.")
+}
+
+```
+

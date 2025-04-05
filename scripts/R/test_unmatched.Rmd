@@ -1,0 +1,227 @@
+---
+title: "Your Document Title"
+author: "Jacopo Olivieri"
+date: "2023-02-22"
+output:
+  html_document:
+    fig_width: 6
+    fig_aspect_ratio: 0.618
+knitr:
+  opts_chunk:
+    echo: false
+    warning: false
+    message: false
+    fig.align: "center"
+---
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+
+# Load required packages
+required_packages <- c("rmarkdown", "tidyverse", "fs", "stringr", "here", "utils", "logger")
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "test_unmatched.log")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+```
+
+## Load Data
+
+```{r}
+data <- import(here("data", "processed", "merged_edm_data.RData"), trust = TRUE)
+data_summary <- import(here("data", "processed", "merged_edm_data_with_summary.RData"), trust = TRUE)
+annual_data <- import(here("data","processed", "annual_return_edm.rds"),
+                      trust = TRUE) 
+```
+
+
+```{r}
+data_summary$summary
+data_summary$data %>% 
+  filter(water_company == "Yorkshire Water",
+         year == 2022,
+         merge_quality == "no_match") %>% 
+  pull(site_name_ea) %>% unique()
+```
+
+
+### Fixing South West Water 2022 and 2023
+
+```{r}
+individ_data <- import(here("data","processed", "combined_edm_data.RData"),
+                       trust = TRUE) 
+
+# 2022 is problematic
+leftsouth22 <- individ_data %>% 
+  filter(water_company == "South West Water", year == 2022) %>% 
+   select(where(~!all(is.na(.))))
+
+rightsouth22 <- annual_data %>% 
+  filter(water_company == "South West Water", year == 2022) %>% 
+   select(where(~!all(is.na(.))))
+
+left_join(leftsouth22, rightsouth22) %>% 
+  filter(is.na(outlet_discharge_ngr))
+
+# 2023
+leftsouth23 <- individ_data %>% 
+  filter(water_company == "South West Water", year == 2023) %>% 
+   select(where(~!all(is.na(.)))) %>% 
+  select(-contains("site"))
+
+rightsouth23 <- annual_data %>% 
+  filter(water_company == "South West Water", year == 2023) %>% 
+  select(water_company, unique_id, outlet_discharge_ngr)
+rightsouth23$u
+
+# this fixes 2023
+left_join(leftsouth23, rightsouth23) %>% 
+  filter(is.na(outlet_discharge_ngr))
+```
+
+
+
+### Fixing Yorkshire Water 2022
+
+```{r}
+individ_data <- import(here("data","processed", "combined_edm_data.RData"),
+                       trust = TRUE) 
+
+york22 <- individ_data %>% 
+  filter(water_company == "Yorkshire Water", year == 2022) %>% 
+  mutate(unique_id = paste0("YW", unique_id))
+
+york23 <- annual_data %>% 
+  filter(water_company == "Yorkshire Water", year == 2023) %>% 
+  select(water_company, unique_id, outlet_discharge_ngr)
+
+left_join(york22, york23, by = join_by(water_company, unique_id)) %>% 
+  filter(!is.na(outlet_discharge_ngr)) %>% 
+  select(water_company, unique_id, outlet_discharge_ngr)
+```
+
+
+### Fixing Thames Water 2023
+
+```{r}
+leftthames23 <- individ_data %>% 
+  filter(water_company == "Thames Water", year == 2023) %>% 
+  select(where(~!all(is.na(.))))  %>% 
+  mutate(across(
+    where(is.character) & matches("site"), tolower))
+
+rightthames23 <- annual_data %>% 
+  filter(water_company == "Thames Water", year == 2023) %>% 
+  select(where(~!all(is.na(.))))  %>% 
+  mutate(across(
+    where(is.character) & matches("site"), tolower))
+
+left_join(leftthames23, rightthames23,
+          by = join_by(year, site_name_wa_sc, unique_id),
+          suffix = c("", "_annual")) %>% 
+  filter(is.na(outlet_discharge_ngr))
+  
+rightthames23 %>% 
+  mutate(across(where(is.character), tolower))
+```
+
+
+### Fixing merge key
+
+```{r}
+data <- data_summary$data
+dat <- load_data()
+
+water_companies <- unique(data$water_company)
+
+for (i in seq_along(water_companies)) {
+  company <- water_companies[i]
+  print(company)
+  
+  join <- data %>% 
+  filter(water_company == company, year == 2023) %>% 
+  pull(key_join) %>% 
+  unique()
+  print(join)
+
+}
+
+
+
+current_company <- "Southern Water"
+current_year <- 2023
+      
+# Get individual and annual spill data for current company-year
+# Remove columns that are all NA as they may differ between datasets
+indiv <- dat$individual %>%
+filter(water_company == current_company, year == current_year) %>%
+select(where(~!all(is.na(.))))
+
+annual <- annual_data %>%
+  filter(water_company == current_company, 
+         year == current_year, 
+         !is.na(counted_spills)) %>%
+  select(where(~!all(is.na(.))))
+
+# Define joining keys: common columns plus location identifier
+# In 2023, we have unique id, so we use that as the join key
+cols_annual_dat <- c("outlet_discharge_ngr")
+key_join <- intersect(names(indiv), names(annual))
+if (current_year == 2023 & "unique_id" %in% key_join) {
+  key_join <- c("water_company", "year", "unique_id")
+}
+key_cols <- c(key_join, cols_annual_dat)
+
+
+
+
+data %>% 
+  filter(water_company == "Southern Water", year == 2023) %>% 
+  pull(key_join) %>% 
+  unique()
+
+data %>% 
+  filter(year == 2023) 
+
+unique(data$key_join)
+grepl("unique_id", unique(data$key_join))
+unique(data$key_join)[grepl("unique_id", unique(data$key_join))]
+
+x <- unique(data$key_join)[[3]]
+x <- unique(data$key_join)[[1]]
+
+x
+if ("unique_id" %in% x) {
+  y = x[x!="unique_id"]
+} else {
+  y = x
+}
+y
+
+subset(x, x!="unique_id")
+
+x[x!="unique_id"]
+```
+

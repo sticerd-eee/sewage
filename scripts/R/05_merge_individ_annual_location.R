@@ -1,0 +1,431 @@
+############################################################
+# Merge location data with individual spill data
+# Project: Sewage
+# Date: 20/12/2024
+# Author: Jacopo Olivieri
+############################################################
+
+#' This script merges the location data from the annual sewage overflow datasets
+#' with the individual spill data.
+#' It's part of the data preparation pipeline for analysing sewage discharge
+#' events.
+
+# Set Up
+############################################################
+
+# Initialise packages with version control with renv
+#' Initialize the R environment with required packages and settings
+#' @return NULL
+initialise_environment <- function() {
+  # Package management with renv
+  if (!requireNamespace("renv", quietly = TRUE)) {
+    install.packages("renv")
+    renv::init()
+  }
+
+  # Define required packages
+  required_packages <- c(
+    "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue", "fs"
+  )
+
+  # Install and load packages
+  invisible(sapply(required_packages, function(pkg) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      install.packages(pkg)
+    }
+    library(pkg, character.only = TRUE)
+  }))
+}
+
+#' Set up logging configuration
+#' @return NULL
+setup_logging <- function() {
+  log_path <- here::here(
+    "output", "log",
+    "merge_individ_annual_location.log"
+  )
+  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
+
+  logger::log_appender(logger::appender_file(log_path))
+  logger::log_layout(logger::layout_glue_colors)
+  logger::log_threshold(logger::DEBUG)
+  logger::log_info("Script started at {Sys.time()}")
+}
+############################################################
+
+
+# Configuration
+############################################################
+
+CONFIG <- list(
+  processed_dir = here::here("data", "processed")
+)
+############################################################
+
+# Functions
+############################################################
+
+#' Load individual and annual data
+#' @param file_name Name of the csv file to load
+#' @return List of named dataframes for each water company for each year
+load_data <- function() {
+  logger::log_info("Loading EDM datasets")
+
+  # Define file paths
+  individ_path <- fs::path(CONFIG$processed_dir, "combined_edm_data.RData")
+  annual_path <- fs::path(CONFIG$processed_dir, "annual_return_edm.rds")
+
+  # Check if both files exist
+  files <- c(individ_path, annual_path)
+  missing_files <- files[!file.exists(files)]
+
+  if (length(missing_files) > 0) {
+    stop(glue::glue("Files not found: {paste(missing_files, collapse = ', ')}"))
+  }
+
+  tryCatch(
+    {
+      # Load both datasets, lowering character vars to facilitate join
+      individ_dat <- rio::import(individ_path, trust = TRUE) %>%
+        mutate(across(where(is.character) & matches("site"), tolower))
+      annual_dat <- rio::import(annual_path, trust = TRUE) %>%
+        mutate(across(where(is.character) & matches("site"), tolower))
+
+      logger::log_info("Successfully loaded both datasets")
+
+      # Return as named list
+      return(list(
+        individual = individ_dat,
+        annual = annual_dat
+      ))
+    },
+    error = function(e) {
+      error_msg <- glue::glue("Failed to load data: {e$message}")
+      logger::log_error(error_msg)
+      stop(error_msg)
+    }
+  )
+}
+
+
+#' Merge location data
+#' @param individual_data DataFrame containing individual spill data
+#' @param annual_data DataFrame containing annual spill data
+#' @return List of merged dataframes for each water company-year combination
+merge_location <- function(individual_data, annual_data) {
+  # Create all possible combinations of water companies and years
+  combinations <- expand_grid(
+    water_company = unique(annual_data$water_company),
+    year = 2021:2023
+  )
+
+  # Process datasets for each company-year combination
+  merged_data <- map2(
+    combinations$water_company,
+    combinations$year,
+    ~ {
+      # Extract current company and year for readability
+      current_company <- .x
+      current_year <- .y
+
+      # Get individual and annual spill data for current company-year
+      # Remove columns that are all NA as they may differ between datasets
+      indiv <- individual_data %>%
+        filter(water_company == current_company, year == current_year) %>%
+        select(where(~ !all(is.na(.))))
+
+      annual <- annual_data %>%
+        filter(
+          water_company == current_company,
+          year == current_year,
+          !is.na(counted_spills)
+        ) %>%
+        select(where(~ !all(is.na(.))))
+
+      # Define joining keys: common columns plus location identifier
+      # In 2023, we have unique id, so we use that as the join key
+      cols_annual_dat <- c("outlet_discharge_ngr")
+      key_join <- intersect(names(indiv), names(annual))
+      if (current_year == 2023 & "unique_id" %in% key_join) {
+        key_join <- c("water_company", "year", "unique_id")
+      }
+      key_cols <- c(key_join, cols_annual_dat)
+
+      # Count occurrences of each key combination in individual data
+      indiv <- indiv %>%
+        group_by(across(all_of(key_join))) %>%
+        mutate(n_individ = n()) %>%
+        ungroup()
+
+      # Process annual data to handle non-unique location matches
+      annual <- annual %>%
+        # Get unique combinations of keys and spill statistics
+        distinct(
+          across(all_of(key_cols)),
+          total_duration_all_spills_hrs, counted_spills
+        ) %>%
+        # For each key combination and discharge outlet, calculate sum spill stats
+        group_by(across(all_of(key_cols))) %>%
+        mutate(
+          max_spill_duration_hrs_yr = max(total_duration_all_spills_hrs),
+          sum_spill_duration_hrs_yr = sum(total_duration_all_spills_hrs),
+          sum_spill_count_yr = sum(counted_spills),
+          partial_match = TRUE,
+          n_key_cols = n(),
+          .keep = "unused"
+        ) %>%
+        # Remove duplicate aggregated values within a given discharge outlet
+        slice(which.max(max_spill_duration_hrs_yr)) %>%
+        # Count annual records per key to identify non-unique matches
+        group_by(across(all_of(key_join))) %>%
+        mutate(
+          n_key_join = n(),
+          partial_match = n_key_join > 1 # TRUE if multiple locations for this key
+        ) %>%
+        # Keep only the location with maximum duration
+        slice(which.max(sum_spill_duration_hrs_yr)) %>%
+        select(
+          all_of(key_cols), n_key_cols, n_key_join, partial_match,
+          contains("spill")
+        ) %>%
+        ungroup()
+
+      # Merge datasets and add quality indicators
+      left_join(indiv, annual, by = key_join, suffix = c("", "_annual")) %>%
+        arrange(across(all_of(key_join))) %>%
+        mutate(
+          # Store joining keys for reference
+          key_join = list(key_join),
+          # Classify quality of each match
+          merge_quality = case_when(
+            n_key_join == 1 ~ "perfect_match",
+            is.na(n_key_join) ~ "no_match",
+            partial_match ~ "partial_match",
+            TRUE ~ "multiple_matches"
+          )
+        ) %>%
+        # Organize columns with metadata first, then remaining data
+        select(
+          any_of(c(
+            "merge_quality", "n_indiv", "n_key_join", "n_key_join",
+            "n_key_cols", "partial_match",
+            "water_company", "year", "site_name_ea", "unique_id",
+            "site_name_wa_sc", "permit_reference_ea", "activity_reference",
+            "permit_reference_wa_sc",
+            "sum_spill_duration_hrs_yr", "sum_spill_duration_hrs_yr",
+            "sum_spill_count_yr"
+          )),
+          everything()
+        )
+    }
+  )
+
+  return(merged_data)
+}
+
+
+#' Summarise merge data at different levels of aggregation
+#' @param merged_data List of merged dataframes from merge_location function
+#' @return List containing summary statistics at different levels
+summarise_merge <- function(merged_data) {
+  # Helper function to calculate percentages
+  add_percentages <- function(df, group_cols) {
+    df %>%
+      group_by(across(all_of(group_cols))) %>%
+      mutate(
+        frac_records = total_records / sum(total_records),
+        frac_outlet_ngr = total_outlet_ngr / sum(total_outlet_ngr),
+        frac_site_name_ea = total_site_name_ea / sum(total_site_name_ea),
+        perc_records = scales::percent(frac_records, accuracy = 0.1),
+        perc_outlet_ngr = scales::percent(frac_outlet_ngr, accuracy = 0.1),
+        perc_site_name_ea = scales::percent(frac_site_name_ea, accuracy = 0.1)
+      ) %>%
+      ungroup()
+  }
+
+  # Create base summary
+  merge_summary <- merged_data %>%
+    bind_rows(.id = "dataset_index") %>%
+    group_by(water_company, year, merge_quality, dataset_index) %>%
+    summarise(
+      n_records = n(),
+      n_outlet_ngr = n_distinct(outlet_discharge_ngr),
+      n_site_name_ea = n_distinct(site_name_ea),
+      .groups = "drop"
+    )
+
+  # Calculate summaries at different levels
+  list(
+    overall_stats = merge_summary %>%
+      group_by(merge_quality) %>%
+      summarise(
+        total_records = sum(n_records),
+        total_outlet_ngr = sum(n_outlet_ngr),
+        total_site_name_ea = sum(n_site_name_ea),
+        n_datasets = n_distinct(dataset_index),
+        .groups = "drop"
+      ) %>%
+      add_percentages(NULL) %>%
+      arrange(desc(total_records)),
+    by_company = merge_summary %>%
+      group_by(water_company, merge_quality) %>%
+      summarise(
+        total_records = sum(n_records),
+        total_outlet_ngr = sum(n_outlet_ngr),
+        total_site_name_ea = sum(n_site_name_ea),
+        n_years = n_distinct(year),
+        .groups = "drop"
+      ) %>%
+      add_percentages("water_company") %>%
+      arrange(water_company, desc(total_records)),
+    by_year = merge_summary %>%
+      group_by(year, merge_quality) %>%
+      summarise(
+        total_records = sum(n_records),
+        total_outlet_ngr = sum(n_outlet_ngr),
+        total_site_name_ea = sum(n_site_name_ea),
+        n_companies = n_distinct(water_company),
+        .groups = "drop"
+      ) %>%
+      add_percentages("year") %>%
+      arrange(year, desc(total_records)),
+    by_company_year = merge_summary %>%
+      group_by(water_company, year, merge_quality) %>%
+      summarise(
+        total_records = sum(n_records),
+        total_outlet_ngr = sum(n_outlet_ngr),
+        total_site_name_ea = sum(n_site_name_ea),
+        .groups = "drop"
+      ) %>%
+      add_percentages(c("water_company", "year")) %>%
+      arrange(water_company, year, desc(total_records))
+  )
+}
+
+
+#' Process and optionally summarize EDM data
+#' @param individual_data DataFrame containing individual spill data
+#' @param annual_data DataFrame containing annual spill data
+#' @param summarise Logical indicating whether to include summary statistics (default: FALSE)
+process_data <- function(individual_data, annual_data, summarise = FALSE) {
+  # Merge the location data
+  merged_data <- merge_location(individual_data, annual_data)
+
+  # Add unique site identifiers based on outlet discharge location
+  add_site_id <- function(data) {
+    lookup <- data %>%
+      filter(!is.na(outlet_discharge_ngr)) %>%
+      distinct(water_company, outlet_discharge_ngr) %>%
+      mutate(site_id = row_number())
+
+    data %>%
+      left_join(lookup, by = c("water_company", "outlet_discharge_ngr"))
+  }
+
+  # Return based on summarise parameter
+  if (summarise) {
+    list(
+      data = add_site_id(bind_rows(merged_data)),
+      summary = summarise_merge(merged_data)
+    ) %>%
+      return()
+  } else {
+    add_site_id(bind_rows(merged_data)) %>%
+      select(-merge_quality, -partial_match, -starts_with("n_")) %>%
+      return()
+  }
+}
+
+
+#' Export processed EDM data to RData and CSV files
+#' @param data List or merged data from process_edm_data
+#' @param summarise Logical indicating whether data includes summary statistics
+#' @return Invisible NULL, called for side effect of saving files
+export_data <- function(data, summarise = FALSE) {
+  tryCatch(
+    {
+      if (summarise) {
+        # Export full list to RData
+        rdata_file <- file.path(
+          CONFIG$processed_dir,
+          "merged_edm_data_with_summary.RData"
+        )
+        save(data, file = rdata_file)
+
+        # Export summary to Excel
+        excel_summary <- file.path(CONFIG$processed_dir, "edm_summary_stats.xlsx")
+        rio::export(data$summary, excel_summary)
+
+        logger::log_info("Full data exported to {rdata_file}")
+        logger::log_info("Summary statistics exported to {excel_summary}")
+      } else {
+        # Export only merged data to RData
+        rdata_file <- file.path(CONFIG$processed_dir, "merged_edm_data.RData")
+        save(data, file = rdata_file)
+
+        # Export merged data to CSV
+        csv_file <- file.path(CONFIG$processed_dir, "merged_edm_data.csv")
+        rio::export(data, csv_file)
+
+        logger::log_info("Data exported successfully to {rdata_file}")
+      }
+    },
+    error = function(e) {
+      msg <- glue::glue("Error exporting data: {e$message} and {csv_summary}")
+      logger::log_error(msg)
+      stop(msg)
+    }
+  )
+
+  invisible(NULL)
+}
+
+############################################################
+
+
+# Main execution
+############################################################
+
+main <- function(summarise = TRUE) {
+  tryCatch(
+    {
+      # Setup
+      initialise_environment()
+      setup_logging()
+
+      # Load data
+      logger::log_info("Starting data loading process")
+      data_list <- load_data()
+      logger::log_info("Data loading completed successfully")
+
+      # Process data
+      logger::log_info("Starting data processing")
+      processed_data <- process_data(
+        individual_data = data_list$individual,
+        annual_data = data_list$annual,
+        summarise = summarise
+      )
+      logger::log_info("Data processing completed successfully")
+
+      # Export results
+      logger::log_info("Starting data export")
+      export_data(processed_data, summarise = summarise)
+      logger::log_info("Data export completed successfully")
+
+      logger::log_info("Pipeline completed successfully at {Sys.time()}")
+    },
+    error = function(e) {
+      error_msg <- glue::glue("Pipeline failed: {e$message}")
+      logger::log_error(error_msg)
+      stop(error_msg)
+    }
+  )
+
+  invisible(NULL)
+}
+
+
+# Execute main function
+if (sys.nframe() == 0) {
+  main()
+}

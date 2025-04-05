@@ -1,0 +1,41 @@
+---
+author: "Jacopo Olivieri"
+date: 2024-12-22
+editor: source
+number-sections: true
+number-depth: 4
+execute: 
+  echo: false
+  warning: false
+  message: false
+  freeze: false
+  fig-width: 6
+  fig-asp: 0.618 
+  fig-align: center
+---
+
+# Updates {#sec-index}
+
+## 18/02/2025 {.unnumbered}
+
+Added section on initial data exploration of house prices and sewage spills (House Data Exploration @sec-04-house-exploration).
+
+## 17/02/2025 {.unnumbered}
+
+Updated sewage overflow spills section with additional descriptive statistics (Sewage Spill Data Exploration, @sec-03-spill-exploration).
+
+## 02/01/2025 {.unnumbered}
+
+Added section on initial data exploration of sewage overflow spills (Sewage Spill Data Exploration, @sec-03-spill-exploration).
+
+## 30/12/2024 {.unnumbered}
+
+Added section on incorrect spill data duration (Current Data Limitations, @sec-02-02-time-parsing).
+
+## 24/12/2024 {.unnumbered}
+
+Added section on the merge of location data to inidividual spill data (Current Data Limitations,  @sec-02-limitations).
+
+## 22/12/2024 {.unnumbered}
+
+Start of Sewage in Our Waters website!
