@@ -1,0 +1,262 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Sewage in Our Waters",
+    "section": "",
+    "text": "1 Updates",
+    "crumbs": [
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#section",
+    "href": "index.html#section",
+    "title": "Sewage in Our Waters",
+    "section": "18/02/2025",
+    "text": "18/02/2025\nAdded section on initial data exploration of house prices and sewage spills (House Data Exploration Chapter 4).",
+    "crumbs": [
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#section-1",
+    "href": "index.html#section-1",
+    "title": "Sewage in Our Waters",
+    "section": "17/02/2025",
+    "text": "17/02/2025\nUpdated sewage overflow spills section with additional descriptive statistics (Sewage Spill Data Exploration, Chapter 3).",
+    "crumbs": [
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#section-2",
+    "href": "index.html#section-2",
+    "title": "Sewage in Our Waters",
+    "section": "02/01/2025",
+    "text": "02/01/2025\nAdded section on initial data exploration of sewage overflow spills (Sewage Spill Data Exploration, Chapter 3).",
+    "crumbs": [
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#section-3",
+    "href": "index.html#section-3",
+    "title": "Sewage in Our Waters",
+    "section": "30/12/2024",
+    "text": "30/12/2024\nAdded section on incorrect spill data duration (Current Data Limitations, Section 2.2).",
+    "crumbs": [
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#section-4",
+    "href": "index.html#section-4",
+    "title": "Sewage in Our Waters",
+    "section": "24/12/2024",
+    "text": "24/12/2024\nAdded section on the merge of location data to inidividual spill data (Current Data Limitations, Chapter 2).",
+    "crumbs": [
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#section-5",
+    "href": "index.html#section-5",
+    "title": "Sewage in Our Waters",
+    "section": "22/12/2024",
+    "text": "22/12/2024\nStart of Sewage in Our Waters website!",
+    "crumbs": [
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
+    ]
+  },
+  {
+    "objectID": "data_limitations.html",
+    "href": "data_limitations.html",
+    "title": "2  Current Data Limitations",
+    "section": "",
+    "text": "2.1 Individual-Annual EDM Data Merge Results\nThe tables below show the results of the merge between: (i) the individual spill data (provided by the water companies) containing the start time and end time of each spill event, and (ii) the annual EDM data (published by the Environment Agency) containing additional useful information, such as the grid coordinates of the discharge points.\nThe merge between the individual and annual data is important for two reasons:\nA key challenge arises because individual spill data prior to 2023 lacks unique identifiers for spill sites. Consequently, matching records between the datasets must rely on other variables, such as site names. This approach can lead to varying degrees of merge success.",
+    "crumbs": [
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Current Data Limitations</span>"
+    ]
+  },
+  {
+    "objectID": "data_limitations.html#sec-02-01-limitations-merge",
+    "href": "data_limitations.html#sec-02-01-limitations-merge",
+    "title": "2  Current Data Limitations",
+    "section": "",
+    "text": "Enriching Spill Records: The individual data mainly captures event timings. Merging incorporates valuable details from the annual data, such as site grid coordinates, into these individual records.\nAssessing Data Quality: The EA’s Annual EDM data undergoes an audit to correct errors. By aggregating individual spills annually and comparing these totals against the audited annual data, we can evaluate the accuracy of the raw individual spill reports.\n\n\n\nPerfect match: An individual spill record is matched to a single, unique discharge point in the annual data (a 1-to-1 match based on identifying information like site name).\nPartial match: An individual spill record is matched to multiple discharge points in the annual data (a 1-to-many match). Aggregated statistics for these spills therefore relate to multiple discharge points. See Section 2.1.2.1 for details.\nNo match: An individual spill record could not be matched to any discharge point in the annual data. See Section 2.1.2.2 for details.\n\n\nOverallCompanyYearCompany-Year\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n2.1.1 Background\nThe Event Duration Monitoring (EDM) data shows sewage discharge events from storm overflows across England’s 10 Water and Sewerage Companies (WaSCs) over three years. The data is comprised of:\n\nIndividual spill data: 30 separate datasets (one per company-year combination), containing logs of each discharge event, including start and end times. These records also contain various site identifiers, though their availability and format vary by company and year.\nAnnual spill data: Contain aggregated annual data on frequency and duration of sewage spills. These data contain additional environmental information not present in the individual records, particularly the grid coordinates of discharge points.\n\nWe therefore want to merge discharge points grid location data from the annual data to individual spill data for subsequent geographic economic analysis.\n\n\n2.1.2 Problems\n\n2.1.2.1 1. Location Data Integration\nProblem: The individual data lack consistent unique identifiers to match with annual data.1 This means that we sometimes cannot match a location in the individual spill data with a unique discharge point grid coordinate (3.3% of total observations).\nCurrent Solution: When multiple discharge points in the annual data match a single site in the individual data, we assign the location of the discharge point with the highest annual spill duration. This seems reasonable if these discharge points are close to each other (yet to check but seems plausible).\n\n\n2.1.2.2 2. Unmatched Observations\nProblem: A portion of observations in the individual data cannot be matched with the annual data (3.5% of total observations).\nPotential Solution: The mismatches likely stem from inconsistent spelling and formatting of site names or variable names between datasets. Implementation of fuzzy matching algorithms or manual data editing could rectify this (yet to do).\nFor example:\n\nMismatch of site name\n\n\nIndividualAnnual",
+    "crumbs": [
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Current Data Limitations</span>"
+    ]
+  },
+  {
+    "objectID": "data_limitations.html#sec-02-02-time-parsing",
+    "href": "data_limitations.html#sec-02-02-time-parsing",
+    "title": "2  Current Data Limitations",
+    "section": "2.2 Incorrect Spill Data",
+    "text": "2.2 Incorrect Spill Data\n\n2.2.1 Background\nWe aggregate individual sewage overflow spills into total spill counts and durations based on data affecting the same catchment area. To validate our aggregation, we can compare our results with the annual aggregated data published by the Environment Agency (EA). The comparison yields a correlations over 90% for both spill counts and durations between our manual aggregation and the EA’s figures. The data that seems most problematic are Wessex Water’s 2022 records and United Utilities’ data for all years.\n\nSpill CountSpill Duration\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n2.2.2 Problems\n\n2.2.2.1 Anomalous/Incorrect Spills\nProblem: The manually aggregated spill counts and spill durations are sometimes much larger than the corresponding EA figures despite the date-time parsing being correct. For example, there are some individual spill events lasting multiple days within the raw data (for which the date-time parsing is correct). These are likely outliers that the EA excludes from their official figures, possibly due to sensor malfunctions.\nPotential Solution: Since the criteria for excluding individual spills are unknown, we could experiment with different exclusion thresholds to determine which ones align most closely with the EA’s data.",
+    "crumbs": [
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Current Data Limitations</span>"
+    ]
+  },
+  {
+    "objectID": "data_limitations.html#sec-02-03-archive-problems",
+    "href": "data_limitations.html#sec-02-03-archive-problems",
+    "title": "2  Current Data Limitations",
+    "section": "2.3 Archive Problems",
+    "text": "2.3 Archive Problems\n\n2.3.1 Incorrect Spill Data\n\n2.3.1.1 Negative Individual Spill Duration\nProblem: There are 0 individual spills for which duration is negative. Many times, this issue occurs when the spill end time is at exactly midnight (00:00:00). Based on the examples below, these negative durations stem from a date parsing error where midnight timestamps are incorrectly assigned to the current day rather than the following day. For instance, a spill ending at “midnight on January 1st” should be interpreted as 00:00:00 on January 2nd.\n\n\n\n\n\n\nSolution: I corrected the observations with a negative spill duration for which the end date was exactly midnight (00:00:00) by advancing the end date by one day. I removed the observations with a negative spill duration where it wasn’t clear why the end date was before the start date.\n\n\n2.3.1.2 2022 Wessex Water Data Does Not Match EA Data\nProblem: For the 2022 Wessex Water data, none of the spill counts or durations in the manually aggregated data matches with the EA’s figures.\nSolution: I addressed the observations with a negative spill duration as follows:\n\nFor cases where the end date was exactly midnight (00:00:00), I advanced the end date by one day.\n\nFor cases where the reason for the end date being earlier than the start date was unclear, I removed the observations.",
+    "crumbs": [
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Current Data Limitations</span>"
+    ]
+  },
+  {
+    "objectID": "data_limitations.html#footnotes",
+    "href": "data_limitations.html#footnotes",
+    "title": "2  Current Data Limitations",
+    "section": "",
+    "text": "In 2023, the Environment Agency introduced standardised unique identifiers, partially mitigating this issue.↩︎",
+    "crumbs": [
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Current Data Limitations</span>"
+    ]
+  },
+  {
+    "objectID": "spill_data_exploration.html",
+    "href": "spill_data_exploration.html",
+    "title": "3  Sewage Spill Data Exploration",
+    "section": "",
+    "text": "3.1 Geographic Distribution in 2023\nSewage spill sites are spread relatively uniformly around England. Spills appear to be more frequent near the coast, particularly in the South and South West, which is expected as these regions have a higher concentration of water channels. Beyond this, there doesn’t seem to be any other visual pattern.",
+    "crumbs": [
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Sewage Spill Data Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "spill_data_exploration.html#sec-03-01-geo-distribution",
+    "href": "spill_data_exploration.html#sec-03-01-geo-distribution",
+    "title": "3  Sewage Spill Data Exploration",
+    "section": "",
+    "text": "3.1.1 Spill Count\n\n\n\n3.1.2 Spill Duration",
+    "crumbs": [
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Sewage Spill Data Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "spill_data_exploration.html#sec-03-02-frequency-duration",
+    "href": "spill_data_exploration.html#sec-03-02-frequency-duration",
+    "title": "3  Sewage Spill Data Exploration",
+    "section": "3.2 Frequency and Duration of Sewage Spills",
+    "text": "3.2 Frequency and Duration of Sewage Spills\nBoth the summary tables and the histograms show that the frequency and duration are very positively skewed. A priori, this could be due various factors (also considering that left side is bound at zero):\n\nMalfunctioning of EDM sensors: Malfunctioning EDM sensors may detect ‘blank’ sewage overflows, creating outliers in the right tail.\nExtreme weather events: Sewage overflows are (theoretically) caused by rainfall. Episodic heavy rain could create temporal clusters of long-duration events, stretching the right tail.\nAging or Inconsistent Infrastructure: Older sewer systems or uneven maintenance across regions could lead to chronic sewage spills, stretching the right tail\n\n\n3.2.1 Summary Tables\n\n202320222021\n\n\n\n\n\n\n    \n\n    \n    \n      \n        \n        \n              \n                 \n                Unique\n                Missing Pct.\n                Mean\n                SD\n                Min\n                Median\n                Max\n                Histogram\n              \n        \n        \n        \n                \n                  Spill Count\n                  244\n                  11\n                  38.63\n                  40.74\n                  1.00\n                  25.00\n                  366.00\n                  \n                \n                \n                  Spill Duration (hrs)\n                  9388\n                  11\n                  300.82\n                  572.70\n                  0.01\n                  61.75\n                  6542.31\n                  \n                \n                \n                  Sites with Spill Count &gt; 0\n                  2\n                  11\n                  1.00\n                  0.00\n                  1.00\n                  1.00\n                  1.00\n                  \n                \n                \n                  Sites with Spill Duration &gt;= 15m\n                  3\n                  11\n                  0.98\n                  0.14\n                  0.00\n                  1.00\n                  1.00\n                  \n                \n                \n                  Water Company\n                  N\n                  %\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Anglian Water\n                  1213\n                  8.98\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Northumbrian Water\n                  1629\n                  12.06\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Severn Trent Water\n                  2575\n                  19.07\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  South West Water\n                  1308\n                  9.69\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Southern Water\n                  870\n                  6.44\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Thames Water\n                  587\n                  4.35\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  United Utilities\n                  2082\n                  15.42\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Welsh Water\n                  110\n                  0.81\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Wessex Water\n                  1141\n                  8.45\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Yorkshire Water\n                  1987\n                  14.72\n                  \n                  \n                  \n                  \n                  \n                  \n                \n        \n      \n    \n\n\n\n\n\n\n\n\n\n    \n\n    \n    \n      \n        \n        \n              \n                 \n                Unique\n                Missing Pct.\n                Mean\n                SD\n                Min\n                Median\n                Max\n                Histogram\n              \n        \n        \n        \n                \n                  Spill Count\n                  222\n                  26\n                  29.66\n                  34.66\n                  1.00\n                  19.00\n                  364.00\n                  \n                \n                \n                  Spill Duration (hrs)\n                  7325\n                  26\n                  175.07\n                  429.63\n                  0.00\n                  34.00\n                  10082.11\n                  \n                \n                \n                  Sites with Spill Count &gt; 0\n                  2\n                  26\n                  1.00\n                  0.00\n                  1.00\n                  1.00\n                  1.00\n                  \n                \n                \n                  Sites with Spill Duration &gt;= 15m\n                  3\n                  26\n                  0.97\n                  0.16\n                  0.00\n                  1.00\n                  1.00\n                  \n                \n                \n                  Water Company\n                  N\n                  %\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Anglian Water\n                  1186\n                  9.09\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Northumbrian Water\n                  1584\n                  12.14\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Severn Trent Water\n                  2437\n                  18.68\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  South West Water\n                  1256\n                  9.63\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Southern Water\n                  862\n                  6.61\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Thames Water\n                  570\n                  4.37\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  United Utilities\n                  2017\n                  15.46\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Welsh Water\n                  110\n                  0.84\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Wessex Water\n                  1137\n                  8.72\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Yorkshire Water\n                  1884\n                  14.44\n                  \n                  \n                  \n                  \n                  \n                  \n                \n        \n      \n    \n\n\n\n\n\n\n\n\n\n    \n\n    \n    \n      \n        \n        \n              \n                 \n                Unique\n                Missing Pct.\n                Mean\n                SD\n                Min\n                Median\n                Max\n                Histogram\n              \n        \n        \n        \n                \n                  Spill Count\n                  244\n                  11\n                  38.63\n                  40.74\n                  1.00\n                  25.00\n                  366.00\n                  \n                \n                \n                  Spill Duration (hrs)\n                  9388\n                  11\n                  300.82\n                  572.70\n                  0.01\n                  61.75\n                  6542.31\n                  \n                \n                \n                  Sites with Spill Count &gt; 0\n                  2\n                  11\n                  1.00\n                  0.00\n                  1.00\n                  1.00\n                  1.00\n                  \n                \n                \n                  Sites with Spill Duration &gt;= 15m\n                  3\n                  11\n                  0.98\n                  0.14\n                  0.00\n                  1.00\n                  1.00\n                  \n                \n                \n                  Water Company\n                  N\n                  %\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Anglian Water\n                  1213\n                  8.98\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Northumbrian Water\n                  1629\n                  12.06\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Severn Trent Water\n                  2575\n                  19.07\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  South West Water\n                  1308\n                  9.69\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Southern Water\n                  870\n                  6.44\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Thames Water\n                  587\n                  4.35\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  United Utilities\n                  2082\n                  15.42\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Welsh Water\n                  110\n                  0.81\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Wessex Water\n                  1141\n                  8.45\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Yorkshire Water\n                  1987\n                  14.72\n                  \n                  \n                  \n                  \n                  \n                  \n                \n        \n      \n    \n\n\n\n\n\n\n\n\n3.2.2 Histogram in 2023\n\nSpill DurationSpill CountLog Spill DurationLog Spill Count",
+    "crumbs": [
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Sewage Spill Data Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "spill_data_exploration.html#sec-03-03-temporal",
+    "href": "spill_data_exploration.html#sec-03-03-temporal",
+    "title": "3  Sewage Spill Data Exploration",
+    "section": "3.3 Temporal Sewage Spill Distribution",
+    "text": "3.3 Temporal Sewage Spill Distribution\nSewage Spills are seasonal, peaking between October and February, which aligns with the wettest months of the year. Given this seasonality, the analysis will need to use time fixed effects.\n\n3.3.1 Total Spill Duration and Count\n\nSpill DurationSpill Count\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n3.3.2 Per Unique Spill Site\n\nSpill DurationSpill Count",
+    "crumbs": [
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Sewage Spill Data Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "spill_data_exploration.html#sec-03-04-company",
+    "href": "spill_data_exploration.html#sec-03-04-company",
+    "title": "3  Sewage Spill Data Exploration",
+    "section": "3.4 Sewage Spill Distribution by Water Company",
+    "text": "3.4 Sewage Spill Distribution by Water Company\nThe violin plots and bar charts below show the sewage spill count and duration, normalised by the number of sewage sites, for each water company. Certain water companies—particularly South West Water—experience sewage spills more frequently than others.\n\n3.4.1 Violin Plots\n\n202320222021\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n3.4.2 Bar Charts\n\n202320222021",
+    "crumbs": [
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Sewage Spill Data Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "spill_data_exploration.html#sec-03-05-coverage",
+    "href": "spill_data_exploration.html#sec-03-05-coverage",
+    "title": "3  Sewage Spill Data Exploration",
+    "section": "3.5 Temporal Coverage",
+    "text": "3.5 Temporal Coverage\nWater companies installed EDM sensors at sewage spill sites gradually, resulting in incomplete coverage for some sites between 2021 and 2023. A total of 23,585 observations have full coverage.\n\n\n\nObservations by Panel Completeness (2021-2023)\n\n\nPanel Status\nCount\nPercentage (%)\n\n\n\n\nComplete\n23585\n59.7\n\n\nIncomplete\n15947\n40.3",
+    "crumbs": [
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Sewage Spill Data Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "house_data_exploration.html",
+    "href": "house_data_exploration.html",
+    "title": "4  House Data Exploration",
+    "section": "",
+    "text": "4.1 Data Description\nI have spatially merged all house sales from the HM Land Registry data to nearby sewage spill sites within a 10km radius. This dataset includes, for each house sale, all sewage spill sites within that range, along with their respective distances and spill severity, measured by frequency and duration. This lookup database allows for filtering by spatial distance or time. Below is a visual representation of three house sales in London.",
+    "crumbs": [
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>House Data Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "house_data_exploration.html#sec-04-02-house-descriptives",
+    "href": "house_data_exploration.html#sec-04-02-house-descriptives",
+    "title": "4  House Data Exploration",
+    "section": "4.2 House Price Descriptive Statistics",
+    "text": "4.2 House Price Descriptive Statistics\nHouse prices are strongly positively skewed approximate a log-normal distribution, though with heavier tails than expected under normality. There is heterogeneity in prices across house types. Overall, this suggests the need for trimming (if we believe that the ‘outliers’ don’t belong to the distribution, but are of another kind) or winsorisation (if we believe that the ‘outliers’ belong to the distribution, but we want a less skewed distribution), and certain property types (e.g., ‘Other’) may need to be excluded from the analysis.\n\n4.2.1 Summary Table\n\n\n\n\nSummaryPrice Heterogeneity\n\n\n\n\n\n\n    \n\n    \n    \n      \n        \n        \n              \n                 \n                Unique\n                Missing Pct.\n                Mean\n                SD\n                Min\n                Median\n                Max\n                Histogram\n              \n        \n        \n        \n                \n                  Price Paid\n                  82217\n                  0\n                  400,290.55\n                  1,682,119.81\n                  1.00\n                  275,000.00\n                  900,000,000.00\n                  \n                \n                \n                  Year Sold\n                  3\n                  0\n                  2,021.86\n                  0.80\n                  2,021.00\n                  2,022.00\n                  2,023.00\n                  \n                \n                \n                  \n                  \n                  N\n                  %\n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Property Type\n                  Detached\n                  733978\n                  23.11\n                  \n                  \n                  \n                  \n                  \n                \n                \n                  \n                  Flats/Maisonettes\n                  574292\n                  18.08\n                  \n                  \n                  \n                  \n                  \n                \n                \n                  \n                  Other\n                  175511\n                  5.53\n                  \n                  \n                  \n                  \n                  \n                \n                \n                  \n                  Semi-Detached\n                  833365\n                  26.24\n                  \n                  \n                  \n                  \n                  \n                \n                \n                  \n                  Terraced\n                  858805\n                  27.04\n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Old/New\n                  Established Residential\n                  2825957\n                  88.98\n                  \n                  \n                  \n                  \n                  \n                \n                \n                  \n                  Newly Built\n                  349994\n                  11.02\n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Tenure\n                  Freehold\n                  2429919\n                  76.51\n                  \n                  \n                  \n                  \n                  \n                \n                \n                  \n                  Leasehold\n                  746032\n                  23.49\n                  \n                  \n                  \n                  \n                  \n                \n        \n      \n    \n\n\n\n\n\n\n\n\n\n    \n\n    \n    \n      \n        \n        \n              \n                 \n                  \n                   \n                Mean\n                SD\n                Min\n                Median\n                Max\n              \n        \n        \n        \n                \n                  Price Paid\n                  Property Type\n                  Detached\n                  502,736\n                  464,423\n                  795\n                  405,000\n                  65,000,000\n                \n                \n                  \n                  \n                  Flats/Maisonettes\n                  324,103\n                  551,921\n                  10,000\n                  233,000\n                  111,000,000\n                \n                \n                  \n                  \n                  Other\n                  1,230,287\n                  6,876,602\n                  100\n                  296,000\n                  900,000,000\n                \n                \n                  \n                  \n                  Semi-Detached\n                  307,159\n                  286,018\n                  1\n                  253,000\n                  39,500,000\n                \n                \n                  \n                  \n                  Terraced\n                  284,431\n                  396,265\n                  1\n                  215,000\n                  73,200,000\n                \n                \n                  \n                  Old/New\n                  Established Residential\n                  402,790\n                  1,770,385\n                  1\n                  267,000\n                  900,000,000\n                \n                \n                  \n                  \n                  Newly Built\n                  380,106\n                  607,078\n                  100\n                  320,000\n                  163,265,000\n                \n                \n                  \n                  Tenure\n                  Freehold\n                  417,712\n                  1,657,053\n                  1\n                  290,000\n                  900,000,000\n                \n                \n                  \n                  \n                  Leasehold\n                  343,547\n                  1,760,100\n                  100\n                  220,000\n                  523,000,000\n                \n                \n                  Year Sold\n                  \n                  \n                  2021.86\n                  0.80\n                  2021.00\n                  2022.00\n                  2023.00\n                \n        \n      \n    \n\n\n\n\n\n\n\n\n4.2.2 Histogram\n\nPricesLog PricesLog Prices Q-Q Plot\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n4.2.3 Temporal House Sale Distribution\nHouse sales appear to be uniform over 2021-2023 in terms of both average sale price and volume of sales. There are a few exceptions in 2021, possibly due to the Covid-19 pandemic (but I have not looked further into this).\n\nPrice of SalesNumber of Sales",
+    "crumbs": [
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>House Data Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "house_data_exploration.html#sec-04-03-house-spills-descriptives",
+    "href": "house_data_exploration.html#sec-04-03-house-spills-descriptives",
+    "title": "4  House Data Exploration",
+    "section": "4.3 House Price and Sewage Spills Descriptive Statistics",
+    "text": "4.3 House Price and Sewage Spills Descriptive Statistics\n\n4.3.1 Cross section\nI begin by examining the cross-sectional relationship between house prices and sewage spills, which can be characterised along three main dimensions: (i) house prices, (ii) spill severity (measured by the number of spills or the spill duration), and (iii) the distance to the nearest spill.\nEach house sale is spatially matched to all spill sites within a 10km radius, allowing me to compute the average spill severity and the average distance to the nearest spill for different distance thresholds. This allows me to see if there are any correlations between house prices and spill severity or distance.\n\n\n4.3.2 Summary Tables\nI present summary statistics for the spill data aggregated over both (i) different distance thresholds and (ii) spill count quartiles within a 2km radius. I use the entire dataset, trimming the house prices to the 5th and 95th percentiles (as I don’t believe these belong to the distribution we are interested in).\nThere are a few patterns that stand out:\n\nHouse prices increase within buffers of increasing distance from spill sites.\nHouse prices decrease across spill count quartiles.\nHouse prices remain positively skewed, even after trimming the 5th and 95th percentiles.\nSpill counts are positively skewed (as we also saw in Section 3.2.2)\n\n\nBy DistanceBy Spill Count\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n4.3.3 Bivariate Plots\nBelow I plot the relationship between house prices and spill severity (spill count and spill duration), distance to spill sites, and spill severity weighted by the inverse of the distance to the nearest spill (accounting for the possibility that closer spills have a larger impact on house prices). I do this for a sample of 100,000 houses (approximately 3% of all houses in the dataset) to reduce computation time. I trim the data to the 5th and 95th percentiles of house prices (as I don’t believe these belong to the distribution we are interested in).\nFor each relationship, I plot a linear regression line and a local regression line (non-parametric) to show potential linear and non-linear relationships. I present these relationships using data aggregated over all years as well as data aggregated over the trailing 12-month period.\n\n4.3.3.1 Spill Count\nThere’s a negative cross-sectional linear relationship between spill count and house price. The negative correlation is stronger both for (i) the trailing 12 months compared to the full time period and (ii) smaller distance thresholds.\nFor distance thresholds below 2km, the non-parametric fit shows a U-shaped pattern, likely due to a few properties with both high spill counts and high prices. However, as the distance threshold increases, the curvature of the U-shape flattens. I have to look further into this, but this may be driven by water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also Section 4.3.3.3).\n\nLinearAll Years - Linear and LOESS12 Months - Linear and LOESS\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n4.3.3.2 Spill Duration\nThe relationship between spill duration and house price is comparable to the relationship between spill count and house price. The confidence intervals are larger, suggesting greater statistical uncertainty. It seems plausible that there is greater variation in spill duration since duration records are influenced by extreme events or measurement errors that affect how long a spill lasts, whereas the 12/24 count method aggregates events more discretely.1\n\nLinearAll Years - Linear and LOESS12 Months - Linear and LOESS\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n4.3.3.3 Distance\nThere’s a negative cross-sectional linear relationship between distance to the nearest spill site (within thresholds) and house price for tresholds below 1km, and slight positive relationship for larger thresholds. There are no apparent differences between the trailing 12 months and the full time period.\nFor all thresholds, the non-parametric fit shows a U-shaped pattern, which is consinstent with the story of water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also Section 4.3.3.1).\n\nLinearAll Years - Linear and LOESS12 Months - Linear and LOESS\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n4.3.3.4 Inverse Spill Count - Distance\nThere’s a negative cross-sectional linear relationship between inverse spill count and house price. The negative correlation is stronger both for (i) the trailing 12 months compared to the full time period and (ii) the larger distance thresholds. Additionally, the non-parametric fit shows a U-shaped pattern. Both of these observations are consistent with the story of water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also Section 4.3.3.1 and Section 4.3.3.3).\n\nLinearAll Years - Linear and LOESS12 Months - Linear and LOESS",
+    "crumbs": [
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>House Data Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "house_data_exploration.html#footnotes",
+    "href": "house_data_exploration.html#footnotes",
+    "title": "4  House Data Exploration",
+    "section": "",
+    "text": "Start counting when the first discharge occurs. Any discharge (or discharges) in the first 12-hour block are counted as one spill. Any discharge (or discharges) in the next and subsequent 24-hour blocks are each counted as one additional spill per block. Continue counting until there is a 24-hour block with no discharge.↩︎",
+    "crumbs": [
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>House Data Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "event_study.html",
+    "href": "event_study.html",
+    "title": "5  Event Study",
+    "section": "",
+    "text": "5.1 Setting\nThis section is currently being revised as I read and process the recent DiD and event study literature. Some statements may be unclear or incorrect, which I will try to refine them as I go.\nWe can conceptualise the setting as an event study where sewage spills constitute the treatment. To reduce compute time, I have aggregated the data to the X-meter radius around the spill site level by taking the median of house prices.\nGiven the potential problems with the vanilla TWFE presented in the recent literature, I decide to use the Chaisemartin & d’Haultefoeuille (2024) estimator using the package DIDmultiplegtDYN. This estimator allows for a wide range of settings, including non-absorbing treatment, staggered treatment, continuous treatment, and many other settings that I still need to understand.",
+    "crumbs": [
+      "<span class='chapter-number'>5</span>  <span class='chapter-title'>Event Study</span>"
+    ]
+  },
+  {
+    "objectID": "event_study.html#sec-05-01-setting",
+    "href": "event_study.html#sec-05-01-setting",
+    "title": "5  Event Study",
+    "section": "",
+    "text": "Treatment is non-absorbing: spill sites can transition between treated and untreated states multiple times, as a location may experience large spill activity in one period and low in the next period (relative to other spill sites).\nTreatment is staggered: spills occur at different times across different locations\nTreatment measurement: spill severity is quantified by either incident count or duration in period \\(t\\) (e.g., monthly), which is naturally continuous. However, we can simplify this into a binary treatment by classifying houses within radius X of a spill site as “treated” when the spill severity exceeds either the mean or a specified percentile threshold relative to other sites.\nFixed effects: we can include both period and location-specific (spill site) fixed effects to estimate the effect of spills on house prices through within-spill site variation over time",
+    "crumbs": [
+      "<span class='chapter-number'>5</span>  <span class='chapter-title'>Event Study</span>"
+    ]
+  },
+  {
+    "objectID": "event_study.html#sec-05-02-basic-event-study-regressions",
+    "href": "event_study.html#sec-05-02-basic-event-study-regressions",
+    "title": "5  Event Study",
+    "section": "5.2 Basic Event Study Regressions",
+    "text": "5.2 Basic Event Study Regressions\nThe following figures show the dynamic effect of sewage spills on house prices over time. Each graph plots changes in median house prices within X-metre radius buffers around spill sites, measured monthly. House prices are aggregated at the spill level using median values for each buffer distance. A buffer is considered “treated” in a given month when the number of spills exceeds either the average or a specified percentile of spill counts across all buffers, calculated over either a monthly or yearly period.\nIn the event study regressions, the effects are estimated for:\n\nSame switchers only. This ensures that event-study effects are estimated only using switchers for whom all the event-study effects can be estimated. This avoids the problem that if treatment effects are heterogeneous across spill sites where treatment switches, changes in the estimated effects across different time horizons might reflect changes in the composition of the sample rather than actual dynamic treatment effects.\nNormalised. This scales the estimates to represent effects per unit of treatment rather than total effects. For spill sites, this means showing the impact per unit of treatment intensity, making estimates comparable across time periods and sites.\n\nOverall, all specifications show practically no effect of spills on house prices.\n\n5.2.1 Binary Treatment - Average Spill Count\n\n250m500m1000m2000m5000m\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n5.2.2 Binary Treatment - Median Spill Count\n\n250m500m1000m2000m5000m\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n5.2.3 Binary Treatment - 75th Percentile Spill Count\n\n250m500m1000m2000m5000m\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n5.2.4 Binary Treatment - 90th Percentile Spill Count\n\n250m500m1000m2000m5000m\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCount MoCount YrDuration MoDuration Yr\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n5.2.5 Continuous Treatment - Average Spill Count\n\n250m500m1000m2000m5000m\n\n\n\nCountDuration\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCountDuration\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCountDuration\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCountDuration\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nCountDuration",
+    "crumbs": [
+      "<span class='chapter-number'>5</span>  <span class='chapter-title'>Event Study</span>"
+    ]
+  },
+  {
+    "objectID": "event_study.html#notes-and-things-to-try",
+    "href": "event_study.html#notes-and-things-to-try",
+    "title": "5  Event Study",
+    "section": "5.3 Notes and Things to Try",
+    "text": "5.3 Notes and Things to Try\n\nTemporal lags: Correlation between lagged spills (1–6 months prior) and prices\nEvent studies using distance weighted aggregations\nUsing quarterly data to reduce seasonality\nUsing P90",
+    "crumbs": [
+      "<span class='chapter-number'>5</span>  <span class='chapter-title'>Event Study</span>"
+    ]
+  }
+]
