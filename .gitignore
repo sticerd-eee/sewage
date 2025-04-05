@@ -1,0 +1,68 @@
+# R specific files
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+renv/library/
+renv/staging/
+renv/local/
+
+# Data files (since these appear to be large and possibly sensitive)
+data/
+*.csv
+*.xlsx
+*.xlsb
+*.xls
+*.accdb
+*.dta
+*.RData
+*.Rdata
+*.zip
+
+# LaTeX/PDF compilation files
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.pdf
+*.run.xml
+*.synctex.gz
+
+# Temporary files
+~$*
+*.temp
+temp/
+*/temp/*
+
+# OS specific
+.DS_Store
+Icon?
+Thumbs.db
+
+# Cache and history files
+*_cache/
+*_files/
+.history
+.Rapp.history
+
+# Environment files
+.env
+.Renviron
+.Rprofile
+
+# Editor specific
+.vscode/
+.idea/
+
+# Website files
+# /book/_freeze/
+/book/.quarto/
+/book/_site/
+/book/book_figs/
+/book/test_files/
+/book/tinytable_assets/

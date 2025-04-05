@@ -1,0 +1,239 @@
+---
+title: "Test Merge House Price Data"
+author: "Jacopo Olivieri"
+date: "2024-01-31"
+output:
+  html_document:
+    fig_width: 6
+    fig_aspect_ratio: 0.618
+knitr:
+  opts_chunk:
+    echo: false
+    warning: false
+    message: false
+    fig.align: "center"
+---
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library # nolint
+# renv::restore()  # Restore the environment if running for first time # nolint
+# renv::snapshot()  # After adding/updating packages, snapshot the state # nolint
+
+
+# Load required packages
+required_packages <- c(
+  "rmarkdown", "rio", "tidyverse", "purrr", "here",
+  "janitor", "data.table", "lubridate", "rnrfa", "sf",
+  "furrr", "future", "tmap"
+)
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+# set up parallel processing
+setup_parallel <- function() {
+  n_workers <- parallelly::availableCores() - 1
+  machine_ram <- memuse::Sys.meminfo()$totalram
+  ram_limit <- as.numeric(0.7 * machine_ram)
+
+  options(future.globals.maxSize = ram_limit)
+  future::plan(future::multisession, workers = n_workers)
+  logger::log_info("Parallel processing initialized with {n_workers} workers")
+}
+setup_parallel()
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "test_merge_house_price_data.log")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+```
+
+## Load Data
+
+### Load EDM Data
+
+```{r, load_data}
+dat <- import(here(
+  "data", "processed",
+  "individual_edm_location.RDATA"
+), trust = TRUE)
+
+dat_yr <- dat$yearly
+dat_mo <- dat$monthly
+
+spill_sites <- import(here("data", "processed", "unique_spill_sites.rds"),
+  trust = TRUE
+)
+```
+
+### Load House Price Data
+
+```{r}
+house_price_data <- import(here("data", "processed", "house_price.rds"),
+  trust = TRUE
+)
+```
+
+### Load Lookup
+
+```{r}
+spill_lookup <- import(here("data", "processed", "spill_house_lookup.rds"),
+  trust = TRUE
+)
+```
+
+### Plot London Spill Sites
+
+```{r}
+# Define a London bounding box (WGS84 coordinates)
+london_bbox <- st_as_sfc(
+  st_bbox(c(xmin = -0.5103, ymin = 51.2868, xmax = 0.3340, ymax = 51.6919), 
+          crs = st_crs(4326))
+)
+
+# Convert spill_sites to an sf object.
+# Note: spill_sites has "easting" and "northing" in British National Grid (EPSG:27700),
+# so we convert and then transform to WGS84.
+spill_sites_sf <- st_as_sf(
+  spill_sites, 
+  coords = c("easting", "northing"), 
+  crs = 27700) %>%
+  st_transform(crs = 4326)
+
+# Filter spill sites that fall within London
+london_spill_sites <- spill_sites_sf[st_within(spill_sites_sf, london_bbox, sparse = FALSE), ]
+
+# Select a random sample of 10 spill sites in London
+set.seed(123)
+sampled_spill_sites <- london_spill_sites %>% slice_sample(n = 10)
+
+# Convert house_price_data to an sf object using longitude and latitude (WGS84)
+house_sf <- st_as_sf(house_price_data, coords = c("longitude", "latitude"), crs = 4326)
+
+# Create 10 km buffers around the sampled spill sites
+spill_buffers <- st_buffer(sampled_spill_sites, dist = 10000)
+
+# Identify houses within the union of these buffers
+valid_spill_buffers <- st_make_valid(spill_buffers)
+houses_in_buffer <- st_intersection(house_sf, st_union(valid_spill_buffers))
+
+
+# Plot with tmap in interactive mode
+tmap_mode("view")
+map <- tm_shape(spill_buffers) +
+  tm_polygons(col = "lightgreen", alpha = 0.3, border.alpha = 0) +
+  tm_shape(houses_in_buffer) +
+  tm_dots(col = "darkblue", size = 0.5, alpha = 0.8) +
+  tm_shape(sampled_spill_sites) +
+  tm_dots(col = "red", size = 1, alpha = 0.9) +
+  tm_layout(
+    title = "House Sales within 10km of Sampled Spill Sites in London",
+    legend.outside = TRUE
+  )
+map
+```
+
+
+
+
+```{r}
+# Filter to London house sales and associated spill sites
+london_house_ids <- house_price_data %>%
+  filter(region == "London") %>%
+  pull(house_id)
+
+london_spill_ids <- spill_lookup %>%
+  filter(house_id %in% london_house_ids) %>%
+  distinct(site_id) %>%
+  pull(site_id)
+
+london_spill_sites <- spill_sites %>%
+  filter(site_id %in% london_spill_ids)
+
+# Randomly sample 10 spill sites
+set.seed(123) # For reproducibility
+sampled_sites <- london_spill_sites %>%
+  slice_sample(n = 3)
+
+# Get houses within 10km of sampled sites
+sampled_house_ids <- spill_lookup %>%
+  filter(site_id %in% sampled_sites$site_id) %>%
+  distinct(house_id) %>%
+  pull(house_id)
+
+matched_houses_sample <- house_price_data %>%
+  filter(house_id %in% sampled_house_ids) %>% 
+  slice_sample(prop = .10)
+
+# Convert to spatial objects (EPSG 27700: British National Grid)
+sampled_sites_sf <- st_as_sf(sampled_sites, coords = c("easting", "northing"), crs = 27700)
+sampled_houses_sf <- st_as_sf(matched_houses_sample, coords = c("easting", "northing"), crs = 27700) 
+
+# Create 10km buffers around spill sites
+sampled_buffers <- st_buffer(sampled_sites_sf, dist = 10000)
+
+# Transform to WGS84 for visualization
+sampled_sites_sf <- st_transform(sampled_sites_sf, 4326)
+sampled_buffers <- st_transform(sampled_buffers, 4326)
+sampled_houses_sf <- st_transform(sampled_houses_sf, 4326)
+
+# London boundary
+london_boundary_sf <- ne_states(country = "United Kingdom", 
+                                returnclass = "sf") %>%
+  filter(region == "Greater London")
+
+
+
+# Generate interactive map
+tmap_mode("view")
+spill_map <- tm_shape(sampled_buffers) +
+  tm_polygons(fill = "lightgreen", 
+              fill_alpha = 0.3, 
+              col_alpha = 0) +
+  tm_shape(sampled_houses_sf) +
+  tm_bubbles(
+    size = "price",
+    fill = "price",
+    fill.scale = tm_scale_intervals(
+      values = "brewer.blues",
+      n = 4
+    ),
+    size.scale = tm_scale_continuous(
+      values.scale = 3
+    ),
+    size.legend = tm_legend_hide(),
+    fill.legend = tm_legend(
+      title = "Price Paid (?)"
+    )
+  ) +
+  tm_shape(sampled_sites_sf) +
+    tm_symbols(
+      fill = "darkred",
+      shape = 18,
+      size = 0.7,
+      fill_alpha = 0.9,
+      fill.legend = tm_legend(title = "Spill Sites")
+    ) +
+  tm_shape(london_boundary_sf) +
+  tm_borders(col = "blue4", lwd = 1) +
+  tm_title("London Spill Sites with 10km Buffers and Nearby House Sales") +
+  tm_layout(legend.outside = TRUE)
+
+spill_map
+```
+

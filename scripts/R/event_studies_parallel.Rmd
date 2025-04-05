@@ -1,0 +1,565 @@
+# Event studies
+
+```{r setup, include=FALSE}
+# Load required packages
+required_packages <- c(
+  "arrow", "here", "dplyr", "DIDmultiplegtDYN", "ggplot2",
+  "future", "future.apply"
+)
+
+# Function to install missing packages
+install_if_missing <- function(packages) {
+  for (pkg in packages) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      cat("Installing", pkg, "...\n")
+      install.packages(pkg, lib = user_lib)
+    }
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# Install and load packages
+install_if_missing(required_packages)
+```
+
+
+```{r}
+# Set up parallel plan (adjust workers based on RAM and cores)
+num_workers <- 2
+plan(multisession, workers = num_workers)
+
+# message(paste("Setting up parallel execution using 'multicore' with", num_workers, "workers..."))
+message(paste("Setting up parallel execution using 'multisession' with", num_workers, "workers..."))
+
+# The rest of the script uses this plan via future_lapply
+
+# Binary
+# Function to run event study models with flexible parameters
+run_bin_event_study <- function(param_grid, rad = 2000, overwrite = FALSE) {
+  # Path for results files
+  results_path <- here("book", "book_regs", paste0("binary_did_results_", rad, ".rds"))
+  partial_path <- here("book", "book_regs", paste0("binary_did_results_partial_", rad, ".rds"))
+
+  # Create directory if it doesn't exist
+  results_dir <- dirname(results_path)
+  if (!dir.exists(results_dir)) {
+    dir.create(results_dir, recursive = TRUE)
+    message("Created directory: ", results_dir)
+  }
+
+  # Load existing results if not overwriting and file exists
+  existing_results <- list()
+  if (!overwrite && file.exists(results_path)) {
+    existing_results <- readRDS(results_path)
+    message("Loaded existing results from: ", results_path)
+  } else if (!overwrite) {
+    message("No existing results file found or overwrite=TRUE. Starting fresh for radius ", rad)
+  } else {
+    message("overwrite=TRUE. Starting fresh for radius ", rad)
+  }
+
+  # Load the dataset for the current radius
+  message(paste("Loading data for radius:", rad))
+  dat_panel_site <- tryCatch(
+    {
+      open_dataset(
+        here::here("data", "processed", "dat_panel_site_mo")
+      ) %>%
+        filter(radius == rad) %>%
+        collect()
+    },
+    error = function(e) {
+      message("Error loading data for radius ", rad, ": ", e$message)
+      return(NULL) # Return NULL if data loading fails
+    }
+  )
+
+  if (is.null(dat_panel_site)) {
+    message("Skipping radius ", rad, " due to data loading error.")
+    return(existing_results) # Return existing (potentially empty) results
+  }
+  message(paste("Data loaded successfully for radius:", rad, " - Rows:", nrow(dat_panel_site)))
+
+  # --- Helper function to run a single model ---
+  run_single_bin_model <- function(params, data_for_radius) {
+    # Extract parameters from the list 'params'
+    outcome <- params$outcome
+    treatment_threshold <- params$treatment_threshold
+    time_agg <- params$time_agg
+    normalized <- params$normalized
+    same_switchers <- params$same_switchers
+    treatment_type <- params$treatment_type
+
+    # Construct the treatment variable name dynamically
+    treatment_var <- paste0("treated_", treatment_type, "_", treatment_threshold, "_", time_agg)
+
+    # Build model name
+    outcome_suffix <- ifelse(outcome == "log_price_median_w", "_logpw", "_logp")
+    treat_type_suffix <- ifelse(treatment_type == "spill_count", "_sc", "_sh")
+    threshold_suffix <- paste0("_", treatment_threshold)
+    time_agg_suffix <- paste0("_", time_agg)
+    sw_suffix <- if (same_switchers) "_sw" else ""
+    norm_suffix <- if (normalized) "_norm" else ""
+    model_name <- paste0(
+      "model_bin", # Base name
+      outcome_suffix, # _logp or _logpw
+      treat_type_suffix, # _sc or _sh
+      threshold_suffix, # _mean, _p50, etc.
+      time_agg_suffix, # _mo or _yr
+      sw_suffix, # _sw (if TRUE)
+      norm_suffix # _norm (if TRUE)
+    )
+
+    # Build model description
+    outcome_label <- case_when(
+      outcome == "price_median_w" ~ "Weighted Price Median",
+      outcome == "log_price_median_w" ~ "Weighted Log Price Median",
+      outcome == "price_median" ~ "Price Median",
+      outcome == "log_price_median" ~ "Log Price Median",
+      TRUE ~ outcome
+    )
+    threshold_label <- case_when(
+      treatment_threshold == "mean" ~ "Mean",
+      treatment_threshold == "p50" ~ "P50",
+      treatment_threshold == "p75" ~ "P75",
+      treatment_threshold == "p90" ~ "P90",
+      treatment_threshold == "max" ~ "Max",
+      TRUE ~ paste0(toupper(substr(treatment_threshold, 1, 1)), substr(treatment_threshold, 2, nchar(treatment_threshold)))
+    )
+    time_agg_label <- ifelse(time_agg == "mo", "Monthly", "Yearly")
+    treat_type_label <- ifelse(treatment_type == "spill_count", "Spill Count", "Spill Hrs")
+    norm_label <- ifelse(normalized, "Norm", "No Norm")
+    switchers_label <- ifelse(same_switchers, "Same Switchers", "All Switchers")
+    model_description <- sprintf(
+      "%s ~ %s %s %s (%s, %s)",
+      outcome_label, time_agg_label, threshold_label, treat_type_label,
+      norm_label, switchers_label
+    )
+
+    cat(sprintf("Running model: %s (%s)\n", model_name, model_description))
+
+    # Run the actual DID model
+    model_result <- try(did_multiplegt_dyn(
+      df = data_for_radius,
+      outcome = outcome,
+      group = "site_id",
+      time = "month_id",
+      treatment = treatment_var,
+      effects = 12,
+      placebo = 3,
+      cluster = "site_id",
+      normalized = normalized,
+      trends_lin = FALSE,
+      same_switchers = same_switchers,
+      less_conservative_se = TRUE,
+      graph_off = TRUE # Typically turn off graph in parallel runs
+    ), silent = FALSE) # Set silent=FALSE to see errors from did_multiplegt_dyn
+
+    # Return a named list for this model
+    result <- list()
+    result[[model_name]] <- model_result
+    attr(result[[model_name]], "description") <- model_description
+    return(result)
+  }
+  # --- End Helper function ---
+
+  # Filter param_grid: Keep only models not present in existing_results if overwrite=FALSE
+  models_to_run_indices <- 1:nrow(param_grid)
+  if (!overwrite && length(existing_results) > 0) {
+    existing_model_names <- names(existing_results)
+    models_to_run_indices <- which(!apply(param_grid, 1, function(row) {
+      # Reconstruct model name to check existence (ensure this logic matches exactly)
+      outcome <- row[["outcome"]]
+      treatment_threshold <- row[["treatment_threshold"]]
+      time_agg <- row[["time_agg"]]
+      normalized <- as.logical(row[["normalized"]]) # Ensure logical
+      same_switchers <- as.logical(row[["same_switchers"]]) # Ensure logical
+      treatment_type <- row[["treatment_type"]]
+
+      model_name <- "model_bin"
+      if (grepl("log_", outcome)) model_name <- paste0(model_name, "_log")
+      if (grepl("_w$", outcome)) model_name <- paste0(model_name, "_w")
+      treat_type_short <- ifelse(treatment_type == "spill_count", "sc", "sh")
+      model_name <- paste0(model_name, "_", treat_type_short)
+      model_name <- paste0(model_name, "_", treatment_threshold)
+      model_name <- paste0(model_name, "_", time_agg)
+      if (same_switchers) model_name <- paste0(model_name, "_sw")
+      if (normalized) model_name <- paste0(model_name, "_norm")
+      return(model_name %in% existing_model_names)
+    }))
+
+    if (length(models_to_run_indices) < nrow(param_grid)) {
+      message(sprintf(
+        "Skipping %d models already present in results for radius %d.",
+        nrow(param_grid) - length(models_to_run_indices), rad
+      ))
+    }
+  }
+
+  # Convert param_grid rows to a list of lists for lapply
+  params_list <- split(param_grid[models_to_run_indices, , drop = FALSE], seq_len(length(models_to_run_indices)))
+
+  total_models_to_run <- length(params_list)
+  if (total_models_to_run == 0) {
+    message("No new models to run for radius ", rad)
+    return(existing_results)
+  }
+
+  cat(sprintf("Starting parallel model estimation for radius %d - total models to run: %d\n", rad, total_models_to_run))
+
+  # Run models in parallel using future_lapply
+  # Pass necessary objects explicitly if needed using future.globals
+  # future_lapply automatically tries to find globals, but being explicit can help
+  # Especially ensure 'dat_panel_site' and 'did_multiplegt_dyn' are available
+  new_results_list <- future_lapply(params_list, run_single_bin_model,
+    data_for_radius = dat_panel_site,
+    future.seed = TRUE, # for reproducibility if needed
+    future.globals = list(
+      did_multiplegt_dyn = DIDmultiplegtDYN::did_multiplegt_dyn,
+      case_when = dplyr::case_when
+      # Add other necessary functions/objects if errors occur
+    ),
+    future.packages = c("dplyr", "DIDmultiplegtDYN") # Explicitly load packages on workers
+  )
+
+  # Combine the list of lists into a single named list
+  new_results <- do.call(c, new_results_list)
+
+  # Combine new results with existing ones
+  # If overwrite=TRUE, existing_results is empty, so this just becomes new_results
+  # If overwrite=FALSE, this adds new results to the loaded ones
+  final_results <- c(existing_results, new_results)
+
+  # Save the final results for this radius
+  tryCatch(
+    {
+      saveRDS(final_results, file = results_path)
+      message("Results saved successfully for radius ", rad, " to: ", results_path)
+      # Optionally remove partial file if main save succeeds
+      if (file.exists(partial_path)) file.remove(partial_path)
+    },
+    error = function(e) {
+      message("Error saving final results for radius ", rad, ": ", e$message)
+      # Attempt to save partial results if final save fails
+      tryCatch(
+        {
+          saveRDS(final_results, file = partial_path)
+          message("Partial results saved for radius ", rad, " to: ", partial_path)
+        },
+        error = function(e_partial) {
+          message("CRITICAL ERROR: Failed to save even partial results for radius ", rad, ": ", e_partial$message)
+        }
+      )
+    }
+  )
+
+  cat("Finished model estimation for radius ", rad, "\n")
+
+  # Return results invisibly
+  invisible(final_results)
+}
+
+binary_param_grid <- expand.grid(
+  outcome = c("log_price_median", "log_price_median_w"),
+  treatment_threshold = c("mean", "p50", "p75", "p90", "max"),
+  time_agg = c("mo", "yr"),
+  treatment_type = c("spill_count", "spill_hrs"),
+  normalized = c(TRUE),
+  same_switchers = c(TRUE),
+  stringsAsFactors = FALSE
+)
+
+# Define radii
+radii <- c(500, 250)
+
+# NEW sequential radii loop
+bin_results_status <- list()
+for (r in radii) {
+  message(paste("\n--- Starting processing for radius:", r, "---\n"))
+  success <- tryCatch(
+    {
+      # Call the function for the current radius.
+      # Set overwrite = FALSE to append/skip existing models by default
+      # Set overwrite = TRUE if you want to rerun everything for this radius
+      run_bin_event_study(binary_param_grid, rad = r, overwrite = FALSE)
+      TRUE # Indicate success
+    },
+    error = function(e) {
+      message(paste("Error processing binary models for radius:", r, "-", e$message))
+      FALSE # Indicate failure
+    }
+  )
+  bin_results_status[[as.character(r)]] <- success # Store status by radius
+  # Optional: Add a small delay or GC call between radii if memory is an issue
+  gc()
+  Sys.sleep(1) # Small pause
+}
+
+message("Finished all binary event studies.")
+# Check if any radius failed
+if (any(!unlist(bin_results_status))) {
+  failed_radii <- names(bin_results_status)[!unlist(bin_results_status)]
+  warning("Binary event studies failed for radii: ", paste(failed_radii, collapse = ", "), ". Check logs.")
+} else {
+  message("All binary event studies completed successfully for all radii.")
+}
+
+# Clean up memory before continuous runs
+gc()
+```
+
+
+```{r}
+# Continuous treatment
+# Function to run event study models with flexible parameters
+run_continuous_event_study <- function(param_grid, rad = 2000, overwrite = FALSE) {
+  # Path for results files
+  results_path <- here("book", "book_regs", paste0("cont_did_results_", rad, ".rds"))
+  partial_path <- here("book", "book_regs", paste0("cont_did_results_partial_", rad, ".rds"))
+
+  # Create directory if it doesn't exist
+  results_dir <- dirname(results_path)
+  if (!dir.exists(results_dir)) {
+    dir.create(results_dir, recursive = TRUE)
+    message("Created directory: ", results_dir)
+  }
+
+  # Load existing results if not overwriting and file exists
+  existing_results <- list()
+  if (!overwrite && file.exists(results_path)) {
+    existing_results <- readRDS(results_path)
+    message("Loaded existing continuous results from: ", results_path)
+  } else if (!overwrite) {
+    message("No existing continuous results file found or overwrite=TRUE. Starting fresh for radius ", rad)
+  } else {
+    message("overwrite=TRUE. Starting fresh for continuous models for radius ", rad)
+  }
+
+  # Load the dataset for the current radius
+  message(paste("Loading data for continuous models, radius:", rad))
+  dat_panel_site <- tryCatch(
+    {
+      open_dataset(
+        here::here("data", "processed", "dat_panel_site_mo")
+      ) %>%
+        filter(radius == rad) %>%
+        collect()
+    },
+    error = function(e) {
+      message("Error loading data for continuous models, radius ", rad, ": ", e$message)
+      return(NULL) # Return NULL if data loading fails
+    }
+  )
+
+  if (is.null(dat_panel_site)) {
+    message("Skipping continuous models for radius ", rad, " due to data loading error.")
+    return(existing_results) # Return existing (potentially empty) results
+  }
+  message(paste("Data loaded successfully for continuous models, radius:", rad, " - Rows:", nrow(dat_panel_site)))
+
+  # --- Helper function to run a single continuous model ---
+  run_single_cont_model <- function(params, data_for_radius) {
+    # Extract parameters
+    outcome <- params$outcome
+    treatment_var <- params$treatment # Note: param name is 'treatment' in continuous_param_grid
+    normalized <- params$normalized
+    same_switchers <- params$same_switchers
+
+    # Build model name
+    outcome_suffix <- ifelse(outcome == "log_price_median_w", "_logpw", "_logp")
+    treat_suffix <- case_when(
+      treatment_var == "spill_count" ~ "_sc",
+      treatment_var == "log_spill_count" ~ "_logsc",
+      treatment_var == "spill_hrs" ~ "_sh",
+      treatment_var == "log_spill_hrs" ~ "_logsh",
+      TRUE ~ paste0("_", gsub("[^[:alnum:]]", "", treatment_var))
+    )
+    sw_suffix <- if (same_switchers) "_sw" else ""
+    norm_suffix <- if (normalized) "_norm" else ""
+    model_name <- paste0(
+      "model_cont", # Base name for continuous
+      outcome_suffix, # _logp or _logpw
+      treat_suffix, # _sc, _logsc, _sh, _logsh
+      sw_suffix, # _sw (if TRUE)
+      norm_suffix # _norm (if TRUE)
+    )
+
+    # Build model description
+    outcome_label <- case_when(
+      outcome == "price_median_w" ~ "Weighted Price Median",
+      outcome == "log_price_median_w" ~ "Weighted Log Price Median",
+      outcome == "price_median" ~ "Price Median",
+      outcome == "log_price_median" ~ "Log Price Median",
+      TRUE ~ outcome
+    )
+    treatment_label <- case_when(
+      treatment_var == "spill_count" ~ "Spill Count",
+      treatment_var == "log_spill_count" ~ "Log Spill Count",
+      treatment_var == "spill_hrs" ~ "Spill Hours",
+      treatment_var == "log_spill_hrs" ~ "Log Spill Hours",
+      TRUE ~ treatment_var
+    )
+    norm_label <- ifelse(normalized, "Norm", "No Norm")
+    switchers_label <- ifelse(same_switchers, "Same Switchers", "All Switchers")
+    model_description <- sprintf(
+      "%s ~ %s (Continuous; %s, %s)",
+      outcome_label, treatment_label, norm_label, switchers_label
+    )
+
+    cat(sprintf("Running model: %s (%s)\n", model_name, model_description))
+
+    # Run the actual DID model for continuous treatment
+    model_result <- try(did_multiplegt_dyn(
+      df = data_for_radius,
+      outcome = outcome,
+      group = "site_id",
+      time = "month_id",
+      treatment = treatment_var,
+      effects = 9,
+      placebo = 2,
+      cluster = "site_id",
+      normalized = normalized,
+      trends_lin = FALSE,
+      same_switchers = same_switchers,
+      less_conservative_se = TRUE,
+      graph_off = TRUE, # Turn off graph in parallel runs
+      effects_equal = TRUE # Specific to continuous setup
+    ), silent = FALSE) # Keep silent = FALSE to see errors
+
+    # Return a named list for this model
+    result <- list()
+    result[[model_name]] <- model_result
+    attr(result[[model_name]], "description") <- model_description
+    return(result)
+  }
+  # --- End Helper function ---
+
+  # Filter param_grid: Keep only models not present in existing_results if overwrite=FALSE
+  models_to_run_indices <- 1:nrow(param_grid)
+  if (!overwrite && length(existing_results) > 0) {
+    existing_model_names <- names(existing_results)
+    models_to_run_indices <- which(!apply(param_grid, 1, function(row) {
+      # Reconstruct model name to check existence
+      outcome <- row[["outcome"]]
+      treatment_var <- row[["treatment"]]
+      normalized <- as.logical(row[["normalized"]])
+      same_switchers <- as.logical(row[["same_switchers"]])
+
+      model_name <- "model_cont"
+      if (grepl("log_", outcome)) model_name <- paste0(model_name, "_log")
+      if (grepl("_w$", outcome)) model_name <- paste0(model_name, "_w")
+      treat_short_name <- gsub("spill_count", "sc", treatment_var)
+      treat_short_name <- gsub("spill_hrs", "sh", treat_short_name)
+      treat_short_name <- gsub("log_", "log", treat_short_name)
+      model_name <- paste0(model_name, "_", treat_short_name)
+      if (same_switchers) model_name <- paste0(model_name, "_sw")
+      if (normalized) model_name <- paste0(model_name, "_norm")
+      return(model_name %in% existing_model_names)
+    }))
+
+    if (length(models_to_run_indices) < nrow(param_grid)) {
+      message(sprintf(
+        "Skipping %d continuous models already present in results for radius %d.",
+        nrow(param_grid) - length(models_to_run_indices), rad
+      ))
+    }
+  }
+
+  # Convert param_grid rows to a list of lists for lapply
+  params_list <- split(param_grid[models_to_run_indices, , drop = FALSE], seq_len(length(models_to_run_indices)))
+
+  total_models_to_run <- length(params_list)
+  if (total_models_to_run == 0) {
+    message("No new continuous models to run for radius ", rad)
+    return(existing_results)
+  }
+
+  cat(sprintf("Starting parallel continuous model estimation for radius %d - total models to run: %d\n", rad, total_models_to_run))
+
+  # Run models in parallel using future_lapply
+  new_results_list <- future_lapply(params_list, run_single_cont_model,
+    data_for_radius = dat_panel_site,
+    future.seed = TRUE,
+    future.globals = list(
+      did_multiplegt_dyn = DIDmultiplegtDYN::did_multiplegt_dyn,
+      case_when = dplyr::case_when
+    ),
+    future.packages = c("dplyr", "DIDmultiplegtDYN")
+  )
+
+  # Combine the list of lists into a single named list
+  new_results <- do.call(c, new_results_list)
+
+  # Combine new results with existing ones
+  final_results <- c(existing_results, new_results)
+
+  # Save the final results for this radius
+  tryCatch(
+    {
+      saveRDS(final_results, file = results_path)
+      message("Continuous results saved successfully for radius ", rad, " to: ", results_path)
+      if (file.exists(partial_path)) file.remove(partial_path)
+    },
+    error = function(e) {
+      message("Error saving final continuous results for radius ", rad, ": ", e$message)
+      # Attempt to save partial results if final save fails
+      tryCatch(
+        {
+          saveRDS(final_results, file = partial_path)
+          message("Partial continuous results saved for radius ", rad, " to: ", partial_path)
+        },
+        error = function(e_partial) {
+          message("CRITICAL ERROR: Failed to save even partial continuous results for radius ", rad, ": ", e_partial$message)
+        }
+      )
+    }
+  )
+
+  cat("Finished continuous model estimation for radius ", rad, "\n")
+
+  # Return results invisibly
+  invisible(final_results)
+}
+
+continuous_param_grid <- expand.grid(
+  outcome = c("log_price_median", "log_price_median_w"),
+  treatment = c("spill_count", "log_spill_count", "spill_hrs", "log_spill_hrs"),
+  normalized = c(TRUE),
+  same_switchers = c(TRUE),
+  stringsAsFactors = FALSE
+)
+
+# NEW sequential radii loop
+cont_results_status <- list()
+for (r in radii) {
+  message(paste("\n--- Starting continuous processing for radius:", r, "---\n"))
+  success <- tryCatch(
+    {
+      # Call the function for the current radius.
+      # Set overwrite = FALSE to append/skip existing models by default
+      run_continuous_event_study(continuous_param_grid, rad = r, overwrite = FALSE)
+      TRUE # Indicate success
+    },
+    error = function(e) {
+      message(paste("Error processing continuous models for radius:", r, "-", e$message))
+      FALSE # Indicate failure
+    }
+  )
+  cont_results_status[[as.character(r)]] <- success # Store status by radius
+  # Optional: Add GC call and sleep between radii
+  gc()
+  Sys.sleep(1)
+}
+
+message("Finished all continuous event studies.")
+# Check if any radius failed
+if (any(!unlist(cont_results_status))) {
+  failed_radii <- names(cont_results_status)[!unlist(cont_results_status)]
+  warning("Continuous event studies failed for radii: ", paste(failed_radii, collapse = ", "), ". Check logs.")
+} else {
+  message("All continuous event studies completed successfully for all radii.")
+}
+
+# Reset to sequential plan after parallel execution (good practice)
+plan(sequential)
+```

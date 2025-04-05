@@ -1,0 +1,2 @@
+CPPFLAGS += -I/opt/homebrew/opt/libomp/include -Xclang -fopenmp
+LDFLAGS += -L/opt/homebrew/opt/libomp/lib -lomp

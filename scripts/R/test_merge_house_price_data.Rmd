@@ -1,0 +1,351 @@
+---
+title: "Test Merge House Price Data"
+author: "Jacopo Olivieri"
+date: "2024-01-13"
+output:
+  html_document:
+    fig_width: 6
+    fig_aspect_ratio: 0.618
+knitr:
+  opts_chunk:
+    echo: false
+    warning: false
+    message: false
+    fig.align: "center"
+---
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+# Load required packages
+required_packages <- c(
+  "rmarkdown", "rio", "tidyverse", "purrr", "here",
+  "janitor", "data.table", "lubridate", "rnrfa", "sf",
+  "PostcodesioR", "furrr", "future", "memoise"
+)
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+# set up parallel processing
+setup_parallel <- function() {
+  n_workers <- parallelly::availableCores() - 1
+  machine_ram <- memuse::Sys.meminfo()$totalram
+  ram_limit <- as.numeric(0.7 * machine_ram)
+
+  options(future.globals.maxSize = ram_limit)
+  future::plan(future::multisession, workers = n_workers)
+  logger::log_info("Parallel processing initialized with {n_workers} workers")
+}
+setup_parallel()
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "test_merge_house_price_data.log")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+```
+
+## Load EDM Data
+
+```{r, load_data}
+dat <- import(here(
+  "data", "processed",
+  "individual_edm_location.RDATA"
+), trust = TRUE)
+
+dat_yr <- dat$yearly
+dat_mo <- dat$monthly
+```
+
+## Load House Price Data
+
+
+```{r}
+house_price_data <- import(here("data", "processed", "house_price.rds"),
+  trust = TRUE
+)
+
+house_price_data %>%
+  filter(!is.na(latitude))
+```
+
+
+## Test Process Postcodes Function
+
+### Plug and play
+
+
+```{r}
+x <- raw_data %>%
+  group_by(year) %>%
+  slice_head(n = 100) %>%
+  ungroup()
+
+x <- raw_data %>%
+  slice(1201:1300)
+
+process_postcodes <- function(postcodes, batch_size = 100) {
+  n_batches <- ceiling(length(postcodes) / batch_size)
+
+  # Split postcodes into batches
+  batch_indices <- split(
+    seq_along(postcodes),
+    ceiling(seq_along(postcodes) / batch_size)
+  )
+
+  # Process batches in parallel
+  logger::log_info("Processing {length(postcodes)} postcodes in {n_batches} batches")
+
+  results <- future_map(batch_indices, function(idx) {
+    batch_postcodes <- list(postcodes = postcodes[idx])
+    batch_result <- bulk_postcode_lookup(batch_postcodes)
+
+    map(batch_result, function(x) {
+      res <- x$result
+      res <- res[names(res) %in% CONFIG$postcode_vars]
+      res
+    })
+  }, .progress = TRUE)
+
+  # Combine all results using data.table
+  logger::log_info("Combining results into single data frame")
+  data.table::rbindlist(
+    unlist(results, recursive = FALSE),
+    fill = TRUE,
+    use.names = TRUE
+  ) %>%
+    as_tibble()
+}
+
+
+
+y <- process_postcodes(raw_data$postcode)
+y
+
+z <- bind_rows(y)
+bind_rows(head(y))
+
+head(y, 1)
+```
+
+### Test batch binding
+
+```{r}
+library(microbenchmark)
+library(dplyr)
+library(data.table)
+
+test_data <- y[[1]]
+test_dt()
+test_dplyr()
+test_base()
+
+test_dt <- function() {
+  data.table::rbindlist(test_data, fill = TRUE, use.names = TRUE)
+}
+test_dplyr <- function() bind_rows(test_data)
+test_base <- function() {
+  # Convert NULLs to NA before converting to data.frame
+  processed_data <- lapply(test_data, function(x) {
+    x$admin_county <- if (is.null(x$admin_county)) NA else x$admin_county
+    as.data.frame(x, stringsAsFactors = FALSE)
+  })
+  do.call(rbind, processed_data)
+}
+
+# Run benchmark
+results <- microbenchmark(
+  data.table = test_dt(),
+  dplyr = test_dplyr(),
+  base = test_base(),
+  times = 50
+)
+
+# Print results
+print(results)
+```
+
+```{r}
+test_data <- y[1:100]
+
+test_nested <- function() {
+  data.table::rbindlist(
+    lapply(test_data, function(x) data.table::rbindlist(x, fill = TRUE, use.names = FALSE)),
+    fill = TRUE,
+    use.names = TRUE
+  )
+}
+test_flat <- function() {
+  data.table::rbindlist(
+    unlist(test_data, recursive = FALSE),
+    fill = TRUE,
+    use.names = TRUE
+  )
+}
+test_flat2 <- function() {
+  # Then use rbindlist on the flattened result
+  data.table::rbindlist(
+    unlist(test_data, recursive = FALSE),
+    fill = TRUE,
+    use.names = TRUE
+  )
+}
+test_dplyr <- function() bind_rows(test_data)
+
+
+results <- microbenchmark(
+  flat2 = test_flat2(),
+  nested = test_nested(),
+  flat = test_flat(),
+  dplyr = test_dplyr(),
+  times = 100
+) %>%
+  suppressWarnings()
+
+print(results)
+
+# Verify they give same result
+result_nested <- test_nested()
+result_flat <- test_flat()
+result_flat2 <- test_flat2()
+result_dplyr <- test_dplyr()
+identical(result_nested, result_flat)
+identical(result_flat, result_flat2)
+identical(result_flat, as.data.table(result_dplyr))
+# I WOULD DO FLAT2
+```
+
+### Test future map vs map
+
+```{r}
+library(microbenchmark)
+setup_parallel <- function() {
+  n_workers <- parallelly::availableCores() # - 1
+  machine_ram <- memuse::Sys.meminfo()$totalram
+  ram_limit <- as.numeric(0.9 * machine_ram)
+
+  options(future.globals.maxSize = ram_limit)
+  future::plan(future::multisession, workers = n_workers)
+  logger::log_info("Parallel processing initialized with {n_workers} workers")
+}
+setup_parallel()
+
+
+x <- raw_data %>%
+  group_by(year) %>%
+  slice_head(n = 3000) %>%
+  ungroup()
+
+process_postcodes_future <- function(postcodes, batch_size = 100) {
+  n_batches <- ceiling(length(postcodes) / batch_size)
+
+  # Split postcodes into batches
+  batch_indices <- split(
+    seq_along(postcodes),
+    ceiling(seq_along(postcodes) / batch_size)
+  )
+
+  # Process batches in parallel
+  logger::log_info("Processing {length(postcodes)} postcodes in {n_batches} batches")
+
+  results <- future_map(batch_indices, function(idx) {
+    batch_postcodes <- list(postcodes = postcodes[idx])
+    batch_result <- bulk_postcode_lookup(batch_postcodes)
+
+    map(batch_result, function(x) {
+      res <- x$result
+      res <- res[names(res) %in% CONFIG$postcode_vars]
+      res
+    })
+  }, .progress = TRUE)
+
+  # Combine all results using data.table
+  logger::log_info("Combining results into single data frame")
+  data.table::rbindlist(
+    unlist(results, recursive = FALSE),
+    fill = TRUE,
+    use.names = TRUE
+  ) %>%
+    as_tibble() %>%
+    suppressWarnings()
+}
+
+process_postcodes_sequential <- function(postcodes, batch_size = 100) {
+  n_batches <- ceiling(length(postcodes) / batch_size)
+
+  batch_indices <- split(
+    seq_along(postcodes),
+    ceiling(seq_along(postcodes) / batch_size)
+  )
+
+  logger::log_info("Processing {length(postcodes)} postcodes in {n_batches} batches")
+
+  results <- map(batch_indices, function(idx) {
+    batch_postcodes <- list(postcodes = postcodes[idx])
+    batch_result <- bulk_postcode_lookup(batch_postcodes)
+
+    map(batch_result, function(x) {
+      res <- x$result
+      res <- res[names(res) %in% CONFIG$postcode_vars]
+      res
+    })
+  }, .progress = TRUE)
+
+  logger::log_info("Combining results into single data frame")
+  data.table::rbindlist(
+    unlist(results, recursive = FALSE),
+    fill = TRUE,
+    use.names = TRUE
+  ) %>%
+    as_tibble() %>%
+    suppressWarnings()
+}
+
+benchmark_results <- microbenchmark(
+  batch_50 = process_postcodes_future(x$postcode, batch_size = 50),
+  batch_100 = process_postcodes_future(x$postcode, batch_size = 100),
+  sequential50 = process_postcodes_sequential(x$postcode, batch_size = 50),
+  sequential100 = process_postcodes_sequential(x$postcode, batch_size = 100),
+  times = 10
+)
+
+
+print(benchmark_results)
+
+autoplot(benchmark_results) +
+  theme_minimal() +
+  labs(
+    title = "Postcode Processing: Parallel vs Sequential",
+    subtitle = paste(
+      "Based on", length(x$postcode), "postcodes,",
+      parallelly::availableCores(), "workers"
+    ),
+    y = "Time (milliseconds)"
+  )
+```
+
+```{r}
+postcode_data <- postcode_data %>%
+  mutate(postcode = str_remove_all(postcode, fixed(" "))) %>%
+  unique()
+
+left_join(raw_data, postcode_data, by = join_by(postcode))
+```
+
