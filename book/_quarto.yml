@@ -13,7 +13,7 @@ book:
     - house_data_exploration.qmd
     - event_study.qmd
 
-bibliography: ../docs/lit_review/sewage_literature_review/refs.bib
+bibliography: refs.bib
 
 format:
   html:

@@ -1,0 +1,78 @@
+---
+title: "test_06_combine_api_edm_data_2024_onwards"
+output: html_document
+---
+
+```{r}
+############################################################
+# Combine EDM API Parquet Data (2024 Onwards)
+# Project: Sewage
+# Date: 2025-04-06
+# Author: Jacopo Olivieri
+#' Note: This script cleans and combines the individual sewage spill data from 
+#' UK water companies for the years 2021-2023 (generated from API data,
+#' 2024 onwards) into a single consolidated Parquet file.
+
+# Setup Functions
+############################################################
+
+
+#' Initialize the R environment with required packages
+#' @return NULL
+initialise_environment <- function() {
+  if (!requireNamespace("renv", quietly = TRUE)) {
+    install.packages("renv")
+  }
+
+  # Define required packages
+  required_packages <- c(
+    "here", "fs", "arrow", "dplyr", "purrr", "logger", "glue", "janitor"
+  )
+
+  # Install and load packages
+  install_if_missing <- function(packages) {
+    new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+    if (length(new_packages) > 0) {
+      message(
+        "Installing missing packages: ",
+        paste(new_packages, collapse = ", ")
+      )
+      install.packages(new_packages)
+    }
+    invisible(sapply(packages, library, character.only = TRUE))
+  }
+
+  install_if_missing(required_packages)
+}
+
+#' Set up logging configuration
+#' @return NULL
+setup_logging <- function() {
+  log_path <- here::here(
+    "output", "log",
+    "06_combine_api_edm_data_2024_onwards.log-2023.log"
+  )
+  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
+  
+  logger::log_appender(logger::appender_file(log_path))
+  logger::log_layout(logger::layout_glue_colors)
+  logger::log_threshold(logger::DEBUG)
+  logger::log_info("Script started at {Sys.time()}")
+}
+
+initialise_environment()
+```
+
+```{r}
+# Configuration
+############################################################
+
+CONFIG <- list(
+  input_dir = here::here("data", "processed", "edm_api_data"),
+  output_file = here::here("data", "processed", "edm_api_data", "combined_api_data.parquet"),
+  # Exclude the potential output file from the list of inputs
+  input_file_pattern = "\.parquet$",
+  exclude_pattern = "combined_api_data\.parquet$"
+)
+```
+

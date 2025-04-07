@@ -225,3 +225,19 @@ subset(x, x!="unique_id")
 x[x!="unique_id"]
 ```
 
+```{r}
+x <- import(here("data", "processed", "combined_edm_data.parquet")) %>% 
+  as_tibble() %>% 
+  arrange(water_company)
+
+combined_df <- combined_df %>% 
+  arrange(water_company)
+
+names(x)
+all.equal(x$water_company, combined_df$water_company)
+
+tibble(x = x$water_company, y = combined_df$water_company) %>% 
+  filter(x!=y)
+
+```
+
