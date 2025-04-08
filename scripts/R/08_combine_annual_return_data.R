@@ -6,7 +6,7 @@
 ############################################################
 
 #' This script cleans and combines the annual sewage spill data
-#' from UK water companies for the years 2021-2023. It's part of the
+#' from UK water companies for the years 2021-2024. It's part of the
 #' data preparation pipeline for analysing sewage discharge events.
 
 
@@ -71,7 +71,7 @@ setup_logging <- function() {
 ############################################################
 
 CONFIG <- list(
-  years = 2021:2023,
+  years = 2021:2024,
   input_dir = here::here("data", "raw", "edm_data"),
   output_dir = here::here("data", "processed"),
   column_name_mapping = c(

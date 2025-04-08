@@ -3,16 +3,15 @@
 # Project: Sewage
 # Date: 2025-04-06
 # Author: Jacopo Olivieri
-#' Note: This script cleans and combines the individual sewage spill data from 
-#' UK water companies for the years 2021-2023 (generated from API data,
-#' 2024 onwards) into a single consolidated Parquet file.
+############################################################
+
+#' Combines and cleans individual water company Parquet files (generated from
+#' API data, 2024 onwards) into a single consolidated Parquet file.
 
 # Setup Functions
 ############################################################
 
-
-#' Initialize the R environment with required packages
-#' @return NULL
+#' Initialize required packages for data processing
 initialise_environment <- function() {
   if (!requireNamespace("renv", quietly = TRUE)) {
     install.packages("renv")
@@ -20,7 +19,8 @@ initialise_environment <- function() {
 
   # Define required packages
   required_packages <- c(
-    "here", "fs", "arrow", "dplyr", "purrr", "logger", "glue", "janitor"
+    "here", "fs", "arrow", "dplyr", "purrr",
+    "logger", "glue", "janitor"
   )
 
   # Install and load packages
@@ -39,18 +39,16 @@ initialise_environment <- function() {
   install_if_missing(required_packages)
 }
 
-#' Set up logging configuration
-#' @return NULL
+#' Configure logging
 setup_logging <- function() {
   log_path <- here::here(
-    "output", "log",
-    "06_combine_api_edm_data_2024_onwards.log-2023.log"
+    "output", "log", "06_combine_api_edm_data_2024_onwards.log"
   )
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-  
+  fs::dir_create(dirname(log_path), recurse = TRUE)
+
   logger::log_appender(logger::appender_file(log_path))
   logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
+  logger::log_threshold(logger::INFO)
   logger::log_info("Script started at {Sys.time()}")
 }
 
@@ -59,10 +57,32 @@ setup_logging <- function() {
 
 CONFIG <- list(
   input_dir = here::here("data", "processed", "edm_api_data"),
-  output_file = here::here("data", "processed", "edm_api_data", "combined_api_data.parquet"),
-  # Exclude the potential output file from the list of inputs
-  input_file_pattern = "\.parquet$",
-  exclude_pattern = "combined_api_data\.parquet$"
+  output_file = here::here(
+    "data", "processed", "edm_api_data",
+    "combined_api_data.parquet"
+  ),
+  input_file_pattern = "\\.parquet$",
+  exclude_pattern = "combined_api_data\\.parquet$",
+  water_company_names = c(
+    "Anglian Water",
+    "Welsh Water",
+    "Northumbrian Water",
+    "Severn Trent Water",
+    "South West Water",
+    "Southern Water",
+    "Thames Water",
+    "United Utilities",
+    "Wessex Water",
+    "Yorkshire Water"
+  ),
+  column_name_mapping = c(
+    "attributes_id" = "unique_id",
+    "attributes_latest_event_start" = "start_time_og",
+    "attributes_latest_event_end" = "end_time_og",
+    "attributes_latitude" = "latitude",
+    "attributes_longitude" = "longitude",
+    "attributes_receiving_water_course" = "receiving_water_course"
+  )
 )
 
 # Data Processing Functions
@@ -76,6 +96,7 @@ CONFIG <- list(
 read_and_combine_parquet_files <- function(input_dir, file_pattern, exclude_pattern) {
   logger::log_info("--- Reading and combining Parquet files from: {input_dir} ---")
 
+  # Validate input directory exists
   if (!fs::dir_exists(input_dir)) {
     logger::log_error("Input directory does not exist: {input_dir}")
     return(NULL)
@@ -92,66 +113,102 @@ read_and_combine_parquet_files <- function(input_dir, file_pattern, exclude_patt
   # Further filter based on exclude pattern
   parquet_files <- parquet_files[!grepl(exclude_pattern, basename(parquet_files))]
 
-
+  # Check if any files found
   if (length(parquet_files) == 0) {
     logger::log_warn("No input Parquet files found matching pattern '{file_pattern}' (excluding '{exclude_pattern}') in {input_dir}.")
-    return(dplyr::tibble()) # Return empty tibble if no files found
+    return(dplyr::tibble())
   }
 
   logger::log_info("Found {length(parquet_files)} Parquet files to combine.")
-  # Log filenames being combined (optional, can be verbose)
-  # logger::log_debug("Files: {paste(basename(parquet_files), collapse=', ')}")
 
+  # Attempt to read and combine files
   tryCatch(
     {
-      # Read and bind rows using purrr::map_dfr for efficiency
+      # Read and bind rows
       combined_data <- purrr::map_dfr(parquet_files, arrow::read_parquet, .id = "source_file") %>%
-        dplyr::mutate(source_file = basename(source_file)) # Keep only filename
+        dplyr::mutate(source_file = basename(source_file))
 
       logger::log_info("Successfully read and combined {nrow(combined_data)} rows from {length(parquet_files)} files.")
       return(combined_data)
     },
     error = function(e) {
       logger::log_error("Error reading or combining Parquet files: {e$message}")
-      # Log which file might have caused issues if possible (not directly available here)
       return(NULL)
     }
   )
 }
 
-#' Placeholder for cleaning the combined data.
-#' Add specific cleaning steps here later (e.g., type conversions,
-#' datetime parsing, filtering) similar to script 03.
-#' @param combined_data The tibble containing combined data.
-#' @return The cleaned tibble.
+#' Clean and standardise the combined EDM API data
+#' @param combined_data Tibble containing the raw combined data
+#' @return Cleaned tibble with standardised data
 clean_combined_data <- function(combined_data) {
+  # Handle empty input case
   if (is.null(combined_data) || nrow(combined_data) == 0) {
     logger::log_info("Skipping cleaning step as input data is NULL or empty.")
     return(combined_data)
   }
 
-  logger::log_info("--- Starting data cleaning (currently a placeholder) ---")
+  logger::log_info("Starting data cleaning with {nrow(combined_data)} rows")
 
-  # <<<< Add cleaning steps here >>>>
-  # Example: Standardize column names
-  # cleaned_data <- combined_data %>% janitor::clean_names()
+  # Prepare water company name mapping
+  snake_case_names <- tolower(gsub(" ", "_", CONFIG$water_company_names))
+  name_mapping <- setNames(CONFIG$water_company_names, snake_case_names)
 
-  # Example: Parse datetimes (assuming columns like 'start_time', 'end_time')
-  # cleaned_data <- cleaned_data %>%
-  #   mutate(across(matches("time|date"), ~ lubridate::parse_date_time(.x, orders = c("Ymd HMS", "Y-m-d H:M:S"), tz = "UTC")))
+  # Clean the data
+  cleaned_data <- combined_data %>%
+    # Select relevant variables
+    dplyr::select(
+      water_company, attributes_id,
+      attributes_latest_event_start, attributes_latest_event_end,
+      attributes_latitude, attributes_longitude,
+      attributes_receiving_water_course
+    ) %>%
+    # Rename variables based on mapping
+    dplyr::rename_with(
+      ~ if_else(.x %in% names(CONFIG$column_name_mapping),
+        CONFIG$column_name_mapping[.x],
+        .x
+      )
+    ) %>%
+    # Standardise water company names
+    dplyr::mutate(water_company = dplyr::if_else(
+      water_company %in% snake_case_names,
+      name_mapping[water_company],
+      water_company
+    )) %>%
+    # Parse date-time columns from epoch milliseconds
+    dplyr::mutate(
+      across(
+        c(start_time_og, end_time_og),
+        ~ as.POSIXct(as.numeric(.x) / 1000, origin = "1970-01-01", tz = "UTC"),
+        .names = "{.col}_parsed"
+      )
+    ) %>%
+    # Rename the parsed columns
+    dplyr::rename(
+      start_time = start_time_og_parsed,
+      end_time = end_time_og_parsed
+    ) %>%
+    # Remove original time columns
+    dplyr::select(-c(start_time_og, end_time_og)) %>%
+    # Filter or truncate observations before 2024
+    dplyr::filter(
+      end_time >= as.POSIXct("2024-01-01"),
+      !is.na(start_time),
+      !is.na(end_time)
+    ) %>%
+    dplyr::mutate(
+      start_time = dplyr::if_else(
+        start_time < as.POSIXct("2024-01-01"),
+        as.POSIXct("2024-01-01"),
+        start_time
+      ),
+      year = as.integer(year(start_time))
+    ) %>%
+    # Remove duplicate rows
+    dplyr::distinct()
 
-  # Example: Deduplication (already done in script 05 per file, but maybe needed across files)
-  # rows_before <- nrow(cleaned_data)
-  # cleaned_data <- dplyr::distinct(cleaned_data)
-  # rows_after <- nrow(cleaned_data)
-  # if (rows_before > rows_after) {
-  #   logger::log_info("Removed {rows_before - rows_after} duplicate rows during combined cleaning.")
-  # }
-
-  # For now, just return the input data
-  cleaned_data <- combined_data
-
-  logger::log_info("--- Data cleaning step finished ---")
+  logger::log_info(glue::glue("Data cleaning finished with {nrow(cleaned_data)} rows"))
   return(cleaned_data)
 }
 
@@ -160,24 +217,29 @@ clean_combined_data <- function(combined_data) {
 #' @param output_path The full path for the output Parquet file.
 #' @return Logical indicating success (TRUE) or failure (FALSE).
 write_combined_parquet <- function(data_to_write, output_path) {
+  # Validate input
   if (is.null(data_to_write)) {
-      logger::log_error("Cannot write Parquet file: Input data is NULL.")
-      return(FALSE)
+    logger::log_error("Cannot write Parquet file: Input data is NULL.")
+    return(FALSE)
   }
 
   logger::log_info("--- Writing combined data to Parquet ---")
   logger::log_info("Output path: {output_path}")
 
+  # Attempt to write file
   tryCatch(
     {
+      # Ensure output directory exists
       output_dir <- dirname(output_path)
       if (!fs::dir_exists(output_dir)) {
         logger::log_info("Creating output directory: {output_dir}")
         fs::dir_create(output_dir, recurse = TRUE)
       }
 
+      # Write data to Parquet
       arrow::write_parquet(data_to_write, output_path)
 
+      # Verify successful write
       rows_written <- nrow(data_to_write)
       if (fs::file_exists(output_path) && rows_written > 0) {
         file_size_kb <- round(fs::file_info(output_path)$size / 1024, 2)
@@ -186,10 +248,9 @@ write_combined_parquet <- function(data_to_write, output_path) {
         )
         return(TRUE)
       } else if (rows_written == 0) {
-         logger::log_info("Wrote an empty Parquet file (0 rows) to {output_path}.")
-         return(TRUE)
-      }
-       else {
+        logger::log_info("Wrote an empty Parquet file (0 rows) to {output_path}.")
+        return(TRUE)
+      } else {
         logger::log_error("File writing seemed complete but file not found or inaccessible at {output_path}.")
         return(FALSE)
       }
@@ -204,41 +265,38 @@ write_combined_parquet <- function(data_to_write, output_path) {
 # Main Execution
 ############################################################
 
-#' Main pipeline orchestration function
 main <- function() {
   start_time <- Sys.time()
 
   tryCatch({
-    # Initialize environment and logging
+    # Setup environment
     initialise_environment()
     setup_logging()
 
     logger::log_info("===== Starting Combined API Data Processing =====")
 
-    # 1. Read and Combine
+    # Read and Combine
     combined_data <- read_and_combine_parquet_files(
       CONFIG$input_dir,
       CONFIG$input_file_pattern,
       CONFIG$exclude_pattern
-      )
+    )
 
     # Check if combination was successful
     if (is.null(combined_data)) {
-       stop("Failed to read and combine Parquet files. See logs for details.")
+      stop("Failed to read and combine Parquet files. See logs for details.")
     }
-     if (nrow(combined_data) == 0) {
-        logger::log_warn("No data combined from input files. Writing an empty output file.")
-     }
+    if (nrow(combined_data) == 0) {
+      logger::log_warn("No data combined from input files. Writing an empty output file.")
+    }
 
-
-    # 2. Clean Data (Placeholder Step)
+    # Clean and standardise data
     cleaned_data <- clean_combined_data(combined_data)
-     if (is.null(cleaned_data)) {
-       stop("Data cleaning step failed. See logs for details.")
+    if (is.null(cleaned_data)) {
+      stop("Data cleaning step failed. See logs for details.")
     }
 
-
-    # 3. Write Combined File
+    # Write final combined file
     write_success <- write_combined_parquet(cleaned_data, CONFIG$output_file)
 
     if (!write_success) {
@@ -246,12 +304,11 @@ main <- function() {
     }
 
     logger::log_info("===== Combined API Data Processing Finished Successfully =====")
-
   }, error = function(e) {
     logger::log_error("Fatal error during main execution: {e$message}")
-    # Optionally re-throw the error to stop execution completely if desired
-    # stop(e)
+    # Error already logged, no need to re-throw
   }, finally = {
+    # Track and report execution time
     end_time <- Sys.time()
     duration <- end_time - start_time
     formatted_duration <- format(duration)
@@ -262,7 +319,7 @@ main <- function() {
   })
 }
 
-# Run main function if script is executed directly
+# Execute main function if script is run directly
 if (sys.nframe() == 0) {
   main()
 }

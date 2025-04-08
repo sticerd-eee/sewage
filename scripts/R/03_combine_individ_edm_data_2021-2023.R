@@ -25,7 +25,7 @@ initialise_environment <- function() {
   required_packages <- c(
     "rmarkdown", "rio", "tidyverse", "purrr", "here",
     "janitor", "logger", "glue", "openxlsx2", "fs",
-    "furrr", "future", "readxlsb", "lubridate", "arrow"
+    "readxlsb", "lubridate", "arrow"
   )
 
   # Install and load packages
@@ -35,18 +35,6 @@ initialise_environment <- function() {
     }
     library(pkg, character.only = TRUE)
   }))
-}
-
-#' Configure parallel processing settings
-#' @return NULL
-setup_parallel <- function() {
-  n_workers <- parallelly::availableCores() - 1
-  machine_ram <- memuse::Sys.meminfo()$totalram
-  ram_limit <- as.numeric(0.7 * machine_ram)
-
-  options(future.globals.maxSize = ram_limit)
-  future::plan(future::multisession, workers = n_workers)
-  logger::log_info("Parallel processing initialized with {n_workers} workers")
 }
 
 #' Set up logging configuration
@@ -132,7 +120,7 @@ load_data <- function() {
     stringsAsFactors = FALSE
   ) %>%
     mutate(
-      year = as.numeric(stringr::str_extract(filename, "^\\d{4}")),
+      year = as.integer(stringr::str_extract(filename, "^\\d{4}")),
       company_clean_name = stringr::str_extract(filename, "(?<=\\d{4}_).*(?=\\.parquet)")
     )
 
@@ -171,7 +159,7 @@ load_data <- function() {
       # Read the Parquet file
       tryCatch(
         {
-          df <- arrow::read_parquet(file_path)
+          df <- arrow::read_parquet(file_path) %>% collect()
           logger::log_info("Successfully loaded {nrow(df)} rows from {basename(file_path)}")
           year_data[[company_name]] <- df
         },
@@ -202,7 +190,8 @@ clean_data <- function(df, df_name) {
   tryCatch(
     {
       # Get year and water company name
-      year <- as.numeric(stringr::str_extract(df_name, "\\d{4}$"))
+      df_name <- str_remove(df_name, "^\\d{4}_") # remove initial YYYY_
+      year <- as.integer(stringr::str_extract(df_name, "\\d{4}$"))
       water_company <- stringr::str_trim(
         stringr::str_replace(df_name, "\\d{4}$", "")
       )
@@ -238,8 +227,8 @@ clean_data <- function(df, df_name) {
       # Company specific variable renaming
       ## Southern Water, South West Water 2022, Thames Water 2023
       if (water_company == "Southern Water" |
-        (water_company == "South West Water" & year == 2022) |
-        (water_company == "Thames Water" & year == 2023)) {
+        (water_company == "South West Water" & year == 2022L) |
+        (water_company == "Thames Water" & year == 2023L)) {
         cleaned <- cleaned %>%
           rename(site_name_wa_sc = site_name_ea)
       }
@@ -458,7 +447,6 @@ main <- function() {
       # Setup
       initialise_environment()
       setup_logging()
-      # setup_parallel()
 
       # Load data
       logger::log_info("===== Starting Individual EDM Data Processing (2021-2023) =====")
@@ -468,7 +456,7 @@ main <- function() {
       logger::log_info("Processing data for {length(unlist(raw_data))} datasets")
       processed_data <- raw_data %>%
         imap(~ setNames(.x, paste(names(.x), .y))) %>%
-        flatten() %>%
+        list_flatten() %>%
         purrr::map2(.x = ., .y = names(.), clean_data) %>%
         purrr::map(.x = ., .f = clean_datetime_columns) %>%
         purrr::map(.x = ., .f = clean_time_range)
