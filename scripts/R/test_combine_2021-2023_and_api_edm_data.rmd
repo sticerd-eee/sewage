@@ -63,7 +63,10 @@ CONFIG <- list(
   api_data_file = here::here("data", "processed", "edm_api_data", "combined_api_data.parquet"),
   output_file = here::here("data", "processed", "combined_edm_data.parquet"),
   final_columns = c(
-    "water_company", "year", "site_name_ea", "unique_id", "start_time", "end_time", "site_name_wa_sc", "latitude", "longitude",
+    "water_company", "year", 
+    "site_name_ea", "unique_id", 
+    "start_time", "end_time", "site_name_wa_sc", 
+    "latitude", "longitude",
     "receiving_water_course", "data_source"
   )
 )
@@ -355,3 +358,38 @@ data %>%
 data_company  <- import(here("data", "processed", "edm_api_data", "united_utilities.parquet"))
 ```
 
+
+```{r}
+x21 <- load_data(2021)[[1]]
+x22 <- load_data(2022)[[1]]
+x23 <- load_data(2023)[[1]]
+x24 <- load_data(2024)[[1]]
+
+x21 %>% 
+  lapply(clean_data)
+
+process_year(2021)
+
+year = 2024
+load_data(year) %>%
+  lapply(clean_data) %>%
+  bind_rows() %>%
+  mutate(year = year) %>% 
+  pull(year_data_start) %>% unique()
+
+for (i in seq(10)) {
+  x24[[i]] %>%
+  clean_data() %>% 
+  pull(year_data_start) %>% unique() %>% print()
+}
+combined_data$year %>% unique()
+```
+
+
+
+
+
+  filter(water_company == "Anglian Water") %>% 
+  arrange(start_time) %>% 
+  select(water_company, year, site_name_ea, unique_event_id, start_time, end_time, site_name_wa_sc, latitude, longitude,
+         receiving_water_course, data_source
