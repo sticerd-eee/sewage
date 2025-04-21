@@ -52,8 +52,20 @@ logger::log_layout(logger::layout_glue_colors)
 ```
 
 ```{r, load_data}
-data_summary <- import(
-  here("data", "processed", "merged_edm_data_with_summary.RData"), trust = TRUE)
+# data_summary <- import(
+  # here("data", "processed", "merged_edm_data_with_summary.RData"), trust = TRUE)
+
+output_dir = here("data", "processed", "matched_events_annual_data")
+matched_combined <- import(
+  paste(output_dir, "matched_events_annual_data.parquet", sep = "/"), 
+  trust = TRUE
+)
+events_unmatched <- import(
+  paste(output_dir, "events_unmatched.parquet", sep = "/"), trust = TRUE
+)
+annual_unmatched <- import(
+  paste(output_dir, "annual_unmatched.parquet", sep = "/"), trust = TRUE
+)
 ```
 
 
@@ -72,11 +84,109 @@ A key challenge arises because **individual spill data prior to 2023 lacks uniqu
 - **Partial match**: An individual spill record is matched to multiple discharge points in the annual data (a 1-to-many match). Aggregated statistics for these spills therefore relate to multiple discharge points. See @sec-02-01-02-01-location-data-integration for details.
 - **No match**: An individual spill record could not be matched to any discharge point in the annual data. See @sec-02-01-02-02-unmatched-observations for details.
 
+
+```{r}
+# Prepare merge summary
+merged_data <- bind_rows( 
+  matched_combined %>% 
+    select(water_company, year, site_name_ea, outlet_discharge_ngr,
+           contains("site_id"), contains("match")) %>% 
+    distinct(),
+  events_unmatched %>% 
+  select(-contains("_time")) %>% 
+  distinct() %>% 
+    mutate(match_type = "no_match"),
+  .id = "group_id") %>% 
+  rename(merge_quality = match_type) %>% 
+  mutate(
+    merge_quality = if_else(
+      merge_quality == "many-to-many", "partial_match", merge_quality)
+  )
+
+summarise_merge <- function(merged_data) {
+  # Helper function to calculate percentages
+  add_percentages <- function(df, group_cols) {
+    df %>%
+      group_by(across(all_of(group_cols))) %>%
+      mutate(
+        frac_records = total_records / sum(total_records),
+        frac_outlet_ngr = total_outlet_ngr / sum(total_outlet_ngr),
+        frac_site_name_ea = total_site_name_ea / sum(total_site_name_ea),
+        perc_records = scales::percent(frac_records, accuracy = 0.1),
+        perc_outlet_ngr = scales::percent(frac_outlet_ngr, accuracy = 0.1),
+        perc_site_name_ea = scales::percent(frac_site_name_ea, accuracy = 0.1)
+      ) %>%
+      ungroup()
+  }
+
+# Create base summary
+merge_summary <- merged_data %>%  
+  group_by(water_company, year, group_id, merge_quality) %>%
+  summarise(
+      n_records = n(),
+      n_outlet_ngr = n_distinct(outlet_discharge_ngr),
+      n_site_name_ea = n_distinct(site_name_ea),
+      .groups = "drop"
+    ) %>% 
+  ungroup() %>% 
+  arrange(water_company, merge_quality, year)
+
+  # Calculate summaries at different levels
+  list(
+    overall_stats = merge_summary %>%
+      group_by(merge_quality) %>%
+      summarise(
+        total_records = sum(n_records),
+        total_outlet_ngr = sum(n_outlet_ngr),
+        total_site_name_ea = sum(n_site_name_ea),
+        .groups = "drop"
+      ) %>%
+      add_percentages(., NULL) %>%
+      arrange(desc(total_records)),
+    by_company = merge_summary %>%
+      group_by(water_company, merge_quality) %>%
+      summarise(
+        total_records = sum(n_records),
+        total_outlet_ngr = sum(n_outlet_ngr),
+        total_site_name_ea = sum(n_site_name_ea),
+        n_years = n_distinct(year),
+        .groups = "drop"
+      ) %>%
+      add_percentages("water_company") %>%
+      arrange(water_company, desc(total_records)),
+    by_year = merge_summary %>%
+      group_by(year, merge_quality) %>%
+      summarise(
+        total_records = sum(n_records),
+        total_outlet_ngr = sum(n_outlet_ngr),
+        total_site_name_ea = sum(n_site_name_ea),
+        n_companies = n_distinct(water_company),
+        .groups = "drop"
+      ) %>%
+      add_percentages("year") %>%
+      arrange(year, desc(total_records)),
+    by_company_year = merge_summary %>%
+      group_by(water_company, year, merge_quality) %>%
+      summarise(
+        total_records = sum(n_records),
+        total_outlet_ngr = sum(n_outlet_ngr),
+        total_site_name_ea = sum(n_site_name_ea),
+        .groups = "drop"
+      ) %>%
+      add_percentages(c("water_company", "year")) %>%
+      arrange(water_company, year, desc(total_records))
+  )
+}
+
+summarise_merge_res <- summarise_merge(merged_data)
+```
+
+
 ::: panel-tabset
 ### Overall
 
 ```{r, overall-merge-stats}
-dat_overall <- data_summary$summary$overall_stats %>% 
+dat_overall <- summarise_merge_res$overall_stats %>% 
   select(merge_quality, contains("records"), contains("site"), 
          contains("outlet"), - contains("perc")) %>% 
   mutate(merge_quality = str_replace_all(merge_quality, "_", " ") %>% 
@@ -131,7 +241,7 @@ reactable(dat_overall,
 ### Company
 
 ```{r, company-merge-stats}
-dat_company <- data_summary$summary$by_company %>% 
+dat_company <- summarise_merge_res$by_company %>% 
     select(water_company, merge_quality, contains("records"), contains("site"), 
            contains("outlet"), - contains("perc")) %>% 
   mutate(merge_quality = str_replace_all(merge_quality, "_", " ") %>% 
@@ -189,7 +299,7 @@ reactable(dat_company,
 ### Year
 
 ```{r, year-merge-stats}
-dat_year <- data_summary$summary$by_year %>% 
+dat_year <- summarise_merge_res$by_year %>% 
   select(year, merge_quality, contains("records"), contains("site"), 
        contains("outlet"), - contains("perc")) %>% 
   mutate(merge_quality = str_replace_all(merge_quality, "_", " ") %>% 
@@ -247,7 +357,7 @@ reactable(dat_year,
 ### Company-Year
 
 ```{r, company-year-merge-stats}
-dat_company_year <- data_summary$summary$by_company_year %>% 
+dat_company_year <- summarise_merge_res$by_company_year %>% 
   select(water_company, year, merge_quality, contains("records"), 
          contains("site"), contains("outlet"), - contains("perc")) %>% 
   mutate(merge_quality = str_replace_all(merge_quality, "_", " ") %>% 
@@ -317,14 +427,29 @@ We therefore want to merge discharge points grid location data from the annual d
 ### Problems {#sec-02-01-02-problems}
 
 #### 1. Location Data Integration {#sec-02-01-02-01-location-data-integration}
-**Problem**: The individual data lack consistent unique identifiers to match with annual data.^[In 2023, the Environment Agency introduced standardised unique identifiers, partially mitigating this issue.] This means that we sometimes cannot match a location in the individual spill data with a unique discharge point grid coordinate (3.3% of total observations).
+
+```{r}
+partial_match <- summarise_merge_res$overall_stats %>% 
+  filter(merge_quality == "partial_match") %>% 
+  pull(perc_outlet_ngr)
+```
+
+
+**Problem**: The individual data lack consistent unique identifiers to match with annual data.^[In 2023, the Environment Agency introduced standardised unique identifiers, partially mitigating this issue.] This means that we sometimes cannot match a location in the individual spill data with a unique discharge point grid coordinate (`r partial_match` of total observations).
 
 **Current Solution**: When multiple discharge points in the annual data match a single site in the individual data, we assign the location of the discharge point with the highest annual spill duration. This seems reasonable if these discharge points are close to each other (yet to check but seems plausible).
 
 #### 2. Unmatched Observations {#sec-02-01-02-02-unmatched-observations}
-**Problem**: A portion of observations in the individual data cannot be matched with the annual data (3.5% of total observations).
 
-**Potential Solution**: The mismatches likely stem from inconsistent spelling and formatting of site names or variable names between datasets. Implementation of fuzzy matching algorithms or manual data editing could rectify this (yet to do).
+```{r}
+no_match <- summarise_merge_res$overall_stats %>% 
+  filter(merge_quality == "no_match") %>% 
+  pull(perc_records)
+```
+
+**Problem**: A portion of observations in the individual data cannot be matched with the annual data (`r no_match` of total observations) despite the use of fuzzy matching.
+
+**Potential Solution**: Exploring these unmatched observations to check if the many-to-many matching can capture additional observations, or if fuzzy matching can be improved.
 
 For example:
 
@@ -334,11 +459,8 @@ For example:
 ### Individual
 
 ```{r, problem1-individ}
-individ_data <- import(here("data","processed", "combined_edm_data.RData"),
-                       trust = TRUE) 
-
 # Yorkshire 2022 individual data
-individ_data_welsh22 <- individ_data %>% 
+individ_data_welsh22 <- events_unmatched %>% 
   filter(year == 2022, water_company == "Welsh Water") %>%
   select(where(~!all(is.na(.))))
 
@@ -369,9 +491,7 @@ individ_data_welsh22 %>%
 ### Annual
 
 ```{r, problem1-annual}
-annual_data <- import(here("data","processed", "annual_return_edm.rds"),
-                      trust = TRUE) 
-annual_data_welsh22 <- annual_data %>% 
+annual_data_welsh22 <- annual_unmatched %>% 
   filter(str_detect(site_name_wa_sc, "XX Cheyney Road CSO, Chester")) %>% 
   select(water_company, year,
          site_name_ea, site_name_wa_sc, outlet_discharge_ngr) 
@@ -415,6 +535,8 @@ We aggregate individual sewage overflow spills into total spill counts and durat
 corr_spill_dat <- import(here("data", "processed", 
                               "individual_edm_location.RDATA"), trust = TRUE)
 corr_spill_dat <- corr_spill_dat$yearly
+
+matched_combined
 ```
 
 ::: panel-tabset

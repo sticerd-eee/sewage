@@ -84,7 +84,8 @@ CONFIG <- list(
     "wa_sc_supplementary_permit_ref_optional" = "permit_reference_wa_sc",
     "ea_permit_reference_ea_consents_database" = "permit_reference_ea",
     "yw_discharge_urn" = "unique_id",
-    "srn" = "unique_id"
+    "srn" = "unique_id",
+    "storm_discharge_asset_type_treatment_works" = "asset_type"
   )
 )
 

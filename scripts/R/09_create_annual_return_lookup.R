@@ -997,7 +997,8 @@ main <- function(compute_rf_matching = FALSE) {
     # 5. Build lookup table
     lookup_res <- build_lookup_from_matches(match_dfs)
     lookup_tbl <- lookup_res$lookup_table %>%
-      mutate(across(starts_with("site_id"), ~ as.numeric(as.character(.))))
+      mutate(across(starts_with("site_id"), ~ as.numeric(as.character(.)))) %>% 
+      mutate(site_id = row_number())
     edges_tbl <- lookup_res$edge_metadata %>%
       mutate(across(starts_with("site_id") | starts_with("year"), 
                     ~ as.numeric(as.character(.))))

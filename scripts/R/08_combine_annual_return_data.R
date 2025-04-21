@@ -79,8 +79,10 @@ CONFIG <- list(
     "shellfish_water_only_populate_for_storm_overflow_with_a_shellfish_water_edm_requirement" = "shellfish_water", # Variant 1
     "bathing_water_only_populate_for_storm_overflow_with_a_bathing_water_edm_requirement" = "bathing_water", # Variant 1
     "initial_edm_commission_date" = "edm_commission_date",
-    "total_duration_hrs_all_spills_prior_to_processing_through_12_24h_count_method" = "total_duration_all_spills_hrs", # Variant 1 (Numeric hours)
-    "counted_spills_using_12_24h_count_method" = "counted_spills",
+    "total_duration_hrs_all_spills_prior_to_processing_through_12_24h_count_method" = "spill_hrs_ea", # Variant 1 (Numeric hours)
+    "total_duration_hours_of_all_spills_prior_to_processing_through_12_24_hour_counting_method" = "spill_hrs_ea",
+    "counted_spills_using_12_24hr_counting_method" = "spill_count_ea",
+    "counted_spills_using_12_24h_count_method" = "spill_count_ea",
     "edm_operation_percent_of_reporting_period_edm_operational" = "edm_operation_percent",
     "edm_operation_reporting_percent_primary_reason_90_percent" = "edm_operation_reason",
     "edm_operation_action_taken_planned_status_timeframe" = "edm_operation_action",
@@ -99,7 +101,7 @@ CONFIG <- list(
     "shellfish_water_s_only_populate_for_storm_overflow_with_a_shellfish_water_edm_requirement" = "shellfish_water", # Variant 2
     "bathing_water_s_only_populate_for_storm_overflow_with_a_bathing_water_edm_requirement" = "bathing_water", # Variant 2
     "treatment_method_on_permit_over_above_storm_tank_settlement_screening" = "treatment_type", # Variant 2
-    "total_duration_hh_mm_ss_all_spills_prior_to_processing_through_12_24h_count_method" = "total_duration_all_spills_hrs", # Variant 2 (HH:MM:SS)
+    "total_duration_hh_mm_ss_all_spills_prior_to_processing_through_12_24h_count_method" = "spill_hrs_ea", # Variant 2 (HH:MM:SS)
     "data_start_calendar_year" = "year_data_start",
     "high_spill_frequency_operational_review_single_year_reason" = "high_spill_operational_review_single_year_reason", # Variant 2
     "high_spill_frequency_operational_review_long_term_average_reason" = "high_spill_operational_review_long_term_average_reason",
@@ -170,7 +172,7 @@ clean_data <- function(df) {
     filter(!is.na(water_company)) %>%
     # Convert hours to numeric type
     mutate(across(
-      any_of("total_duration_all_spills_hrs"),
+      any_of("spill_hrs_ea"),
       ~ {
         if (inherits(.x, "POSIXct")) {
           as.numeric(as_hms(.x)) / 3600
