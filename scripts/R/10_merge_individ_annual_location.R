@@ -19,13 +19,13 @@ initialise_environment <- function() {
     install.packages("renv")
     renv::init()
   }
-  
+
   # Define required packages
   required_packages <- c(
     "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue",
     "fs", "conflicted", "reclin2", "data.table", "assertthat"
   )
-  
+
   # Install and load packages
   invisible(sapply(required_packages, function(pkg) {
     if (!requireNamespace(pkg, quietly = TRUE)) {
@@ -43,7 +43,7 @@ setup_logging <- function() {
   log_dir <- here::here("output", "log")
   fs::dir_create(log_dir, recurse = TRUE)
   log_path <- file.path(log_dir, "10_merge_individ_annual_location.log")
-  
+
   logger::log_appender(logger::appender_tee(log_path))
   logger::log_layout(logger::layout_glue_colors)
   logger::log_threshold(logger::INFO)
@@ -63,7 +63,8 @@ CONFIG <- list(
     "data", "processed", "combined_edm_data.parquet"
   ),
   data_path_lookup = here::here(
-    "data", "processed", "annual_return_lookup.parquet"),
+    "data", "processed", "annual_return_lookup.parquet"
+  ),
   id_cols = c(
     "site_name_ea", "site_name_wa_sc",
     "permit_reference_ea", "permit_reference_wa_sc",
@@ -78,13 +79,13 @@ CONFIG <- list(
   ),
   output_dir = here::here("data", "processed", "matched_events_annual_data"),
   keep_cols = c(
-    "site_id",
+    "site_id", #"site_id_2021", "site_id_2022", "site_id_2024", "site_id_2024",  
     "match_method", "match_quality", "match_type", "match_key", "key_length", "tie",
     "water_company", "year",
     "site_name_ea", "site_name_wa_sc",
     "permit_reference_ea", "permit_reference_wa_sc",
     "activity_reference", "asset_type",
-    "ngr", "ngr_og", 
+    "ngr", "ngr_og",
     "unique_id",
     "start_time", "end_time",
     "spill_hrs_ea", "spill_count_ea",
@@ -103,11 +104,11 @@ CONFIG <- list(
 #' @return A list containing two data frames: spill_events and annual_returns.
 load_data <- function() {
   logger::log_info("Loading EDM datasets: individual spill events and annual returns.")
-  
+
   # Define file paths using configuration
   event_path <- fs::path(CONFIG$data_path_individual)
   annual_path <- fs::path(CONFIG$data_path_annual)
-  
+
   # Check if both files exist before attempting to load
   files <- c(event_path, annual_path)
   missing_files <- files[!file.exists(files)]
@@ -118,7 +119,7 @@ load_data <- function() {
     logger::log_error(error_msg)
     stop(error_msg)
   }
-  
+
   # Load the data and return
   tryCatch(
     {
@@ -134,7 +135,7 @@ load_data <- function() {
       stop(error_msg)
     }
   )
-  
+
   return(list(
     spill_events = spill_event_df,
     annual_returns = annual_return_df
@@ -152,7 +153,7 @@ generate_key_combinations <- function(shared_cols) {
   if (length(shared_cols) == 0) {
     return(list())
   }
-  
+
   # Create combinations for each size from length(cols) down to 1
   seq_along(shared_cols) %>%
     rev() %>%
@@ -172,22 +173,22 @@ find_matchable_keys <- function(event_df, annual_df, key) {
   if (!all(key %in% names(event_df)) || !all(key %in% names(annual_df))) {
     stop("Key columns must exist in both data frames: ", paste(key, collapse = ", "))
   }
-  
+
   if (nrow(event_df) == 0 || nrow(annual_df) == 0 || length(key) == 0) {
     return(event_df %>% slice(0) %>% select(all_of(key)))
   }
-  
+
   # Count occurrences of key values in both dataframes
   event_counts <- event_df %>%
     count(across(all_of(key)), name = "n_event", .drop = FALSE)
   annual_counts <- annual_df %>%
     count(across(all_of(key)), name = "n_annual", .drop = FALSE)
-  
+
   # Identify keys that are unique in the annual (reference) data
   annual_unique_keys <- annual_counts %>%
     filter(n_annual == 1) %>%
     select(all_of(key))
-  
+
   # Find the final set of keys to use for matching in this iteration.
   matchable_keys <- inner_join(
     event_counts %>% select(all_of(key)),
@@ -195,7 +196,7 @@ find_matchable_keys <- function(event_df, annual_df, key) {
     by = key,
     na_matches = "never"
   )
-  
+
   return(matchable_keys)
 }
 
@@ -216,7 +217,7 @@ extract_join_tag <- function(
   # Extract the matching rows
   event_sub <- dplyr::semi_join(event_df, matchable_keys, by = key, na_matches = "never")
   annual_sub <- dplyr::semi_join(annual_df, matchable_keys, by = key, na_matches = "never")
-  
+
   # Join and tag
   matched_sub <- dplyr::inner_join(
     event_sub, annual_sub,
@@ -232,14 +233,14 @@ extract_join_tag <- function(
       key_length = length(key),
       .before = 1
     )
-  
+
   # Identify overlapping base names from suffixed columns
   overlap_bases <- names(matched_sub)[grepl(paste0(event_suffix, "$"), names(matched_sub))] %>%
     sub(paste0(event_suffix, "$"), "", .)
-  
+
   # Coalesce each pair, preferring annual values
   for (base in overlap_bases) {
-    event_col  <- paste0(base, event_suffix)
+    event_col <- paste0(base, event_suffix)
     annual_col <- paste0(base, annual_suffix)
     if (annual_col %in% names(matched_sub) && event_col %in% names(matched_sub)) {
       matched_sub[[base]] <- dplyr::coalesce(
@@ -248,14 +249,14 @@ extract_join_tag <- function(
       )
     }
   }
-  
+
   # Drop the original suffixed columns
   matched_sub <- matched_sub %>%
     dplyr::select(
       -dplyr::ends_with(event_suffix),
       -dplyr::ends_with(annual_suffix)
     )
-  
+
   return(matched_sub)
 }
 
@@ -271,22 +272,22 @@ find_matchable_keys <- function(event_df, annual_df, key) {
   if (!all(key %in% names(event_df)) || !all(key %in% names(annual_df))) {
     stop("Key columns must exist in both data frames: ", paste(key, collapse = ", "))
   }
-  
+
   if (nrow(event_df) == 0 || nrow(annual_df) == 0 || length(key) == 0) {
     return(event_df %>% slice(0) %>% select(all_of(key)))
   }
-  
+
   # Count occurrences of key values in both dataframes
   event_counts <- event_df %>%
     count(across(all_of(key)), name = "n_event", .drop = FALSE)
   annual_counts <- annual_df %>%
     count(across(all_of(key)), name = "n_annual", .drop = FALSE)
-  
+
   # Identify keys that are unique in the annual (reference) data
   annual_unique_keys <- annual_counts %>%
     filter(n_annual == 1) %>%
     select(all_of(key))
-  
+
   # Find the final set of keys to use for matching in this iteration.
   matchable_keys <- inner_join(
     event_counts %>% select(all_of(key)),
@@ -294,7 +295,7 @@ find_matchable_keys <- function(event_df, annual_df, key) {
     by = key,
     na_matches = "never"
   )
-  
+
   return(matchable_keys)
 }
 
@@ -315,24 +316,24 @@ run_windfall_match <- function(
     annual_suffix = "_annual") {
   shared_cols <- intersect(names(event_df), names(annual_df))
   key_list <- generate_key_combinations(shared_cols)
-  
+
   # Initialise state variables
   remaining_events <- event_df
   remaining_annual <- annual_df
   all_matched_data <- tibble()
-  
+
   # Loop through potential keys, largest combinations first
   for (key in key_list) {
     # Stop if either dataset has no remaining rows
     if (nrow(remaining_events) == 0 || nrow(remaining_annual) == 0) {
       break
     }
-    
+
     # Keys unique in the remaining annual data and present in remaining event data
     matchable_keys <- find_matchable_keys(
       remaining_events, remaining_annual, key
     )
-    
+
     # If suitable keys are found for this iteration...
     if (nrow(matchable_keys) > 0) {
       # Extract, join, and tag the subset corresponding to these keys
@@ -341,10 +342,10 @@ run_windfall_match <- function(
         matchable_keys, key,
         event_suffix, annual_suffix
       )
-      
+
       # Accumulate the matches
       all_matched_data <- bind_rows(all_matched_data, matched_sub)
-      
+
       # Remove the matched rows from the pools for the next iteration
       remaining_events <- anti_join(
         remaining_events, matchable_keys,
@@ -356,7 +357,7 @@ run_windfall_match <- function(
       )
     }
   }
-  
+
   # Return all components
   list(
     matched_data      = all_matched_data,
@@ -388,18 +389,18 @@ add_zero_spill_stats <- function(matched_data, unmatched_annual_data) {
       key_length = 0,
       .before = 1
     )
-  
+
   # Filter the *unmatched* annual data for non-zero spill records
   annual_data_nonzero <- unmatched_annual_data %>%
     filter(spill_hrs_ea != 0 | spill_count_ea != 0)
-  
+
   # Append the zero-spill records (if any) to the main matched dataset
   if (nrow(annual_data_zero) > 0) {
     matched_data_with_zeros <- bind_rows(matched_data, annual_data_zero)
   } else {
     matched_data_with_zeros <- matched_data
   }
-  
+
   # Return the combined data and the separated non-zero unmatched annual records
   list(
     matched_data_with_zeros = matched_data_with_zeros,
@@ -414,9 +415,9 @@ merge_events_with_annual_returns <- function(spill_event_df, annual_return_df) {
     year = CONFIG$years
   ) %>%
     arrange(year, water_company)
-  
+
   logger::log_info("Starting matching process for company-year combinations.")
-  
+
   # Iterate over each company-year subset
   match_results_list <- pmap(
     list(
@@ -430,7 +431,7 @@ merge_events_with_annual_returns <- function(spill_event_df, annual_return_df) {
       logger::log_debug(
         "Processing: Year {current_year}, Company {current_company}"
       )
-      
+
       # Filter data for current company and year
       event_df_sub <- spill_event_df %>%
         filter(water_company == current_company, year == current_year) %>%
@@ -438,7 +439,7 @@ merge_events_with_annual_returns <- function(spill_event_df, annual_return_df) {
       annual_return_df_sub <- annual_return_df %>%
         filter(water_company == current_company, year == current_year) %>%
         select(where(~ any(!is.na(.))), any_of(c("spill_hrs_ea", "spill_count_ea")))
-      
+
       # Perform the windfall matching on the subsets
       windfall_res <- run_windfall_match(
         event_df = event_df_sub,
@@ -446,13 +447,13 @@ merge_events_with_annual_returns <- function(spill_event_df, annual_return_df) {
         event_suffix = "_event",
         annual_suffix = "_annual"
       )
-      
+
       # Add unmatched zero-spill annual records and separate non-zero unmatched
       final_group_results <- add_zero_spill_stats(
         matched_data = windfall_res$matched_data,
         unmatched_annual_data = windfall_res$annual_unmatched
       )
-      
+
       # Return results
       list(
         # Matched event data
@@ -464,9 +465,9 @@ merge_events_with_annual_returns <- function(spill_event_df, annual_return_df) {
       )
     }
   )
-  
+
   logger::log_info("Finished matching process.")
-  
+
   # Combine all matched dataframes into a single dataframe
   return(list(
     matched_combined = rbindlist(
@@ -510,11 +511,11 @@ run_max_match <- function(
   df_left <- events_unmatched %>% select(where(~ any(!is.na(.))))
   df_right <- annual_unmatched_nonzero %>% select(where(~ any(!is.na(.))))
   shared_cols <- intersect(names(df_left), names(df_right))
-  
+
   # tag rows for later unmatched detection
   df_left <- df_left %>% tibble::rowid_to_column("event_row_id")
   df_right <- df_right %>% tibble::rowid_to_column("annual_row_id")
-  
+
   # inner join on all shared columns (explicit many-to-many)
   joined_all <- inner_join(
     df_left, df_right,
@@ -529,7 +530,7 @@ run_max_match <- function(
       match_key    = paste(shared_cols, collapse = "|"),
       key_length   = length(shared_cols)
     )
-  
+
   # compute tie indicator robustly: handle all-NA cases
   tie_info <- joined_all %>%
     group_by(event_row_id) %>%
@@ -544,7 +545,7 @@ run_max_match <- function(
       .groups = "drop"
     ) %>%
     select(event_row_id, tie)
-  
+
   # select the single best record per event: highest spill_hrs_ea, then highest spill_count_ea
   best_matches <- joined_all %>%
     group_by(event_row_id) %>%
@@ -552,12 +553,12 @@ run_max_match <- function(
     slice(1) %>%
     ungroup() %>%
     left_join(tie_info, by = "event_row_id")
-  
+
   # detect unmatched events
   events_remaining <- df_left %>%
     filter(!event_row_id %in% best_matches$event_row_id) %>%
     select(-event_row_id)
-  
+
   # detect remaining annuals, conditional on keep_joined_losses
   if (keep_joined_losses) {
     # keep all non-selected
@@ -569,10 +570,10 @@ run_max_match <- function(
       filter(!annual_row_id %in% joined_all$annual_row_id)
   }
   annual_remaining <- annual_remaining %>% select(-annual_row_id)
-  
+
   # drop row IDs from matches
   matches <- best_matches %>% select(-event_row_id, -annual_row_id)
-  
+
   list(
     matches          = matches,
     events_unmatched = events_remaining,
@@ -596,20 +597,20 @@ run_many_to_many_max_match <- function(
     water_company = unique(events_unmatched$water_company),
     year          = unique(events_unmatched$year)
   ) %>% arrange(year, water_company)
-  
+
   results <- pmap(
     list(company_years$year, company_years$water_company),
     ~ {
       current_year <- ..1
       current_company <- ..2
-      
+
       ev_sub <- events_unmatched %>%
         filter(water_company == current_company, year == current_year) %>%
         select(where(~ any(!is.na(.))))
       an_sub <- annual_unmatched_nonzero %>%
         filter(water_company == current_company, year == current_year) %>%
         select(where(~ any(!is.na(.))), any_of(c("spill_hrs_ea", "spill_count_ea")))
-      
+
       if (nrow(ev_sub) == 0 || nrow(an_sub) == 0) {
         return(list(
           max_matches = ev_sub[0, ],
@@ -617,7 +618,7 @@ run_many_to_many_max_match <- function(
           annual_unmatched = an_sub
         ))
       }
-      
+
       mm <- run_max_match(
         events_unmatched         = ev_sub,
         annual_unmatched_nonzero = an_sub,
@@ -631,7 +632,7 @@ run_many_to_many_max_match <- function(
       )
     }
   )
-  
+
   list(
     max_matches_all  = rbindlist(map(results, "max_matches"), fill = TRUE),
     events_unmatched = rbindlist(map(results, "events_unmatched"), fill = TRUE),
@@ -655,7 +656,7 @@ prepare_fuzzy_data <- function(events_df, annual_df, block_var, id_cols) {
   if (!all(c("water_company", "year") %in% names(annual_df))) {
     stop("annual_df must contain 'water_company' and 'year'")
   }
-  
+
   dfs <- list(events = events_df, annual = annual_df)
   prep <- lapply(dfs, function(df) {
     # assign group_id and blocking key
@@ -664,18 +665,18 @@ prepare_fuzzy_data <- function(events_df, annual_df, block_var, id_cols) {
       mutate(group_id = cur_group_id()) %>%
       ungroup() %>%
       mutate(!!block_var := paste(water_company, year, sep = "_"), .before = 1)
-    
+
     # minimal (deduped) version
     minimal <- full %>%
       select(any_of(id_cols), group_id, !!block_var) %>%
       distinct()
-    
+
     list(
       full = as.data.table(full),
       minimal = as.data.table(minimal)
     )
   })
-  
+
   # assemble into named list
   list(
     events        = prep$events$minimal,
@@ -830,7 +831,7 @@ run_fuzzy_matching <- function(
   if (!all(required %in% names(final_res))) {
     stop("final_res missing: ", paste(setdiff(required, names(final_res)), collapse = ", "))
   }
-  
+
   # prepare blocking + group IDs
   id_cols <- c("water_company", "year", CONFIG$id_cols)
   prepped <- prepare_fuzzy_data(
@@ -839,7 +840,7 @@ run_fuzzy_matching <- function(
     block_var = block_var,
     id_cols   = id_cols
   )
-  
+
   # perform fuzzy matching by block
   blocks <- unique(prepped$events[[block_var]])
   fuzzy_merges <- purrr::map(blocks, function(b) {
@@ -849,41 +850,41 @@ run_fuzzy_matching <- function(
     if (nrow(ev) == 0 || nrow(an) == 0) {
       return(NULL)
     }
-    
+
     # identify comparators available in both subsets
     shared <- intersect(names(ev), names(an))
     vars_block <- setdiff(shared, c(block_var, "source", "group_id", "water_company", "year"))
     if (length(vars_block) == 0) {
       return(NULL)
     }
-    
+
     # generate and score candidate pairs
     pairs <- create_candidate_pairs(list(events = ev, annual = an), block_var)
     if (nrow(pairs) == 0) {
       return(NULL)
     }
-    
+
     compare_candidate_pairs(pairs, vars_block)
     score_pairs_em(pairs, vars_block)
     select_matches(pairs, threshold, n, m, include_ties)
-    
+
     # link and return minimal join keys
     link_selected_pairs(pairs) %>%
       select(all_of(CONFIG$match_cols), group_id_event, group_id_annual)
   }) %>%
     purrr::compact() %>%
     bind_rows()
-  
+
   # reconstruct matched + unmatched sets
   matched_combined <- fuzzy_merges %>%
     left_join(prepped$annual_full, by = c("group_id_annual" = "group_id")) %>%
     left_join(prepped$events_full,
-              by = c("group_id_event" = "group_id"),
-              suffix = c("", "_dup")
+      by = c("group_id_event" = "group_id"),
+      suffix = c("", "_dup")
     ) %>%
     select(-ends_with("_dup")) %>%
     bind_rows(final_res$matched_combined, .)
-  
+
   events_unmatched <- anti_join(
     prepped$events_full, fuzzy_merges,
     by = c("group_id" = "group_id_event")
@@ -892,7 +893,7 @@ run_fuzzy_matching <- function(
     prepped$annual_full, fuzzy_merges,
     by = c("group_id" = "group_id_annual")
   )
-  
+
   list(
     matched_combined = matched_combined,
     events_unmatched = events_unmatched,
@@ -919,22 +920,23 @@ finalise_merged_data <- function(fuzzy_results) {
   # Load lookup and annual returns
   lookup <- import(CONFIG$data_path_lookup)
   annual_returns <- import(CONFIG$data_path_annual)
-  
+
   # Build lookup with per-year outlet discharge NGR
   years_lookup <- 2021:2024
   lookup <- purrr::reduce(
-    years_lookup, .init = lookup,
+    years_lookup,
+    .init = lookup,
     function(acc, yr) {
       year_id <- paste0("site_id_", yr)
       ngr_col <- paste0("outlet_discharge_ngr_", yr)
       coords <- annual_returns %>%
         filter(year == yr) %>%
-        select({{year_id}}, outlet_discharge_ngr) %>%
-        rename({{ngr_col}} := outlet_discharge_ngr)
+        select({{ year_id }}, outlet_discharge_ngr) %>%
+        rename({{ ngr_col }} := outlet_discharge_ngr)
       left_join(acc, coords, by = year_id, na_matches = "never")
     }
   )
-  
+
   # Enrich matched_combined for each year, then combine
   enriched <- purrr::map(
     CONFIG$years,
@@ -946,23 +948,27 @@ finalise_merged_data <- function(fuzzy_results) {
         select(-any_of(other_ids)) %>%
         left_join(lookup, by = id_col)
     }
-  ) %>% 
-    rbindlist(., use.names = TRUE, fill = TRUE) %>% 
-    rename(ngr_og = outlet_discharge_ngr) %>% 
+  ) %>%
+    rbindlist(., use.names = TRUE, fill = TRUE) %>%
+    rename(ngr_og = outlet_discharge_ngr) %>%
     mutate(
       ngr = coalesce(
         outlet_discharge_ngr_2024,
         outlet_discharge_ngr_2023,
         outlet_discharge_ngr_2022,
-        outlet_discharge_ngr_2021)) 
-  
+        outlet_discharge_ngr_2021
+      )
+    )
+
   fuzzy_results$matched_combined <- enriched
-  
+  fuzzy_results$annual_unmatched_nonzero <- fuzzy_results$annual_unmatched_nonzero %>% 
+    rename(ngr_og = outlet_discharge_ngr)
+
   # Trim all list elements to desired columns
   purrr::map(
     fuzzy_results,
     ~ dplyr::select(.x, any_of(CONFIG$keep_cols))
-  ) %>% 
+  ) %>%
     return()
 }
 
@@ -975,27 +981,27 @@ finalise_merged_data <- function(fuzzy_results) {
 #' @return NULL
 export_results <- function(final_results) {
   output_dir <- CONFIG$output_dir
-  
+
   if (!dir.exists(output_dir)) {
     fs::dir_create(output_dir, recurse = TRUE)
     logger::log_info("Created output directory: {output_dir}")
   }
-  
+
   # Define file paths
   matched_path <- file.path(output_dir, "matched_events_annual_data.parquet")
   events_unmatched_path <- file.path(output_dir, "events_unmatched.parquet")
   annual_unmatched_path <- file.path(output_dir, "annual_unmatched.parquet")
-  
+
   # Save the data files
   logger::log_info("Saving matched data to {matched_path}")
   arrow::write_parquet(final_results$matched_combined, matched_path)
-  
+
   logger::log_info("Saving unmatched events to {events_unmatched_path}")
   arrow::write_parquet(final_results$events_unmatched, events_unmatched_path)
-  
+
   logger::log_info("Saving unmatched annual data to {annual_unmatched_path}")
   arrow::write_parquet(final_results$annual_unmatched_nonzero, annual_unmatched_path)
-  
+
   logger::log_info("Export completed successfully")
 }
 
@@ -1003,23 +1009,22 @@ export_results <- function(final_results) {
 ############################################################
 
 #' Main execution function
-#' @return A list with all merged results and statistics
 main <- function() {
   # Initialize environment and set up logging
   initialise_environment()
   setup_logging()
-  
+
   logger::log_info("Starting merge process for individual and annual location data")
-  
+
   # Load data
   data_list <- load_data()
   spill_events <- data_list$spill_events
   annual_returns <- data_list$annual_returns
-  
+
   # Run initial windfall matching (prioritized exact matching with uniqueness requirements)
   logger::log_info("Running windfall matching (1:1 exact matches)")
   windfall_res <- merge_events_with_annual_returns(spill_events, annual_returns)
-  
+
   # Run many-to-many max matching for remaining observations
   logger::log_info("Running many-to-many max matching")
   max_match_res <- run_many_to_many_max_match(
@@ -1040,11 +1045,11 @@ main <- function() {
     n = 1, # One event can match at most one annual record
     m = 1 # One annual record can match at most one event
   )
-  
+
   # Clean data
   logger::log_info("Finalising merged data")
   final_results <- finalise_merged_data(fuzzy_results)
-  
+
   # Export data
   logger::log_info("Exporting results to {CONFIG$output_dir}")
   export_results(final_results)

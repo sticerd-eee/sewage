@@ -71,7 +71,8 @@ CONFIG <- list(
 initialise_environment <- function() {
   required_packages <- c(
     "rio", "tidyverse", "purrr", "here", "logger", "glue", "fs",
-    "lubridate", "PostcodesioR", "furrr", "future", "memoise", "data.table"
+    "lubridate", "PostcodesioR", "furrr", "future", "memoise", 
+    "data.table", "arrow"
   )
 
   # Package management with renv
@@ -331,26 +332,19 @@ get_postcode_data <- function(df, refresh = FALSE) {
 # Export Functions
 ############################################################
 
-#' Export processed data to RDS and CSV formats
+#' Export processed data to a single Parquet file
 #' @param df Data frame to export
 #' @return NULL
 export_data <- function(df) {
-  # Define output paths
-  rds_path <- file.path(CONFIG$output_dir, "house_price.rds")
-  csv_path <- file.path(CONFIG$output_dir, "house_price.csv")
-
-  # Export data
+  parquet_path <- file.path(CONFIG$output_dir, "house_price.parquet")
+  
   tryCatch(
     {
-      saveRDS(df, rds_path)
-      write_csv(df, csv_path)
-
-      logger::log_info("Data exported successfully to:")
-      logger::log_info("  - RDS: {rds_path}")
-      logger::log_info("  - CSV: {csv_path}")
+      arrow::write_parquet(df, parquet_path)
+      logger::log_info("Data exported successfully to Parquet file at {parquet_path}")
     },
     error = function(e) {
-      err_msg <- glue::glue("Failed to export data: {e$message}")
+      err_msg <- glue::glue("Failed to export data to Parquet: {e$message}")
       logger::log_error(err_msg)
       stop(err_msg)
     }
@@ -393,5 +387,5 @@ main <- function(refresh_postcodes = TRUE) {
 
 # Execute main function if script is run directly
 if (sys.nframe() == 0) {
-  main(refresh_postcodes = TRUE)
+  main(refresh_postcodes = FALSE)
 }

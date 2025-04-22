@@ -885,6 +885,41 @@ build_lookup_from_matches <- function(match_dfs) {
   )
 }
 
+# Helper to append singleton site_ids without matches
+#' Append orphan sites (no matches) to the lookup table
+#' @param lookup_tbl Lookup table tibble
+#' @param data_list Named list of yearly dataframes
+#' @return Extended lookup table including singletons
+append_singleton_sites <- function(lookup_tbl, data_list) {
+  years    <- CONFIG$years
+  site_cols<- paste0("site_id_", years)
+  
+  orphan_rows <- purrr::map_dfr(years, function(yr) {
+    col     <- paste0("site_id_", yr)
+    all_ids <- data_list[[paste0("df", yr)]][[col]]
+    missing <- setdiff(all_ids, lookup_tbl[[col]])
+    if (length(missing) == 0) return(tibble())
+    tibble::tibble(!!!setNames(
+      purrr::map(years, function(y) if (y == yr) missing else rep(NA_integer_, length(missing))),
+      site_cols
+    ))
+  })
+  
+  if (nrow(orphan_rows) > 0) {
+    next_id <- max(lookup_tbl$site_id) + seq_len(nrow(orphan_rows))
+    orphan_rows <- orphan_rows %>% mutate(site_id = next_id)
+    lookup_tbl <- bind_rows(lookup_tbl, orphan_rows)
+  }
+  
+  lookup_tbl %>% 
+    arrange(site_id_2021) %>% 
+    return()
+}
+
+
+# Export 
+############################################################
+
 #' Export lookup data to Excel and Parquet formats
 #' @param lookup_tbl The lookup table
 #' @param edges_tbl The edge metadata table
@@ -1002,8 +1037,11 @@ main <- function(compute_rf_matching = FALSE) {
     edges_tbl <- lookup_res$edge_metadata %>%
       mutate(across(starts_with("site_id") | starts_with("year"), 
                     ~ as.numeric(as.character(.))))
+    
+    # 6. Append singleton sites with no matches
+    lookup_tbl <- append_singleton_sites(lookup_tbl, data_list)
 
-    # 6. Save outputs
+    # 7. Save outputs
     export_data(lookup_tbl, edges_tbl)
 
     logger::log_info("Lookup table saved (rows: {nrow(lookup_tbl)})")

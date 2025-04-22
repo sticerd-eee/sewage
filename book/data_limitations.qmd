@@ -66,6 +66,12 @@ events_unmatched <- import(
 annual_unmatched <- import(
   paste(output_dir, "annual_unmatched.parquet", sep = "/"), trust = TRUE
 )
+agg_yr <- import(
+  here::here("data", "processed", "spill_aggregated", "agg_spill_yr.parquet"),
+)
+agg_mo <- import(
+  here::here("data", "processed", "spill_aggregated", "agg_spill_mo.parquet"),
+)
 ```
 
 
@@ -78,7 +84,7 @@ The merge between the individual and annual data is important for two reasons:
 1. **Enriching Spill Records**: The individual data mainly captures event timings. Merging incorporates valuable details from the annual data, such as site grid coordinates, into these individual records.
 2. **Assessing Data Quality**: The EA's Annual EDM data undergoes an audit to correct errors. By aggregating individual spills annually and comparing these totals against the audited annual data, we can evaluate the accuracy of the raw individual spill reports.
 
-A key challenge arises because **individual spill data prior to 2023 lacks unique identifiers for spill sites**. Consequently, matching records between the datasets must rely on other variables, such as site names. This approach can lead to varying degrees of merge success.
+**Individual spill data prior to 2023 lacks unique identifiers for spill sites**. Consequently, matching records between the datasets must rely on other variables, such as site names, which can lead to varying degrees of merge success.
 
 - **Perfect match**: An individual spill record is matched to a single, unique discharge point in the annual data (a 1-to-1 match based on identifying information like site name).
 - **Partial match**: An individual spill record is matched to multiple discharge points in the annual data (a 1-to-many match). Aggregated statistics for these spills therefore relate to multiple discharge points. See @sec-02-01-02-01-location-data-integration for details.
@@ -89,7 +95,7 @@ A key challenge arises because **individual spill data prior to 2023 lacks uniqu
 # Prepare merge summary
 merged_data <- bind_rows( 
   matched_combined %>% 
-    select(water_company, year, site_name_ea, outlet_discharge_ngr,
+    select(water_company, year, site_name_ea, ngr,
            contains("site_id"), contains("match")) %>% 
     distinct(),
   events_unmatched %>% 
@@ -124,7 +130,7 @@ merge_summary <- merged_data %>%
   group_by(water_company, year, group_id, merge_quality) %>%
   summarise(
       n_records = n(),
-      n_outlet_ngr = n_distinct(outlet_discharge_ngr),
+      n_outlet_ngr = n_distinct(ngr),
       n_site_name_ea = n_distinct(site_name_ea),
       .groups = "drop"
     ) %>% 
@@ -494,7 +500,7 @@ individ_data_welsh22 %>%
 annual_data_welsh22 <- annual_unmatched %>% 
   filter(str_detect(site_name_wa_sc, "XX Cheyney Road CSO, Chester")) %>% 
   select(water_company, year,
-         site_name_ea, site_name_wa_sc, outlet_discharge_ngr) 
+         site_name_ea, site_name_wa_sc, ngr_og) 
 
 reactable(annual_data_welsh22,
   columns = list(
@@ -510,7 +516,7 @@ reactable(annual_data_welsh22,
     site_name_wa_sc = colDef(
       name = "Site Name WaSC"
     ),
-    outlet_discharge_ngr = colDef(
+    ngr_og = colDef(
       name = "Discharge Grid Location"
     )
   ),
@@ -531,23 +537,16 @@ reactable(annual_data_welsh22,
 
 We aggregate individual sewage overflow spills into total spill counts and durations based on data affecting the same catchment area. To validate our aggregation, we can compare our results with the annual aggregated data published by the Environment Agency (EA). The comparison yields a correlations over 90% for both spill counts and durations between our manual aggregation and the EA's figures. The data that seems most problematic are Wessex Water's 2022 records and United Utilities' data for all years.
 
-```{r, correlation-plots-dataload}
-corr_spill_dat <- import(here("data", "processed", 
-                              "individual_edm_location.RDATA"), trust = TRUE)
-corr_spill_dat <- corr_spill_dat$yearly
-
-matched_combined
-```
-
 ::: panel-tabset
 
 #### Spill Count
 
 ```{r, correlation-plot1}
+corr_spill_dat <- agg_yr
 
 correlation_spill <- cor(
   corr_spill_dat$spill_count_yr, 
-  corr_spill_dat$spill_count_yr_ea, 
+  corr_spill_dat$spill_count_ea, 
   use = "complete.obs")
 
 # Convert factors first
@@ -557,12 +556,12 @@ corr_spill_dat$year <- as.factor(corr_spill_dat$year)
 # Create the base ggplot
 p_spill <- ggplot(
   corr_spill_dat, 
-  aes(x = spill_count_yr, y = spill_count_yr_ea,
+  aes(x = spill_count_yr, y = spill_count_ea,
       color = water_company, shape = year,
       text = paste("Water Company:", water_company,
                    "<br>Year:", year,
                    "<br>Spill Count Aggregated:", spill_count_yr,
-                   "<br>Spill Count EA:", spill_count_yr_ea))) +
+                   "<br>Spill Count EA:", spill_count_ea))) +
   geom_point(alpha = 0.5, size = 1) +
   geom_abline(slope = 1, color = "black", linewidth = 0.1) +
   labs(title = "Spill Count Correlation",
@@ -584,7 +583,7 @@ interactive_plot_spill <- ggplotly(
   p_spill, 
   tooltip = "text",
   dynamicTicks = TRUE) %>%
-  layout(
+  plotly::layout(
     showlegend = FALSE,
     title = list(
       text = paste0("Spill Count Correlation<br>",
@@ -604,12 +603,12 @@ interactive_plot_spill
 
 correlation_dur <- cor(
   corr_spill_dat$spill_hrs_yr, 
-  corr_spill_dat$spill_hrs_yr_ea, 
+  corr_spill_dat$spill_hrs_ea, 
   use = "complete.obs")
 
 # correlation_dur_no_neg <- cor(
 #   corr_spill_dat$spill_hrs_yr[corr_spill_dat$spill_hrs_yr > 0], 
-#   corr_spill_dat$spill_hrs_yr_ea[corr_spill_dat$spill_hrs_yr > 0], 
+#   corr_spill_dat$spill_hrs_ea[corr_spill_dat$spill_hrs_yr > 0], 
 #   use = "complete.obs")
 
 # Convert factors first
@@ -619,12 +618,12 @@ corr_spill_dat$year <- as.factor(corr_spill_dat$year)
 # Create the base ggplot
 p_dur <- ggplot(
   corr_spill_dat, 
-  aes(x = spill_hrs_yr, y = spill_hrs_yr_ea, 
+  aes(x = spill_hrs_yr, y = spill_hrs_ea, 
       color = water_company, shape = year,
       text = paste("Water Company:", water_company,
       "<br>Year:", year,
       "<br>Spill Count Aggregated:", spill_hrs_yr,
-      "<br>Spill Count EA:", spill_hrs_yr_ea))) +
+      "<br>Spill Count EA:", spill_hrs_ea))) +
   geom_point(alpha = 0.5, size = 1) +
   geom_abline(slope = 1, color = "black", linewidth = 0.1) +
   scale_x_continuous(limits = c(0, NA)) +
@@ -648,7 +647,7 @@ interactive_plot_dur <- ggplotly(
   p_dur, 
   tooltip = "text",
   dynamicTicks = TRUE) %>%
-  layout(
+  plotly::layout(
     showlegend = FALSE,
     title = list(
       text = paste0(
@@ -675,12 +674,15 @@ interactive_plot_dur
 
 
 ```{r, extreme-data}
+individ_data = import(here::here(
+    "data", "processed", "combined_edm_data.parquet"))
+
 corr_spill_dat %>% 
   filter(water_company=="United Utilities", year==2022,
-         site_name_ea == "bury wastewater treatment works") %>% 
+         tolower(site_name_ea) == "bury wastewater treatment works") %>% 
   select(water_company, year, site_name_ea, 
-         spill_hrs_yr, spill_hrs_yr_ea,
-         spill_count_yr, spill_count_yr_ea) %>% 
+         spill_hrs_yr, spill_hrs_ea,
+         spill_count_yr, spill_count_ea) %>% 
   reactable(.,
   columns = list(
     water_company = colDef(
@@ -698,7 +700,7 @@ corr_spill_dat %>%
       format = colFormat(digits = 0)
     ),
     # Site Names group
-    spill_count_yr_ea = colDef(
+    spill_count_ea = colDef(
       name = "Spill Count EA",
       format = colFormat(separators = TRUE, digits = 0)
     ),
@@ -707,16 +709,16 @@ corr_spill_dat %>%
       format = colFormat(digits = 0)
     ),
     # Grid Locations group
-    spill_hrs_yr_ea = colDef(
+    spill_hrs_ea = colDef(
       name = "Spill Duration EA",
       format = colFormat(separators = TRUE, digits = 0)
     )
   ),
   columnGroups = list(
     colGroup(name = "Spill Count", columns = c("spill_count_yr",
-                                               "spill_count_yr_ea")),
+                                               "spill_count_ea")),
     colGroup(name = "Spill Duration", columns = c("spill_hrs_yr", 
-                                                  "spill_hrs_yr_ea"))
+                                                  "spill_hrs_ea"))
   ),
   defaultSorted = list(water_company = "asc", year = "asc"),
   filterable = FALSE,

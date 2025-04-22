@@ -44,7 +44,7 @@ initialise_environment <- function() {
 setup_logging <- function() {
   log_path <- here::here(
     "output", "log",
-    "10_clean_consented_discharges_database.log"
+    "11_clean_consented_discharges_database.log"
   )
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 

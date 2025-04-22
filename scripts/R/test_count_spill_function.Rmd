@@ -48,441 +48,537 @@ logger::log_appender(logger::appender_file(log_path))
 logger::log_layout(logger::layout_glue_colors)
 ```
 
-## Load Data
+## Aggregation
 
 ```{r}
-data <- import(here("data", "processed", "merged_edm_data.RData"), trust = TRUE)
-data_summary <- import(here("data", "processed", "merged_edm_data_with_summary.RData"), trust = TRUE)
+############################################################
+# Aggregate Spill Statistics
+# Project: Sewage
+# Date: 28/12/2024
+# Author: Jacopo Olivieri
+############################################################
 
-data_summary
-data
-```
+#' This script individual sewage overflow spills into total spill counts and
+#' durations based on data affecting the same catchment area.
 
+# Set Up Functions
+############################################################
 
-
-```{r}
-x=nrow(dat)
-#x=6
-spill_count <- 0
-block_start <- as.POSIXct(NA)
-block_end <- as.POSIXct(NA)
-dur12 <- hours(12)
-dur24 <- hours(24)
-
-for (i in seq_len(nrow(dat))) {
-  current_start <- dat$start_time[i]
-  current_end <- dat$end_time[i]
-  
-  # 12-hour block (first spill or >24h gap)
-  if (is.na(block_end) || 
-      difftime(current_start, block_end, units="hours") > 0) {
-    
-    # Initialise block start
-    block_start <- current_start
-    block_end <- current_start + hours(dur12)
-    
-    # Update spill count
-    diff_block_current = difftime(current_end, block_start, units="hours") %>% 
-      as.numeric()
-    spill_over_12h <- ceiling((diff_block_current-dur12)/dur24)
-    n_spills <- 1L + spill_over_12h
-    spill_count <- spill_count + n_spills
-    
-    # Update block 
-    block_start <- block_end + hours(dur24*(spill_over_12h))
-    block_end <- block_start + hours(dur24)
-    
-    # 24 hour block
-  } else if (difftime(current_end, block_start, units="hours") > 0) {
-    
-    # Update spill count 
-    diff_block_current = as.numeric(
-      difftime(current_end, block_start, units="hours"))
-    spill_over_24h <- ceiling(diff_block_current/dur24)
-    n_spills <- spill_over_24h
-    spill_count <- spill_count  + n_spills
-    
-    # Update block
-    block_start <- block_end + hours(dur24*(spill_over_24h-1))
-    block_end <- block_start + hours(dur24)
-    }
+# Initialise packages with version control with renv
+#' Initialize the R environment with required packages and settings
+#' @return NULL
+initialise_environment <- function() {
+  # Package management with renv
+  if (!requireNamespace("renv", quietly = TRUE)) {
+    install.packages("renv")
+    renv::init()
   }
-print(spill_count)
-```
 
+  # Define required packages
+  required_packages <- c(
+    "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue", "fs",
+    "data.table"
+  )
 
-```{r}
-spill_count <- 0
-block_start <- as.POSIXct(NA)
-block_end <- as.POSIXct(NA)
-dur12 <- hours(12)
-dur24 <- hours(24)
-
-for (i in seq_len(nrow(dat))) {
-  current_start <- dat$start_time[i]
-  current_end <- dat$end_time[i]
-  
-  # Calculate difference between spill start and current block end
-  if (!is.na(block_end)) {
-    time_to_block <- difftime(current_start, block_end, units="hours")
-  }
-  
-  # 12-hour block (first spill or >24h gap)
-  if (is.na(block_end) || time_to_block > 0) {
-    
-    # Initialise block start
-    block_start <- current_start
-    block_end <- current_start + dur12
-    
-    # Update spill count
-    diff_current = as.numeric(difftime(current_end, block_start, units="hours"))
-    spill_over_12h <- ceiling((diff_current-12)/24)
-    spill_count <- spill_count + 1L + spill_over_12h
-    
-    # Update block 
-    block_start <- block_end + (dur24* spill_over_12h)
-    block_end <- block_start + dur24
-    
-    # 24 hour block
-  } else if (difftime(current_end, block_start, units="hours") > 0) {
-    
-    # Update spill count 
-    diff_current <- as.numeric(difftime(current_end, block_start, units="hours"))
-    spill_over_24h <- ceiling(diff_current/24)
-    spill_count <- spill_count + spill_over_24h
-    
-    # Update block
-    block_start <- block_end + (dur24 * (spill_over_24h-1))
-    block_end <- block_start + dur24
+  # Install and load packages
+  invisible(sapply(required_packages, function(pkg) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      install.packages(pkg)
     }
+    library(pkg, character.only = TRUE)
+  }))
 }
 
-dt
-```
+#' Set up logging configuration
+#' @return NULL
+setup_logging <- function() {
+  log_path <- here::here(
+    "output", "log", "12_aggregate_spill_stats.log"
+  )
+  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
-```{r}
-# Vectorized function for counting spills using 12/24 method
-count_spills <- function(start_times, end_times) {
-  if (length(start_times) == 0) return(0)
-  
-  # Initialise variables
-  spill_count <- 0
-  block_start <- as.POSIXct(NA)
-  block_end <- as.POSIXct(NA)
-  dur12 <- hours(12)
-  dur24 <- hours(24)
-  
-  # Pre-sort inputs
-  ord <- order(start_times)
-  start_times <- start_times[ord]
-  end_times <- end_times[ord]
-  
-  # Process each spill sequentially
-  for (i in seq_len(length(start_times))) {
-    current_start <- start_times[i]
-    current_end <- end_times[i]
-    
-    # Calculate difference between spill start and current block end
-    if (!is.na(block_end)) {
-      gap <- difftime(current_start, block_end, units="hours")
-    }
-    
-    # 12-hour block (first spill or >24h gap)
-    if (is.na(block_end) || gap > 0) {
-      # Initialize block start
-      block_start <- current_start
-      block_end <- current_start + dur12
-      
-      # Update spill count
-      diff_current <- as.numeric(difftime(current_end, block_start, units="hours"))
-      spill_over_12h <- ceiling(max(0, (diff_current-12))/24)
-      spill_count <- spill_count + 1L + spill_over_12h
-      
-      # Update block
-      block_start <- block_end + (dur24 * spill_over_12h)
-      block_end <- block_start + dur24
-      
-    # 24 hour block
-    } else {
-      # Update spill count
-      diff_current <- as.numeric(difftime(current_end, block_start, units="hours"))
-      spill_over_24h <- ceiling(max(0, diff_current)/24)
-      spill_count <- spill_count + spill_over_24h
-      
-      # Update block
-      block_start <- block_end + (dur24 * (spill_over_24h-1))
-      block_end <- block_start + dur24
-    }
-  }
-  
-  return(spill_count)
+  logger::log_appender(logger::appender_file(log_path))
+  logger::log_layout(logger::layout_glue_colors)
+  logger::log_threshold(logger::DEBUG)
+  logger::log_info("Script started at {Sys.time()}")
 }
 
 
-```
+# Configuration
+############################################################
 
-
-
-
-
-
-
-
-
-```{r}
-dat <- dat %>%
-  group_by(water_company, year, outlet_discharge_ngr) %>%
-  arrange(start_time, .by_group = TRUE) %>% 
-  ungroup()
-dt = as.data.table(dat)
-setkey(dt, water_company, year, outlet_discharge_ngr)
-
-
-tic("data.table")
-dt_result <- dt[order(start_time),
-             .(total_spill_count = count_spills(start_time, end_time),
-               total_spill_hrs = sum(as.numeric(
-                 difftime(end_time, start_time, units = "hours")))),
-             by = .(water_company, year, outlet_discharge_ngr)]
-toc()
-
-tic("dplyr")
-dplyr_result <- dat %>%
-  group_by(water_company, year, outlet_discharge_ngr) %>%
-  arrange(start_time, .by_group = TRUE) %>%
-  summarise(
-    total_spill_count = count_spills(start_time, end_time),
-    total_spill_hrs = sum(as.numeric(
-              difftime(end_time, start_time, units = "hours"))),
-    .groups = 'drop')  
-toc()
-```
-
-```{r}
-benchmark_results3 <- microbenchmark(
-  data.table = {
-    dt_result <- dt[,
-                 .(total_spill_count = count_spills(start_time, end_time),
-                   total_spill_hrs = sum(as.numeric(
-                     difftime(end_time, start_time, units = "hours")))),
-                 by = .(water_company, year, outlet_discharge_ngr)]
-  },
-  dplyr = {
-    dplyr_result <- dat %>%
-      group_by(water_company, year, outlet_discharge_ngr) %>%
-      summarise(
-        total_spill_count = count_spills_fast(start_time, end_time),
-        total_spill_hrs = sum(as.numeric(
-                  difftime(end_time, start_time, units = "hours"))),
-        .groups = 'drop')
-  },
-  times = 10  # Number of times to run each expression
+CONFIG <- list(
+  merged_data_path = here::here(
+    "data", "processed", "matched_events_annual_data", 
+    "matched_events_annual_data.parquet"),
+  data_path_annual = here::here(
+    "data", "processed", "annual_return_edm.parquet"
+  ),
+  output_dir = here::here("data", "processed", "spill_aggregated"),
+  years = 2021:2023
 )
 
-# View results
-print(benchmark_results3)
+# Functions
+############################################################
 
-# For a nice visualization
-autoplot(benchmark_results3)  # requires ggplot2
-```
+#' Load merged individual sewage spill data
+#' @param file_name Name of the data file to load
+#' @return A list with two elements:
+#' \describe{
+#'   \item{spill_data}{A data frame with site_id, start_time, and end_time}
+#'   \item{metadata}{A data frame with all other variables excluding start_time and end_time}
+#' }
+load_data <- function() {
+  file_path <- CONFIG$merged_data_path
+  logger::log_info("Loading data: {file_path}")
+
+  if (!file.exists(file_path)) {
+    stop(glue::glue("File not found: {file_path}"))
+  }
+
+  tryCatch(
+    {
+      data <- rio::import(file_path, trust = TRUE)
+      list(
+        spill_data = data %>% 
+          select(site_id, year, water_company, start_time, end_time),
+        metadata = data %>% 
+          select(-start_time, -end_time, -unique_id) %>% 
+          distinct()
+      ) %>% 
+        return()
+    },
+    error = function(e) {
+      error_msg <- glue::glue("Failed to load data: {e$message}")
+      logger::log_error(error_msg)
+      stop(error_msg)
+    }
+  )
+}
+
+#' Split records that cross month boundaries into separate monthly records
+#' @param df Data frame containing spill records
+#' @return Data frame with split records for cross-month spills
+split_monthly_records <- function(df) {
+  dt <- as.data.table(df)[end_time > start_time]
+
+  # 1. Build a “calendar” of all month‐windows covering your data
+  all_months <- seq(
+    floor_date(min(dt$start_time), "month"),
+    floor_date(max(dt$end_time),   "month"),
+    by = "month"
+  )
+  cal <- data.table(
+    month_start = as.POSIXct(all_months,               tz = "UTC"),
+    month_end   = as.POSIXct(all_months + months(1), tz = "UTC") - 1
+  )
+
+  # 2. Key both tables for an interval‐overlap join
+  setkey(dt,    start_time, end_time)
+  setkey(cal, month_start, month_end)
+
+  # 3. Join, then “clamp” each record to its month‐slice
+  out <- foverlaps(dt, cal, nomatch = 0L)[
+    , .(
+        start_time = pmax(start_time, month_start),
+        end_time   = pmin(end_time,   month_end),
+        # carry through every other column from dt:
+        .SD[, setdiff(names(dt), c("start_time","end_time")), with = FALSE]
+      )
+  ]
+
+  # 4. Return as a data.frame (or data.table)
+  return(out[])
+}
 
 
-
-```{r}
-count_spills <- function(start_times, end_times) {
-  if (!length(start_times)) return(0L)
+#' Prepare spill data for aggregation by handling year/month boundaries
+#' @param data Input dataframe containing spill data
+#' @return List of data tables prepared for yearly and monthly aggregation
+prepare_spill_data <- function(data) {
+  # Initial data prep and year boundary handling
+  dt <- as.data.table(data) 
+  ## Remove key NAs
+  dt <- dt[!is.na(site_id) & !is.na(start_time)]
+  ## Truncate start/end times that cross year boundaries
+  dt[, c("lower", "upper") := {
+    lr <- as.POSIXct(ISOdatetime(year, 1, 1, 0, 0, 0), tz = "UTC")
+    ur <- as.POSIXct(ISOdatetime(year + 1, 1, 1, 0, 0, 0), tz = "UTC")
+    list(lr, ur)
+  }, by = year]
   
+  dt[, `:=`(
+    start_time = pmax(start_time, lower),
+    end_time   = pmin(end_time,   upper)
+  )]
+  dt[, c("lower", "upper") := NULL]
+  data.table::setkey(dt, site_id, start_time)
+
+  # Prepare yearly dataset
+  dt_yearly <- copy(dt)
+
+  # Prepare monthly dataset from yearly data
+  dt_monthly <- split_monthly_records(dt)
+  dt_monthly[, month := data.table::month(start_time)]
+  dt_monthly[, quarter := ceiling(month/3)] 
+
+  return(list(
+    yearly = dt_yearly,
+    monthly = dt_monthly
+  ))
+}
+
+
+#' Count spills using the 12/24 counting method
+#' @param start_times Vector of spill start times (POSIXct)
+#' @param end_times Vector of spill end times (POSIXct)
+#' @return Integer count of spill events
+count_spills <- function(start_times, end_times) {
+  if (!length(start_times)) {
+    return(0L)
+  }
+
   # POSIXct to numeric (seconds since epoch) to optimise speed
   start_times <- as.numeric(start_times)
-  end_times   <- as.numeric(end_times)
-  
+  end_times <- as.numeric(end_times)
+
   # Pre-sort inputs by start_time
   ord <- order(start_times)
   start_times <- start_times[ord]
-  end_times   <- end_times[ord]
-  
+  end_times <- end_times[ord]
+
   # Pre-compute durations in seconds
   dur12 <- 12 * 3600
   dur24 <- 24 * 3600
-  
+
   # Initialise variables
   spill_count <- 0L
   block_start <- NA_real_
-  block_end   <- NA_real_
-  
+  block_end <- NA_real_
+
   for (i in seq_along(start_times)) {
     current_start <- start_times[i]
-    current_end   <- end_times[i]
-    
+    current_end <- end_times[i]
+
     # Calculate difference between spill start and current block end
     if (!is.na(block_end)) {
       gap <- (current_start - block_end) / 3600
     }
-    
+
     # 12-hour block (first spill or >24h gap)
     if (is.na(block_end) || gap > 0) {
       block_start <- current_start
-      block_end   <- current_start + dur12
-      
+      block_end <- current_start + dur12
+
       # How many 24-hour blocks occur after the first 12 hours (if any)
-      diff_current   <- (current_end - block_start) / 3600
+      diff_current <- (current_end - block_start) / 3600
       spill_over_12h <- ceiling(pmax(0, diff_current - 12) / 24)
-      spill_count    <- spill_count + 1L + spill_over_12h
-      
+      spill_count <- spill_count + 1L + spill_over_12h
+
       # Update block times
       block_start <- block_end + (dur24 * spill_over_12h)
-      block_end   <- block_start + dur24
-      
+      block_end <- block_start + dur24
     } else {
       # 24 hour block
       # Update spill count
-      diff_current   <- (current_end - block_start) / 3600
+      diff_current <- (current_end - block_start) / 3600
       spill_over_24h <- ceiling(pmax(0, diff_current) / 24)
-      spill_count    <- spill_count + spill_over_24h
-      
+      spill_count <- spill_count + spill_over_24h
+
       # Update block times
       block_start <- block_end + dur24 * (spill_over_24h - 1)
-      block_end   <- block_start + dur24
+      block_end <- block_start + dur24
     }
   }
-  
+
   return(spill_count)
 }
 
 
-# Apply the optimized function
-dt_result <- dt[order(start_time),
-               .(
-                 total_spill_count = count_spills_fast(start_time, end_time),
-                 total_spill_hrs = sum(as.numeric(difftime(end_time, start_time, units = "hours")))
-               ),
-               by = .(water_company, year, outlet_discharge_ngr)]
+#' Aggregate spill data by water company and year/month
+#' @param data Input dataframe containing individual spill data
+#' @return List with aggregated yearly and monthly spill statistics
+aggregate_spills <- function(data) {
+  prepared_data <- prepare_spill_data(data)
+  dt_yearly  <- prepared_data$yearly
+  dt_monthly <- prepared_data$monthly
 
-dt_result %>% 
-  filter(outlet_discharge_ngr == "SP7106038010")
-dplyr_result %>% 
-  filter(outlet_discharge_ngr == "SP7106038010")
-```
-
-
-
-
-```{r}
-dt <- data.table(
-  year = c(2023, 2023, 2023),
-  start_time = as.POSIXct(c(
-    "2022-12-15 00:00:01",  # Crosses previous year boundary
-    "2023-03-15 00:00:01",  # Within year
-    "2023-12-15 00:00:01"   # Near year end
-  ), tz = "UTC"),
-  end_time = as.POSIXct(c(
-    "2023-02-15 00:00:01",  # Within year
-    "2023-05-15 00:00:01",  # Within year
-    "2024-02-15 00:00:01"   # Crosses next year boundary
-  ), tz = "UTC")
-)
-
-dt[["key_join"]] <- sapply(dt[["key_join"]], function(x) paste(unlist(x), collapse = ", "))
-
-# Apply the transformation
-dt[, `:=`(
-  start_time_new = pmax(start_time, 
-                    as.POSIXct(paste0(year, "-01-01 00:00:00"), tz = "UTC")),
-  end_time_new = pmin(end_time, 
-                  as.POSIXct(paste0(year + 1, "-01-01 00:00:00"), tz = "UTC"))
-)]
-
-# Print transformed data
-dt
-unique(as.data.table(dt))
-# Get rows that are duplicates
-duplicates <- dt[duplicated(dt) | duplicated(dt, fromLast = TRUE), ]
-```
-
-
-
-```{r}
-#' Split records that cross month boundaries into separate monthly records
-#' @param df Data frame containing spill records with start_time and end_time columns
-#' @return Data frame with split records for cross-month spills
-split_monthly_records <- function(df) {
-  
-  # Convert to data.table once at the start
-  dt <- data.table::copy(as.data.table(df))
-  dt <- dt[end_time > start_time]
-  
-  # Pre-calculate floor dates for all records at once
-  dt[, `:=`(
-    floor_start = floor_date(start_time, "month"),
-    floor_end = floor_date(end_time, "month")
-  )][, needs_split := floor_start != floor_end]
-  
-  # Split the data.table based on the needs_split column
-  result_list <- list(
-    # Single-month records
-    dt[needs_split == FALSE],
-    
-    # Multi-month records that need splitting
-    dt[needs_split == TRUE, {
-      months_seq <- seq(
-        as.Date(floor_start),
-        as.Date(floor_end),
-        by = "month"
-      )
-      
-      data.table(
-        start_time = c(
-          start_time,
-          as.POSIXct(months_seq[-1], tz = "UTC")
-        ),
-        end_time = c(
-          as.POSIXct(months_seq[-1], tz = "UTC") - 1,
-          end_time
-        )
-      )
-    }, by = setdiff(names(dt), c("start_time", "end_time", "key_join", 
-                                "floor_start", "floor_end", "needs_split"))]
+  # Combinations to ensure zero‑row outputs are created where needed
+  yearly_combinations <- expand_grid(
+    water_company = unique(dt_yearly$water_company),
+    year          = CONFIG$years
   )
 
-  # Combine results and clean up temporary columns
-  result <- rbindlist(result_list, fill = TRUE)
-  result[, c("floor_start", "floor_end", "needs_split") := NULL]
+  monthly_combinations <- expand_grid(
+    water_company = unique(dt_monthly$water_company),
+    year          = CONFIG$years,
+    month         = 1:12
+  )
+
+  # ---- Yearly ----------------------------------------------------
+  yearly_result <- map2(
+    yearly_combinations$water_company,
+    yearly_combinations$year,
+    ~ {
+      current_data <- dt_yearly[
+        water_company == .x & year == .y
+      ]
+
+      if (nrow(current_data) == 0) {
+        return(data.table(
+          water_company      = .x,
+          year               = .y,
+          site_id            = NA_character_,
+          spill_count_yr     = 0L,
+          spill_hrs_yr       = 0L,
+          spill_count_yr_ea  = 0L,
+          spill_hrs_yr_ea    = 0L
+        ))
+      }
+
+      current_data[,
+        .(
+          spill_count_yr    = count_spills(start_time, end_time),
+          spill_hrs_yr      = sum(
+            as.numeric(difftime(end_time, start_time, units = "hours")), 
+            na.rm = TRUE)
+        ),
+        by = .(water_company, site_id, year)
+      ]
+    }
+  )
+
+  # ---- Monthly ---------------------------------------------------
+  monthly_result <- pmap(
+    list(
+      monthly_combinations$water_company,
+      monthly_combinations$year,
+      monthly_combinations$month
+    ),
+    ~ {
+      current_data <- dt_monthly[
+        water_company == ..1 & year == ..2 & month == ..3
+      ]
+
+      if (nrow(current_data) == 0) {
+        return(data.table(
+          water_company   = ..1,
+          year            = ..2,
+          month           = ..3,
+          site_id         = NA_character_,
+          spill_count_mo  = 0L,
+          spill_hrs_mo    = 0L
+        ))
+      }
+
+      current_data[,
+        .(
+          spill_count_mo = count_spills(start_time, end_time),
+          spill_hrs_mo   = sum(
+            as.numeric(difftime(end_time, start_time, units = "hours")), 
+            na.rm = TRUE)
+        ),
+        by = .(water_company, site_id, year, month)
+      ]
+    }
+  )
   
-  return(result)
+  # ---- Quarterly -------------------------------------------------
+  quarterly_combinations <- expand_grid(
+    water_company = unique(dt_month$water_company),
+    year          = CONFIG$years,
+    quarter       = 1:4
+  )
+
+  quarterly_result <- pmap(
+    list(
+      quarterly_combinations$water_company,
+      quarterly_combinations$year,
+      quarterly_combinations$quarter
+    ),
+    function(wc, yr, qt) {
+      cur <- dt_month[water_company == wc & year == yr & quarter == qt]
+      if (nrow(cur) == 0) {
+        return(data.table(
+          water_company   = wc,
+          year            = yr,
+          quarter         = qt,
+          site_id         = NA_character_,
+          spill_count_qt  = 0L,
+          spill_hrs_qt    = 0
+        ))
+      }
+      cur[,
+        .(
+          spill_count_qt = count_spills(start_time, end_time),
+          spill_hrs_qt   = sum(
+            as.numeric(difftime(end_time, start_time, units = "hours")),
+            na.rm = TRUE
+          )
+        ),
+        by = .(water_company, site_id, year, quarter)
+      ]
+    }
+  )
+
+  list(
+    yearly   = bind_rows(yearly_result),
+    monthly  = bind_rows(monthly_result),
+    quarterly = bind_rows(quarterly_result) 
+  )
 }
 
-dt_og = dt
-dt <- example_data
+#' Complete and align spill data across time
+#' @param data List with components:
+#'   \itemize{
+#'     \item yearly: annual spill data (columns: water_company, site_id, year, spill_count_yr, spill_hrs_yr).
+#'     \item monthly: monthly spill data (columns: water_company, site_id, year, month, spill_count_mo, spill_hrs_mo).
+#'   }
+#' @param metadata site metadata with annual spill totals
+#' @return List with:
+#'   \itemize{
+#'     \item yearly: completed yearly data.
+#'     \item monthly: completed monthly data.
+#'   }
+complete_data_observations <- function(
+    data, metadata = data$metadata) {
+  site_metadata_cols <- c(
+    "site_name_ea", "site_name_wa_sc", "permit_reference_ea",
+    "activity_reference", "permit_reference_wa_sc", "unique_id"
+  )
 
-dt %>% 
-  filter(end_time == start_time)
+  # Yearly 
+  logger::log_info("Completing yearly data observations")
+  completed_yearly <- data$yearly %>%
+    full_join(
+      metadata, na_matches = "never", 
+      by = join_by(water_company, site_id, year)) %>% 
+    group_by(site_id) %>%
+    complete(year = CONFIG$years) %>%
+    fill(
+      all_of(intersect(site_metadata_cols, names(.))),
+      .direction = "downup") %>% 
+    ungroup() %>% 
+    mutate(
+      spill_count_yr = if_else(
+        is.na(spill_count_yr), spill_count_ea, spill_count_yr),
+      spill_hrs_yr = if_else(
+        is.na(spill_hrs_yr), spill_hrs_ea, spill_hrs_yr))
+
+  # Monthly 
+  logger::log_info("Completing monthly data observations")
+  completed_monthly <- data$monthly %>%
+    full_join(
+      tidyr::crossing(metadata, month = 1:12),
+      na_matches = "never", 
+      by = join_by(water_company, site_id, year, month)) %>% 
+    group_by(site_id) %>%
+    complete(year = CONFIG$years, month = 1:12) %>%
+    fill(
+      all_of(intersect(site_metadata_cols, names(.))),
+      .direction = "downup") %>% 
+    ungroup() %>% 
+    mutate(
+      spill_count_mo = if_else(
+        is.na(spill_count_mo), spill_count_ea, spill_count_mo),
+      spill_hrs_mo = if_else(
+        is.na(spill_hrs_mo), spill_hrs_ea, spill_hrs_mo))
+  
+  # Quarterly 
+  logger::log_info("Completing quarterly data observations")
+  completed_quarterly <- data$quarterly %>%
+    full_join(
+      tidyr::crossing(metadata, quarter = 1:4),
+      by = join_by(water_company, site_id, year, quarter),
+      na_matches = "never"
+    ) %>%
+    group_by(site_id) %>%
+    complete(year = CONFIG$years, quarter = 1:4) %>%
+    fill(all_of(intersect(site_meta_cols, names(.))), .direction = "downup") %>%
+    ungroup() %>%
+    mutate(
+      spill_count_qt = if_else(
+        is.na(spill_count_qt), spill_count_ea, spill_count_qt),
+      spill_hrs_qt   = if_else(
+        is.na(spill_hrs_qt),   spill_hrs_ea,   spill_hrs_qt)
+    )
+
+  list(
+    yearly    = completed_yearly,
+    monthly   = completed_monthly,
+    quarterly = completed_quarterly    
+  )
+}
+
+#' Export function to save aggregated results
+#' @param final_results List containing components $yearly and $monthly
+#' @return NULL (invisibly)
+export_results <- function(final_results) {
+  output_dir <- CONFIG$output_dir
+
+  if (!dir.exists(output_dir)) {
+    fs::dir_create(output_dir, recurse = TRUE)
+    logger::log_info("Created output directory: {output_dir}")
+  }
+
+  yr_path <- file.path(output_dir, "agg_spill_yr.parquet")
+  mo_path <- file.path(output_dir, "agg_spill_mo.parquet")
+  qt_path  <- file.path(output_dir, "agg_spill_qtr.parquet")
+
+  # Yearly data
+  logger::log_info("Saving yearly data to {yr_path}")
+  arrow::write_parquet(final_results$yearly, yr_path)
+
+  # Monthly data
+  logger::log_info("Saving monthly data to {mo_path}")
+  arrow::write_parquet(final_results$monthly, mo_path)
+  
+  # Quarterly data
+  logger::log_info("Saving quarterly data to {qt_path}")
+  arrow::write_parquet(final_results$quarterly, qt_path) 
+
+  logger::log_info("Export completed successfully")
+  invisible(NULL)
+}
+
+############################################################
 
 
-example_data <- data.table(
-  id = 1:4,
-  year = c(2021, 2021, 2021, 2021),
-  start_time = as.POSIXct(c(
-    "2021-01-15 10:00:00",  # Same month
-    "2021-01-25 14:00:00",  # Crosses to next month
-    "2021-03-28 23:00:00",  # Crosses multiple months
-    "2021-12-31 23:00:00"   # Crosses to next year
-  ), tz = "UTC"),
-  end_time = as.POSIXct(c(
-    "2021-01-20 15:00:00",  # Same month
-    "2021-02-05 16:00:00",  # Crosses to next month
-    "2021-05-02 02:00:00",  # Crosses multiple months
-    "2022-01-02 01:00:00"   # Crosses to next year
-  ), tz = "UTC"),
-  value = c(10, 20, 30, 40)
-)
+# Main execution
+############################################################
 
-res <- split_monthly_records(example_data)
-res
+main <- function() {
+  # Setup
+  initialise_environment()
+  setup_logging()
+
+  tryCatch(
+    {
+      # Load and process data
+      logger::log_info("Starting data processing pipeline")
+      data <- load_data()
+
+      # Aggregate spills
+      logger::log_info("Aggregating spill statistics")
+      aggregated_data <- aggregate_spills(data$spill_data)
+
+      # Complete time series observations
+      logger::log_info("Completing time series observations")
+      completed_data <- complete_data_observations(
+        aggregated_data,
+        metadata = data$metadata)
+
+      # Export results
+      logger::log_info("Exporting results")
+      export_results(completed_data)
+
+      logger::log_info("Processing completed successfully")
+    },
+    error = function(e) {
+      logger::log_error("Pipeline failed: {e$message}")
+      stop(glue::glue("Pipeline failed: {e$message}"))
+    }
+  )
+}
 ```
-
-
-```{r}
-dt_monthly
-```
-
 
