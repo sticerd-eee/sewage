@@ -5,7 +5,7 @@
 # Author: Jacopo Olivieri
 ############################################################
 
-# Set Up
+# Set Up Functions
 ############################################################
 
 #' Initialise the R environment with required packages and settings
@@ -19,7 +19,8 @@ initialise_environment <- function() {
 
   # Define required packages
   required_packages <- c(
-    "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue", "fs", "rnrfa", "sf"
+    "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue", 
+    "fs", "rnrfa", "sf", "arrow"
   )
 
   # Install and load packages
@@ -34,7 +35,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "14_10km_site_house_sale_match.log")
+  log_path <- here::here("output", "log", "15_10km_site_house_sale_match.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
   logger::log_appender(logger::appender_file(log_path))
@@ -43,7 +44,7 @@ setup_logging <- function() {
   logger::log_info("Script started at {Sys.time()}")
 }
 
-############################################################
+
 # Configuration
 ############################################################
 
@@ -51,28 +52,30 @@ CONFIG <- list(
   processed_dir = here::here("data", "processed")
 )
 
-############################################################
+
 # Functions
 ############################################################
 
 #' Load spatial datasets for house prices and spill sites.
-#' @return List containing house price data and spill sites data
+#' @return List with `house` and `spill` data frames
 load_data <- function() {
   logger::log_info("Loading spatial datasets")
 
-  house_data <- rio::import(here::here("data", "processed", "house_price.rds"),
+  house_data <- rio::import(
+    here::here("data", "processed", "house_price.parquet"),
     trust = TRUE
   )
-  spill_data <- rio::import(here::here("data", "processed", "unique_spill_sites.rds"),
+  spill_data <- rio::import(
+    here::here("data", "processed", "unique_spill_sites.parquet"),
     trust = TRUE
   )
 
   return(list(house = house_data, spill = spill_data))
 }
 
-#' Prepare spill sites spatial data and create a lookup table.
-#' @param spill_data DataFrame of spill sites
-#' @return List containing the spatial spill sites and a lookup table
+#' Convert spill sites to sf and build lookup table
+#' @param spill_df Data frame of spill sites with easting/northing
+#' @return List with `spill_sf` (sf) and `lookup` (tibble)
 prepare_spill_sites <- function(spill_data) {
   logger::log_info("Preparing spill sites spatial data")
 
@@ -89,9 +92,9 @@ prepare_spill_sites <- function(spill_data) {
   return(list(spill_sf = spill_sites_sf, lookup = spill_lookup))
 }
 
-#' Prepare house price spatial data.
-#' @param house_data DataFrame of house price records
-#' @return sf object containing the house price data
+#' Convert house records to sf points
+#' @param house_df Data frame of house sales with easting/northing
+#' @return sf object with house_id and geometry
 prepare_house_data <- function(house_data) {
   logger::log_info("Preparing house price spatial data")
 
@@ -103,12 +106,12 @@ prepare_house_data <- function(house_data) {
   return(houses_sf)
 }
 
-#' Perform spatial join to match houses with nearby spill sites.
-#' @param houses_sf sf object containing house price data
-#' @param spill_sites_sf sf object containing spill sites
-#' @param spill_lookup Lookup table for spill sites
-#' @param radius_km Numeric radius in kilometres for matching (default: 10)
-#' @return sf object with merged house and spill data, including distance calculations
+#' Match houses to spill sites within specified radius
+#' @param houses_sf sf of houses
+#' @param spill_sf sf of spills
+#' @param lookup tibble linking site_id to geometry
+#' @param radius_km search radius in km (default 10)
+#' @return Tibble of matches with distances and counts
 perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup, radius_km = 10) {
   logger::log_info("Performing spatial join between houses and spill sites")
 
@@ -150,55 +153,55 @@ perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup, radius
 #' Process the spatial data by loading, preparing, and merging house price and spill site data.
 #' @param radius_km Numeric radius in kilometres for the spatial join (default: 10)
 #' @return sf object containing the merged data
-process_spatial_data <- function(radius_km = 10) {
-  datasets <- load_data()
+process_spatial_data <- function(data, radius_km = 10) {
+  datasets <- data
 
   houses_sf <- prepare_house_data(datasets$house)
   spill_data <- prepare_spill_sites(datasets$spill)
 
-  merged_spatial_data <- perform_spatial_join(houses_sf, spill_data$spill_sf, spill_data$lookup, radius_km)
+  merged_spatial_data <- perform_spatial_join(
+    houses_sf, spill_data$spill_sf, spill_data$lookup, radius_km)
 
   return(merged_spatial_data)
 }
 
-# New export function added here
-export_data <- function(df) {
-  # Define output paths
-  rds_path <- file.path(CONFIG$processed_dir, "spill_house_lookup.rds")
-  csv_path <- file.path(CONFIG$processed_dir, "spill_house_lookup.csv")
 
-  # Export data with error handling
+#' Export processed data to a single Parquet file
+#' @param df Tibble to export
+#' @return NULL
+export_data <- function(df) {
+  parquet_path <- file.path(CONFIG$processed_dir, "spill_house_lookup.parquet")
+  
   tryCatch(
     {
-      saveRDS(df, rds_path)
-      write_csv(df, csv_path)
-
-      logger::log_info(glue::glue("Data exported successfully to:"))
-      logger::log_info(glue::glue("  - RDS: {rds_path}"))
-      logger::log_info(glue::glue("  - CSV: {csv_path}"))
+      arrow::write_parquet(df, parquet_path)
+      logger::log_info("Data exported successfully to Parquet file at {parquet_path}")
     },
     error = function(e) {
-      err_msg <- glue::glue("Failed to export data: {e$message}")
+      err_msg <- glue::glue("Failed to export data to Parquet: {e$message}")
       logger::log_error(err_msg)
       stop(err_msg)
     }
   )
 }
 
-############################################################
+
 # Main Execution
 ############################################################
 
-#' Main function to execute the spatial data integration pipeline.
-#' @return Invisible NULL
+#' Main execution function
 main <- function() {
   tryCatch(
     {
       initialise_environment()
       setup_logging()
+      
+      # Load data
+      data_list <- load_data()
 
+      # 10km radius match
       logger::log_info("Starting spatial data processing pipeline")
-      merged_data <- process_spatial_data()
+      merged_data <- process_spatial_data(data = data_list, radius_km = 10)
       logger::log_info("Spatial join completed successfully")
 
       # Export the merged data using the export_data function

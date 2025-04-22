@@ -105,7 +105,7 @@ setup_parallel <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "12_clean_lr_house_price_data.log")
+  log_path <- here::here("output", "log", "14_clean_lr_house_price_data.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
   logger::log_appender(logger::appender_file(log_path))
