@@ -352,6 +352,18 @@ left_join(raw_data, postcode_data, by = join_by(postcode))
 ## v2
 
 ```{r}
+data_list$house
+data_list$spill
+```
 
+```{r}
+data_list
+
+houses_sf <- prepare_house_data(data_list$house)
+spill_data <- prepare_spill_sites(data_list$spill)
+```
+
+```{r}
+merged_data <- process_spatial_data(data = data_list, radius_km = 10)
 ```
 

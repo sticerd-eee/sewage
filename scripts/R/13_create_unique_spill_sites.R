@@ -117,13 +117,13 @@ clean_ngr <- function(x) {
 clean_location <- function(data) {
   data %>%
     # clean ngr
-    mutate(ngr_clean = clean_ngr(ngr)) %>% 
+    mutate(ngr = clean_ngr(ngr)) %>% 
     # deduplicate on cleaned ref
-    distinct(water_company, year, site_id, ngr_clean) %>%
+    distinct(water_company, year, site_id, ngr) %>%
     # pivot availability by year
     mutate(available = TRUE) %>%
     pivot_wider(
-      id_cols     = c(water_company, site_id, ngr_clean),
+      id_cols     = c(water_company, site_id, ngr),
       names_from  = year,
       values_from = available,
       names_prefix= "available_year_",
@@ -131,7 +131,7 @@ clean_location <- function(data) {
     ) %>%
     # parse British National Grid coords
     mutate(
-      coords = map(ngr_clean, ~ tryCatch(
+      coords = map(ngr, ~ tryCatch(
         rnrfa::osg_parse(.x, coord_system = "BNG"),
         error = function(e) list(easting=NA_real_, northing=NA_real_)
       ))

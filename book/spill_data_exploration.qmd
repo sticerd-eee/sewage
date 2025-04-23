@@ -94,15 +94,16 @@ theme_pref <- theme_minimal() +
 
 ```{r, load_data}
 # Aggregated spill data
-dat <- import(here("data", "processed", 
-                   "individual_edm_location.RDATA"), trust = TRUE)
-
-dat_yr <- dat$yearly
-dat_mo <- dat$monthly
+dat_yr <- import(
+  here::here("data", "processed", "spill_aggregated", "agg_spill_yr.parquet"),
+)
+dat_mo <- import(
+  here::here("data", "processed", "spill_aggregated", "agg_spill_mo.parquet"),
+)
 
 # Spill sites
-spill_sites <- import(here("data", "processed", "unique_spill_sites.rds"),
-  trust = TRUE
+spill_sites <- import(
+  here("data", "processed", "unique_spill_sites.parquet"), trust = TRUE
 )
 ```
 
@@ -111,10 +112,10 @@ spill_sites <- import(here("data", "processed", "unique_spill_sites.rds"),
 Sewage spill sites are spread relatively uniformly around England. Spills appear to be more frequent near the coast, particularly in the South and South West, which is expected as these regions have a higher concentration of water channels. Beyond this, there doesn't seem to be any other visual pattern.
 
 ```{r, plot-spill-stats}
-
 dat_yr_clean <- left_join(
-  dat_yr, spill_sites, 
-  by = join_by(water_company, outlet_discharge_ngr, site_id))
+  select(dat_yr, - ngr), 
+  spill_sites, 
+  by = join_by(water_company, site_id)) 
 
 # Create spill map functions
 plot_spill_map <- function(data, value_col, legend_title) {
@@ -354,7 +355,7 @@ datasummary_skim(dat_yr_clean_list[[2]], fmt = 2)
 #### 2021
 
 ```{r}
-datasummary_skim(dat_yr_clean_list[[1]], fmt = 2)
+datasummary_skim(dat_yr_clean_list[[3]], fmt = 2)
 ```
 :::
 
@@ -472,7 +473,7 @@ dat_mo_clean <- dat_mo %>%
   summarize(
     spill_hrs_mo = sum(spill_hrs_mo), 
     spill_count_mo = sum(spill_count_mo),
-    unique_spill_sites = n_distinct(outlet_discharge_ngr),
+    unique_spill_sites = n_distinct(ngr),
     .groups = "drop") %>% 
   mutate(
     across(starts_with("spill"), ~ log(1 + .), .names = "log_{.col}"),

@@ -80,35 +80,27 @@ theme_pref <- theme_minimal() +
 
 ```{r, load_data}
 # Aggregated spill data
-dat <- import(here(
-  "data", "processed",
-  "individual_edm_location.RDATA"
-), trust = TRUE)
-dat_mo <- dat$monthly
-dat_yr <- dat$yearly
-rm(dat)
+dat_yr <- import(
+  here::here("data", "processed", "spill_aggregated", "agg_spill_yr.parquet"),
+)
+dat_mo <- import(
+  here::here("data", "processed", "spill_aggregated", "agg_spill_mo.parquet"),
+)
 
 # Spill sites
-spill_sites <- import(here("data", "processed", "unique_spill_sites.rds"),
-  trust = TRUE
+spill_sites <- import(
+  here("data", "processed", "unique_spill_sites.parquet"), trust = TRUE
 )
 
 # House price
-house_price_data <- import(here("data", "processed", "house_price.rds"),
+house_price_data <- import(
+  here("data", "processed", "house_price.parquet"),
   trust = TRUE
 )
-# house_price_data_wins <- house_price_data %>%
-#     mutate(price = Winsorize(
-#         price, val = quantile(price, probs = c(0.05, 0.95))))
-# house_price_data_trim <- house_price_data %>%
-#  filter(
-#    price >= quantile(price, probs = 0.05, na.rm = TRUE),
-#    price <= quantile(price, probs = 0.95, na.rm = TRUE)
-#  )
 
 # House price - spill site lookup
-spill_lookup <- import(here("data", "processed", "spill_house_lookup.rds"),
-  trust = TRUE
+spill_lookup <- import(
+  here("data", "processed", "spill_house_lookup.parquet"), trust = TRUE
 )
 
 # DuckDB connection
@@ -118,7 +110,7 @@ spill_lookup <- import(here("data", "processed", "spill_house_lookup.rds"),
 
 ## Data Description {#sec-04-01-data-descr}
 
-I have spatially merged all house sales from the HM Land Registry data to nearby sewage spill sites within a 10km radius. This dataset includes, for each house sale, all sewage spill sites within that range, along with their respective distances and spill severity, measured by frequency and duration. This lookup database allows for filtering by spatial distance or time. Below is a visual representation of three house sales in London.
+I have spatially merged all house sales from the HM Land Registry data to nearby sewage spill sites within a 5km radius. This dataset includes, for each house sale, all sewage spill sites within that range, along with their respective distances and spill severity, measured by frequency and duration. This lookup database allows for filtering by spatial distance or time. Below is a visual representation of three house sales in London.
 
 ```{r, data_description}
 #| eval: false
@@ -137,25 +129,29 @@ london_house_ids <- house_price_data %>%
 sample_spill_ids <- spill_sites %>%
   inner_join(
     spill_lookup %>%
-      filter(house_id %in% london_house_ids$house_id) %>%
+      filter(house_id %in% london_house_ids$house_id,
+             distance_km <= 5) %>%
       distinct(site_id),
     by = "site_id"
   ) %>%
-  left_join(dat_yr, 
-            by = join_by(water_company, outlet_discharge_ngr, site_id))
+  left_join(
+    select(dat_yr, -ngr), 
+    by = join_by(water_company, site_id))
 
-# Convert to spatial objects (EPSG 27700: British National Grid)
-sampled_houses_sf <- st_as_sf(london_house_ids,
+ # Convert to spatial objects (EPSG 27700: British National Grid)
+sampled_houses_sf <- st_as_sf(
+  london_house_ids,
   coords = c("easting", "northing"),
   crs = 27700
 )
-sampled_sites_sf <- st_as_sf(sample_spill_ids,
+sampled_sites_sf <- st_as_sf(
+  sample_spill_ids,
   coords = c("easting", "northing"),
   crs = 27700
 )
 
-# Create 10km buffers around houses
-sampled_buffers <- st_buffer(sampled_houses_sf, dist = 10000)
+# Create 5km buffers around houses
+sampled_buffers <- st_buffer(sampled_houses_sf, dist = 5000)
 
 # Transform to WGS84 for visualization
 sampled_houses_sf <- st_transform(sampled_houses_sf, 4326)
@@ -165,8 +161,7 @@ sampled_buffers <- st_transform(sampled_buffers, 4326)
 # London boundary
 london_boundary_sf <- ne_states(
   country = "United Kingdom",
-  returnclass = "sf"
-) %>%
+  returnclass = "sf") %>%
   filter(region == "Greater London")
 
 
@@ -207,7 +202,7 @@ spill_map <- tm_shape(sampled_buffers) +
   ) +
   tm_shape(london_boundary_sf) +
   tm_borders(col = "blue4", lwd = 1) +
-  tm_title("London Spill Sites with 10km Buffers of House Sales") +
+  tm_title("London Spill Sites with 5km Buffers of House Sales") +
   tm_layout(legend.outside = TRUE)
 
 rm(sampled_houses_sf, sampled_sites_sf, sampled_buffers, london_boundary_sf)
@@ -436,9 +431,21 @@ ggplot(house_monthly, aes(x = month, y = count_sold, fill = factor(year))) +
 
 I begin by examining the cross-sectional relationship between house prices and sewage spills, which can be characterised along three main dimensions: (i) house prices, (ii) spill severity (measured by the number of spills or the spill duration), and (iii) the distance to the nearest spill.
 
-Each house sale is spatially matched to all spill sites within a 10km radius, allowing me to compute the average spill severity and the average distance to the nearest spill for different distance thresholds. This allows me to see if there are any correlations between house prices and spill severity or distance.
+Each house sale is spatially matched to all spill sites within a 5km radius, allowing me to compute the average spill severity and the average distance to the nearest spill for different distance thresholds. This allows me to see if there are any correlations between house prices and spill severity or distance.
 
 ### Summary Tables {#sec-04-03-02-summary-tables}
+
+```{r}
+# Calculate 5th and 95th house price percentiles
+house_price_data_trimmed <- house_price_data %>%
+  filter(between(
+    price, 
+    quantile(price, 0.05, na.rm = TRUE), quantile(price, 0.95, na.rm = TRUE)
+    )
+  )
+trimmed_house_ids <- unique(house_price_data_trimmed$house_id)
+```
+
 
 I present summary statistics for the spill data aggregated over both (i) different distance thresholds and (ii) spill count quartiles within a 2km radius. I use the entire dataset, trimming the house prices to the 5th and 95th percentiles (as I don't believe these belong to the distribution we are interested in).
 
@@ -454,60 +461,63 @@ There are a few patterns that stand out:
 #### By Distance {#sec-04-03-02-01-distance}
 
 ```{r, house_price_spill_summary}
+# Load aggregated data
 dat_agg_all <- open_dataset(
   here("data", "processed", "agg_all_yrs_cross_section")) %>%
   collect()
+dat_agg_12mo <- open_dataset(
+  here("data", "processed", "agg_12mo_cross_section")) %>%
+  collect()
 
-houses_above_10000 <- unique(filter(dat_agg_all, radius == 10000)$house_id)
+# Filter for 5th and 95th house price percentiles
+dat_agg_all_trimmed <- dat_agg_all %>%
+  filter(house_id %in% trimmed_house_ids)
+houses_within_5000 <- filter(dat_agg_all_trimmed, radius == 5000)$house_id %>% 
+  unique()
 
-dat_above_10000 <- house_price_data  %>% 
-  filter(!(house_id %in% houses_above_10000)) %>%
-  filter(
-    between(price, quantile(price, 0.05, na.rm = TRUE), quantile(price, 0.95, na.rm = TRUE))
-  ) %>%
+# Summary stats for houses beyond 5000m
+dat_above_5000 <- house_price_data_trimmed %>%
+  filter(!(house_id %in% houses_within_5000)) %>%
   summarise(
-    threshold_m = ">10000",
+    threshold_m = ">5000",
     n_houses = uniqueN(house_id),
-    n_spill_sites = 0,
-    mean_price = mean(price),
-    median_price = median(price),
-    sd_price = sd(price),
-    min_price = min(price),
-    max_price = max(price)
+    n_spill_sites = 0, 
+    mean_price = mean(price, na.rm = TRUE), 
+    median_price = median(price, na.rm = TRUE),
+    sd_price = sd(price, na.rm = TRUE),
+    min_price = min(price, na.rm = TRUE),
+    max_price = max(price, na.rm = TRUE)
   )
 
-dat_below_10000 <- dat_agg_all %>%
-  group_by(radius) %>%
-  filter(
-    between(price, quantile(price, 0.05, na.rm = TRUE), quantile(price, 0.95, na.rm = TRUE))
-    #   # if_all(c(price, spill_count, spill_hrs),
-    #   #        ~ between(.x, quantile(.x, 0.05, na.rm = TRUE), quantile(.x, 0.95, na.rm = TRUE)))
-  ) %>%
-  ungroup() %>%
+# Summary stats for houses below 5000m
+dat_below_5000_prepared <- dat_agg_all_trimmed %>%
   filter(!is.na(mean_distance)) %>%
   mutate(
     radius = as.character(radius),
     inverse_spill_count = spill_count / mean_distance,
     inverse_spill_hrs = spill_hrs / mean_distance,
     log_price = log(price)
-  ) 
+  )
 
-summary_table <- dat_below_10000 %>%
+summary_table_below <- dat_below_5000_prepared %>%
   group_by(radius) %>%
   summarise(
     threshold_m = first(radius),
-    mean_distance_m = mean(mean_distance),
+    mean_distance_m = mean(mean_distance, na.rm = TRUE),
     n_houses = uniqueN(house_id),
-    n_spill_sites = mean(n_spill_sites),
-    mean_price = mean(price),
-    median_price = median(price),
-    sd_price = sd(price),
-    min_price = min(price),
-    max_price = max(price)
+    n_spill_sites = mean(n_spill_sites, na.rm = TRUE),
+    mean_price = mean(price, na.rm = TRUE),
+    median_price = median(price, na.rm = TRUE),
+    sd_price = sd(price, na.rm = TRUE),
+    min_price = min(price, na.rm = TRUE),
+    max_price = max(price, na.rm = TRUE),
+    .groups = "drop" 
   ) %>%
   select(-radius) %>%
-  arrange(mean_distance_m) %>%
-  bind_rows(dat_above_10000)
+  arrange(mean_distance_m)
+
+# Combine below and above 5000m summaries
+summary_table <- bind_rows(summary_table_below, dat_above_5000)
 
 reactable(
   summary_table,
@@ -598,67 +608,57 @@ reactable(
 #### By Spill Count {#sec-04-03-02-02-spill-count}
 
 ```{r}
-# summary table by spill count quartiles within threshold
+# Define threshold
 threshold <- 2000
 treshold_label <- paste0(threshold / 1000, "km")
-spill_counts <- dat_agg_all %>%
-  filter(radius == threshold) %>%
-  filter(
-    between(price, quantile(price, 0.05, na.rm = TRUE), quantile(price, 0.95, na.rm = TRUE))
-  )
 
-# Calculate quartile breakpoints
+# Filter for threshold using trimmed house price data
+spill_counts_base <- dat_agg_all_trimmed %>%
+  filter(radius == threshold)
+
+# Calculate spill count quartile breakpoints
 spill_counts_quantiles <- quantile(
-  filter(spill_counts, !is.na(mean_distance))$spill_count,
-  probs = c(0, 0.25, 0.5, 0.75, 1)
+  filter(spill_counts_base, !is.na(mean_distance))$spill_count,
+  probs = seq(0, 1, 0.25), 
+  na.rm = TRUE 
 )
 
-# Quartile summary stats under threshold
-spill_counts_summary_below_threshold <- spill_counts %>%
+# Summary stats below threshold
+spill_counts_summary_below_threshold <- spill_counts_base %>%
   filter(!is.na(mean_distance)) %>%
   mutate(
-    quartile = case_when(
-      spill_count <= spill_counts_quantiles[2] ~ "1st quartile (0-25%)",
-      spill_count <= spill_counts_quantiles[3] ~ "2nd quartile (25-50%)",
-      spill_count <= spill_counts_quantiles[4] ~ "3rd quartile (50-75%)",
-      spill_count <= spill_counts_quantiles[5] ~ "4th quartile (75-100%)"
-    )
+    quartile = cut(
+      spill_count,
+      breaks = spill_counts_quantiles,
+      labels = c("1st quartile (0-25%)", "2nd quartile (25-50%)",
+                 "3rd quartile (50-75%)", "4th quartile (75-100%)"),
+                   include.lowest = TRUE, 
+      right = TRUE)
   ) %>%
   group_by(quartile) %>%
   summarise(
-    spill_count_min = min(spill_count),
-    spill_count_max = max(spill_count),
-    spill_count_mean = mean(spill_count),
-    spill_count_median = median(spill_count),
-    n_houses = n(),
-    n_spill_sites = mean(n_spill_sites),
+    spill_count_min = min(spill_count, na.rm = TRUE),
+    spill_count_max = max(spill_count, na.rm = TRUE),
+    spill_count_mean = mean(spill_count, na.rm = TRUE),
+    spill_count_median = median(spill_count, na.rm = TRUE),
+    n_houses = n(), 
+    n_spill_sites = mean(n_spill_sites, na.rm = TRUE), 
     mean_price = mean(price, na.rm = TRUE),
     median_price = median(price, na.rm = TRUE),
     sd_price = sd(price, na.rm = TRUE),
     min_price = min(price, na.rm = TRUE),
     max_price = max(price, na.rm = TRUE),
     .groups = "drop"
-  ) %>%
-  # Ensure quartiles are displayed in the correct order
-  mutate(quartile = factor(quartile, levels = c(
-    "1st quartile (0-25%)",
-    "2nd quartile (25-50%)",
-    "3rd quartile (50-75%)",
-    "4th quartile (75-100%)"
-  )))
+  ) 
 
-# Quartile summary stats above threshold
-houses_below_threshold <- spill_lookup %>%
-  select(house_id, distance_m) %>% 
-  filter(distance_m <= threshold) %>%
+houses_below_threshold_ids <- spill_lookup %>%
+  filter(distance_m <= threshold) %>% 
   pull(house_id) %>%
   unique()
 
-spill_counts_summary_above_threshold <- house_price_data %>%
-  filter(!(house_id %in% houses_below_threshold)) %>%
-  filter(
-    between(price, quantile(price, 0.05, na.rm = TRUE), quantile(price, 0.95, na.rm = TRUE))
-  ) %>%
+# Summary stats above treshold
+spill_counts_summary_above_threshold <- house_price_data_trimmed %>%
+  filter(!(house_id %in% houses_below_threshold_ids)) %>%
   summarise(
     quartile = paste0("Above ", treshold_label, " threshold"),
     spill_count_min = 0,
@@ -666,104 +666,57 @@ spill_counts_summary_above_threshold <- house_price_data %>%
     spill_count_mean = 0,
     spill_count_median = 0,
     n_houses = uniqueN(house_id),
-    n_spill_sites = 0,
-    mean_price = mean(price),
-    median_price = median(price),
-    sd_price = sd(price),
-    min_price = min(price),
-    max_price = max(price)
+    n_spill_sites = 0, 
+    mean_price = mean(price, na.rm = TRUE),
+    median_price = median(price, na.rm = TRUE),
+    sd_price = sd(price, na.rm = TRUE),
+    min_price = min(price, na.rm = TRUE),
+    max_price = max(price, na.rm = TRUE)
   )
 
+# Combine summaries
 spill_counts_summary <- bind_rows(
   spill_counts_summary_below_threshold,
   spill_counts_summary_above_threshold
 )
 
-# Display the summary table using reactable
+# Display the summary table
 reactable(
   spill_counts_summary,
   columns = list(
-    quartile = colDef(
-      name = "Spill Count Quartile"
-    ),
-    spill_count_min = colDef(
-      name = "Min Count",
-      format = colFormat(digits = 0)
-    ),
-    spill_count_max = colDef(
-      name = "Max Count",
-      format = colFormat(digits = 0)
-    ),
-    spill_count_mean = colDef(
-      name = "Mean Count",
-      format = colFormat(digits = 1)
-    ),
-    spill_count_median = colDef(
-      name = "Median Count",
-      format = colFormat(digits = 1)
-    ),
-    n_houses = colDef(
-      name = "# Houses",
-      format = colFormat(separators = TRUE)
-    ),
-    n_spill_sites = colDef(
-      name = "# Spill Sites",
-      format = colFormat(separators = TRUE, digits = 1)
-    ),
-    mean_price = colDef(
-      name = "Mean (£)",
-      format = colFormat(separators = TRUE, digits = 0)
-    ),
-    median_price = colDef(
-      name = "Median (£)",
-      format = colFormat(separators = TRUE, digits = 0)
-    ),
-    sd_price = colDef(
-      name = "SD (£)",
-      format = colFormat(separators = TRUE, digits = 0)
-    ),
-    min_price = colDef(
-      name = "Min (£)",
-      format = colFormat(separators = TRUE, digits = 0)
-    ),
-    max_price = colDef(
-      name = "Max (£)",
-      format = colFormat(separators = TRUE, digits = 0)
-    )
+    quartile = colDef(name = "Spill Count Quartile"),
+    spill_count_min = colDef(name = "Min Count", format = colFormat(digits = 0)),
+    spill_count_max = colDef(name = "Max Count", format = colFormat(digits = 0)),
+    spill_count_mean = colDef(name = "Mean Count", format = colFormat(digits = 1)),
+    spill_count_median = colDef(name = "Median Count", format = colFormat(digits = 1)),
+    n_houses = colDef(name = "# Houses", format = colFormat(separators = TRUE)),
+    n_spill_sites = colDef(name = "# Spill Sites", format = colFormat(separators = TRUE, digits = 1)),
+    mean_price = colDef(name = "Mean (£)", format = colFormat(separators = TRUE, digits = 0)),
+    median_price = colDef(name = "Median (£)", format = colFormat(separators = TRUE, digits = 0)),
+    sd_price = colDef(name = "SD (£)", format = colFormat(separators = TRUE, digits = 0)),
+    min_price = colDef(name = "Min (£)", format = colFormat(separators = TRUE, digits = 0)),
+    max_price = colDef(name = "Max (£)", format = colFormat(separators = TRUE, digits = 0))
   ),
   columnGroups = list(
     colGroup(
-      name = "Spill Count Statistics",
-      columns = c("spill_count_min", "spill_count_max", "spill_count_mean", "spill_count_median")
-    ),
+      name = "Spill Count Statistics", 
+      columns = c("spill_count_min", "spill_count_max", 
+                  "spill_count_mean", "spill_count_median")),
     colGroup(
-      name = "Observations",
-      columns = c("n_houses", "n_spill_sites")
-    ),
+      name = "Observations", 
+      columns = c("n_houses", "n_spill_sites")),
     colGroup(
-      name = "Price Statistics",
-      columns = c(
-        "mean_price", "median_price", "sd_price",
-        "min_price", "max_price"
-      )
-    )
+      name = "Price Statistics", 
+      columns = c("mean_price", "median_price", "sd_price", 
+                  "min_price", "max_price"))
   ),
-  # Styling adjustments
   defaultColDef = colDef(
-    headerStyle = list(
-      fontSize = "0.8em",
-      whiteSpace = "wrap"
-    ),
-    style = list(
-      fontSize = "0.75em"
-    ),
-    minWidth = 80
-  ),
-  # Table behavior
-  resizable = TRUE,
-  filterable = FALSE,
-  defaultPageSize = 10,
-  compact = TRUE,
+    headerStyle = list(fontSize = "0.8em", whiteSpace = "wrap"), 
+    style = list(fontSize = "0.75em"), minWidth = 80),
+  resizable = TRUE, 
+  filterable = FALSE, 
+  defaultPageSize = 10, 
+  compact = TRUE, 
   style = list(maxWidth = "100%", overflowX = "auto")
 )
 ```
@@ -773,29 +726,18 @@ reactable(
 
 ### Bivariate Plots {#sec-04-03-03-bivariate-plots}
 
-Below I plot the relationship between house prices and spill severity (spill count and spill duration), distance to spill sites, and spill severity weighted by the inverse of the distance to the nearest spill (accounting for the possibility that closer spills have a larger impact on house prices). I do this for a sample of 100,000 houses (approximately 3% of all houses in the dataset) to reduce computation time. I trim the data to the 5th and 95th percentiles of house prices (as I don't believe these belong to the distribution we are interested in).
+Below I plot the relationship between house prices and spill severity (spill count and spill duration), distance to spill sites, and spill severity weighted by the inverse of the distance to the nearest spill (accounting for the possibility that closer spills have a larger impact on house prices). I do this for a sample of 300,000 houses (approximately 3% of all houses in the dataset) to reduce computation time. I trim the data to the 5th and 95th percentiles of house prices (as I don't believe these belong to the distribution we are interested in).
 
 For each relationship, I plot a linear regression line and a local regression line (non-parametric) to show potential linear and non-linear relationships.  I present these relationships using data aggregated over all years as well as data aggregated over the trailing 12-month period.
     
 ```{r}
 #| eval: false
 
-# Load data
-# rm(list = setdiff(ls(), c("theme_pref", "con")))
-# con <- DBI::dbConnect(duckdb::duckdb(), dbdir = here("data", "duckdb.duckdb"))
-dat_agg_12mo <- open_dataset(
-  here("data", "processed", "agg_12mo_cross_section")
-) %>%
-  collect()
-dat_agg_all <- open_dataset(
-  here("data", "processed", "agg_all_yrs_cross_section")
-) %>%
-  collect()
-
 # Sample data for plotting
 set.seed(123)
-sample_houses <- unique(dat_agg_12mo$house_id) %>%
-  sample(size = 300000)
+sample_size <- 300000
+sample_houses <- unique(dat_agg_all_trimmed$house_id) %>%
+  sample(size = sample_size)
 
 dat_agg_all_sample <- dat_agg_all %>%
   filter(house_id %in% sample_houses)
@@ -803,27 +745,22 @@ dat_agg_12mo_sample <- dat_agg_12mo %>%
   filter(house_id %in% sample_houses)
 
 # Reshape data to long format
-radius_levels <- c(500, 1000, 2000, 5000)
+radius_levels <- c(250, 500, 1000, 2000, 5000)
 plot_data <- bind_rows(
-  dat_agg_all_sample %>%
+  dat_agg_all_sample %>% 
     mutate(time_frame = "All Years", .before = 1),
-  dat_agg_12mo_sample %>%
+  dat_agg_12mo_sample %>% 
     mutate(time_frame = "12 Months", .before = 1)
 ) %>%
   filter(radius %in% radius_levels) %>%
   mutate(
-    radius = factor(radius, levels = radius_levels, paste0(radius_levels, "m")),
+    radius = factor(radius, 
+                    levels = radius_levels, 
+                    labels = paste0(radius_levels, "m")),
     inverse_spill_count = spill_count / mean_distance,
     inverse_spill_hrs = spill_hrs / mean_distance,
     log_price = log(price)
-  ) %>%
-  group_by(time_frame, radius) %>%
-  filter(
-    between(price, quantile(price, 0.05, na.rm = TRUE), quantile(price, 0.95, na.rm = TRUE))
-    # if_all(c(price, spill_count, spill_hrs),
-    #        ~ between(.x, quantile(.x, 0.05, na.rm = TRUE), quantile(.x, 0.95, na.rm = TRUE)))
-  ) %>%
-  ungroup()
+  )
 
 
 # Create plotting function
@@ -918,7 +855,10 @@ for (var_name in names(plot_specs)) {
     file_name <- paste0(var_name, "_", variant_name, ".png")
 
     # Save the plot - note that filename is now the first argument and plot is specified by 'plot'
-    ggsave(filename = here("book", "book_figs", file_name), plot = p, width = 8, height = 0.618 * 6, dpi = 600)
+    ggsave(
+      filename = here("book", "book_figs", file_name), 
+      plot = p, 
+      width = 8, height = 0.618 * 6, dpi = 600)
   }
 }
 ```

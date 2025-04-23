@@ -389,66 +389,101 @@ aggregate_spills <- function(data) {
 complete_data_observations <- function(
     data, metadata = data$metadata) {
   site_metadata_cols <- c(
-    "site_name_ea", "site_name_wa_sc", "permit_reference_ea",
-    "activity_reference", "permit_reference_wa_sc", "unique_id"
+    "site_name_ea", "site_name_wa_sc", 
+    "permit_reference_ea", "permit_reference_wa_sc",
+    "activity_reference", "asset_type",
+    "ngr",
+    "unique_id",
+    "wfd_waterbody_id_cycle_2", "receiving_water_name",
+    "shellfish_water", "bathing_water", 
+    "edm_commission_date"
   )
   
   # Yearly 
   logger::log_info("Completing yearly data observations")
-  completed_yearly <- data$yearly %>%
-    full_join(
-      metadata, na_matches = "never", 
-      by = join_by(water_company, site_id, year)) %>% 
-    group_by(site_id) %>%
-    complete(year = CONFIG$years) %>%
-    fill(
-      all_of(intersect(site_metadata_cols, names(.))),
-      .direction = "downup") %>% 
-    ungroup() %>% 
+  yearly_sites <- bind_rows(
+    distinct(data$yearly, site_id, water_company),
+    distinct(metadata, site_id, water_company)
+  ) %>% 
+    distinct()
+  
+  yearly_grid <- tidyr::crossing(yearly_sites, year = CONFIG$years)
+  
+  completed_yearly <- yearly_grid %>%
+    left_join(
+      data$yearly,
+      by = c("site_id", "year", "water_company")
+    ) %>%
+    left_join(
+      metadata,
+      by = c("site_id", "year", "water_company")
+    ) %>%
+    group_by(site_id) %>%      
+    fill(all_of(intersect(site_metadata_cols, names(.))),
+         .direction = "downup") %>%
+    ungroup() %>%    
     mutate(
-      spill_count_yr = if_else(
-        is.na(spill_count_yr), spill_count_ea, spill_count_yr),
-      spill_hrs_yr = if_else(
-        is.na(spill_hrs_yr), spill_hrs_ea, spill_hrs_yr))
+      spill_count_yr = if_else(is.na(spill_count_yr), spill_count_ea, spill_count_yr),
+      spill_hrs_yr   = if_else(is.na(spill_hrs_yr),   spill_hrs_ea,   spill_hrs_yr)
+    )
   
   # Monthly 
   logger::log_info("Completing monthly data observations")
-  completed_monthly <- data$monthly %>%
-    full_join(
-      tidyr::crossing(metadata, month = 1:12),
-      na_matches = "never", 
-      by = join_by(water_company, site_id, year, month)) %>% 
-    group_by(site_id) %>%
-    complete(year = CONFIG$years, month = 1:12) %>%
-    fill(
-      all_of(intersect(site_metadata_cols, names(.))),
-      .direction = "downup") %>% 
-    ungroup() %>% 
+  monthly_sites <- bind_rows(
+    distinct(data$monthly, site_id, water_company),
+    distinct(metadata, site_id, water_company)
+  ) %>% 
+    distinct()
+
+  monthly_grid <- tidyr::crossing(
+    monthly_sites, year = CONFIG$years, month = 1:12)
+  
+  completed_monthly <- monthly_grid %>%
+    left_join(
+      data$monthly,
+      by = c("site_id", "year", "month", "water_company")
+    ) %>%
+    left_join(
+      metadata,
+      by = c("site_id", "year", "water_company")
+    ) %>%
+    group_by(site_id) %>%      
+    fill(all_of(intersect(site_metadata_cols, names(.))),
+         .direction = "downup") %>%
+    ungroup() %>%    
     mutate(
-      spill_count_mo = if_else(
-        is.na(spill_count_mo), spill_count_ea, spill_count_mo),
-      spill_hrs_mo = if_else(
-        is.na(spill_hrs_mo), spill_hrs_ea, spill_hrs_mo))
+      spill_count_mo = if_else(is.na(spill_count_mo), spill_count_ea, spill_count_mo),
+      spill_hrs_mo   = if_else(is.na(spill_hrs_mo),   spill_hrs_ea,   spill_hrs_mo)
+    )
+  
   
   # Quarterly 
   logger::log_info("Completing quarterly data observations")
-  completed_quarterly <- data$quarterly %>%
-    full_join(
-      tidyr::crossing(metadata, quarter = 1:4),
-      by = join_by(water_company, site_id, year, quarter),
-      na_matches = "never"
+  quarterly_sites <- bind_rows(
+    distinct(data$quarterly, site_id, water_company),
+    distinct(metadata, site_id, water_company)
+  ) %>% 
+    distinct()
+  
+  quarterly_grid <- tidyr::crossing(
+    quarterly_sites, year = CONFIG$years, quarter = 1:4)
+  
+  completed_quarterly <- quarterly_grid %>%
+    left_join(
+      data$quarterly,
+      by = c("site_id", "year", "quarter", "water_company")
     ) %>%
-    group_by(site_id) %>%
-    complete(year = CONFIG$years, quarter = 1:4) %>%
-    fill(
-      all_of(intersect(site_metadata_cols, names(.))), 
-      .direction = "downup") %>%
-    ungroup() %>%
+    left_join(
+      metadata,
+      by = c("site_id", "year", "water_company")
+    ) %>%
+    group_by(site_id) %>%      
+    fill(all_of(intersect(site_metadata_cols, names(.))),
+         .direction = "downup") %>%
+    ungroup() %>%    
     mutate(
-      spill_count_qt = if_else(
-        is.na(spill_count_qt), spill_count_ea, spill_count_qt),
-      spill_hrs_qt   = if_else(
-        is.na(spill_hrs_qt),   spill_hrs_ea,   spill_hrs_qt)
+      spill_count_qt = if_else(is.na(spill_count_qt), spill_count_ea, spill_count_qt),
+      spill_hrs_qt   = if_else(is.na(spill_hrs_qt),   spill_hrs_ea,   spill_hrs_qt)
     )
   
   list(

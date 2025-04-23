@@ -1,3 +1,4 @@
+```{r}
 ############################################################
 # Create Monthly Regression Panel Dataset
 # Project: Sewage
@@ -18,7 +19,6 @@ initialise_environment <- function() {
   # Package management with renv
   if (!requireNamespace("renv", quietly = TRUE)) {
     install.packages("renv")
-    renv::init()
   }
 
   # Define required packages
@@ -443,7 +443,5 @@ main <- function(refresh_db = FALSE) {
   })
 }
 
-# Execute main function if script is run directly
-if (sys.nframe() == 0) {
-  main(refresh_db = FALSE)
-}
+```
+

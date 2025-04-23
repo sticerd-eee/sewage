@@ -1,3 +1,4 @@
+```{r}
 ############################################################
 # Create Cross-sectional Databases
 # Project: Sewage
@@ -169,7 +170,7 @@ prepare_data <- function(con) {
   # Merge data
   house_spill_data_tbl <- house_tbl %>%
     left_join(spill_lookup_tbl, by = "house_id") %>%
-    left_join(dat_mo_tbl, by = "site_id")
+    full_join(dat_mo_tbl, by = "site_id")
 
   # Define radius thresholds
   radius_tbl <- tibble(radius = CONFIG$radius_thresholds)
@@ -199,45 +200,20 @@ create_all_years_db <- function(prepared_data, con) {
     cross_join(radius_tbl, copy = TRUE) %>%
     group_by(house_id, radius) %>%
     summarise(
-      # Spill metrics
       spill_count = sum(
         if_else(distance_m <= radius, spill_count_mo, 0),
-        na.rm = TRUE
+        na.rm = FALSE
       ),
       spill_hrs = sum(
         if_else(distance_m <= radius, spill_hrs_mo, 0),
-        na.rm = TRUE
+        na.rm = FALSE
       ),
       n_spill_sites = n_distinct(
         if_else(distance_m <= radius, site_id, NA_integer_),
-        na.rm = TRUE
-      ),
-      # Quality metrics
-      n_site_months = sum(if_else(distance_m <= radius, 1, 0)),
-      n_spill_count_present = sum(
-        if_else(distance_m <= radius, as.integer(!is.na(spill_count_mo)), 0L),
-        na.rm = TRUE
-      ),
-      n_spill_hrs_present = sum(
-        if_else(distance_m <= radius, as.integer(!is.na(spill_hrs_mo)), 0L),
-        na.rm = TRUE
+        na.rm = FALSE
       ),
       .groups = "drop"
-    ) %>%
-    # Calculate quality proportions
-    mutate(
-      prop_spill_count_na = if_else(
-        n_site_months > 0,
-        1 - (n_spill_count_present / n_site_months), 0 
-      ),
-      prop_spill_hrs_na = if_else(
-        n_site_months > 0,
-        1 - (n_spill_hrs_present / n_site_months), 0 
-      )
-    ) %>% 
-    select(-n_spill_count_present, -n_spill_hrs_present) %>% 
-    filter(!(prop_spill_count_na == 1 & n_site_months > 0),
-           !(prop_spill_hrs_na == 1 & n_site_months > 0))
+    )
   gc(full = TRUE)
 
   # 2. Mean distance: using distinct house-site pairs
@@ -248,11 +224,11 @@ create_all_years_db <- function(prepared_data, con) {
     summarise(
       mean_distance = mean(
         if_else(distance_m <= radius, distance_m, NA_real_),
-        na.rm = TRUE
+        na.rm = FALSE
       ),
       min_distance = min(
         if_else(distance_m <= radius, distance_m, NA_real_),
-        na.rm = TRUE
+        na.rm = FALSE
       ),
       .groups = "drop"
     )
@@ -291,46 +267,21 @@ create_prior_12mo_db <- function(prepared_data, con) {
     cross_join(radius_tbl, copy = TRUE) %>%
     group_by(house_id, radius) %>%
     summarise(
-      # Spill metrics
       spill_count = sum(
         if_else(distance_m <= radius, spill_count_mo, 0),
-        na.rm = TRUE
+        na.rm = FALSE
       ),
       spill_hrs = sum(
         if_else(distance_m <= radius, spill_hrs_mo, 0),
-        na.rm = TRUE
+        na.rm = FALSE
       ),
       n_spill_sites = n_distinct(
         if_else(distance_m <= radius, site_id, NA_integer_),
-        na.rm = TRUE
-      ),
-      # Quality metrics
-      n_site_months = sum(if_else(distance_m <= radius, 1, 0)),
-      n_spill_count_present = sum(
-        if_else(distance_m <= radius, as.integer(!is.na(spill_count_mo)), 0L),
-        na.rm = TRUE
-      ),
-      n_spill_hrs_present = sum(
-        if_else(distance_m <= radius, as.integer(!is.na(spill_hrs_mo)), 0L),
-        na.rm = TRUE
+        na.rm = FALSE
       ),
       .groups = "drop"
     ) %>%
-    # Calculate quality proportions
-    mutate(
-      prop_spill_count_na = if_else(
-        n_site_months > 0,
-        1 - (n_spill_count_present / n_site_months), 0 
-      ),
-      prop_spill_hrs_na = if_else(
-        n_site_months > 0,
-        1 - (n_spill_hrs_present / n_site_months), 0 
-      )
-    ) %>% 
-    select(-n_spill_count_present, -n_spill_hrs_present) %>% 
-    filter(!(prop_spill_count_na == 1 & n_site_months > 0),
-           !(prop_spill_hrs_na == 1 & n_site_months > 0))
-  
+    filter(!is.na(spill_count) & !is.na(spill_hrs))
   gc(full = TRUE)
 
   # 2. Mean distance: first get unique house-site pairs, then aggregate
@@ -346,11 +297,11 @@ create_prior_12mo_db <- function(prepared_data, con) {
     summarise(
       mean_distance = mean(
         if_else(distance_m <= radius, distance_m, NA_real_),
-        na.rm = TRUE
+        na.rm = FALSE
       ),
       min_distance = min(
         if_else(distance_m <= radius, distance_m, NA_real_),
-        na.rm = TRUE
+        na.rm = FALSE
       ),
       .groups = "drop"
     )
@@ -454,7 +405,47 @@ main <- function(refresh_db = FALSE) {
   })
 }
 
-# Execute main function if script is run directly
-if (sys.nframe() == 0) {
-  main(refresh_db = FALSE)
-}
+
+```
+
+```{r}
+# 1. Spill statistics: aggregate across all years
+  dat_agg_all <- house_spill_data_tbl %>%
+    cross_join(radius_tbl, copy = TRUE) %>%
+    group_by(house_id, radius) %>%
+    summarise(
+      spill_count = sum(
+        if_else(distance_m <= radius, spill_count_mo, 0),
+        na.rm = TRUE
+      ),
+      spill_hrs = sum(
+        if_else(distance_m <= radius, spill_hrs_mo, 0),
+        na.rm = TRUE
+      ),
+      n_spill_sites = n_distinct(
+        if_else(distance_m <= radius, site_id, NA_integer_),
+        na.rm = TRUE
+      ),
+      .groups = "drop"
+    )
+  gc(full = TRUE)
+
+  # 2. Mean distance: using distinct house-site pairs
+  agg_all_years_distances <- house_spill_data_tbl %>%
+    distinct(house_id, site_id, distance_m) %>%
+    cross_join(radius_tbl, copy = TRUE) %>%
+    group_by(house_id, radius) %>%
+    summarise(
+      mean_distance = mean(
+        if_else(distance_m <= radius, distance_m, NA_real_),
+        na.rm = TRUE
+      ),
+      min_distance = min(
+        if_else(distance_m <= radius, distance_m, NA_real_),
+        na.rm = TRUE
+      ),
+      .groups = "drop"
+    )
+  gc(full = TRUE)
+```
+
