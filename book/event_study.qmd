@@ -623,15 +623,18 @@ if (any(!unlist(cont_results_status))) {
 plan(sequential)
 ```
 
+
+
 ```{r}
 all_results <- list()
-rads <- c(250, 500, 1000, 2000, 5000, 10000)
+rads <- c(250, 500, 1000, 2000)
 
 for (rad in rads) {
   rad_str <- as.character(rad)
 
   # Handle binary results
-  path_binary <- here("output", "regs", paste0("binary_did_results_", rad, ".rds"))
+  path_binary <- here("output", "regs", 
+                      paste0("binary_did_results_", rad, "_qt", ".rds"))
   if (file.exists(path_binary)) {
     all_results$binary[[rad_str]] <- readRDS(path_binary)
   } else {
@@ -640,7 +643,8 @@ for (rad in rads) {
   }
 
   # Handle continuous results
-  path_cont <- here("output", "regs", paste0("cont_did_results_", rad, ".rds"))
+  path_cont <- here("output", "regs", 
+                    paste0("cont_did_results_", rad, "_qt", ".rds"))
   if (file.exists(path_cont)) {
     all_results$continuous[[rad_str]] <- readRDS(path_cont)
   } else {
@@ -888,13 +892,13 @@ Overall, all specifications show practically no effect of spills on house prices
 
 ::: {.panel-tabset group="radius-250m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
 # model_binary_log_mean_sw_norm; radius 250
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sc_mean_mo_sw_norm"
+  model = "model_bin_log_sc_mean_qt_sw_norm"
 )
 ```
 
@@ -903,15 +907,15 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sc_mean_yr_sw_norm"
+  model = "model_bin_log_sc_mean_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sh_mean_mo_sw_norm"
+  model = "model_bin_log_sh_mean_qt_sw_norm"
 )
 ```
 
@@ -920,7 +924,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sh_mean_yr_sw_norm"
+  model = "model_bin_log_sh_mean_yr_sw_norm"
 )
 ```
 
@@ -936,7 +940,7 @@ create_regression_plot(
 # model_binary_log_mean_sw_norm; radius 500
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sc_mean_mo_sw_norm"
+  model = "model_bin_log_sc_mean_qt_sw_norm"
 )
 ```
 
@@ -945,7 +949,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sc_mean_yr_sw_norm"
+  model = "model_bin_log_sc_mean_yr_sw_norm"
 )
 ```
 
@@ -955,7 +959,7 @@ create_regression_plot(
 
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sh_mean_mo_sw_norm"
+  model = "model_bin_log_sh_mean_qt_sw_norm"
 )
 ```
 
@@ -964,7 +968,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sh_mean_yr_sw_norm"
+  model = "model_bin_log_sh_mean_yr_sw_norm"
 )
 ```
 
@@ -980,7 +984,7 @@ create_regression_plot(
 # model_binary_log_mean_sw_norm; radius 1000
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sc_mean_mo_sw_norm"
+  model = "model_bin_log_sc_mean_qt_sw_norm"
 )
 ```
 
@@ -989,7 +993,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sc_mean_yr_sw_norm"
+  model = "model_bin_log_sc_mean_yr_sw_norm"
 )
 ```
 
@@ -998,7 +1002,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sh_mean_mo_sw_norm"
+  model = "model_bin_log_sh_mean_qt_sw_norm"
 )
 ```
 
@@ -1007,7 +1011,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sh_mean_yr_sw_norm"
+  model = "model_bin_log_sh_mean_yr_sw_norm"
 )
 ```
 
@@ -1023,7 +1027,7 @@ create_regression_plot(
 # model_binary_log_mean_sw_norm; radius 2000
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sc_mean_mo_sw_norm"
+  model = "model_bin_log_sc_mean_qt_sw_norm"
 )
 ```
 
@@ -1032,7 +1036,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sc_mean_yr_sw_norm"
+  model = "model_bin_log_sc_mean_yr_sw_norm"
 )
 ```
 
@@ -1041,7 +1045,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sh_mean_mo_sw_norm"
+  model = "model_bin_log_sh_mean_qt_sw_norm"
 )
 ```
 
@@ -1050,50 +1054,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sh_mean_yr_sw_norm"
-)
-```
-
-:::
-
-#### 5000m
-
-::: {.panel-tabset group="radius-5000m"}
-
-##### Count Mo
-
-```{r}
-# model_binary_log_mean_sw_norm; radius 5000
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sc_mean_mo_sw_norm"
-)
-```
-
-##### Count Yr
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sc_mean_yr_sw_norm"
-)
-```
-
-##### Duration Mo
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sh_mean_mo_sw_norm"
-)
-```
-
-##### Duration Yr
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sh_mean_yr_sw_norm"
+  model = "model_bin_log_sh_mean_yr_sw_norm"
 )
 ```
 
@@ -1115,7 +1076,7 @@ create_regression_plot(
 # model_binary_log_p50_sw_norm; radius 250
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sc_p50_mo_sw_norm"
+  model = "model_bin_log_sc_p50_qt_sw_norm"
 )
 ```
 
@@ -1124,7 +1085,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sc_p50_yr_sw_norm"
+  model = "model_bin_log_sc_p50_yr_sw_norm"
 )
 ```
 
@@ -1133,7 +1094,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sh_p50_mo_sw_norm"
+  model = "model_bin_log_sh_p50_qt_sw_norm"
 )
 ```
 
@@ -1142,7 +1103,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sh_p50_yr_sw_norm"
+  model = "model_bin_log_sh_p50_yr_sw_norm"
 )
 ```
 
@@ -1158,7 +1119,7 @@ create_regression_plot(
 # model_binary_log_p50_sw_norm; radius 500
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sc_p50_mo_sw_norm"
+  model = "model_bin_log_sc_p50_qt_sw_norm"
 )
 ```
 
@@ -1167,7 +1128,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sc_p50_yr_sw_norm"
+  model = "model_bin_log_sc_p50_yr_sw_norm"
 )
 ```
 
@@ -1176,7 +1137,7 @@ create_regression_plot(
 ```{r}  
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sh_p50_mo_sw_norm"
+  model = "model_bin_log_sh_p50_qt_sw_norm"
 )
 ```
 
@@ -1185,7 +1146,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sh_p50_yr_sw_norm"
+  model = "model_bin_log_sh_p50_yr_sw_norm"
 )
 ```
 
@@ -1201,7 +1162,7 @@ create_regression_plot(
 # model_binary_log_p50_sw_norm; radius 1000
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sc_p50_mo_sw_norm"
+  model = "model_bin_log_sc_p50_qt_sw_norm"
 )
 ```
 
@@ -1210,7 +1171,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sc_p50_yr_sw_norm"
+  model = "model_bin_log_sc_p50_yr_sw_norm"
 )
 ```
 
@@ -1219,7 +1180,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sh_p50_mo_sw_norm"
+  model = "model_bin_log_sh_p50_qt_sw_norm"
 )
 ```
 
@@ -1228,7 +1189,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sh_p50_yr_sw_norm"
+  model = "model_bin_log_sh_p50_yr_sw_norm"
 )
 ```
 
@@ -1244,7 +1205,7 @@ create_regression_plot(
 # model_binary_log_p50_sw_norm; radius 2000
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sc_p50_mo_sw_norm"
+  model = "model_bin_log_sc_p50_qt_sw_norm"
 )
 ```
 
@@ -1253,7 +1214,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sc_p50_yr_sw_norm"
+  model = "model_bin_log_sc_p50_yr_sw_norm"
 )
 ```
 
@@ -1262,7 +1223,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sh_p50_mo_sw_norm"
+  model = "model_bin_log_sh_p50_qt_sw_norm"
 )
 ```
 
@@ -1271,50 +1232,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sh_p50_yr_sw_norm"
-)
-```
-
-:::
-
-#### 5000m
-
-::: {.panel-tabset group="radius-5000m"}
-
-##### Count Mo
-
-```{r}
-# model_binary_log_p50_sw_norm; radius 5000
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sc_p50_mo_sw_norm"
-)
-```
-
-##### Count Yr
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sc_p50_yr_sw_norm"
-)
-```
-
-##### Duration Mo
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sh_p50_mo_sw_norm"
-)
-```
-
-##### Duration Yr
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sh_p50_yr_sw_norm"
+  model = "model_bin_log_sh_p50_yr_sw_norm"
 )
 ```
 
@@ -1336,7 +1254,7 @@ create_regression_plot(
 # model_binary_log_p75_sw_norm; radius 250
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sc_p75_mo_sw_norm"
+  model = "model_bin_log_sc_p75_qt_sw_norm"
 )
 ```
 
@@ -1345,7 +1263,7 @@ create_regression_plot(
 ```{r}  
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sc_p75_yr_sw_norm"
+  model = "model_bin_log_sc_p75_yr_sw_norm"
 )
 ```
 
@@ -1354,7 +1272,7 @@ create_regression_plot(
 ```{r}  
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sh_p75_mo_sw_norm"
+  model = "model_bin_log_sh_p75_qt_sw_norm"
 )
 ```
 
@@ -1363,7 +1281,7 @@ create_regression_plot(
 ```{r}  
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sh_p75_yr_sw_norm"
+  model = "model_bin_log_sh_p75_yr_sw_norm"
 )
 ```
 
@@ -1379,7 +1297,7 @@ create_regression_plot(
 # model_binary_log_p75_sw_norm; radius 500
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sc_p75_mo_sw_norm"
+  model = "model_bin_log_sc_p75_qt_sw_norm"
 )
 ```
 
@@ -1388,7 +1306,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sc_p75_yr_sw_norm"
+  model = "model_bin_log_sc_p75_yr_sw_norm"
 )
 ```
 
@@ -1397,7 +1315,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sh_p75_mo_sw_norm"
+  model = "model_bin_log_sh_p75_qt_sw_norm"
 )
 ```
 
@@ -1406,7 +1324,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sh_p75_yr_sw_norm"
+  model = "model_bin_log_sh_p75_yr_sw_norm"
 )
 ```
 
@@ -1422,7 +1340,7 @@ create_regression_plot(
 # model_binary_log_p75_sw_norm; radius 1000
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sc_p75_mo_sw_norm"
+  model = "model_bin_log_sc_p75_qt_sw_norm"
 )
 ```
 
@@ -1431,7 +1349,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sc_p75_yr_sw_norm"
+  model = "model_bin_log_sc_p75_yr_sw_norm"
 )
 ```
 
@@ -1440,7 +1358,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sh_p75_mo_sw_norm"
+  model = "model_bin_log_sh_p75_qt_sw_norm"
 )
 ```
 
@@ -1449,7 +1367,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sh_p75_yr_sw_norm"
+  model = "model_bin_log_sh_p75_yr_sw_norm"
 )
 ```
 
@@ -1465,7 +1383,7 @@ create_regression_plot(
 # model_binary_log_p75_sw_norm; radius 2000
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sc_p75_mo_sw_norm"
+  model = "model_bin_log_sc_p75_qt_sw_norm"
 )
 ```
 
@@ -1474,7 +1392,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sc_p75_yr_sw_norm"
+  model = "model_bin_log_sc_p75_yr_sw_norm"
 )
 ```
 
@@ -1483,7 +1401,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sh_p75_mo_sw_norm"
+  model = "model_bin_log_sh_p75_qt_sw_norm"
 )
 ```
 
@@ -1492,50 +1410,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sh_p75_yr_sw_norm"
-)
-```
-
-:::
-
-#### 5000m
-
-::: {.panel-tabset group="radius-5000m"}
-
-##### Count Mo
-
-```{r}
-# model_binary_log_p75_sw_norm; radius 5000
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sc_p75_mo_sw_norm"
-)
-```
-
-##### Count Yr
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sc_p75_yr_sw_norm"
-)
-```
-
-##### Duration Mo
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sh_p75_mo_sw_norm"
-)
-```
-
-##### Duration Yr
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sh_p75_yr_sw_norm"
+  model = "model_bin_log_sh_p75_yr_sw_norm"
 )
 ```
 
@@ -1557,7 +1432,7 @@ create_regression_plot(
 # model_binary_log_p90_sw_norm; radius 250
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sc_p90_mo_sw_norm"
+  model = "model_bin_log_sc_p90_qt_sw_norm"
 )
 ```
 
@@ -1566,7 +1441,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sc_p90_yr_sw_norm"
+  model = "model_bin_log_sc_p90_yr_sw_norm"
 )
 ```
 
@@ -1575,7 +1450,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sh_p90_mo_sw_norm"
+  model = "model_bin_log_sh_p90_qt_sw_norm"
 )
 ```
 
@@ -1584,7 +1459,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 250,
-  model = "model_bin_logp_sh_p90_yr_sw_norm"
+  model = "model_bin_log_sh_p90_yr_sw_norm"
 )
 ```
 
@@ -1600,7 +1475,7 @@ create_regression_plot(
 # model_binary_log_p90_sw_norm; radius 500
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sc_p90_mo_sw_norm"
+  model = "model_bin_log_sc_p90_qt_sw_norm"
 )
 ```
 
@@ -1609,7 +1484,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sc_p90_yr_sw_norm"
+  model = "model_bin_log_sc_p90_yr_sw_norm"
 )
 ```
 
@@ -1618,7 +1493,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sh_p90_mo_sw_norm"
+  model = "model_bin_log_sh_p90_qt_sw_norm"
 )
 ```
 
@@ -1627,7 +1502,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 500,
-  model = "model_bin_logp_sh_p90_yr_sw_norm"
+  model = "model_bin_log_sh_p90_yr_sw_norm"
 )
 ```
 
@@ -1643,7 +1518,7 @@ create_regression_plot(
 # model_binary_log_p90_sw_norm; radius 1000
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sc_p90_mo_sw_norm"
+  model = "model_bin_log_sc_p90_qt_sw_norm"
 )
 ```
 
@@ -1652,7 +1527,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sc_p90_yr_sw_norm"
+  model = "model_bin_log_sc_p90_yr_sw_norm"
 )
 ```
 
@@ -1661,7 +1536,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sh_p90_mo_sw_norm"
+  model = "model_bin_log_sh_p90_qt_sw_norm"
 )
 ```
 
@@ -1670,7 +1545,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 1000,
-  model = "model_bin_logp_sh_p90_yr_sw_norm"
+  model = "model_bin_log_sh_p90_yr_sw_norm"
 )
 ```
 
@@ -1686,7 +1561,7 @@ create_regression_plot(
 # model_binary_log_p90_sw_norm; radius 1000
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sc_p90_mo_sw_norm"
+  model = "model_bin_log_sc_p90_qt_sw_norm"
 )
 ```
 
@@ -1695,7 +1570,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sc_p90_yr_sw_norm"
+  model = "model_bin_log_sc_p90_yr_sw_norm"
 )
 ```
 
@@ -1704,7 +1579,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sh_p90_mo_sw_norm"
+  model = "model_bin_log_sh_p90_qt_sw_norm"
 )
 ```
 
@@ -1713,50 +1588,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "binary", radius = 2000,
-  model = "model_bin_logp_sh_p90_yr_sw_norm"
-)
-```
-
-:::
-
-#### 5000m
-
-::: {.panel-tabset group="radius-5000m"}
-
-##### Count Mo
-
-```{r}
-# model_binary_log_p90_sw_norm; radius 5000
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sc_p90_mo_sw_norm"
-)
-```
-
-##### Count Yr
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sc_p90_yr_sw_norm"
-)
-```
-
-##### Duration Mo
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sh_p90_mo_sw_norm"
-)
-```
-
-##### Duration Yr
-
-```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 5000,
-  model = "model_bin_logp_sh_p90_yr_sw_norm"
+  model = "model_bin_log_sh_p90_yr_sw_norm"
 )
 ```
 
@@ -1778,7 +1610,7 @@ create_regression_plot(
 # model_cont_log_mean_sw_norm; radius 250
 create_regression_plot(
   treatment_type = "continuous", radius = 250,
-  model = "model_cont_logp_logsc_sw_norm"
+  model = "model_cont_log_logsc_sw_norm"
 )
 ```
 
@@ -1787,7 +1619,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "continuous", radius = 250,
-  model = "model_cont_logp_logsh_sw_norm"
+  model = "model_cont_log_logsh_sw_norm"
 )
 ```
 
@@ -1803,7 +1635,7 @@ create_regression_plot(
 # model_cont_log_mean_sw_norm; radius 500
 create_regression_plot(
   treatment_type = "continuous", radius = 500,
-  model = "model_cont_logp_logsc_sw_norm"
+  model = "model_cont_log_logsc_sw_norm"
 )
 ```
 
@@ -1812,7 +1644,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "continuous", radius = 500,
-  model = "model_cont_logp_logsh_sw_norm"
+  model = "model_cont_log_logsh_sw_norm"
 )
 ```
 
@@ -1828,7 +1660,7 @@ create_regression_plot(
 # model_cont_log_mean_sw_norm; radius 1000
 create_regression_plot(
   treatment_type = "continuous", radius = 1000,
-  model = "model_cont_logp_logsc_sw_norm"
+  model = "model_cont_log_logsc_sw_norm"
 )
 ```
 
@@ -1837,7 +1669,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "continuous", radius = 1000,
-  model = "model_cont_logp_logsh_sw_norm"
+  model = "model_cont_log_logsh_sw_norm"
 )
 ```
 
@@ -1853,7 +1685,7 @@ create_regression_plot(
 # model_cont_log_mean_sw_norm; radius 2000
 create_regression_plot(
   treatment_type = "continuous", radius = 2000,
-  model = "model_cont_logp_logsc_sw_norm"
+  model = "model_cont_log_logsc_sw_norm"
 )
 ```
 
@@ -1862,32 +1694,7 @@ create_regression_plot(
 ```{r}
 create_regression_plot(
   treatment_type = "continuous", radius = 2000,
-  model = "model_cont_logp_logsh_sw_norm"
-)
-```
-
-:::
-
-#### 5000m  
-
-::: {.panel-tabset group="language"}
-
-##### Count
-
-```{r}
-# model_cont_log_mean_sw_norm; radius 5000
-create_regression_plot(
-  treatment_type = "continuous", radius = 5000,
-  model = "model_cont_logp_logsc_sw_norm"
-)
-```
-
-##### Duration
-
-```{r}
-create_regression_plot(
-  treatment_type = "continuous", radius = 5000,
-  model = "model_cont_logp_logsh_sw_norm"
+  model = "model_cont_log_logsh_sw_norm"
 )
 ```
 

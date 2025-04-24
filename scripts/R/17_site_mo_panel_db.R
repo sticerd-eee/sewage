@@ -40,7 +40,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "16_site_mo_panel_db.log")
+  log_path <- here::here("output", "log", "17_site_mo_panel_db.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
   logger::log_appender(logger::appender_file(log_path))
@@ -55,7 +55,7 @@ setup_logging <- function() {
 CONFIG <- list(
   processed_dir = here::here("data", "processed"),
   db_path = here::here("data", "duckdb.duckdb"),
-  radius_thresholds = c(250, 500, 1000, 2000, 5000)
+  radius_thresholds = c(250, 500, 1000, 2000)
 )
 
 # Database Functions
@@ -187,7 +187,7 @@ create_monthly_panel <- function(prepared_tables, con) {
   dat_mo_tbl <- prepared_tables$dat_mo_tbl
 
   # Calculate monthly metrics from spill data (outside radius loop)
-  logger::log_info("Calculating monthly spillage metrics across all sites")
+  logger::log_info("Calculating monthly spill metrics across all sites")
   monthly_metrics_base <- dat_mo_tbl %>%
     filter(!is.na(spill_count) & !is.na(spill_hrs))
 
