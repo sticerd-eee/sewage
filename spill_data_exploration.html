@@ -42,7 +42,7 @@ ul.task-list li input[type="checkbox"] {
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-d4d76bf8491c20bad77d141916dc28e1.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-840961d59ea61e9dde183d3430b0b7fd.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-2180d9982d7c035d3c98108530bcf335.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "sidebar",
   "copy-button": false,
@@ -260,8 +260,8 @@ ul.task-list li input[type="checkbox"] {
 
     <script>
 
-      function styleCell_72rjnli6mf5msauq26g9(i, j, css_id) {
-          var table = document.getElementById("tinytable_72rjnli6mf5msauq26g9");
+      function styleCell_mljudu3bpdsp208tzkyn(i, j, css_id) {
+          var table = document.getElementById("tinytable_mljudu3bpdsp208tzkyn");
           var cell = table.rows[i]?.cells[j];  // Safe navigation to avoid errors
           if (cell) {
               console.log(`Styling cell at (${i}, ${j}) with class ${css_id}`);
@@ -271,7 +271,7 @@ ul.task-list li input[type="checkbox"] {
           }
       }
       function insertSpanRow(i, colspan, content) {
-        var table = document.getElementById('tinytable_72rjnli6mf5msauq26g9');
+        var table = document.getElementById('tinytable_mljudu3bpdsp208tzkyn');
         var newRow = table.insertRow(i);
         var newCell = newRow.insertCell(0);
         newCell.setAttribute("colspan", colspan);
@@ -279,8 +279,8 @@ ul.task-list li input[type="checkbox"] {
         // this may be unsafe, but innerText does not interpret <br>
         newCell.innerHTML = content;
       }
-      function spanCell_72rjnli6mf5msauq26g9(i, j, rowspan, colspan) {
-        var table = document.getElementById("tinytable_72rjnli6mf5msauq26g9");
+      function spanCell_mljudu3bpdsp208tzkyn(i, j, rowspan, colspan) {
+        var table = document.getElementById("tinytable_mljudu3bpdsp208tzkyn");
         const targetRow = table.rows[i];
         const targetCell = targetRow.cells[j];
         for (let r = 0; r < rowspan; r++) {
@@ -310,15 +310,15 @@ ul.task-list li input[type="checkbox"] {
       window.addEventListener('load', function () {
           var cellsToStyle = [
             // tinytable style arrays after
-          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_g8j8llxpsmk18wt8x1j5',}, 
-          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_3ysqdf7lufpy7h02ffho',}, 
-          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_04hdzdasqxc4zrd14pmq',}, 
+          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_810bfzpzsjoooszu2f7k',}, 
+          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_jtu17pr5ffrnnathws89',}, 
+          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_1c3wfffmjf8midlb9uu3',}, 
           ];
 
           // Loop over the arrays to style the cells
           cellsToStyle.forEach(function (group) {
               group.positions.forEach(function (cell) {
-                  styleCell_72rjnli6mf5msauq26g9(cell.i, cell.j, group.css_id);
+                  styleCell_mljudu3bpdsp208tzkyn(cell.i, cell.j, group.css_id);
               });
           });
       });
@@ -326,12 +326,12 @@ ul.task-list li input[type="checkbox"] {
 
     <style>
       /* tinytable css entries after */
-      .table td.tinytable_css_g8j8llxpsmk18wt8x1j5, .table th.tinytable_css_g8j8llxpsmk18wt8x1j5 { border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_3ysqdf7lufpy7h02ffho, .table th.tinytable_css_3ysqdf7lufpy7h02ffho { border-top: solid black 0.1em; }
-      .table td.tinytable_css_04hdzdasqxc4zrd14pmq, .table th.tinytable_css_04hdzdasqxc4zrd14pmq { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_810bfzpzsjoooszu2f7k, .table th.tinytable_css_810bfzpzsjoooszu2f7k { border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_jtu17pr5ffrnnathws89, .table th.tinytable_css_jtu17pr5ffrnnathws89 { border-top: solid black 0.1em; }
+      .table td.tinytable_css_1c3wfffmjf8midlb9uu3, .table th.tinytable_css_1c3wfffmjf8midlb9uu3 { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
     </style>
     <div class="container">
-      <table class="table table-borderless" id="tinytable_72rjnli6mf5msauq26g9" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
+      <table class="table table-borderless" id="tinytable_mljudu3bpdsp208tzkyn" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
         <thead>
         
               <tr>
@@ -350,47 +350,47 @@ ul.task-list li input[type="checkbox"] {
         <tbody>
                 <tr>
                   <td>Spill Count</td>
-                  <td>244</td>
-                  <td>11</td>
-                  <td>38.63</td>
-                  <td>40.74</td>
-                  <td>1.00</td>
-                  <td>25.00</td>
+                  <td>245</td>
+                  <td>4</td>
+                  <td>33.57</td>
+                  <td>41.42</td>
+                  <td>0.00</td>
+                  <td>18.00</td>
                   <td>366.00</td>
-                  <td><img src="./tinytable_assets/idr6dfxxpirjhh90xczyg7.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/id7lakki0fcpmfi47jhta7.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Spill Duration (hrs)</td>
-                  <td>9388</td>
-                  <td>11</td>
-                  <td>300.82</td>
-                  <td>572.70</td>
-                  <td>0.01</td>
-                  <td>61.75</td>
-                  <td>6542.31</td>
-                  <td><img src="./tinytable_assets/idl14dsr4p50p47gbwzbjk.png" style="height: 1em;"></td>
+                  <td>9399</td>
+                  <td>4</td>
+                  <td>267.42</td>
+                  <td>604.17</td>
+                  <td>0.00</td>
+                  <td>36.27</td>
+                  <td>8760.00</td>
+                  <td><img src="./tinytable_assets/ide1vvzmoqsrgtx16bv92v.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Count &gt; 0</td>
-                  <td>2</td>
-                  <td>11</td>
-                  <td>1.00</td>
+                  <td>3</td>
+                  <td>4</td>
+                  <td>0.86</td>
+                  <td>0.35</td>
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td>1.00</td>
-                  <td><img src="./tinytable_assets/id0ilqsw54lz1uf001z0ap.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idxgtusm63euqo1ov604pg.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Duration &gt;= 15m</td>
                   <td>3</td>
-                  <td>11</td>
-                  <td>0.98</td>
-                  <td>0.14</td>
+                  <td>4</td>
+                  <td>0.84</td>
+                  <td>0.36</td>
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td><img src="./tinytable_assets/idq894734pzhaqo9k2ytjs.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idbc94bpimr6iawea6m9x2.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Water Company</td>
@@ -405,8 +405,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Anglian Water</td>
-                  <td>1213</td>
-                  <td>8.98</td>
+                  <td>1439</td>
+                  <td>9.92</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -416,8 +416,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Northumbrian Water</td>
-                  <td>1629</td>
-                  <td>12.06</td>
+                  <td>1589</td>
+                  <td>10.96</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -427,8 +427,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Severn Trent Water</td>
-                  <td>2575</td>
-                  <td>19.07</td>
+                  <td>2595</td>
+                  <td>17.90</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -438,8 +438,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>South West Water</td>
-                  <td>1308</td>
-                  <td>9.69</td>
+                  <td>1382</td>
+                  <td>9.53</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -449,8 +449,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Southern Water</td>
-                  <td>870</td>
-                  <td>6.44</td>
+                  <td>1028</td>
+                  <td>7.09</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -460,8 +460,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Thames Water</td>
-                  <td>587</td>
-                  <td>4.35</td>
+                  <td>643</td>
+                  <td>4.43</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -471,8 +471,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>United Utilities</td>
-                  <td>2082</td>
-                  <td>15.42</td>
+                  <td>2199</td>
+                  <td>15.17</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -482,7 +482,7 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Welsh Water</td>
-                  <td>110</td>
+                  <td>118</td>
                   <td>0.81</td>
                   <td></td>
                   <td></td>
@@ -493,8 +493,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Wessex Water</td>
-                  <td>1141</td>
-                  <td>8.45</td>
+                  <td>1280</td>
+                  <td>8.83</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -504,8 +504,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Yorkshire Water</td>
-                  <td>1987</td>
-                  <td>14.72</td>
+                  <td>2227</td>
+                  <td>15.36</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -527,8 +527,8 @@ ul.task-list li input[type="checkbox"] {
 
     <script>
 
-      function styleCell_98y77nkpd1o0q6qv66kv(i, j, css_id) {
-          var table = document.getElementById("tinytable_98y77nkpd1o0q6qv66kv");
+      function styleCell_fn228xdnwaldwrmb4kc2(i, j, css_id) {
+          var table = document.getElementById("tinytable_fn228xdnwaldwrmb4kc2");
           var cell = table.rows[i]?.cells[j];  // Safe navigation to avoid errors
           if (cell) {
               console.log(`Styling cell at (${i}, ${j}) with class ${css_id}`);
@@ -538,7 +538,7 @@ ul.task-list li input[type="checkbox"] {
           }
       }
       function insertSpanRow(i, colspan, content) {
-        var table = document.getElementById('tinytable_98y77nkpd1o0q6qv66kv');
+        var table = document.getElementById('tinytable_fn228xdnwaldwrmb4kc2');
         var newRow = table.insertRow(i);
         var newCell = newRow.insertCell(0);
         newCell.setAttribute("colspan", colspan);
@@ -546,8 +546,8 @@ ul.task-list li input[type="checkbox"] {
         // this may be unsafe, but innerText does not interpret <br>
         newCell.innerHTML = content;
       }
-      function spanCell_98y77nkpd1o0q6qv66kv(i, j, rowspan, colspan) {
-        var table = document.getElementById("tinytable_98y77nkpd1o0q6qv66kv");
+      function spanCell_fn228xdnwaldwrmb4kc2(i, j, rowspan, colspan) {
+        var table = document.getElementById("tinytable_fn228xdnwaldwrmb4kc2");
         const targetRow = table.rows[i];
         const targetCell = targetRow.cells[j];
         for (let r = 0; r < rowspan; r++) {
@@ -577,15 +577,15 @@ ul.task-list li input[type="checkbox"] {
       window.addEventListener('load', function () {
           var cellsToStyle = [
             // tinytable style arrays after
-          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_fa18ofwi5yll87pnvpas',}, 
-          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_bwsq2o2jlf45yfia11h2',}, 
-          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_kj0p0rlvjghbsyfvhcsj',}, 
+          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_3a6cgl9jf4saqs06517n',}, 
+          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_r2ppjjos0u5gb9xlt8wi',}, 
+          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_a4yfg0bbm382mdz71uwy',}, 
           ];
 
           // Loop over the arrays to style the cells
           cellsToStyle.forEach(function (group) {
               group.positions.forEach(function (cell) {
-                  styleCell_98y77nkpd1o0q6qv66kv(cell.i, cell.j, group.css_id);
+                  styleCell_fn228xdnwaldwrmb4kc2(cell.i, cell.j, group.css_id);
               });
           });
       });
@@ -593,12 +593,12 @@ ul.task-list li input[type="checkbox"] {
 
     <style>
       /* tinytable css entries after */
-      .table td.tinytable_css_fa18ofwi5yll87pnvpas, .table th.tinytable_css_fa18ofwi5yll87pnvpas { border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_bwsq2o2jlf45yfia11h2, .table th.tinytable_css_bwsq2o2jlf45yfia11h2 { border-top: solid black 0.1em; }
-      .table td.tinytable_css_kj0p0rlvjghbsyfvhcsj, .table th.tinytable_css_kj0p0rlvjghbsyfvhcsj { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_3a6cgl9jf4saqs06517n, .table th.tinytable_css_3a6cgl9jf4saqs06517n { border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_r2ppjjos0u5gb9xlt8wi, .table th.tinytable_css_r2ppjjos0u5gb9xlt8wi { border-top: solid black 0.1em; }
+      .table td.tinytable_css_a4yfg0bbm382mdz71uwy, .table th.tinytable_css_a4yfg0bbm382mdz71uwy { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
     </style>
     <div class="container">
-      <table class="table table-borderless" id="tinytable_98y77nkpd1o0q6qv66kv" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
+      <table class="table table-borderless" id="tinytable_fn228xdnwaldwrmb4kc2" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
         <thead>
         
               <tr>
@@ -617,47 +617,47 @@ ul.task-list li input[type="checkbox"] {
         <tbody>
                 <tr>
                   <td>Spill Count</td>
-                  <td>222</td>
-                  <td>26</td>
-                  <td>29.66</td>
-                  <td>34.66</td>
-                  <td>1.00</td>
-                  <td>19.00</td>
-                  <td>364.00</td>
-                  <td><img src="./tinytable_assets/idmrijqn70rvkl7zwjtqmf.png" style="height: 1em;"></td>
+                  <td>227</td>
+                  <td>17</td>
+                  <td>24.32</td>
+                  <td>33.85</td>
+                  <td>0.00</td>
+                  <td>12.00</td>
+                  <td>366.00</td>
+                  <td><img src="./tinytable_assets/id0fjeotv4tnezl2wnahm3.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Spill Duration (hrs)</td>
-                  <td>7325</td>
-                  <td>26</td>
-                  <td>175.07</td>
-                  <td>429.63</td>
+                  <td>7389</td>
+                  <td>17</td>
+                  <td>143.90</td>
+                  <td>405.07</td>
                   <td>0.00</td>
-                  <td>34.00</td>
+                  <td>16.25</td>
                   <td>10082.11</td>
-                  <td><img src="./tinytable_assets/idz0th07cikdof1i4v7fia.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idscm1x24uhgdsuomjewhr.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Count &gt; 0</td>
-                  <td>2</td>
-                  <td>26</td>
-                  <td>1.00</td>
+                  <td>3</td>
+                  <td>17</td>
+                  <td>0.81</td>
+                  <td>0.39</td>
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td>1.00</td>
-                  <td><img src="./tinytable_assets/idh44v9ixwofi4ikmycw4d.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/id409cggpvlfvd9ht2b3vv.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Duration &gt;= 15m</td>
                   <td>3</td>
-                  <td>26</td>
-                  <td>0.97</td>
-                  <td>0.16</td>
+                  <td>17</td>
+                  <td>0.79</td>
+                  <td>0.41</td>
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td><img src="./tinytable_assets/idiqmub8jvdud4eva0kkzb.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idpcuqrsvceb1pf82imtvk.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Water Company</td>
@@ -672,8 +672,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Anglian Water</td>
-                  <td>1186</td>
-                  <td>9.09</td>
+                  <td>1439</td>
+                  <td>9.92</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -683,8 +683,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Northumbrian Water</td>
-                  <td>1584</td>
-                  <td>12.14</td>
+                  <td>1589</td>
+                  <td>10.96</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -694,8 +694,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Severn Trent Water</td>
-                  <td>2437</td>
-                  <td>18.68</td>
+                  <td>2595</td>
+                  <td>17.90</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -705,8 +705,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>South West Water</td>
-                  <td>1256</td>
-                  <td>9.63</td>
+                  <td>1382</td>
+                  <td>9.53</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -716,8 +716,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Southern Water</td>
-                  <td>862</td>
-                  <td>6.61</td>
+                  <td>1028</td>
+                  <td>7.09</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -727,8 +727,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Thames Water</td>
-                  <td>570</td>
-                  <td>4.37</td>
+                  <td>643</td>
+                  <td>4.43</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -738,8 +738,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>United Utilities</td>
-                  <td>2017</td>
-                  <td>15.46</td>
+                  <td>2199</td>
+                  <td>15.17</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -749,8 +749,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Welsh Water</td>
-                  <td>110</td>
-                  <td>0.84</td>
+                  <td>118</td>
+                  <td>0.81</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -760,8 +760,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Wessex Water</td>
-                  <td>1137</td>
-                  <td>8.72</td>
+                  <td>1280</td>
+                  <td>8.83</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -771,8 +771,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Yorkshire Water</td>
-                  <td>1884</td>
-                  <td>14.44</td>
+                  <td>2227</td>
+                  <td>15.36</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -794,8 +794,8 @@ ul.task-list li input[type="checkbox"] {
 
     <script>
 
-      function styleCell_8ku53g90bk1y2htv10sp(i, j, css_id) {
-          var table = document.getElementById("tinytable_8ku53g90bk1y2htv10sp");
+      function styleCell_xy89d0vlib686avsit65(i, j, css_id) {
+          var table = document.getElementById("tinytable_xy89d0vlib686avsit65");
           var cell = table.rows[i]?.cells[j];  // Safe navigation to avoid errors
           if (cell) {
               console.log(`Styling cell at (${i}, ${j}) with class ${css_id}`);
@@ -805,7 +805,7 @@ ul.task-list li input[type="checkbox"] {
           }
       }
       function insertSpanRow(i, colspan, content) {
-        var table = document.getElementById('tinytable_8ku53g90bk1y2htv10sp');
+        var table = document.getElementById('tinytable_xy89d0vlib686avsit65');
         var newRow = table.insertRow(i);
         var newCell = newRow.insertCell(0);
         newCell.setAttribute("colspan", colspan);
@@ -813,8 +813,8 @@ ul.task-list li input[type="checkbox"] {
         // this may be unsafe, but innerText does not interpret <br>
         newCell.innerHTML = content;
       }
-      function spanCell_8ku53g90bk1y2htv10sp(i, j, rowspan, colspan) {
-        var table = document.getElementById("tinytable_8ku53g90bk1y2htv10sp");
+      function spanCell_xy89d0vlib686avsit65(i, j, rowspan, colspan) {
+        var table = document.getElementById("tinytable_xy89d0vlib686avsit65");
         const targetRow = table.rows[i];
         const targetCell = targetRow.cells[j];
         for (let r = 0; r < rowspan; r++) {
@@ -844,15 +844,15 @@ ul.task-list li input[type="checkbox"] {
       window.addEventListener('load', function () {
           var cellsToStyle = [
             // tinytable style arrays after
-          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_hmd7fym7m8s26tin7u8e',}, 
-          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_zwdmyf4oq2gxbnziwu1d',}, 
-          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_ghwni1hrg17s477t9uku',}, 
+          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_leuycr7xikag3tyr74w8',}, 
+          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_ceiyz62rbngy5ha7pyik',}, 
+          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_9r9m4coup1e4pttxyuhd',}, 
           ];
 
           // Loop over the arrays to style the cells
           cellsToStyle.forEach(function (group) {
               group.positions.forEach(function (cell) {
-                  styleCell_8ku53g90bk1y2htv10sp(cell.i, cell.j, group.css_id);
+                  styleCell_xy89d0vlib686avsit65(cell.i, cell.j, group.css_id);
               });
           });
       });
@@ -860,12 +860,12 @@ ul.task-list li input[type="checkbox"] {
 
     <style>
       /* tinytable css entries after */
-      .table td.tinytable_css_hmd7fym7m8s26tin7u8e, .table th.tinytable_css_hmd7fym7m8s26tin7u8e { border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_zwdmyf4oq2gxbnziwu1d, .table th.tinytable_css_zwdmyf4oq2gxbnziwu1d { border-top: solid black 0.1em; }
-      .table td.tinytable_css_ghwni1hrg17s477t9uku, .table th.tinytable_css_ghwni1hrg17s477t9uku { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_leuycr7xikag3tyr74w8, .table th.tinytable_css_leuycr7xikag3tyr74w8 { border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_ceiyz62rbngy5ha7pyik, .table th.tinytable_css_ceiyz62rbngy5ha7pyik { border-top: solid black 0.1em; }
+      .table td.tinytable_css_9r9m4coup1e4pttxyuhd, .table th.tinytable_css_9r9m4coup1e4pttxyuhd { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
     </style>
     <div class="container">
-      <table class="table table-borderless" id="tinytable_8ku53g90bk1y2htv10sp" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
+      <table class="table table-borderless" id="tinytable_xy89d0vlib686avsit65" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
         <thead>
         
               <tr>
@@ -884,47 +884,47 @@ ul.task-list li input[type="checkbox"] {
         <tbody>
                 <tr>
                   <td>Spill Count</td>
-                  <td>244</td>
-                  <td>11</td>
-                  <td>38.63</td>
-                  <td>40.74</td>
-                  <td>1.00</td>
-                  <td>25.00</td>
+                  <td>259</td>
+                  <td>19</td>
+                  <td>31.63</td>
+                  <td>40.52</td>
+                  <td>0.00</td>
+                  <td>17.00</td>
                   <td>366.00</td>
-                  <td><img src="./tinytable_assets/idmsd4i53nb7zvjk7pb34t.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idjcp7pmhjuzkhe27qf9xd.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Spill Duration (hrs)</td>
-                  <td>9388</td>
-                  <td>11</td>
-                  <td>300.82</td>
-                  <td>572.70</td>
-                  <td>0.01</td>
-                  <td>61.75</td>
-                  <td>6542.31</td>
-                  <td><img src="./tinytable_assets/id36izjrq3x05dza39uyz0.png" style="height: 1em;"></td>
+                  <td>8275</td>
+                  <td>19</td>
+                  <td>231.54</td>
+                  <td>535.07</td>
+                  <td>0.00</td>
+                  <td>30.75</td>
+                  <td>14074.25</td>
+                  <td><img src="./tinytable_assets/idcrluvk9s1v0whzjqmtb8.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Count &gt; 0</td>
-                  <td>2</td>
-                  <td>11</td>
-                  <td>1.00</td>
+                  <td>3</td>
+                  <td>19</td>
+                  <td>0.86</td>
+                  <td>0.35</td>
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td>1.00</td>
-                  <td><img src="./tinytable_assets/id554nf2o7essb5xcsvde4.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/id7k2q8kh4xov4yufa8adh.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Duration &gt;= 15m</td>
                   <td>3</td>
-                  <td>11</td>
-                  <td>0.98</td>
-                  <td>0.14</td>
+                  <td>19</td>
+                  <td>0.84</td>
+                  <td>0.37</td>
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td><img src="./tinytable_assets/idczhmaedbut857xcavomz.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idutwwmrjzae2a252mdf0t.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Water Company</td>
@@ -939,8 +939,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Anglian Water</td>
-                  <td>1213</td>
-                  <td>8.98</td>
+                  <td>1439</td>
+                  <td>9.92</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -950,8 +950,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Northumbrian Water</td>
-                  <td>1629</td>
-                  <td>12.06</td>
+                  <td>1589</td>
+                  <td>10.96</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -961,8 +961,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Severn Trent Water</td>
-                  <td>2575</td>
-                  <td>19.07</td>
+                  <td>2595</td>
+                  <td>17.90</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -972,8 +972,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>South West Water</td>
-                  <td>1308</td>
-                  <td>9.69</td>
+                  <td>1382</td>
+                  <td>9.53</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -983,8 +983,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Southern Water</td>
-                  <td>870</td>
-                  <td>6.44</td>
+                  <td>1028</td>
+                  <td>7.09</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -994,8 +994,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Thames Water</td>
-                  <td>587</td>
-                  <td>4.35</td>
+                  <td>643</td>
+                  <td>4.43</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -1005,8 +1005,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>United Utilities</td>
-                  <td>2082</td>
-                  <td>15.42</td>
+                  <td>2199</td>
+                  <td>15.17</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -1016,7 +1016,7 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Welsh Water</td>
-                  <td>110</td>
+                  <td>118</td>
                   <td>0.81</td>
                   <td></td>
                   <td></td>
@@ -1027,8 +1027,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Wessex Water</td>
-                  <td>1141</td>
-                  <td>8.45</td>
+                  <td>1280</td>
+                  <td>8.83</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -1038,8 +1038,8 @@ ul.task-list li input[type="checkbox"] {
                 </tr>
                 <tr>
                   <td>Yorkshire Water</td>
-                  <td>1987</td>
-                  <td>14.72</td>
+                  <td>2227</td>
+                  <td>15.36</td>
                   <td></td>
                   <td></td>
                   <td></td>
@@ -1277,13 +1277,13 @@ ul.task-list li input[type="checkbox"] {
 <tbody>
 <tr class="odd">
 <td style="text-align: left;">Complete</td>
-<td style="text-align: right;">23585</td>
-<td style="text-align: right;">59.7</td>
+<td style="text-align: right;">32151</td>
+<td style="text-align: right;">73.9</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">Incomplete</td>
-<td style="text-align: right;">15947</td>
-<td style="text-align: right;">40.3</td>
+<td style="text-align: right;">11349</td>
+<td style="text-align: right;">26.1</td>
 </tr>
 </tbody>
 </table>
