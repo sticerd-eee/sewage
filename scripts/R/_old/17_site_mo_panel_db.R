@@ -65,12 +65,12 @@ CONFIG <- list(
 #' @return DuckDB connection object
 connect_to_db <- function() {
   logger::log_info("Connecting to DuckDB at {CONFIG$db_path}")
-  
+
   tryCatch(
     {
       con <- DBI::dbConnect(duckdb::duckdb(), dbdir = CONFIG$db_path)
-      dbExecute(con, "PRAGMA memory_limit='16GB'")
-      dbExecute(con, "PRAGMA max_memory='16GB'")
+      dbExecute(con, "PRAGMA memory_limit='14GB'")
+      dbExecute(con, "PRAGMA max_memory='13GB'")
       dbExecute(con, "PRAGMA max_temp_directory_size='500GiB'")
       logger::log_info("Database connection established")
       return(con)
@@ -88,10 +88,10 @@ connect_to_db <- function() {
 #' @return NULL
 load_data_to_db <- function(con) {
   logger::log_info("Loading datasets into DuckDB")
-  
+
   # Check if tables already exist
   existing_tables <- DBI::dbListTables(con)
-  
+
   # Load house price data if needed
   if (!"house_price_data" %in% existing_tables) {
     logger::log_info("Loading house price data")
@@ -103,7 +103,7 @@ load_data_to_db <- function(con) {
     rm(house_price_data)
     logger::log_info("House price data loaded")
   }
-  
+
   # Load spill lookup data if needed
   if (!"spill_lookup" %in% existing_tables) {
     logger::log_info("Loading spill lookup data")
@@ -115,15 +115,17 @@ load_data_to_db <- function(con) {
     rm(spill_lookup)
     logger::log_info("Spill lookup data loaded")
   }
-  
+
   # Load monthly spill data if needed
   if (!"dat_mo" %in% existing_tables) {
     logger::log_info("Loading monthly spill data")
     dat_mo <- import(
       file.path(
-        CONFIG$processed_dir, "spill_aggregated", "agg_spill_mo.parquet"),
-      trust = TRUE)
-    
+        CONFIG$processed_dir, "spill_aggregated", "agg_spill_mo.parquet"
+      ),
+      trust = TRUE
+    )
+
     dat_mo <- dat_mo %>%
       select(water_company, site_id, year, month, spill_count_mo, spill_hrs_mo) %>%
       arrange(site_id, year, month)

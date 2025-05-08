@@ -882,60 +882,12 @@ res_fuzzy_unique <- run_fuzzy_matching(
 ## Clean data
 
 ```{r}
-fuzzy_results
+output_dir = here::here("data", "processed", "matched_events_annual_data")
+site_metadata_path <- file.path(output_dir, "site_metadata.parquet")
+metadata <- import(site_metadata_path)
 
-finalise_merged_data <- function(fuzzy_results) {
-  # Load lookup and annual returns
-  lookup <- import(CONFIG$data_path_lookup)
-  annual_returns <- import(CONFIG$data_path_annual)
-  
-  # Build lookup with per-year outlet discharge NGR
-  years_lookup <- 2021:2024
-  lookup <- purrr::reduce(
-    yearsannual returns for the years of interestookup, .init = lookup,
-    function(acc, yr) {
-      year_id <- paste0("site_id_", yr)
-      ngr_col <- paste0("outlet_discharge_ngr_", yr)
-      coords <- annual_returns %>%
-        filter(year == yr) %>%
-        select({{year_id}}, outlet_discharge_ngr) %>%
-        rename({{ngr_col}} := outlet_discharge_ngr)
-      left_join(acc, coords, by = year_id, na_matches = "never")
-    }
-  )
-  
-  # Enrich matched_combined for each year, then combine
-  enriched <- purrr::map(
-    CONFIG$years,
-    function(y) {
-      id_col <- paste0("site_id_", y)
-      other_ids <- setdiff(paste0("site_id_", years_lookup), id_col)
-      fuzzy_results$matched_combined %>%
-        filter(!is.na(.data[[id_col]])) %>%
-        select(-any_of(other_ids)) %>%
-        left_join(lookup, by = id_col)
-    }
-  ) %>% 
-    rbindlist(., use.names = TRUE, fill = TRUE) %>% 
-    rename(ngr_og = outlet_discharge_ngr) %>% 
-    mutate(
-      ngr = coalesce(
-        outlet_discharge_ngr_2024,
-        outlet_discharge_ngr_2023,
-        outlet_discharge_ngr_2022,
-        outlet_discharge_ngr_2021)) 
-  
-  fuzzy_results$matched_combined <- enriched
-  
-  # Trim all list elements to desired columns
-  purrr::map(
-    fuzzy_results,
-    ~ dplyr::select(.x, any_of(CONFIG$keep_cols))
-  ) %>% 
-    return()
-}
-
-lookup %>% 
-  filter(site_id_2021==1302)
+output_dir = here::here("data", "processed", "matched_events_annual_data")
+matched_path <- file.path(output_dir, "matched_events_annual_data.parquet")
+matched <- import(matched_path)
 ```
 

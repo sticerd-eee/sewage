@@ -31,13 +31,8 @@ if (!requireNamespace("renv", quietly = TRUE)) {
 
 # Load required packages
 required_packages <- c(
-  "rmarkdown", "rio", "tidyverse", "purrr", "here",
-  "janitor", "sf", "sp", "rnaturalearth",
-  "rnaturalearthdata", "rnrfa", "DescTools",
-  "modelsummary", "tmap", "leaflet",
-  "htmltools", "servr", "viridis", "data.table",
-  "reactable", "htmlwidgets", "reactablefmtr", "dbplyr",
-  "DIDmultiplegtDYN", "arrow"
+  "rmarkdown", "rio", "tidyverse", "purrr", "here", "janitor", "viridis",
+  "data.table", "DIDmultiplegtDYN", "arrow", "furrr"
 )
 install_if_missing <- function(packages) {
   new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
@@ -82,759 +77,477 @@ theme_pref <- theme_minimal() +
 #| eval: false
 #| include: false
 
-# Set up parallel plan (adjust workers based on RAM and cores)
-num_workers <- 2
-plan(multisession, workers = num_workers)
+# ---------- Function to run event study ----------
 
-# message(paste("Setting up parallel execution using 'multicore' with", num_workers, "workers..."))
-message(paste("Setting up parallel execution using 'multisession' with", num_workers, "workers..."))
+# Build model name (helper function)
+build_model_name <- function(outcome,
+                             treatment_threshold,
+                             time_agg,
+                             normalized,
+                             same_switchers,
+                             treatment_type,
+                             controls = NULL) {
+  # Set binary (bin) or continuous
+  base <- "model_"
+  base <- ifelse(
+    treatment_threshold == "cont", paste0(base, "cont"), paste0(base, "bin")
+  )
 
-# The rest of the script uses this plan via future_lapply
+  # Set spill statistic
+  base <- ifelse(grepl("log_", outcome), paste0(base, "_logp"), base)
+  base <- ifelse(grepl("_w$", outcome), paste0(base, "_w"), base)
+  tt <- ifelse(grepl("spill_count", treatment_type), "sc", "sh")
 
-# Binary
-# Function to run event study models with flexible parameters
-run_bin_event_study <- function(param_grid, rad = 2000, overwrite = FALSE) {
-  # Path for results files
-  results_path <- here("book", "book_regs", paste0("binary_did_results_", rad, ".rds"))
-  partial_path <- here("book", "book_regs", paste0("binary_did_results_partial_", rad, ".rds"))
+  # Set model name
+  base <- paste(base, tt, treatment_threshold, time_agg, sep = "_")
 
-  # Create directory if it doesn't exist
-  results_dir <- dirname(results_path)
-  if (!dir.exists(results_dir)) {
-    dir.create(results_dir, recursive = TRUE)
-    message("Created directory: ", results_dir)
+  # Set model parameters
+  if (same_switchers) base <- paste0(base, "_sw")
+  if (normalized) base <- paste0(base, "_norm")
+
+  # Set controls
+  if (!is.null(controls) && length(controls)) {
+    ctrl_suffix <- paste(controls, collapse = "_")
+    base <- paste(base, ctrl_suffix, sep = "_")
   }
 
-  # Load existing results if not overwriting and file exists
-  existing_results <- list()
-  if (!overwrite && file.exists(results_path)) {
-    existing_results <- readRDS(results_path)
-    message("Loaded existing results from: ", results_path)
-  } else if (!overwrite) {
-    message("No existing results file found or overwrite=TRUE. Starting fresh for radius ", rad)
+  return(base)
+}
+
+# Build model description (helper function)
+build_description <- function(outcome,
+                              treatment_threshold,
+                              time_agg,
+                              treatment_type,
+                              normalized,
+                              same_switchers,
+                              controls = NULL) {
+  # Labels
+  outcome_lbl <- dplyr::case_when(
+    outcome == "price_median_w" ~ "Weighted Price Median",
+    outcome == "log_price_median_w" ~ "Weighted Log Price Median",
+    outcome == "price_median" ~ "Price Median",
+    outcome == "log_price_median" ~ "Log Price Median",
+    outcome == "price" ~ "Price",
+    outcome == "log_price" ~ "Log Price",
+    TRUE ~ outcome
+  )
+
+  threshold_lbl <- dplyr::case_when(
+    treatment_threshold == "mean" ~ "Mean",
+    treatment_threshold == "p50" ~ "P50",
+    treatment_threshold == "p75" ~ "P75",
+    treatment_threshold == "p90" ~ "P90",
+    treatment_threshold == "max" ~ "Max",
+    treatment_threshold == "cont" ~ "Continuous",
+    TRUE ~ stringr::str_to_title(treatment_threshold)
+  )
+
+  time_lbl <- dplyr::case_when(
+    time_agg == "mo" ~ "Monthly",
+    time_agg == "qtr" ~ "Quarterly",
+    time_agg == "yr" ~ "Yearly",
+    TRUE ~ time_agg
+  )
+  time_lbl <- ifelse(threshold_lbl == "Continuous", "", time_lbl)
+
+  treat_lbl <- dplyr::case_when(
+    grepl("spill_count", treatment_type) & treatment_threshold != "cont"
+    ~ "Spill Count",
+    grepl("spill_hrs", treatment_type) & treatment_threshold != "cont"
+    ~ "Spill Hours",
+    grepl("spill_count", treatment_type) & treatment_threshold == "cont"
+    ~ "Log Spill Count",
+    grepl("spill_hrs", treatment_type) & treatment_threshold == "cont"
+    ~ "Log Spill Hours",
+    TRUE ~ NA_character_
+  )
+
+  norm_lbl <- ifelse(normalized, "Norm", "No Norm")
+  sw_lbl <- ifelse(same_switchers, "Same Switchers", "All Switchers")
+
+  ctrl_lbl <- if (is.null(controls) || length(controls) == 0) {
+    ""
   } else {
-    message("overwrite=TRUE. Starting fresh for radius ", rad)
+    paste0("; Controls: ", paste(controls, collapse = ", "))
   }
 
-  # Load the dataset for the current radius
-  message(paste("Loading data for radius:", rad))
-  dat_panel_site <- tryCatch(
-    {
-      open_dataset(
-        here::here("data", "processed", "dat_panel_site_mo")
-      ) %>%
-        filter(radius == rad) %>%
-        collect()
-    },
-    error = function(e) {
-      message("Error loading data for radius ", rad, ": ", e$message)
-      return(NULL) # Return NULL if data loading fails
-    }
+  # Compose
+  glue::glue(
+    "{outcome_lbl} ~ {time_lbl} {threshold_lbl} {treat_lbl} ",
+    "({norm_lbl}, {sw_lbl}{ctrl_lbl})"
+  ) %>%
+    as.character()
+}
+
+# ---- main function --------------------------------------------------------- #
+
+run_event_study <- function(
+    param_grid,
+    data,
+    rad,
+    time_var = c("month_id", "qtr_id"),
+    group_var = "site_id",
+    cluster_var = "site_id",
+    overwrite = FALSE,
+    file_name = "did_results_site_qtr_{rad}.rds") {
+  stopifnot(
+    is.data.frame(param_grid),
+    is.data.frame(data),
+    is.logical(overwrite),
+    length(rad) == 1
   )
 
-  if (is.null(dat_panel_site)) {
-    message("Skipping radius ", rad, " due to data loading error.")
-    return(existing_results) # Return existing (potentially empty) results
-  }
-  message(paste("Data loaded successfully for radius:", rad, " - Rows:", nrow(dat_panel_site)))
-
-  # --- Helper function to run a single model ---
-  run_single_bin_model <- function(params, data_for_radius) {
-    # Extract parameters from the list 'params'
-    outcome <- params$outcome
-    treatment_threshold <- params$treatment_threshold
-    time_agg <- params$time_agg
-    normalized <- params$normalized
-    same_switchers <- params$same_switchers
-    treatment_type <- params$treatment_type
-
-    # Construct the treatment variable name dynamically
-    treatment_var <- paste0("treated_", treatment_type, "_", treatment_threshold, "_", time_agg)
-
-    # Build model name
-    outcome_suffix <- ifelse(outcome == "log_price_median_w", "_logpw", "_logp")
-    treat_type_suffix <- ifelse(treatment_type == "spill_count", "_sc", "_sh")
-    threshold_suffix <- paste0("_", treatment_threshold)
-    time_agg_suffix <- paste0("_", time_agg)
-    sw_suffix <- if (same_switchers) "_sw" else ""
-    norm_suffix <- if (normalized) "_norm" else ""
-    model_name <- paste0(
-      "model_bin", # Base name
-      outcome_suffix, # _logp or _logpw
-      treat_type_suffix, # _sc or _sh
-      threshold_suffix, # _mean, _p50, etc.
-      time_agg_suffix, # _mo or _yr
-      sw_suffix, # _sw (if TRUE)
-      norm_suffix # _norm (if TRUE)
-    )
-
-    # Build model description
-    outcome_label <- case_when(
-      outcome == "price_median_w" ~ "Weighted Price Median",
-      outcome == "log_price_median_w" ~ "Weighted Log Price Median",
-      outcome == "price_median" ~ "Price Median",
-      outcome == "log_price_median" ~ "Log Price Median",
-      TRUE ~ outcome
-    )
-    threshold_label <- case_when(
-      treatment_threshold == "mean" ~ "Mean",
-      treatment_threshold == "p50" ~ "P50",
-      treatment_threshold == "p75" ~ "P75",
-      treatment_threshold == "p90" ~ "P90",
-      treatment_threshold == "max" ~ "Max",
-      TRUE ~ paste0(toupper(substr(treatment_threshold, 1, 1)), substr(treatment_threshold, 2, nchar(treatment_threshold)))
-    )
-    time_agg_label <- ifelse(time_agg == "mo", "Monthly", "Yearly")
-    treat_type_label <- ifelse(treatment_type == "spill_count", "Spill Count", "Spill Hrs")
-    norm_label <- ifelse(normalized, "Norm", "No Norm")
-    switchers_label <- ifelse(same_switchers, "Same Switchers", "All Switchers")
-    model_description <- sprintf(
-      "%s ~ %s %s %s (%s, %s)",
-      outcome_label, time_agg_label, threshold_label, treat_type_label,
-      norm_label, switchers_label
-    )
-
-    cat(sprintf("Running model: %s (%s)\n", model_name, model_description))
-
-    # Run the actual DID model
-    model_result <- try(did_multiplegt_dyn(
-      df = data_for_radius,
-      outcome = outcome,
-      group = "site_id",
-      time = "month_id",
-      treatment = treatment_var,
-      effects = 12,
-      placebo = 3,
-      cluster = "site_id",
-      normalized = normalized,
-      trends_lin = FALSE,
-      same_switchers = same_switchers,
-      less_conservative_se = TRUE,
-      graph_off = TRUE # Typically turn off graph in parallel runs
-    ), silent = FALSE) # Set silent=FALSE to see errors from did_multiplegt_dyn
-
-    # Return a named list for this model
-    result <- list()
-    result[[model_name]] <- model_result
-    attr(result[[model_name]], "description") <- model_description
-    return(result)
-  }
-  # --- End Helper function ---
-
-  # Filter param_grid: Keep only models not present in existing_results if overwrite=FALSE
-  models_to_run_indices <- 1:nrow(param_grid)
-  if (!overwrite && length(existing_results) > 0) {
-    existing_model_names <- names(existing_results)
-    models_to_run_indices <- which(!apply(param_grid, 1, function(row) {
-      # Reconstruct model name to check existence (ensure this logic matches exactly)
-      outcome <- row[["outcome"]]
-      treatment_threshold <- row[["treatment_threshold"]]
-      time_agg <- row[["time_agg"]]
-      normalized <- as.logical(row[["normalized"]]) # Ensure logical
-      same_switchers <- as.logical(row[["same_switchers"]]) # Ensure logical
-      treatment_type <- row[["treatment_type"]]
-
-      model_name <- "model_bin"
-      if (grepl("log_", outcome)) model_name <- paste0(model_name, "_log")
-      if (grepl("_w$", outcome)) model_name <- paste0(model_name, "_w")
-      treat_type_short <- ifelse(treatment_type == "spill_count", "sc", "sh")
-      model_name <- paste0(model_name, "_", treat_type_short)
-      model_name <- paste0(model_name, "_", treatment_threshold)
-      model_name <- paste0(model_name, "_", time_agg)
-      if (same_switchers) model_name <- paste0(model_name, "_sw")
-      if (normalized) model_name <- paste0(model_name, "_norm")
-      return(model_name %in% existing_model_names)
-    }))
-
-    if (length(models_to_run_indices) < nrow(param_grid)) {
-      message(sprintf(
-        "Skipping %d models already present in results for radius %d.",
-        nrow(param_grid) - length(models_to_run_indices), rad
-      ))
-    }
-  }
-
-  # Convert param_grid rows to a list of lists for lapply
-  params_list <- split(param_grid[models_to_run_indices, , drop = FALSE], seq_len(length(models_to_run_indices)))
-
-  total_models_to_run <- length(params_list)
-  if (total_models_to_run == 0) {
-    message("No new models to run for radius ", rad)
-    return(existing_results)
-  }
-
-  cat(sprintf("Starting parallel model estimation for radius %d - total models to run: %d\n", rad, total_models_to_run))
-
-  # Run models in parallel using future_lapply
-  # Pass necessary objects explicitly if needed using future.globals
-  # future_lapply automatically tries to find globals, but being explicit can help
-  # Especially ensure 'dat_panel_site' and 'did_multiplegt_dyn' are available
-  new_results_list <- future_lapply(params_list, run_single_bin_model,
-    data_for_radius = dat_panel_site,
-    future.seed = TRUE, # for reproducibility if needed
-    future.globals = list(
-      did_multiplegt_dyn = DIDmultiplegtDYN::did_multiplegt_dyn,
-      case_when = dplyr::case_when
-      # Add other necessary functions/objects if errors occur
-    ),
-    future.packages = c("dplyr", "DIDmultiplegtDYN") # Explicitly load packages on workers
+  # ---- 0. results file ----------------------------------------------------- #
+  res_path <- here::here(
+    "book", "book_regs", glue::glue(file_name)
   )
+  fs::dir_create(fs::path_dir(res_path))
 
-  # Combine the list of lists into a single named list
-  new_results <- do.call(c, new_results_list)
+  existing <- if (!overwrite && fs::file_exists(res_path)) readRDS(res_path) else list()
 
-  # Combine new results with existing ones
-  # If overwrite=TRUE, existing_results is empty, so this just becomes new_results
-  # If overwrite=FALSE, this adds new results to the loaded ones
-  final_results <- c(existing_results, new_results)
-
-  # Save the final results for this radius
-  tryCatch(
-    {
-      saveRDS(final_results, file = results_path)
-      message("Results saved successfully for radius ", rad, " to: ", results_path)
-      # Optionally remove partial file if main save succeeds
-      if (file.exists(partial_path)) file.remove(partial_path)
-    },
-    error = function(e) {
-      message("Error saving final results for radius ", rad, ": ", e$message)
-      # Attempt to save partial results if final save fails
-      tryCatch(
-        {
-          saveRDS(final_results, file = partial_path)
-          message("Partial results saved for radius ", rad, " to: ", partial_path)
-        },
-        error = function(e_partial) {
-          message("CRITICAL ERROR: Failed to save even partial results for radius ", rad, ": ", e_partial$message)
-        }
+  # ---- 1. decide what we still need to run --------------------------------- #
+  param_grid <- tibble::as_tibble(param_grid) %>%
+    dplyr::mutate(
+      model_name = purrr::pmap_chr(
+        list(
+          outcome,
+          treatment_threshold,
+          time_agg,
+          normalized,
+          same_switchers,
+          treatment_type,
+          controls
+        ),
+        build_model_name
       )
-    }
+    )
+
+  existing_names <- if (length(existing)) names(existing) else character(0)
+
+  todo <- dplyr::anti_join(
+    param_grid,
+    tibble::tibble(model_name = existing_names),
+    by = "model_name"
   )
 
-  cat("Finished model estimation for radius ", rad, "\n")
-
-  # Return results invisibly
-  invisible(final_results)
-}
-
-binary_param_grid <- expand.grid(
-  outcome = c("log_price_median", "log_price_median_w"),
-  treatment_threshold = c("mean", "p50", "p75", "p90", "max"),
-  time_agg = c("mo", "yr"),
-  treatment_type = c("spill_count", "spill_hrs"),
-  normalized = c(TRUE),
-  same_switchers = c(TRUE),
-  stringsAsFactors = FALSE
-)
-
-# Define radii
-radii <- c(500, 250)
-
-# NEW sequential radii loop
-bin_results_status <- list()
-for (r in radii) {
-  message(paste("\n--- Starting processing for radius:", r, "---\n"))
-  success <- tryCatch(
-    {
-      # Call the function for the current radius.
-      # Set overwrite = FALSE to append/skip existing models by default
-      # Set overwrite = TRUE if you want to rerun everything for this radius
-      run_bin_event_study(binary_param_grid, rad = r, overwrite = FALSE)
-      TRUE # Indicate success
-    },
-    error = function(e) {
-      message(paste("Error processing binary models for radius:", r, "-", e$message))
-      FALSE # Indicate failure
-    }
-  )
-  bin_results_status[[as.character(r)]] <- success # Store status by radius
-  # Optional: Add a small delay or GC call between radii if memory is an issue
-  gc()
-  Sys.sleep(1) # Small pause
-}
-
-message("Finished all binary event studies.")
-# Check if any radius failed
-if (any(!unlist(bin_results_status))) {
-  failed_radii <- names(bin_results_status)[!unlist(bin_results_status)]
-  warning("Binary event studies failed for radii: ", paste(failed_radii, collapse = ", "), ". Check logs.")
-} else {
-  message("All binary event studies completed successfully for all radii.")
-}
-
-# Clean up memory before continuous runs
-gc()
-
-
-##########################################
-
-
-# Continuous treatment
-# Function to run event study models with flexible parameters
-run_continuous_event_study <- function(param_grid, rad = 2000, overwrite = FALSE) {
-  # Path for results files
-  results_path <- here("book", "book_regs", paste0("cont_did_results_", rad, ".rds"))
-  partial_path <- here("book", "book_regs", paste0("cont_did_results_partial_", rad, ".rds"))
-
-  # Create directory if it doesn't exist
-  results_dir <- dirname(results_path)
-  if (!dir.exists(results_dir)) {
-    dir.create(results_dir, recursive = TRUE)
-    message("Created directory: ", results_dir)
+  if (nrow(todo) == 0) {
+    message("No new models to run for radius ", rad, ".")
+    return(invisible(existing))
   }
+  message("Estimating ", nrow(todo), " models for radius ", rad, "...")
 
-  # Load existing results if not overwriting and file exists
-  existing_results <- list()
-  if (!overwrite && file.exists(results_path)) {
-    existing_results <- readRDS(results_path)
-    message("Loaded existing continuous results from: ", results_path)
-  } else if (!overwrite) {
-    message("No existing continuous results file found or overwrite=TRUE. Starting fresh for radius ", rad)
-  } else {
-    message("overwrite=TRUE. Starting fresh for continuous models for radius ", rad)
-  }
+  # ---- 2. run the models (parallel) --------------------------------------- #
+  furrr::future_map(todo$model_name,
+    function(mn) {
+      # Get model iteration
+      p <- dplyr::filter(todo, model_name == mn) %>%
+        dplyr::slice(1)
 
-  # Load the dataset for the current radius
-  message(paste("Loading data for continuous models, radius:", rad))
-  dat_panel_site <- tryCatch(
-    {
-      open_dataset(
-        here::here("data", "processed", "dat_panel_site_mo")
-      ) %>%
-        filter(radius == rad) %>%
-        collect()
-    },
-    error = function(e) {
-      message("Error loading data for continuous models, radius ", rad, ": ", e$message)
-      return(NULL) # Return NULL if data loading fails
-    }
-  )
-
-  if (is.null(dat_panel_site)) {
-    message("Skipping continuous models for radius ", rad, " due to data loading error.")
-    return(existing_results) # Return existing (potentially empty) results
-  }
-  message(paste("Data loaded successfully for continuous models, radius:", rad, " - Rows:", nrow(dat_panel_site)))
-
-  # --- Helper function to run a single continuous model ---
-  run_single_cont_model <- function(params, data_for_radius) {
-    # Extract parameters
-    outcome <- params$outcome
-    treatment_var <- params$treatment # Note: param name is 'treatment' in continuous_param_grid
-    normalized <- params$normalized
-    same_switchers <- params$same_switchers
-
-    # Build model name
-    outcome_suffix <- ifelse(outcome == "log_price_median_w", "_logpw", "_logp")
-    treat_suffix <- case_when(
-      treatment_var == "spill_count" ~ "_sc",
-      treatment_var == "log_spill_count" ~ "_logsc",
-      treatment_var == "spill_hrs" ~ "_sh",
-      treatment_var == "log_spill_hrs" ~ "_logsh",
-      TRUE ~ paste0("_", gsub("[^[:alnum:]]", "", treatment_var))
-    )
-    sw_suffix <- if (same_switchers) "_sw" else ""
-    norm_suffix <- if (normalized) "_norm" else ""
-    model_name <- paste0(
-      "model_cont", # Base name for continuous
-      outcome_suffix, # _logp or _logpw
-      treat_suffix, # _sc, _logsc, _sh, _logsh
-      sw_suffix, # _sw (if TRUE)
-      norm_suffix # _norm (if TRUE)
-    )
-
-    # Build model description
-    outcome_label <- case_when(
-      outcome == "price_median_w" ~ "Weighted Price Median",
-      outcome == "log_price_median_w" ~ "Weighted Log Price Median",
-      outcome == "price_median" ~ "Price Median",
-      outcome == "log_price_median" ~ "Log Price Median",
-      TRUE ~ outcome
-    )
-    treatment_label <- case_when(
-      treatment_var == "spill_count" ~ "Spill Count",
-      treatment_var == "log_spill_count" ~ "Log Spill Count",
-      treatment_var == "spill_hrs" ~ "Spill Hours",
-      treatment_var == "log_spill_hrs" ~ "Log Spill Hours",
-      TRUE ~ treatment_var
-    )
-    norm_label <- ifelse(normalized, "Norm", "No Norm")
-    switchers_label <- ifelse(same_switchers, "Same Switchers", "All Switchers")
-    model_description <- sprintf(
-      "%s ~ %s (Continuous; %s, %s)",
-      outcome_label, treatment_label, norm_label, switchers_label
-    )
-
-    cat(sprintf("Running model: %s (%s)\n", model_name, model_description))
-
-    # Run the actual DID model for continuous treatment
-    model_result <- try(did_multiplegt_dyn(
-      df = data_for_radius,
-      outcome = outcome,
-      group = "site_id",
-      time = "month_id",
-      treatment = treatment_var,
-      effects = 9,
-      placebo = 2,
-      cluster = "site_id",
-      normalized = normalized,
-      trends_lin = FALSE,
-      same_switchers = same_switchers,
-      less_conservative_se = TRUE,
-      graph_off = TRUE, # Turn off graph in parallel runs
-      effects_equal = TRUE # Specific to continuous setup
-    ), silent = FALSE) # Keep silent = FALSE to see errors
-
-    # Return a named list for this model
-    result <- list()
-    result[[model_name]] <- model_result
-    attr(result[[model_name]], "description") <- model_description
-    return(result)
-  }
-  # --- End Helper function ---
-
-  # Filter param_grid: Keep only models not present in existing_results if overwrite=FALSE
-  models_to_run_indices <- 1:nrow(param_grid)
-  if (!overwrite && length(existing_results) > 0) {
-    existing_model_names <- names(existing_results)
-    models_to_run_indices <- which(!apply(param_grid, 1, function(row) {
-      # Reconstruct model name to check existence
-      outcome <- row[["outcome"]]
-      treatment_var <- row[["treatment"]]
-      normalized <- as.logical(row[["normalized"]])
-      same_switchers <- as.logical(row[["same_switchers"]])
-
-      model_name <- "model_cont"
-      if (grepl("log_", outcome)) model_name <- paste0(model_name, "_log")
-      if (grepl("_w$", outcome)) model_name <- paste0(model_name, "_w")
-      treat_short_name <- gsub("spill_count", "sc", treatment_var)
-      treat_short_name <- gsub("spill_hrs", "sh", treat_short_name)
-      treat_short_name <- gsub("log_", "log", treat_short_name)
-      model_name <- paste0(model_name, "_", treat_short_name)
-      if (same_switchers) model_name <- paste0(model_name, "_sw")
-      if (normalized) model_name <- paste0(model_name, "_norm")
-      return(model_name %in% existing_model_names)
-    }))
-
-    if (length(models_to_run_indices) < nrow(param_grid)) {
-      message(sprintf(
-        "Skipping %d continuous models already present in results for radius %d.",
-        nrow(param_grid) - length(models_to_run_indices), rad
-      ))
-    }
-  }
-
-  # Convert param_grid rows to a list of lists for lapply
-  params_list <- split(param_grid[models_to_run_indices, , drop = FALSE], seq_len(length(models_to_run_indices)))
-
-  total_models_to_run <- length(params_list)
-  if (total_models_to_run == 0) {
-    message("No new continuous models to run for radius ", rad)
-    return(existing_results)
-  }
-
-  cat(sprintf("Starting parallel continuous model estimation for radius %d - total models to run: %d\n", rad, total_models_to_run))
-
-  # Run models in parallel using future_lapply
-  new_results_list <- future_lapply(params_list, run_single_cont_model,
-    data_for_radius = dat_panel_site,
-    future.seed = TRUE,
-    future.globals = list(
-      did_multiplegt_dyn = DIDmultiplegtDYN::did_multiplegt_dyn,
-      case_when = dplyr::case_when
-    ),
-    future.packages = c("dplyr", "DIDmultiplegtDYN")
-  )
-
-  # Combine the list of lists into a single named list
-  new_results <- do.call(c, new_results_list)
-
-  # Combine new results with existing ones
-  final_results <- c(existing_results, new_results)
-
-  # Save the final results for this radius
-  tryCatch(
-    {
-      saveRDS(final_results, file = results_path)
-      message("Continuous results saved successfully for radius ", rad, " to: ", results_path)
-      if (file.exists(partial_path)) file.remove(partial_path)
-    },
-    error = function(e) {
-      message("Error saving final continuous results for radius ", rad, ": ", e$message)
-      # Attempt to save partial results if final save fails
-      tryCatch(
-        {
-          saveRDS(final_results, file = partial_path)
-          message("Partial continuous results saved for radius ", rad, " to: ", partial_path)
-        },
-        error = function(e_partial) {
-          message("CRITICAL ERROR: Failed to save even partial continuous results for radius ", rad, ": ", e_partial$message)
-        }
+      # Define treatment variable
+      treatment_var <- paste0(
+        "d_",
+        p$treatment_threshold, "_",
+        p$treatment_type, "_",
+        p$time_agg
       )
-    }
-  )
+      treatment_var <- ifelse(
+        p$treatment_threshold == "cont",
+        p$treatment_type,
+        gsub("log_spill", "spill", treatment_var)
+      )
 
-  cat("Finished continuous model estimation for radius ", rad, "\n")
 
-  # Return results invisibly
-  invisible(final_results)
-}
+      desc <- build_description(
+        p$outcome,
+        p$treatment_threshold,
+        p$time_agg,
+        p$treatment_type,
+        p$normalized,
+        p$same_switchers,
+        unlist(p$controls)
+      )
 
-continuous_param_grid <- expand.grid(
-  outcome = c("log_price_median", "log_price_median_w"),
-  treatment = c("spill_count", "log_spill_count", "spill_hrs", "log_spill_hrs"),
-  normalized = c(TRUE),
-  same_switchers = c(TRUE),
-  stringsAsFactors = FALSE
-)
+      message(" • ", mn, " …")
 
-# NEW sequential radii loop
-cont_results_status <- list()
-for (r in radii) {
-  message(paste("\n--- Starting continuous processing for radius:", r, "---\n"))
-  success <- tryCatch(
-    {
-      # Call the function for the current radius.
-      # Set overwrite = FALSE to append/skip existing models by default
-      run_continuous_event_study(continuous_param_grid, rad = r, overwrite = FALSE)
-      TRUE # Indicate success
+      res <- DIDmultiplegtDYN::did_multiplegt_dyn(
+        df = data,
+        outcome = p$outcome,
+        group = group_var,
+        time = time_var,
+        treatment = treatment_var,
+        effects = 6,
+        placebo = 2,
+        cluster = cluster_var,
+        normalized = p$normalized,
+        same_switchers = p$same_switchers,
+        controls = unlist(p$controls),
+        graph_off = TRUE
+      )
+
+      attr(res, "description") <- desc
+      # return a named list so purrr::flatten will keep names
+      rlist <- list(res)
+      names(rlist) <- mn
+      rlist
     },
-    error = function(e) {
-      message(paste("Error processing continuous models for radius:", r, "-", e$message))
-      FALSE # Indicate failure
-    }
-  )
-  cont_results_status[[as.character(r)]] <- success # Store status by radius
-  # Optional: Add GC call and sleep between radii
-  gc()
-  Sys.sleep(1)
-}
+    .options = furrr::furrr_options(seed = TRUE),
+    .progress = TRUE
+  ) %>%
+    purrr::flatten() -> new_results
 
-message("Finished all continuous event studies.")
-# Check if any radius failed
-if (any(!unlist(cont_results_status))) {
-  failed_radii <- names(cont_results_status)[!unlist(cont_results_status)]
-  warning("Continuous event studies failed for radii: ", paste(failed_radii, collapse = ", "), ". Check logs.")
-} else {
-  message("All continuous event studies completed successfully for all radii.")
-}
+  # ---- 3. merge + save ----------------------------------------------------- #
+  final <- c(existing, new_results)
+  saveRDS(final, res_path)
+  message("Results saved → ", res_path)
 
-# Reset to sequential plan after parallel execution (good practice)
-plan(sequential)
+  invisible(final)
+}
 ```
 
 
+```{r}
+#| eval: false
+#| include: false
+
+param_grid_bin <- expand.grid(
+  outcome = c("log_price_median", "log_price_median_w"),
+  treatment_threshold = c("mean", "p50", "p75", "p90"),
+  time_agg = c("qtr", "yr"),
+  treatment_type = c("spill_count", "spill_hrs"),
+  normalized = c(TRUE),
+  same_switchers = c(TRUE),
+  stringsAsFactors = FALSE,
+  controls = list(NULL)
+)
+param_grid_cont <- expand.grid(
+  outcome = c("log_price_median", "log_price_median_w"),
+  treatment_threshold = c("cont"),
+  time_agg = c("qtr"),
+  treatment_type = c("log_spill_count", "log_spill_hrs"),
+  normalized = c(TRUE),
+  same_switchers = c(TRUE),
+  stringsAsFactors = FALSE,
+  controls = list(NULL)
+)
+param_grid <- bind_rows(param_grid_bin, param_grid_cont)
+
+# Radii to loop over
+radii <- c(250, 500, 1000, 2000)
+
+# Parallel processing
+plan(multisession, workers = 3)
+
+# Load data
+## Data paths
+path_house <- here::here("data", "processed", "panel_house")
+path_site <- here::here("data", "processed", "dat_panel_site_level")
+path_spill <- here::here("data", "processed", "agg_spill_stats")
+path_house_controls <- here::here("data", "processed", "house_price.parquet")
+
+# House panel data
+house_qtr <- open_dataset(path_house) %>%
+  filter(period_type == "quarterly") %>%
+  select(-contains("month"))
+# Aggregate site level panel data
+site_qtr <- open_dataset(path_site) %>%
+  filter(period_type == "quarterly") %>%
+  select(-contains("month"))
+# Spill statistics
+spill_qtr <- open_dataset(path_spill) %>%
+  filter(period_type == "quarterly") %>%
+  collect() %>%
+  select(-contains("month"), -contains("_mo"))
+# House controls
+house_controls <- open_dataset(path_house_controls) %>%
+  collect() %>%
+  select(
+    -transaction_id,
+    -price, -date_of_transfer, -postcode, -saon, -locality, -year,
+    -easting, -northing, -longitude, -latitude
+  )
+
+for (r in radii) {
+  message("Loading and preparing data for radius: ", r)
+
+  # Site level panel data
+  site_dat <- site_qtr %>%
+    filter(radius == r) %>%
+    collect()
+
+  # Form panel data
+  panel_site <- left_join(
+    site_dat, spill_qtr,
+    by = join_by(site_id, qtr_id, quarter, year, period_type)
+  )
+
+  message("Starting regressions for radius: ", r)
+  run_event_study(
+    param_grid = param_grid,
+    data = panel_site,
+    rad = r,
+    time_var = "qtr_id",
+    group_var = "site_id",
+    cluster_var = "site_id",
+    overwrite = TRUE,
+    file_name = "did_results_site_qtr_{rad}.rds"
+  )
+}
+```
+
 
 ```{r}
-all_results <- list()
-rads <- c(250, 500, 1000, 2000)
+#| eval: false
+#| include: false
 
-for (rad in rads) {
-  rad_str <- as.character(rad)
+# Create parameter grid
+param_grid_bin <- expand.grid(
+  outcome = c("log_price"),
+  treatment_threshold = c("mean", "p50", "p75", "p90"),
+  time_agg = c("qtr", "yr"),
+  treatment_type = c("spill_count", "spill_hrs"),
+  normalized = c(TRUE),
+  same_switchers = c(TRUE),
+  stringsAsFactors = FALSE,
+  controls = list(NULL, c("property_type", "old_new", "duration"))
+)
+param_grid_cont <- expand.grid(
+  outcome = c("log_price"),
+  treatment_threshold = c("cont"),
+  time_agg = c("qtr"),
+  treatment_type = c("log_spill_count", "log_spill_hrs"),
+  normalized = c(TRUE),
+  same_switchers = c(TRUE),
+  stringsAsFactors = FALSE,
+  controls = list(NULL, c("property_type", "old_new", "duration"))
+)
+param_grid <- bind_rows(param_grid_bin, param_grid_cont)
 
-  # Handle binary results
-  path_binary <- here("output", "regs", 
-                      paste0("binary_did_results_", rad, "_qt", ".rds"))
-  if (file.exists(path_binary)) {
-    all_results$binary[[rad_str]] <- readRDS(path_binary)
-  } else {
-    print(paste("Binary file does not exist:", path_binary))
-    # We don't return or skip - continue processing other files
+# Radii to loop over
+radii <- c(250, 500, 1000, 2000)
+
+# Parallel processing
+plan(multisession, workers = 3)
+
+for (r in radii) {
+  message("Loading and preparing data for radius: ", r)
+
+  # Site level panel data
+  house_dat <- house_qtr %>%
+    filter(radius == r) %>%
+    collect()
+
+  # Form panel data
+  panel_house <- left_join(
+    house_dat, spill_qtr,
+    by = join_by(site_id, qtr_id, quarter, year, period_type)
+  ) %>%
+    left_join(house_controls, by = join_by(house_id)) %>%
+    mutate(
+      property_type = factor(property_type, levels = c("D", "S", "T", "F", "O")),
+      old_new = factor(old_new, levels = c("N", "Y")),
+      duration = factor(duration, levels = c("F", "L"))
+    )
+
+  message("Starting regressions for radius: ", r)
+  run_event_study(
+    param_grid = param_grid,
+    data = panel_house,
+    rad = r,
+    time_var = "qtr_id",
+    group_var = "site_id",
+    cluster_var = "site_id",
+    overwrite = TRUE,
+    file_name = "did_results_house_qtr_{rad}.rds"
+  )
+}
+```
+
+
+## Setting {#sec-05-01-setting}
+
+```{r}
+# Load results
+load_results <- function(radii = c(250, 500, 1000, 2000),
+                         freqs = c("qtr", "mo"),
+                         dir_path = here("output", "regs"),
+                         quiet = FALSE,
+                         pattern = "*_did_results_site_{f}_{r}.rds") {
+  safe_rds <- purrr::possibly(readRDS, otherwise = NULL)
+  results <- list() # <- final nested list to be returned
+
+  for (r in radii) {
+    r_chr <- as.character(r)
+
+    for (f in freqs) {
+      pattern <- glue(pattern)
+      file <- Sys.glob(file.path(dir_path, pattern))[1] # take first match
+
+      # no file found → skip
+      if (is.na(file) || is.null(file) || file == "") next
+
+      obj <- safe_rds(file)
+      if (is.null(obj)) next # corrupted file → skip
+
+      # initialise slots if necessary
+      if (is.null(results[[r_chr]])) results[[r_chr]] <- list()
+
+      results[[r_chr]][[f]] <- obj # store
+      if (!quiet) message("✓ loaded ", f, " ", r, ": ", basename(file))
+    }
   }
 
-  # Handle continuous results
-  path_cont <- here("output", "regs", 
-                    paste0("cont_did_results_", rad, "_qt", ".rds"))
-  if (file.exists(path_cont)) {
-    all_results$continuous[[rad_str]] <- readRDS(path_cont)
-  } else {
-    print(paste("Continuous file does not exist:", path_cont))
-    # We don't return or skip - continue processing other files
-  }
+  return(results)
 }
 
 
-get_regression_plot <- function(results,
-                                treatment_type = c("binary", "continuous"),
-                                radius = NULL,
-                                model = NULL,
-                                use_description = TRUE,
-                                arrange_plots = TRUE,
-                                ncol = 2) {
-  # Parameter validation
-  treatment_type <- match.arg(treatment_type)
-
-  # Handle radius validation
-  valid_radii <- c("250", "500", "1000", "2000", "5000", "10000")
-  if (is.null(radius)) {
-    radius <- valid_radii[1]
-    message(paste("No radius specified. Using default radius:", radius))
-  } else {
-    radius <- as.character(radius)
-    # Check if all specified radiuses are valid
-    invalid_radii <- radius[!radius %in% valid_radii]
-    if (length(invalid_radii) > 0) {
-      stop(paste(
-        "Invalid radiuses:", paste(invalid_radii, collapse = ", "),
-        "\nValid options are:", paste(valid_radii, collapse = ", ")
-      ))
-    }
-  }
-
-  # Create a list to store plots
-  plot_list <- list()
-
-  # Loop through each radius
-  for (r in radius) {
-    # Check if treatment and radius exist
-    if (!treatment_type %in% names(results)) {
-      message(paste("Treatment type", treatment_type, "not found in results. Skipping."))
-      next
-    }
-
-    if (!r %in% names(results[[treatment_type]])) {
-      message(paste("Radius", r, "not found for treatment type", treatment_type, ". Skipping."))
-      next
-    }
-
-    # Get models for the specified treatment type and radius
-    available_models <- names(results[[treatment_type]][[r]])
-
-    if (length(available_models) == 0) {
-      message(paste("No models found for treatment type", treatment_type, "and radius", r, ". Skipping."))
-      next
-    }
-
-    # Handle model selection by number or name
-    selected_model <- NULL
-
-    if (is.numeric(model)) {
-      if (model <= 0 || model > length(available_models)) {
-        message(paste("Model index must be between 1 and", length(available_models), "for radius", r, ". Skipping."))
-        next
-      }
-      selected_model <- available_models[model]
-    } else if (is.character(model)) {
-      if (!model %in% available_models) {
-        message(paste("Model", model, "not found for radius", r, ". Skipping."))
-        next
-      }
-      selected_model <- model
-    } else if (is.null(model)) {
-      # If no model specified, use the first one
-      selected_model <- available_models[1]
-      message(paste("No model specified. Using first model for radius", r, ":", selected_model))
-    } else {
-      message("Model must be specified as a character string or numeric index. Skipping radius", r)
-      next
-    }
-
-    # Get the model object
-    model_obj <- results[[treatment_type]][[r]][[selected_model]]
-
-    # Check if the model has a plot
-    if (is.null(model_obj$plot)) {
-      message(paste("No plot found for model", selected_model, "and radius", r, ". Skipping."))
-      next
-    }
-
-    # Get subtitle from model description or name
-    subtitle <- selected_model
-    if (use_description && !is.null(attr(model_obj, "description"))) {
-      subtitle <- attr(model_obj, "description")
-    }
-
-    # Create plot with subtitle and radius info
-    plot_title <- paste("Radius:", r, "m")
-    plot_obj <- model_obj$plot +
-      ggplot2::labs(
-        subtitle = subtitle,
-        title = plot_title
-      )
-
-    # Add to the list of plots
-    plot_list[[r]] <- plot_obj
-  }
-
-  # If no plots were created, return NULL
-  if (length(plot_list) == 0) {
-    message("No plots were created.")
-    return(NULL)
-  }
-
-  # If there's only one plot, return it directly
-  if (length(plot_list) == 1) {
-    return(plot_list[[1]])
-  }
-
-  # If there are multiple plots and arrange_plots is TRUE, arrange them in a grid
-  if (arrange_plots) {
-    # Check if required packages are available
-    if (!requireNamespace("gridExtra", quietly = TRUE)) {
-      message("Package 'gridExtra' is required to arrange multiple plots. Installing...")
-      install.packages("gridExtra")
-      library(gridExtra)
-    }
-
-    # Arrange plots in a grid
-    return(gridExtra::grid.arrange(grobs = plot_list, ncol = ncol))
-  } else {
-    # Return the list of plots
-    return(plot_list)
-  }
-}
-
-# Plot for a single radius
-# plot <- get_regression_plot(
-#   all_results,
-#   treatment_type = "continuous", # binary
-#   radius = 2000, # c(2000, 5000)
-#   model = "model_cont_mean_log_logtreat_sw_norm" # 16
-# )
-
-create_regression_plot <- function(data = all_results,
-                                   treatment_type, radius, model) {
-  # Get the base plot using the existing function
-  plot <- get_regression_plot(
+# Make regression plot
+plot_regression <- function(
     data,
-    treatment_type = treatment_type,
-    radius = radius,
-    model = model
-  )
+    radius,
+    model,
+    freq = c("qtr", "mo"),
+    use_desc = TRUE) {
+  freq <- match.arg(freq)
+  r <- as.character(radius)
 
-  # Retrieve the specific model object AGAIN to access arguments
-  # (get_regression_plot already did this, but didn't return args)
-  model_obj <- data[[treatment_type]][[as.character(radius)]][[model]]
+  stopifnot(r %in% names(data))
+  stopifnot(freq %in% names(data[[r]]))
 
-  # Construct the formula caption if arguments are available
-  formula_caption <- NULL # Default to NULL
-  if (!is.null(model_obj) && !inherits(model_obj, "try-error") && !is.null(model_obj$args) &&
-    all(c("outcome", "group", "time", "treatment") %in% names(model_obj$args))) {
-    args <- model_obj$args
-    # Ensure args components are not NULL before pasting
-    if (!is.null(args$outcome) && !is.null(args$group) && !is.null(args$time) && !is.null(args$treatment)) {
-      formula_caption <- paste0(
-        "Regression specification: ",
-        args$outcome, " ~ ", args$group, " + ", args$time, " + ", args$treatment
-      )
-    } else {
-      formula_caption <- paste("Regression specification: Partial details unavailable for:", model)
-    }
-  } else {
-    # Fallback if args aren't available or model_obj is an error
-    formula_caption <- paste("Regression specification: Details unavailable for:", model)
+  mod <- data[[r]][[freq]][[model]]
+  if (is.null(mod)) {
+    stop(
+      "Model '", model, "' not found for radius ", r,
+      " and freq '", freq, "'."
+    )
   }
 
-  # Add group column based on Time and convert to factor with explicit order
-  plot$data$group <- factor(ifelse(plot$data$Time <= 0, "Pre", "Post"),
-    levels = c("Pre", "Post")
+  if (is.null(mod$plot)) {
+    stop("Model '", model, "' has no plot element.")
+  }
+
+  # ------------------------------------------------------------------------
+  # Data wrangling
+  df <- mod$plot$data %>%
+    mutate(group = factor(
+      ifelse(Time <= 0, "Pre", "Post"),
+      levels = c("Pre", "Post")
+    ))
+
+  subtitle <- if (use_desc && !is.null(attr(mod, "description"))) {
+    attr(mod, "description")
+  } else {
+    model
+  }
+  formula_caption <- paste0(
+    "Regression specification: ", mod$args$outcome, " ~ ", mod$args$group,
+    " + ", mod$args$time, " + ", mod$args$treatment
   )
 
-  # Create the new plot
-  new_plot <- ggplot(plot$data, aes(x = Time, y = Estimate)) +
+  ggplot(df, aes(x = Time, y = Estimate, colour = group)) +
     geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
-    geom_errorbar(aes(ymin = LB.CI, ymax = UB.CI, color = group), width = 0.2) +
-    geom_point(aes(color = group), size = 1) +
+    geom_errorbar(aes(ymin = LB.CI, ymax = UB.CI), width = 0.2) +
+    geom_point(aes(color = group), size = 1.2) +
     scale_color_manual(
       values = c(
         "Pre" = viridis(1, option = "magma"),
@@ -843,24 +556,23 @@ create_regression_plot <- function(data = all_results,
       breaks = c("Pre", "Post")
     ) +
     theme_minimal() +
-    labs(x = "Time", y = "Estimate", subtitle = plot$labels$subtitle, caption = formula_caption) +
+    labs(
+      x = "Time",
+      y = "Estimate",
+      subtitle = subtitle,
+      caption = formula_caption
+    ) +
     theme_pref +
-    theme(plot.caption = element_text(hjust = 0)) # Left-align caption
-
-  # Generate filename
-  filename <- gsub("^model_", "", model)
-  filename <- paste0(filename, "_", radius, ".png")
-  filepath <- here("agents", "book", "book_figs", filename)
-
-  # ggsave(filename = filepath, plot = new_plot, width = 8, height = 0.618 * 6, dpi = 600)
-
-  # Return invisible to indicate function completed
-  # invisible(NULL)
-  return(new_plot)
+    theme(plot.caption = element_text(hjust = 0))
 }
-```
 
-## Setting {#sec-05-01-setting}
+results_qtr <- load_results(
+  radii = c(250, 500, 1000, 2000),
+  freqs = c("qtr", "mo"),
+  dir_path = here("output", "regs"),
+  quiet = TRUE
+)
+```
 
 *This section is currently being revised as I read and process the recent DiD and event study literature. Some statements may be unclear or incorrect, which I will try to refine them as I go.*
 
@@ -895,36 +607,35 @@ Overall, all specifications show practically no effect of spills on house prices
 ##### Count Qt
 
 ```{r}
-# model_binary_log_mean_sw_norm; radius 250
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sc_mean_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sc_mean_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sc_mean_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sc_mean_yr_sw_norm"
 )
 ```
 
 ##### Duration Qt
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sh_mean_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sh_mean_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sh_mean_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sh_mean_yr_sw_norm"
 )
 ```
 
@@ -934,41 +645,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-500m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_mean_sw_norm; radius 500
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sc_mean_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sc_mean_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sc_mean_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sc_mean_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sh_mean_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sh_mean_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sh_mean_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sh_mean_yr_sw_norm"
 )
 ```
 
@@ -978,40 +687,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-1000m"}  
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_mean_sw_norm; radius 1000
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sc_mean_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sc_mean_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sc_mean_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sc_mean_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sh_mean_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sh_mean_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sh_mean_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sh_mean_yr_sw_norm"
 )
 ```
 
@@ -1021,40 +729,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-2000m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_mean_sw_norm; radius 2000
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sc_mean_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sc_mean_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sc_mean_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sc_mean_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sh_mean_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sh_mean_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sh_mean_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sh_mean_yr_sw_norm"
 )
 ```
 
@@ -1070,40 +777,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-250m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p50_sw_norm; radius 250
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sc_p50_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sc_p50_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sc_p50_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sc_p50_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sh_p50_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sh_p50_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sh_p50_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sh_p50_yr_sw_norm"
 )
 ```
 
@@ -1113,40 +819,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-500m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p50_sw_norm; radius 500
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sc_p50_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sc_p50_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sc_p50_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sc_p50_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}  
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sh_p50_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sh_p50_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sh_p50_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sh_p50_yr_sw_norm"
 )
 ```
 
@@ -1156,40 +861,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-1000m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p50_sw_norm; radius 1000
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sc_p50_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sc_p50_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sc_p50_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sc_p50_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sh_p50_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sh_p50_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sh_p50_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sh_p50_yr_sw_norm"
 )
 ```
 
@@ -1199,40 +903,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-2000m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p50_sw_norm; radius 2000
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sc_p50_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sc_p50_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sc_p50_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sc_p50_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sh_p50_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sh_p50_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sh_p50_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sh_p50_yr_sw_norm"
 )
 ```
 
@@ -1248,40 +951,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-250m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p75_sw_norm; radius 250
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sc_p75_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sc_p75_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}  
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sc_p75_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sc_p75_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}  
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sh_p75_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sh_p75_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}  
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sh_p75_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sh_p75_yr_sw_norm"
 )
 ```
 
@@ -1291,40 +993,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-500m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p75_sw_norm; radius 500
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sc_p75_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sc_p75_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sc_p75_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sc_p75_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sh_p75_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sh_p75_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sh_p75_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sh_p75_yr_sw_norm"
 )
 ```
 
@@ -1334,40 +1035,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-1000m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p75_sw_norm; radius 1000
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sc_p75_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sc_p75_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sc_p75_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sc_p75_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sh_p75_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sh_p75_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sh_p75_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sh_p75_yr_sw_norm"
 )
 ```
 
@@ -1377,40 +1077,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-2000m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p75_sw_norm; radius 2000
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sc_p75_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sc_p75_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sc_p75_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sc_p75_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sh_p75_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sh_p75_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sh_p75_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sh_p75_yr_sw_norm"
 )
 ```
 
@@ -1426,40 +1125,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-250m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p90_sw_norm; radius 250
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sc_p90_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sc_p90_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sc_p90_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sc_p90_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sh_p90_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sh_p90_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 250,
-  model = "model_bin_log_sh_p90_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sh_p90_yr_sw_norm"
 )
 ```
 
@@ -1469,40 +1167,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-500m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p90_sw_norm; radius 500
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sc_p90_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sc_p90_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sc_p90_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sc_p90_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sh_p90_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sh_p90_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 500,
-  model = "model_bin_log_sh_p90_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_bin_logp_sh_p90_yr_sw_norm"
 )
 ```
 
@@ -1512,40 +1209,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-1000m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p90_sw_norm; radius 1000
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sc_p90_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sc_p90_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sc_p90_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sc_p90_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sh_p90_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sh_p90_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 1000,
-  model = "model_bin_log_sh_p90_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_bin_logp_sh_p90_yr_sw_norm"
 )
 ```
 
@@ -1555,40 +1251,39 @@ create_regression_plot(
 
 ::: {.panel-tabset group="radius-2000m"}
 
-##### Count Mo
+##### Count Qt
 
 ```{r}
-# model_binary_log_p90_sw_norm; radius 1000
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sc_p90_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sc_p90_qtr_sw_norm"
 )
 ```
 
 ##### Count Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sc_p90_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sc_p90_yr_sw_norm"
 )
 ```
 
-##### Duration Mo
+##### Duration Qt
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sh_p90_qt_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sh_p90_qtr_sw_norm"
 )
 ```
 
 ##### Duration Yr
 
 ```{r}
-create_regression_plot(
-  treatment_type = "binary", radius = 2000,
-  model = "model_bin_log_sh_p90_yr_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_bin_logp_sh_p90_yr_sw_norm"
 )
 ```
 
@@ -1602,24 +1297,23 @@ create_regression_plot(
 
 #### 250m
 
-::: {.panel-tabset group="radius-250m"}
+::: {.panel-tabset group="radius-250m-cont"}
 
 ##### Count
 
 ```{r}
-# model_cont_log_mean_sw_norm; radius 250
-create_regression_plot(
-  treatment_type = "continuous", radius = 250,
-  model = "model_cont_log_logsc_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_cont_logp_sc_cont_qtr_sw_norm"
 )
 ```
 
 ##### Duration
 
 ```{r}
-create_regression_plot(
-  treatment_type = "continuous", radius = 250,
-  model = "model_cont_log_logsh_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_cont_logp_sh_cont_qtr_sw_norm"
 )
 ```
 
@@ -1627,24 +1321,23 @@ create_regression_plot(
 
 #### 500m
 
-::: {.panel-tabset group="radius-500m"}
+::: {.panel-tabset group="radius-500m-cont"}
 
 ##### Count
 
 ```{r}
-# model_cont_log_mean_sw_norm; radius 500
-create_regression_plot(
-  treatment_type = "continuous", radius = 500,
-  model = "model_cont_log_logsc_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_cont_logp_sc_cont_qtr_sw_norm"
 )
 ```
 
 ##### Duration
 
 ```{r}
-create_regression_plot(
-  treatment_type = "continuous", radius = 500,
-  model = "model_cont_log_logsh_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 500, freq = "qtr",
+  model = "model_cont_logp_sh_cont_qtr_sw_norm"
 )
 ```
 
@@ -1652,24 +1345,23 @@ create_regression_plot(
 
 #### 1000m
 
-::: {.panel-tabset group="radius-1000m"}
+::: {.panel-tabset group="radius-1000m-cont"}
 
 ##### Count
 
 ```{r}
-# model_cont_log_mean_sw_norm; radius 1000
-create_regression_plot(
-  treatment_type = "continuous", radius = 1000,
-  model = "model_cont_log_logsc_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_cont_logp_sc_cont_qtr_sw_norm"
 )
 ```
 
 ##### Duration
 
 ```{r}
-create_regression_plot(
-  treatment_type = "continuous", radius = 1000,
-  model = "model_cont_log_logsh_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 1000, freq = "qtr",
+  model = "model_cont_logp_sh_cont_qtr_sw_norm"
 )
 ```
 
@@ -1677,24 +1369,23 @@ create_regression_plot(
 
 #### 2000m
 
-::: {.panel-tabset group="radius-2000m"}
+::: {.panel-tabset group="radius-2000m-cont"}
 
 ##### Count
 
 ```{r}
-# model_cont_log_mean_sw_norm; radius 2000
-create_regression_plot(
-  treatment_type = "continuous", radius = 2000,
-  model = "model_cont_log_logsc_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_cont_logp_sc_cont_qtr_sw_norm"
 )
 ```
 
 ##### Duration
 
 ```{r}
-create_regression_plot(
-  treatment_type = "continuous", radius = 2000,
-  model = "model_cont_log_logsh_sw_norm"
+plot_regression(
+  data = results_qtr, radius = 2000, freq = "qtr",
+  model = "model_cont_logp_sh_cont_qtr_sw_norm"
 )
 ```
 
@@ -1712,7 +1403,7 @@ create_regression_plot(
 ```{r}
 #| eval: false
 dat_panel_site <- open_dataset(
-  here::here("data", "processed", "dat_panel_site_mo")
+  here::here("data", "processed", "dat_panel_site_qtr")
 ) %>%
   filter(radius == 250) %>%
   collect()

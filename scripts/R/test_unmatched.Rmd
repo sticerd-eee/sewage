@@ -456,3 +456,250 @@ if (sys.nframe() == 0) {
 
 ```
 
+```{r}
+df <- import("/Users/jacopoolivieri/Downloads/test.csv")
+```
+
+```{r}
+# Clean column names
+df_clean <- df %>%
+  janitor::clean_names()
+
+# Filter data to keep only the 'Negative' (baseline) and 'Negative + Negative x Treated' (combined effect) rows
+df_filtered <- df_clean %>%
+  filter(coefficient %in% c("Negative", "Negative + Negative x Treated"))
+
+# Reshape the data to long format
+df_long <- df_filtered %>%
+  pivot_longer(
+    cols = starts_with("est_") | starts_with("se_"),
+    names_to = c(".value", "condition"),
+    names_pattern = "(est|se)_(.*)"
+  ) %>%
+  # Improve readability of condition names
+  mutate(condition = case_when(
+    condition == "below_p50" ~ "Below p50",
+    condition == "above_p50" ~ "Above p50",
+    condition == "all_shocks" ~ "All Shocks",
+    TRUE ~ condition
+  )) %>%
+  # Convert 'condition' to a factor for ordering and colour mapping
+  mutate(condition = factor(condition, levels = c("Below p50", "Above p50", "All Shocks"))) %>%
+  # Improve readability of coefficient names for the x-axis
+   mutate(coefficient_label = case_when(
+     coefficient == "Negative" ~ "Baseline\n(Shock Only)", # Using \n for line break
+     coefficient == "Negative + Negative x Treated" ~ "Combined\n(Shock + Treatment)", # Using \n for line break
+     TRUE ~ coefficient
+   )) %>%
+   # Convert 'coefficient_label' to a factor to control x-axis order
+   mutate(coefficient_label = factor(coefficient_label, levels = c("Baseline\n(Shock Only)", "Combined\n(Shock + Treatment)"))) %>%
+   # Shorten variable names for better facet titles
+   mutate(variable_short = str_replace(variable, " Consumpti", " Cons.") %>%
+                           str_replace(" Intake", " Intake")) %>%
+   # Convert 'variable_short' to factor for facet ordering (optional, alphabetical by default)
+   mutate(variable_short = factor(variable_short))
+
+
+# --- Plotting ---
+
+# Define the amount of dodge
+dodge_width <- 0.4 # Adjust this value to control spacing
+
+# Create the ggplot object with updated aesthetics and faceting
+ggplot(
+    df_long,
+    # Define aesthetics:
+    # x-axis: effect type ('coefficient_label': Baseline vs Combined)
+    # y-axis: estimate value ('est')
+    # color: distinguish lines/points based on condition ('condition')
+    aes(x = coefficient_label, y = est, color = condition)
+  ) +
+  # Add lines connecting the baseline point to the combined effect point for each condition within each facet
+  # 'group = condition' ensures lines are drawn connecting the two points for the same condition
+  # 'position = position_dodge()' moves the lines side-by-side based on 'color'
+  geom_line(aes(group = condition), position = position_dodge(width = dodge_width), linewidth = 1, alpha = 0.8) +
+  # Add points representing the specific point estimates
+  # 'position = position_dodge()' moves the points side-by-side
+  geom_point(position = position_dodge(width = dodge_width), size = 3.5, alpha = 0.9) +
+  # Add vertical error bars representing standard error (Estimate +/- SE)
+  # 'position = position_dodge()' moves the error bars side-by-side
+  # 'width' controls the horizontal size of the error bar caps (make it smaller than dodge_width)
+  geom_errorbar(
+    aes(ymin = est - se, ymax = est + se),
+    position = position_dodge(width = dodge_width),
+    width = 0.1, # Width of the error bar caps
+    linewidth = 0.7
+   ) +
+  # Create separate panels (facets) for each outcome variable ('variable_short')
+  # 'ncol = 3' arranges the facets horizontally
+  facet_wrap(~ variable_short, ncol = 3) +
+  # Add a horizontal dashed line at y=0 for reference
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.8) +
+  # Customize labels and title
+  labs(
+    title = "Impact of Treatment during Negative Shocks by Outcome Variable",
+    subtitle = "Comparing Baseline (Shock Only) vs. Combined Effect (Shock + Treatment)",
+    x = "Effect Type", # Updated x-axis label
+    y = "Estimated Coefficient", # Updated y-axis label
+    color = "Shock Type" # Updated legend title
+  ) +
+  # Apply a minimal theme
+  theme_minimal(base_size = 12) +
+  # Further theme customization
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 11),
+    axis.title = element_text(size = 11),
+    axis.text.x = element_text(size = 9, angle = 0, vjust = 0.5, hjust=0.5),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(1.5, "lines")
+  ) +
+  # Use a colorblind-friendly color palette for the conditions
+  scale_color_brewer(palette = "Set1") # Or "Dark2", "Paired"
+
+# Display the plot
+print(plot_vertical_dodged)
+
+```
+
+```{r}
+# Load necessary libraries
+# Ensure you have these installed: install.packages(c("tidyverse", "janitor", "stringr"))
+library(tidyverse)
+library(janitor)
+library(stringr)
+
+# --- Data Preparation ---
+
+# Recreate the data provided by the user
+# In a real scenario, you would load this from a file, e.g., using read_csv("your_data_file.csv")
+data_text <- "
+Coefficient,Variable,Est below p50,SE below p50,Est above p50,SE above p50,Est all shocks,SE all shocks
+Negative,Total Consumpti,-0.2,0.1,-0.6,0.1,-0.42,0.1
+Negative x Treated,Total Consumpti,0.3,0.1,0.4,0.1,0.44,0.1
+Negative + Negative x Treated,Total Consumpti,0.1,0.1,-0.2,0.1,0.02,0.1
+Negative,Food Consumpti,-0.15,0.1,-0.55,0.1,-0.34,0.1
+Negative x Treated,Food Consumpti,0.25,0.1,0.35,0.1,0.35,0.1
+Negative + Negative x Treated,Food Consumpti,0.1,0.1,-0.2,0.1,0.01,0.1
+Negative,Protein Intake,-0.25,0.1,-0.7,0.1,-0.3,0.1
+Negative x Treated,Protein Intake,0.25,0.1,0.3,0.1,0.32,0.1
+Negative + Negative x Treated,Protein Intake,0,0.1,-0.4,0.1,0.02,0.1
+"
+
+# Read the data from the text string
+df <- read_csv(data_text, show_col_types = FALSE)
+
+# Clean column names
+df_clean <- df %>%
+  janitor::clean_names()
+
+# Filter data to keep only the 'Negative' (baseline) and 'Negative + Negative x Treated' (combined effect) rows
+df_filtered <- df_clean %>%
+  filter(coefficient %in% c("Negative", "Negative + Negative x Treated"))
+
+# Reshape the data to long format
+df_long <- df_filtered %>%
+  pivot_longer(
+    cols = starts_with("est_") | starts_with("se_"),
+    names_to = c(".value", "condition"),
+    names_pattern = "(est|se)_(.*)"
+  ) %>%
+  # Improve readability of condition names
+  mutate(condition_label = case_when( # Renamed to avoid conflict before filtering
+    condition == "below_p50" ~ "Below p50",
+    condition == "above_p50" ~ "Above p50",
+    condition == "all_shocks" ~ "All Shocks",
+    TRUE ~ condition
+  )) %>%
+  # *** ADDED FILTER: Remove 'All Shocks' condition ***
+  filter(condition_label != "All Shocks") %>%
+  # Convert 'condition_label' to a factor for ordering and colour mapping
+  # *** UPDATED LEVELS: Removed 'All Shocks' from factor levels ***
+  mutate(condition = factor(condition_label, levels = c("Below p50", "Above p50"))) %>%
+  # Improve readability of coefficient names for the x-axis
+   mutate(coefficient_label = case_when(
+     coefficient == "Negative" ~ "Baseline\n(Shock Only)", # Using \n for line break
+     coefficient == "Negative + Negative x Treated" ~ "Combined\n(Shock + Treatment)", # Using \n for line break
+     TRUE ~ coefficient
+   )) %>%
+   # Convert 'coefficient_label' to a factor to control x-axis order
+   mutate(coefficient_label = factor(coefficient_label, levels = c("Baseline\n(Shock Only)", "Combined\n(Shock + Treatment)"))) %>%
+   # Shorten variable names for better facet titles
+   mutate(variable_short = str_replace(variable, " Consumpti", " Cons.") %>%
+                           str_replace(" Intake", " Intake")) %>%
+   # Convert 'variable_short' to factor for facet ordering (optional, alphabetical by default)
+   mutate(variable_short = factor(variable_short))
+
+
+# --- Plotting ---
+
+# Define the amount of dodge
+dodge_width <- 0.4 # Adjust this value to control spacing
+
+# Create the ggplot object with updated aesthetics and faceting
+# The plotting code remains largely the same, ggplot handles the reduced data
+plot_vertical_dodged_filtered <- ggplot(
+    df_long,
+    # Define aesthetics:
+    # x-axis: effect type ('coefficient_label': Baseline vs Combined)
+    # y-axis: estimate value ('est')
+    # color: distinguish lines/points based on condition ('condition')
+    aes(x = coefficient_label, y = est, color = condition) # Uses the new 'condition' factor
+  ) +
+  # Add lines connecting the baseline point to the combined effect point for each condition within each facet
+  geom_line(aes(group = condition), position = position_dodge(width = dodge_width), linewidth = 1, alpha = 0.8) +
+  # Add points representing the specific point estimates
+  geom_point(position = position_dodge(width = dodge_width), size = 3.5, alpha = 0.9) +
+  # Add vertical error bars representing standard error (Estimate +/- SE)
+  geom_errorbar(
+    aes(ymin = est - se, ymax = est + se),
+    position = position_dodge(width = dodge_width),
+    width = 0.1, # Width of the error bar caps
+    linewidth = 0.7
+   ) +
+  # Create separate panels (facets) for each outcome variable ('variable_short')
+  facet_wrap(~ variable_short, ncol = 3) +
+  # Add a horizontal dashed line at y=0 for reference
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.8) +
+  # Customize labels and title
+  labs(
+    title = "Impact of Treatment during Negative Shocks by Outcome Variable",
+    subtitle = "Comparing Baseline (Shock Only) vs. Combined Effect (Shock + Treatment) - P50 Groups Only", # Updated subtitle
+    x = "Effect Type",
+    y = "Estimated Coefficient",
+    color = "Condition"
+  ) +
+  # Apply a minimal theme
+  theme_minimal(base_size = 12) +
+  # Further theme customization
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 11),
+    axis.title = element_text(size = 11),
+    axis.text.x = element_text(size = 9, angle = 0, vjust = 0.5, hjust=0.5),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(1.5, "lines")
+  ) +
+  # Use a colorblind-friendly color palette for the conditions
+  scale_color_brewer(palette = "Set1") # Or "Dark2", "Paired"
+
+# Display the plot
+print(plot_vertical_dodged_filtered)
+
+# --- Saving the Plot (Optional) ---
+# Uncomment the following lines to save the plot to a file
+
+# Save as PNG file
+# ggsave("treatment_effect_vertical_dodged_filtered_plot.png", plot = plot_vertical_dodged_filtered, width = 10, height = 6, dpi = 300)
+
+# Save as PDF file
+# ggsave("treatment_effect_vertical_dodged_filtered_plot.pdf", plot = plot_vertical_dodged_filtered, width = 10, height = 6)
+
+```
+

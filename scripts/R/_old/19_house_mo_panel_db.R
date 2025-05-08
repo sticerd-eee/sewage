@@ -6,8 +6,8 @@
 ############################################################
 
 #' This script creates a house-level monthly panel dataset based on radius
-#' from the DuckDB database and the site-level panel data. The resulting
-#' dataset is exported in parquet format for downstream analysis.
+#' from the DuckDB database. The resulting dataset is exported in parquet
+#' format for downstream analysis.
 
 # Setup Functions
 ############################################################
@@ -55,8 +55,7 @@ setup_logging <- function() {
 CONFIG <- list(
   processed_dir = here::here("data", "processed"),
   db_path = here::here("data", "duckdb.duckdb"),
-  radius_thresholds = c(250, 500, 1000, 2000, 5000)
-  # radius_thresholds = c(10000)
+  radius_thresholds = c(250, 500, 1000, 2000)
 )
 
 # Database Functions
@@ -83,6 +82,7 @@ connect_to_db <- function() {
   )
 }
 
+
 #' Load datasets into DuckDB if not already present
 #' @param con DuckDB connection
 #' @return NULL
@@ -96,7 +96,7 @@ load_data_to_db <- function(con) {
   if (!"house_price_data" %in% existing_tables) {
     logger::log_info("Loading house price data")
     house_price_data <- import(
-      file.path(CONFIG$processed_dir, "house_price.rds"),
+      file.path(CONFIG$processed_dir, "house_price.parquet"),
       trust = TRUE
     )
     copy_to(con, house_price_data, "house_price_data", temporary = FALSE)
@@ -108,7 +108,7 @@ load_data_to_db <- function(con) {
   if (!"spill_lookup" %in% existing_tables) {
     logger::log_info("Loading spill lookup data")
     spill_lookup <- import(
-      file.path(CONFIG$processed_dir, "spill_house_lookup.rds"),
+      file.path(CONFIG$processed_dir, "spill_house_lookup.parquet"),
       trust = TRUE
     )
     copy_to(con, spill_lookup, "spill_lookup", temporary = FALSE)
@@ -120,9 +120,15 @@ load_data_to_db <- function(con) {
   if (!"dat_mo" %in% existing_tables) {
     logger::log_info("Loading monthly spill data")
     dat_mo <- import(
-      file.path(CONFIG$processed_dir, "individual_edm_location.RDATA"),
+      file.path(
+        CONFIG$processed_dir, "spill_aggregated", "agg_spill_mo.parquet"
+      ),
       trust = TRUE
-    )$monthly
+    )
+
+    dat_mo <- dat_mo %>%
+      select(water_company, site_id, year, month, spill_count_mo, spill_hrs_mo) %>%
+      arrange(site_id, year, month)
     copy_to(con, dat_mo, "dat_mo", temporary = FALSE)
     rm(dat_mo)
     logger::log_info("Monthly spill data loaded")

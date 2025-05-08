@@ -79,7 +79,7 @@ CONFIG <- list(
   ),
   output_dir = here::here("data", "processed", "matched_events_annual_data"),
   keep_cols = c(
-    "site_id", #"site_id_2021", "site_id_2022", "site_id_2024", "site_id_2024",  
+    "site_id", # "site_id_2021", "site_id_2022", "site_id_2024", "site_id_2024",
     "match_method", "match_quality", "match_type", "match_key", "key_length", "tie",
     "water_company", "year",
     "site_name_ea", "site_name_wa_sc",
@@ -911,10 +911,11 @@ run_fuzzy_matching <- function(
 #'     \item{events_unmatched}{Unmatched spill events}
 #'     \item{annual_unmatched_nonzero}{Unmatched annual records with spills}
 #'   }
-#' @return The same list, where:
+#' @return A list containing the same elements as input, plus:
 #'   \itemize{
 #'     \item{`matched_combined` has a new `ngr` column with coalesced per‑year discharge NGRs.}
-#'     \item{All elements are limited to `CONFIG$keep_cols`.}
+#'     \item{`site_metadata` contains distinct site information derived from the enriched matched data, excluding time columns.}
+#'     \item{All elements except `site_metadata` are limited to `CONFIG$keep_cols`. `site_metadata` retains all its derived columns.}
 #'   }
 finalise_merged_data <- function(fuzzy_results) {
   # Load lookup and annual returns
@@ -961,15 +962,21 @@ finalise_merged_data <- function(fuzzy_results) {
     )
 
   fuzzy_results$matched_combined <- enriched
-  fuzzy_results$annual_unmatched_nonzero <- fuzzy_results$annual_unmatched_nonzero %>% 
+  fuzzy_results$annual_unmatched_nonzero <- fuzzy_results$annual_unmatched_nonzero %>%
     rename(ngr_og = outlet_discharge_ngr)
 
   # Trim all list elements to desired columns
-  purrr::map(
+  final_list <- purrr::map(
     fuzzy_results,
     ~ dplyr::select(.x, any_of(CONFIG$keep_cols))
-  ) %>%
-    return()
+  )
+
+  # Add metadata
+  final_list$site_metadata <- final_list$matched_combined %>%
+    select(-start_time, -end_time) %>%
+    distinct()
+
+  return(final_list)
 }
 
 
@@ -977,7 +984,8 @@ finalise_merged_data <- function(fuzzy_results) {
 ############################################################
 
 #' Export function to save merge results
-#' @param final_results List containing matched_data, unmatched_events, and unmatched_annual elements
+#' @param final_results List containing `matched_combined`, `events_unmatched`,
+#'   `annual_unmatched_nonzero`, and `site_metadata` elements.
 #' @return NULL
 export_results <- function(final_results) {
   output_dir <- CONFIG$output_dir
@@ -991,6 +999,7 @@ export_results <- function(final_results) {
   matched_path <- file.path(output_dir, "matched_events_annual_data.parquet")
   events_unmatched_path <- file.path(output_dir, "events_unmatched.parquet")
   annual_unmatched_path <- file.path(output_dir, "annual_unmatched.parquet")
+  site_metadata_path <- file.path(output_dir, "site_metadata.parquet")
 
   # Save the data files
   logger::log_info("Saving matched data to {matched_path}")
@@ -1001,6 +1010,9 @@ export_results <- function(final_results) {
 
   logger::log_info("Saving unmatched annual data to {annual_unmatched_path}")
   arrow::write_parquet(final_results$annual_unmatched_nonzero, annual_unmatched_path)
+
+  logger::log_info("Saving site metadata to {site_metadata_path}")
+  arrow::write_parquet(final_results$site_metadata, site_metadata_path)
 
   logger::log_info("Export completed successfully")
 }

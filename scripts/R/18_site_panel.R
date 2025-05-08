@@ -1,12 +1,8 @@
-
-## Function
-
-```{r}
 ############################################################
 # Create Site-Level House Price Statistics by Radius (Monthly & Quarterly)
 # Project: Sewage
 # Date: 06/03/2025
-# Author: Jacopo Olivieri 
+# Author: Jacopo Olivieri
 ############################################################
 
 #' This script reads house price data and the site-house lookup from
@@ -84,10 +80,9 @@ connect_to_db <- function() {
 #' @param con DuckDB connection
 #' @return NULL
 load_data_to_db <- function(con) {
-  
   # Check if tables already exist
   existing_tables <- DBI::dbListTables(con)
-  
+
   # House prices
   if (!"house_price_data" %in% existing_tables) {
     logger::log_info("Loading house price data")
@@ -99,7 +94,7 @@ load_data_to_db <- function(con) {
     rm(house_price_data)
     logger::log_info("House price data loaded")
   }
-  
+
   # Spill lookup
   if (!"spill_lookup" %in% existing_tables) {
     logger::log_info("Loading spill lookup data")
@@ -130,7 +125,7 @@ prepare_tables <- function(con) {
     )
 
   spill_lookup_tbl <- tbl(con, "spill_lookup") %>%
-    select(house_id, site_id, distance_m) 
+    select(house_id, site_id, distance_m)
 
   return(list(
     house_tbl = house_tbl,
@@ -144,14 +139,15 @@ prepare_tables <- function(con) {
 #' @return data.table with site_id, date_col, price_median_w, price_mean_w.
 calculate_weighted_stats <- function(dt, date_col) {
   # Filter data for valid weights and prices
-  dt_filtered <- dt[!is.na(price) & !is.na(distance_m)] 
+  dt_filtered <- dt[!is.na(price) & !is.na(distance_m)]
   if (nrow(dt_filtered) == 0) {
-      empty_dt <- data.table(
-          site_id = integer(0),
-          price_median_w = numeric(0),
-          price_mean_w = numeric(0))
-      empty_dt[, (date_col) := as.Date(character(0))] 
-      return(empty_dt)
+    empty_dt <- data.table(
+      site_id = integer(0),
+      price_median_w = numeric(0),
+      price_mean_w = numeric(0)
+    )
+    empty_dt[, (date_col) := as.Date(character(0))]
+    return(empty_dt)
   }
 
   # Calculate inverse distance weight
@@ -161,7 +157,7 @@ calculate_weighted_stats <- function(dt, date_col) {
   weighted_stats <- dt_filtered[, .(
     price_median_w = matrixStats::weightedMedian(price, w = weight, na.rm = TRUE),
     price_mean_w = matrixStats::weightedMean(price, w = weight, na.rm = TRUE)
-  ), by = .(site_id, get(date_col))] 
+  ), by = .(site_id, get(date_col))]
 
   # Rename the date column back dynamically
   setnames(weighted_stats, "get", date_col)
@@ -185,27 +181,29 @@ create_site_panel_for_radius <- function(prepared_tables, radius_m, con = NULL) 
     filter(distance_m <= .env$radius_m) %>%
     inner_join(house_tbl, by = "house_id") %>%
     select(
-      site_id, house_id, 
+      site_id, house_id,
       transfer_date_mo, transfer_date_qtr,
       year, month, quarter,
-      price, distance_m)
+      price, distance_m
+    )
 
   # 2. Collect data needed for weighted stats
   log_debug("Collecting data for weighted stats (radius {radius_m}m)")
   houses_in_radius_dt <- houses_in_radius_tbl %>%
-      select(site_id, transfer_date_mo, transfer_date_qtr, price, distance_m) %>%
-      collect() %>%
-      as.data.table()
+    select(site_id, transfer_date_mo, transfer_date_qtr, price, distance_m) %>%
+    collect() %>%
+    as.data.table()
   log_info(
-    "Collected {nrow(houses_in_radius_dt)} rows for weighted calculation 
-    (radius {radius_m}m)")
+    "Collected {nrow(houses_in_radius_dt)} rows for weighted calculation
+    (radius {radius_m}m)"
+  )
 
   # --- Monthly Aggregation ---
   log_info("Aggregating monthly house prices for radius {radius_m}m")
 
   # 3a. Calculate unweighted monthly stats using dbplyr
   monthly_unweighted_agg <- houses_in_radius_tbl %>%
-    group_by(site_id, transfer_date_mo, year, month) %>% 
+    group_by(site_id, transfer_date_mo, year, month) %>%
     summarise(
       price_median = median(price, na.rm = TRUE),
       price_mean = mean(price, na.rm = TRUE),
@@ -213,27 +211,29 @@ create_site_panel_for_radius <- function(prepared_tables, radius_m, con = NULL) 
       mean_distance = mean(distance_m, na.rm = TRUE),
       .groups = "drop"
     ) %>%
-    rename(date = transfer_date_mo) %>% 
-    collect() %>% 
+    rename(date = transfer_date_mo) %>%
+    collect() %>%
     as.data.table()
 
   # 3b. Calculate weighted monthly stats
   log_debug("Calculating weighted monthly stats (radius {radius_m}m)")
   monthly_weighted_agg <- calculate_weighted_stats(
-    houses_in_radius_dt, "transfer_date_mo") 
+    houses_in_radius_dt, "transfer_date_mo"
+  )
   setnames(monthly_weighted_agg, "transfer_date_mo", "date")
 
   # 3c. Merge monthly weighted and unweighted stats
   monthly_agg <- merge(
     monthly_unweighted_agg, monthly_weighted_agg,
-    by = c("site_id", "date"))
+    by = c("site_id", "date")
+  )
 
   # --- Quarterly Aggregation ---
   log_info("Aggregating quarterly house prices for radius {radius_m}m")
 
   # 4a. Calculate unweighted quarterly stats
   quarterly_unweighted_agg <- houses_in_radius_tbl %>%
-    group_by(site_id, transfer_date_qtr, year, quarter) %>% 
+    group_by(site_id, transfer_date_qtr, year, quarter) %>%
     summarise(
       price_median = median(price, na.rm = TRUE),
       price_mean = mean(price, na.rm = TRUE),
@@ -241,88 +241,98 @@ create_site_panel_for_radius <- function(prepared_tables, radius_m, con = NULL) 
       mean_distance = mean(distance_m, na.rm = TRUE),
       .groups = "drop"
     ) %>%
-    rename(date = transfer_date_qtr) %>% 
-    collect() %>% 
+    rename(date = transfer_date_qtr) %>%
+    collect() %>%
     as.data.table()
 
 
   # 4b. Calculate weighted quarterly stats
   log_debug("Calculating weighted quarterly stats (radius {radius_m}m)")
   quarterly_weighted_agg <- calculate_weighted_stats(
-    houses_in_radius_dt, "transfer_date_qtr")
+    houses_in_radius_dt, "transfer_date_qtr"
+  )
   setnames(quarterly_weighted_agg, "transfer_date_qtr", "date")
 
   # 4c. Merge quarterly weighted and unweighted stats
   quarterly_agg <- merge(
     quarterly_unweighted_agg, quarterly_weighted_agg,
-    by = c("site_id", "date"), all = TRUE)
+    by = c("site_id", "date"), all = TRUE
+  )
 
-  
+
   # 5. Clean up large intermediate data.table for the radius
   rm(houses_in_radius_dt)
-  gc(full = TRUE) 
-  
-  
-  # 6. Data completion 
-  
+  gc(full = TRUE)
+
+
+  # 6. Data completion
+
   # Monthly
   # Create monthly template
   log_debug("Completing monthly data for radius {radius_m}m")
   radius_sites_mo <- unique(monthly_agg$site_id)
   all_dates_mo <- seq.Date(
-    min(monthly_agg$date), max(monthly_agg$date), by = "month")
+    min(monthly_agg$date), max(monthly_agg$date),
+    by = "month"
+  )
   monthly_template <- CJ(
-    site_id = radius_sites_mo, date = all_dates_mo, sorted = FALSE) 
-  
+    site_id = radius_sites_mo, date = all_dates_mo, sorted = FALSE
+  )
+
   # Merge monthly data onto template
   monthly_panel <- merge(
-    monthly_template, monthly_agg, 
-    by = c("site_id", "date"), all.x = TRUE)
-  
+    monthly_template, monthly_agg,
+    by = c("site_id", "date"), all.x = TRUE
+  )
+
   # Add date components, IDs, fill NAs, calculate logs
   monthly_panel[, `:=`(
-      year = data.table::year(date),
-      month = data.table::month(date),
-      month_id = (data.table::year(date) - base_year) * 12 
+    year = data.table::year(date),
+    month = data.table::month(date),
+    month_id = (data.table::year(date) - base_year) * 12
       + data.table::month(date),
-      n_houses = fifelse(is.na(n_houses), 0L, n_houses), 
-      radius = as.integer(radius_m),
-      period_type = "monthly",
-      log_price_median = log(price_median),
-      log_price_mean = log(price_mean),
-      log_price_median_w = log(price_median_w),
-      log_price_mean_w = log(price_mean_w)
+    n_houses = fifelse(is.na(n_houses), 0L, n_houses),
+    radius = as.integer(radius_m),
+    period_type = "monthly",
+    log_price_median = log(price_median),
+    log_price_mean = log(price_mean),
+    log_price_median_w = log(price_median_w),
+    log_price_mean_w = log(price_mean_w)
   )]
   if (!"quarter" %in% names(monthly_panel)) monthly_panel[, quarter := NA_integer_]
   if (!"qtr_id" %in% names(monthly_panel)) monthly_panel[, qtr_id := NA_integer_]
-  
+
   # Quarterly
   # Create quarterly template
   log_debug("Completing quarterly data for radius {radius_m}m")
   radius_sites_qtr <- unique(quarterly_agg$site_id)
   all_dates_qtr <- seq.Date(
-    min(quarterly_agg$date), max(quarterly_agg$date), by = "quarter")
+    min(quarterly_agg$date), max(quarterly_agg$date),
+    by = "quarter"
+  )
   quarterly_template <- CJ(
-    site_id = radius_sites_qtr, date = all_dates_qtr, sorted = FALSE)
-  
+    site_id = radius_sites_qtr, date = all_dates_qtr, sorted = FALSE
+  )
+
   # Merge quarterly data onto template
   quarterly_panel <- merge(
-    quarterly_template, quarterly_agg, 
-    by = c("site_id", "date"), all.x = TRUE)
-  
+    quarterly_template, quarterly_agg,
+    by = c("site_id", "date"), all.x = TRUE
+  )
+
   # Add date components, IDs, fill NAs, calculate logs
   quarterly_panel[, `:=`(
-      year = data.table::year(date),
-      quarter = data.table::quarter(date),
-      qtr_id = (data.table::year(date) - base_year) * 4 
+    year = data.table::year(date),
+    quarter = data.table::quarter(date),
+    qtr_id = (data.table::year(date) - base_year) * 4
       + data.table::quarter(date),
-      n_houses = fifelse(is.na(n_houses), 0L, n_houses), 
-      radius = as.integer(radius_m),
-      period_type = "quarterly",
-      log_price_median = log(price_median),
-      log_price_mean = log(price_mean),
-      log_price_median_w = log(price_median_w),
-      log_price_mean_w = log(price_mean_w)
+    n_houses = fifelse(is.na(n_houses), 0L, n_houses),
+    radius = as.integer(radius_m),
+    period_type = "quarterly",
+    log_price_median = log(price_median),
+    log_price_mean = log(price_mean),
+    log_price_median_w = log(price_median_w),
+    log_price_mean_w = log(price_mean_w)
   )]
   if (!"month" %in% names(quarterly_panel)) quarterly_panel[, month := NA_integer_]
   if (!"month_id" %in% names(quarterly_panel)) quarterly_panel[, month_id := NA_integer_]
@@ -331,8 +341,8 @@ create_site_panel_for_radius <- function(prepared_tables, radius_m, con = NULL) 
   radius_data <- rbindlist(
     list(monthly_panel, quarterly_panel),
     use.names = TRUE,
-    fill = TRUE 
-    )
+    fill = TRUE
+  )
 
   # 7. Select and order final columns for consistency
   final_cols <- c(
@@ -340,7 +350,7 @@ create_site_panel_for_radius <- function(prepared_tables, radius_m, con = NULL) 
     "site_id", "date", "period_type", "radius",
     "year", "month", "quarter", "month_id", "qtr_id",
     # Stats
-    "n_houses", "mean_distance", 
+    "n_houses", "mean_distance",
     "price_median", "log_price_median",
     "price_mean", "log_price_mean",
     "price_median_w", "log_price_median_w",
@@ -348,7 +358,7 @@ create_site_panel_for_radius <- function(prepared_tables, radius_m, con = NULL) 
   )
 
   radius_data <- select(radius_data, any_of(final_cols))
-  setorderv(radius_data, c("site_id", "date", "period_type")) 
+  setorderv(radius_data, c("site_id", "date", "period_type"))
 
   log_info("Completed processing for radius {radius_m}m")
 
@@ -361,10 +371,11 @@ create_site_panel_for_radius <- function(prepared_tables, radius_m, con = NULL) 
 #' @return NULL
 export_house_data <- function(data_list) {
   log_info("Exporting aggregated house price statistics")
-  
+
   # Combine data from all radii
   combined_data <- rbindlist(data_list, use.names = TRUE, fill = TRUE)
-  rm(data_list); gc() 
+  rm(data_list)
+  gc()
 
   log_info("Writing partitioned parquet dataset to: {CONFIG$output_dir}")
   dir.create(CONFIG$output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -375,7 +386,7 @@ export_house_data <- function(data_list) {
     path = CONFIG$output_dir,
     partitioning = c("radius", "period_type"),
     format = "parquet",
-    existing_data_behavior = "overwrite" 
+    existing_data_behavior = "overwrite"
   )
 
   log_info("Export complete. Data written to {CONFIG$output_dir}")
@@ -393,7 +404,7 @@ main <- function(refresh_db = FALSE) {
     # Setup
     initialise_environment()
     setup_logging()
-    
+
     # Connect to duckdb
     con <- connect_to_db()
     on.exit({
@@ -413,77 +424,40 @@ main <- function(refresh_db = FALSE) {
       }
     }
     load_data_to_db(con)
-    
+
     # Prepare data
     prepared_tables <- prepare_tables(con)
 
     # Aggregate data for each radius
     all_radius_results <- list()
-    log_info("Starting house price aggregation across radii") 
+    log_info("Starting house price aggregation across radii")
     for (rad in CONFIG$radius_thresholds) {
       radius_result_dt <- create_site_panel_for_radius(
         prepared_tables = prepared_tables,
         radius_m = rad,
-        con = con 
+        con = con
       )
-      
+
       all_radius_results[[as.character(rad)]] <- radius_result_dt
 
       Sys.sleep(1)
       gc(full = TRUE)
     }
-    log_info("Finished processing all radii.") 
-    
+    log_info("Finished processing all radii.")
+
     # Export data
     export_house_data(all_radius_results)
     log_info("House price statistics aggregation completed successfully")
   }, error = function(e) {
     # Log fatal errors
     log_error("Fatal error during script execution: {e$message}")
-    stop(e) 
+    stop(e)
   }, finally = {
     log_info("Script finished at {Sys.time()}")
   })
 }
 
-# # Execute main function if script is run directly
-# if (sys.nframe() == 0) {
-#   main(refresh_db = FALSE) # Set to TRUE to force reload of house_price/spill_lookup
-# }
-```
-
-
-## Test
-
-```{r}
-# check they are the same
-file_path_mo_og <- here::here("data", "processed", "dat_panel_site_mo")
-file_path_qtr_og <- here::here("data", "processed", "dat_panel_site_qtr")
-file_path_new <- here::here("data", "processed", "dat_panel_site_level")
-
-data_mo_og <- open_dataset(file_path_mo_og) %>%
-  filter(radius == 2000) %>%
-  collect() %>% 
-  group_by(site_id) %>% 
-  filter(any(!is.na(price_mean))) %>% 
-  ungroup() %>% 
-  arrange(site_id, month_id)
-data_qtr_og <- open_dataset(file_path_qtr_og) %>%
-  filter(radius == 2000) %>%
-  collect() %>% 
-  group_by(site_id) %>% 
-  filter(any(!is.na(price_mean))) %>% 
-  ungroup() %>% 
-  arrange(site_id, qtr_id)
-data_new_mo <- open_dataset(file_path_new) %>%
-  filter(radius == 2000) %>%
-  filter(period_type == "monthly") %>%
-  collect() %>% 
-  arrange(site_id, month_id)
-data_new_qtr <- open_dataset(file_path_new) %>%
-  filter(radius == 2000) %>%
-  filter(period_type == "quarterly") %>%
-  collect() %>% 
-  arrange(site_id, qtr_id)
-```
-
+# Execute main function if script is run directly
+if (sys.nframe() == 0) {
+  main(refresh_db = FALSE)
+}
