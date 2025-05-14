@@ -88,7 +88,7 @@ Given the potential problems with the vanilla TWFE presented in the recent liter
 
 ## Site-Level Event Study Regressions Within Spill Buffers {#sec-05-02-basic-event-study-regressions}
 
-The following figures present the dynamic effects of sewage spills on house prices within an X-metre radius around spill sites. For each spill site and quarter, I aggregate spill statistics and average house prices within the corresponding X-metre buffer.^[This aggregation is primarily for computational efficiency given the size of the dataset; the analysis could alternatively be conducted at the individual house level.] The estimated regression coefficients capture the within-buffer change in average house prices over time, relative to untreated periods, conditional on the buffer experiencing a high-severity spill in a given quarter. That is, they reflect how prices evolve in a given spill site’s buffer following the occurrence of a high-severity spill within that buffer.
+The following figures present the dynamic effects of sewage spills on house prices within an X-metre radius around spill sites. For each spill site and quarter, I aggregate spill statistics and average house prices within the corresponding X-metre buffer.^[This aggregation is primarily for computational efficiency given the size of the dataset; the analysis could alternatively be conducted at the individual house level.] The estimated regression coefficients capture the within-buffer change in average house prices over time, relative to untreated periods, conditional on the buffer experiencing a high-severity spill in a given quarter. That is, they reflect how **prices evolve in a given spill site's buffer following the occurrence of a high-severity spill within that buffer**.
 
 The regressions below are estimated using the Chaisemartin & d'Haultefoeuille (2024) estimator using the package `DIDmultiplegtDYN.` This estimator allows for a wide range of settings, including non-absorbing treatment, staggered treatment, continuous treatment, and many other settings that I still need to understand. In the event study regressions, the effects are estimated for:
 
@@ -362,7 +362,7 @@ plan(multisession, workers = 3)
 
 # Load data
 ## Data paths
-path_house <- here::here("data", "processed", "panel_house")
+path_house <- here::here("data", "processed", "houses_within_radius_panel")
 path_site <- here::here("data", "processed", "dat_panel_site_level")
 path_spill <- here::here("data", "processed", "agg_spill_stats")
 path_house_controls <- here::here("data", "processed", "house_price.parquet")
@@ -1401,8 +1401,19 @@ plot_reg_chaisemartin(
 
 ## House-Level Event Study Regressions Within Admin Boundaries {#sec-05-03-house-level-event-study}
 
+The advantages of using house-level data relative to site-level data in the event study regressions are:
+
+- **House-level controls:** Working at the house-level allows us to include property attributes (e.g. newly built, property type etc.) as controls. This ensures that any post-spill changes in the composition of sales do not confound price effects.
+- **No double-counting from overlapping buffers:** Each property appears only once, even if it falls within 500 m of multiple outfalls. This avoids mechanical correlation among treated observations, which could inflate standard errors.
+- **Larger control group:** Properties outside of the X-metre buffer remain in the sample. We can therefore use different location fixed effects (e.g., LSOA, MSOA, Admin Ward, Admin County, County, Region, Country, NHS HA) to account for any pre-existing differences in house prices across the study area.
+
+The figures below show the dynamic effects of sewage spills on house prices across different administrative boundaries. Using geocoded transaction data, I calculate the total volume of sewage spills within a 500 m radius of each property for every calendar quarter. A property is classified as treated in a given quarter if the spill volume exceeds a specified threshold. This approach allows treatment timing to vary across properties, depending on the occurrence and intensity of nearby spills.
+
+The regressions estimate changes in house prices over time within the same location, comparing treated and untreated periods. This controls for time-invariant property characteristics and broader market trends. Regressions are estimated using the event-study estimator developed by Sun and Abraham (2021).
+
 ```{r}
 #| eval: false
+#| Load Data
 
 # Define file paths
 path_house <- here::here("data", "processed", "general_house_panel_qtr")
@@ -1433,9 +1444,10 @@ house_controls <- open_dataset(path_house_controls) %>%
 
 ```{r}
 #| eval: false
+# Create Event Data
 
 # Create event data for each radius
-radii <- c(250L, 500L, 1000L)
+radii <- c(250L)
 event_data_list <- purrr::map(
   radii,
   function(rad) {
@@ -1620,16 +1632,18 @@ event_data_list <- purrr::map(
   purrr::set_names(paste0("rad_", radii))
 ```
 
+
 ```{r}
 #| eval: false
+# Define Functions to Run Event Study Regressions
 
 # Helper: build model name
 build_model_name <- function(
     outcome,
     treatment_threshold,
     treatment_type,
-    time_agg,
     thr_time_agg,
+    time_agg,
     time_fe,
     space_fe,
     cluster_var,
@@ -1762,11 +1776,23 @@ run_event_study_sunab <- function(
     length(rad) == 1
   )
 
-  # ---- 0. results file ----------------------------------------------------- #
-  res_path <- here::here("book", "book_regs", glue::glue(file_name))
-  fs::dir_create(fs::path_dir(res_path))
+  # ---- 0. results directory/file setup ----------------------------------- #
+  # Create directory for individual model files
+  res_dir <- here::here("book", "book_regs", glue::glue("sunab_models_rad_{rad}"))
+  fs::dir_create(res_dir)
 
-  existing <- if (!overwrite && fs::file_exists(res_path)) readRDS(res_path) else list()
+  # Create/read index file to track which models are complete
+  index_path <- file.path(res_dir, "model_index.rds")
+  if (!overwrite && fs::file_exists(index_path)) {
+    model_index <- readRDS(index_path)
+  } else {
+    model_index <- tibble::tibble(
+      model_name = character(),
+      completed = logical(),
+      file_path = character()
+    )
+  }
+  existing_names <- model_index$model_name
 
   # ---- 1. identify the models still to run ------------------------------- #
   param_grid <- tibble::as_tibble(param_grid) %>%
@@ -1787,8 +1813,6 @@ run_event_study_sunab <- function(
       )
     )
 
-  existing_names <- if (length(existing)) names(existing) else character(0)
-
   todo <- dplyr::anti_join(
     param_grid,
     tibble::tibble(model_name = existing_names),
@@ -1797,92 +1821,121 @@ run_event_study_sunab <- function(
 
   if (nrow(todo) == 0) {
     cli::cli_alert_info("No new models to run for radius {rad}.")
-    return(invisible(existing))
+    return(invisible(model_index))
   }
   cli::cli_alert_info("Estimating {nrow(todo)} models for radius {rad} …")
 
-  # ---- 2. run the models (optionally in parallel) --------------------- #
-  furrr::future_map(todo$model_name,
-    function(mn) {
-      # Get model iteration
-      p <- dplyr::filter(todo, model_name == mn) %>%
-        dplyr::slice(1)
+  # ---- 2. run the models one by one, saving each individually ------------- #
+  for (i in 1:nrow(todo)) {
+    mn <- todo$model_name[i]
+    cli::cli_alert(" • {i}/{nrow(todo)}: {mn}")
 
-      # Define treatment variable
-      treatment_var <- paste0(
-        "first_t_",
-        p$treatment_threshold, "_",
-        p$treatment_type, "_",
-        p$thr_time_agg
+    # Get model iteration
+    p <- todo[i, ]
+
+    # Define treatment variable
+    treatment_var <- paste0(
+      "first_t_",
+      p$treatment_threshold, "_",
+      p$treatment_type, "_",
+      p$thr_time_agg
+    )
+
+    # Build formula -------------------------------------------------
+    rhs_terms <- c(
+      paste0("sunab(", treatment_var, ", ", p$time_agg, ")"),
+      unlist(p$controls)
+    ) %>%
+      purrr::compact()
+
+    fml <- as.formula(
+      paste0(
+        p$outcome, " ~ ", paste(rhs_terms, collapse = " + "),
+        " | ", p$space_fe, " + ", p$time_fe
       )
+    )
+    cl_fml <- as.formula(paste0(" ~ ", p$cluster_var, " + ", p$time_fe))
 
-      # Build formula -------------------------------------------------
-      rhs_terms <- c(
-        paste0("sunab(", treatment_var, ", ", p$time_agg, ")"),
-        unlist(p$controls)
-      ) %>%
-        purrr::compact()
+    # Build description
+    desc <- build_description(
+      p$outcome,
+      p$treatment_threshold,
+      p$treatment_type,
+      p$time_agg,
+      p$thr_time_agg,
+      p$time_fe,
+      p$space_fe,
+      p$cluster_var,
+      unlist(p$controls)
+    )
 
-      fml <- as.formula(
-        paste0(
-          p$outcome, " ~ ", paste(rhs_terms, collapse = " + "),
-          " | ", p$space_fe, " + ", p$time_fe
+    # Run the model
+    res <- tryCatch(
+      {
+        fixest::feols(
+          fml = fml,
+          data = data,
+          vcov = cl_fml
         )
-      )
-      cl_fml <- as.formula(paste0(" ~ ", p$cluster_var, " + ", p$time_fe))
-
-      desc <- build_description(
-        p$outcome,
-        p$treatment_threshold,
-        p$treatment_type,
-        p$time_agg,
-        p$thr_time_agg,
-        p$time_fe,
-        p$space_fe,
-        p$cluster_var,
-        unlist(p$controls)
-      )
-
-      cli::cli_alert(" • {mn}")
-
-      res <- fixest::feols(
-        fml = fml,
-        data = data,
-        vcov = cl_fml
-      )
-
-      # Build specification for ggplot
-      controls <- if (is.null(p$controls) || length(p$controls) == 0) {
-        ""
-      } else {
-        unlist(p$controls) %>%
-          paste(collapse = " + ")
+      },
+      error = function(e) {
+        cli::cli_alert_danger("Error fitting model {mn}: {e$message}")
+        return(NULL)
       }
-      spec <- glue::glue(
-        "{p$outcome} ~ {p$time_fe} + {p$space_fe} + {treatment_var} + {controls}"
+    )
+
+    # Skip if model failed
+    if (is.null(res)) {
+      next
+    }
+
+    # Only save the plotting data
+    res <- ggfixest::iplot_data(
+      res,
+      .ci_level = 0.95
+    )
+
+    # Build specification for ggplot
+    controls <- if (is.null(p$controls) || length(p$controls) == 0) {
+      ""
+    } else {
+      unlist(p$controls) %>%
+        paste(collapse = " + ")
+    }
+    spec <- glue::glue(
+      "{p$outcome} ~ {p$time_fe} + {p$space_fe} + {treatment_var} + {controls}"
+    )
+
+    attr(res, "description") <- desc
+    attr(res, "spec") <- spec
+
+    # Save to individual file
+    model_file <- file.path(res_dir, paste0(mn, ".rds"))
+    saveRDS(res, model_file)
+
+    # Update index
+    model_index <- model_index %>%
+      dplyr::add_row(
+        model_name = mn,
+        completed = TRUE,
+        file_path = model_file
       )
+    saveRDS(model_index, index_path)
 
-      attr(res, "description") <- desc
-      attr(res, "spec") <- spec
-      list(res) %>%
-        rlang::set_names(mn)
-    },
-    .options = furrr::furrr_options(seed = TRUE),
-    .progress = TRUE
-  ) %>%
-    purrr::flatten() -> new_results
+    # Clean up memory
+    rm(res, fml, cl_fml, desc, spec, treatment_var, rhs_terms, controls)
+    gc(verbose = FALSE)
+  }
 
-  # ---- 3. merge + save ----------------------------------------------------- #
-  final <- c(existing, new_results)
-  saveRDS(final, res_path)
-  cli::cli_alert_success("Results saved → {res_path}")
-
-  invisible(final)
+  cli::cli_alert_success("All models saved in → {res_dir}")
+  invisible(model_index)
 }
 ```
 
+
 ```{r}
 #| eval: false
+# Run Event Study Regressions
 
 param_grid <- expand.grid(
   outcome = c("log_price"),
@@ -1909,7 +1962,7 @@ event_data_list_sample <- purrr::map(1:length(event_data_list), function(i) {
 purrr::imap(event_data_list_sample, ~ {
   rad_value <- as.numeric(gsub("rad_", "", .y))
   run_event_study_sunab(
-    param_grid = param_grid,
+    param_grid = param_grid[1:2, ],
     data = .x,
     rad = rad_value,
     overwrite = TRUE,
@@ -1918,8 +1971,72 @@ purrr::imap(event_data_list_sample, ~ {
 })
 ```
 
+
 ```{r}
-# Make Sunab regression plot
+# Define Function to Load Results
+load_results_sunab <- function(radii = c(250, 500, 1000),
+                               freqs = c("qtr", "mo"),
+                               dir_path = here::here("output", "regs"),
+                               quiet = FALSE,
+                               pattern = "sunab_models_rad_{r}") {
+  results <- list()
+
+  for (r in radii) {
+    r_chr <- as.character(r)
+
+    # Initialize radius slot if needed
+    if (is.null(results[[r_chr]])) results[[r_chr]] <- list()
+
+    for (f in freqs) {
+      # Create path to model index file
+      model_dir_pattern <- glue::glue(
+        pattern,
+        .envir = rlang::env(r = r, f = f)
+      )
+      model_dir <- file.path(dir_path, model_dir_pattern)
+      index_path <- file.path(model_dir, "model_index.rds")
+
+      # Skip if no index file exists
+      if (!file.exists(index_path)) {
+        if (!quiet) {
+          cli::cli_alert_warning(
+            "No model index found for radius {r}, freq {f}"
+          )
+        }
+        next
+      }
+
+      # Read model index
+      model_index <- readRDS(index_path)
+
+      # Initialize frequency slot
+      results[[r_chr]][[f]] <- list()
+
+      # Load each model into the structure
+      model_count <- 0
+      for (mn in model_index$model_name) {
+        model_path <- file.path(model_dir, paste0(mn, ".rds"))
+        if (file.exists(model_path)) {
+          results[[r_chr]][[f]][[mn]] <- readRDS(model_path)
+          model_count <- model_count + 1
+        }
+      }
+
+      if (!quiet) {
+        cli::cli_alert_success(
+          "Loaded {model_count} models for radius {r}, freq {f}"
+        )
+      }
+    }
+  }
+
+  return(results)
+}
+```
+
+
+```{r}
+# Define Function to Plot Sunab Regressions
 plot_reg_sunab <- function(
     data,
     radius,
@@ -1954,12 +2071,7 @@ plot_reg_sunab <- function(
   }
 
   # Plot
-  p <- ggfixest::ggiplot(
-    mod,
-    aggr_eff = "post",
-    ci_level = c(.8, .9, .95)
-  )
-  mod_data <- p$data %>%
+  mod %>%
     mutate(
       estimate_names = estimate_names + 1,
       group = factor(
@@ -1970,12 +2082,8 @@ plot_reg_sunab <- function(
     filter(
       estimate_names <= 8, estimate_names >= -2,
       ci_level == .95
-    )
-
-  ggplot(
-    mod_data,
-    aes(x = estimate_names, y = estimate, color = group)
-  ) +
+    ) %>%
+    ggplot(aes(x = estimate_names, y = estimate, color = group)) +
     geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
     geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
     geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2) +
@@ -2002,50 +2110,12 @@ plot_reg_sunab <- function(
 ```
 
 ```{r}
-results_sunab <- load_results(
-  radii = c(250),
-  dir_path = here::here("book", "book_regs"),
-  quiet = TRUE,
-  pattern = "sunab_results*.rds"
+results_sunab <- load_results_sunab(
+  radii = c(250, 500, 1000),
+  freqs = c("qtr"),
+  quiet = FALSE,
+  pattern = "sunab_models_rad_{r}"
 )
-
-strip_fixest_model <- function(mod) {
-  to_remove <- c(
-    "summary_flags",
-    "call_env",
-    "scores",
-    "residuals",
-    "fitted.values",
-    "cov.scaled",
-    "cov.iid",
-    "cov.unscaled",
-    "hessian",
-    "model_matrix_info",
-    "model",
-    "vcov",
-    "call",
-    "fixef.algo",
-    "fe.reorder",
-    "fixef_sizes",
-    "fixef_vars",
-    "fixef.tol",
-    "fixef.iter",
-    "summary",
-    "summary_from_fit",
-    "fml",
-    "fml_all",
-    "se",
-    "updating"
-  )
-
-  for (slot in to_remove) {
-    if (!is.null(mod[[slot]])) mod[[slot]] <- NULL
-  }
-
-  mod
-}
-
-
 ```
 
 ### Binary Treatment - Average Spill Count {#sec-05-03-01-binary-average}
@@ -2062,19 +2132,133 @@ strip_fixest_model <- function(mod) {
 plot_reg_sunab(
   data = results_sunab,
   radius = 250,
-  model = "model_bin_logp_sc_mean_qtr_sw_norm"
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa"
 )
 ```
 
-##### Count - 
+##### Count - Controls
 
 ```{r}
-plot_reg_chaisemartin(
-  data = results_qtr, radius = 250, freq = "qtr",
-  model = "model_bin_logp_sc_mean_qtr_sw_norm"
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration - No Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration - Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-500m"}
+
+##### Count - No Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count - Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration - No Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration - Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-1000m"}
+
+##### Count - No Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count - Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration - No Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration - Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa_old_new_property_type_duration"
 )
 ```
 
 :::
 
 :::
+
