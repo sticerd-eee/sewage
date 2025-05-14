@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.7.30">
+<meta name="generator" content="quarto-1.7.31">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -39,7 +39,7 @@ ul.task-list li input[type="checkbox"] {
 <script src="site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="site_libs/quarto-html/anchor.min.js"></script>
 <link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="site_libs/quarto-html/quarto-syntax-highlighting-de070a7b0ab54f8780927367ac907214.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-e1a5c8363afafaef2c763b6775fbf3ca.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
 <link href="site_libs/bootstrap/bootstrap-96c5540ededea34e36548507abb5b3a4.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
@@ -179,7 +179,7 @@ window.Quarto = {
    
   <ul>
   <li><a href="#sec-05-01-setting" id="toc-sec-05-01-setting" class="nav-link active" data-scroll-target="#sec-05-01-setting"><span class="header-section-number">5.1</span> Setting</a></li>
-  <li><a href="#sec-05-02-basic-event-study-regressions" id="toc-sec-05-02-basic-event-study-regressions" class="nav-link" data-scroll-target="#sec-05-02-basic-event-study-regressions"><span class="header-section-number">5.2</span> Basic Event Study Regressions</a>
+  <li><a href="#sec-05-02-basic-event-study-regressions" id="toc-sec-05-02-basic-event-study-regressions" class="nav-link" data-scroll-target="#sec-05-02-basic-event-study-regressions"><span class="header-section-number">5.2</span> Site-Level Event Study Regressions Within Spill Buffers</a>
   <ul class="collapse">
   <li><a href="#sec-05-02-01-binary-average" id="toc-sec-05-02-01-binary-average" class="nav-link" data-scroll-target="#sec-05-02-01-binary-average"><span class="header-section-number">5.2.1</span> Binary Treatment - Average Spill Count</a></li>
   <li><a href="#sec-05-02-02-binary-median" id="toc-sec-05-02-02-binary-median" class="nav-link" data-scroll-target="#sec-05-02-02-binary-median"><span class="header-section-number">5.2.2</span> Binary Treatment - Median Spill Count</a></li>
@@ -187,7 +187,10 @@ window.Quarto = {
   <li><a href="#sec-05-02-04-binary-p90" id="toc-sec-05-02-04-binary-p90" class="nav-link" data-scroll-target="#sec-05-02-04-binary-p90"><span class="header-section-number">5.2.4</span> Binary Treatment - 90th Percentile Spill Count</a></li>
   <li><a href="#sec-05-02-04-continuous-treatment" id="toc-sec-05-02-04-continuous-treatment" class="nav-link" data-scroll-target="#sec-05-02-04-continuous-treatment"><span class="header-section-number">5.2.5</span> Continuous Treatment - Average Spill Count</a></li>
   </ul></li>
-  <li><a href="#notes-and-things-to-try" id="toc-notes-and-things-to-try" class="nav-link" data-scroll-target="#notes-and-things-to-try"><span class="header-section-number">5.3</span> Notes and Things to Try</a></li>
+  <li><a href="#sec-05-03-house-level-event-study" id="toc-sec-05-03-house-level-event-study" class="nav-link" data-scroll-target="#sec-05-03-house-level-event-study"><span class="header-section-number">5.3</span> House-Level Event Study Regressions Within Admin Boundaries</a>
+  <ul class="collapse">
+  <li><a href="#sec-05-03-01-binary-average" id="toc-sec-05-03-01-binary-average" class="nav-link" data-scroll-target="#sec-05-03-01-binary-average"><span class="header-section-number">5.3.1</span> Binary Treatment - Average Spill Count</a></li>
+  </ul></li>
   </ul>
 </nav>
     </div>
@@ -228,24 +231,23 @@ window.Quarto = {
 <section id="sec-05-01-setting" class="level2" data-number="5.1">
 <h2 data-number="5.1" class="anchored" data-anchor-id="sec-05-01-setting"><span class="header-section-number">5.1</span> Setting</h2>
 <p><em>This section is currently being revised as I read and process the recent DiD and event study literature. Some statements may be unclear or incorrect, which I will try to refine them as I go.</em></p>
-<p>We can conceptualise the setting as an event study where sewage spills constitute the treatment. To reduce compute time, I have aggregated the data to the X-meter radius around the spill site level by taking the median of house prices.</p>
+<p>We can conceptualise the empirical setting as an event study, where <em>treatment</em> occurs when a location experiences a sewage spill above a defined threshold, and house prices serve as the outcome variable.</p>
 <ul>
-<li><strong>Treatment is non-absorbing:</strong> spill sites can transition between treated and untreated states multiple times, as a location may experience large spill activity in one period and low in the next period (relative to other spill sites).</li>
-<li><strong>Treatment is staggered:</strong> spills occur at different times across different locations</li>
-<li><strong>Treatment measurement:</strong> spill severity is quantified by either incident count or duration in period <span class="math inline">\(t\)</span> (e.g., monthly), which is naturally continuous. However, we can simplify this into a binary treatment by classifying houses within radius X of a spill site as “treated” when the spill severity exceeds either the mean or a specified percentile threshold relative to other sites.</li>
-<li><strong>Fixed effects:</strong> we can include both period and location-specific (spill site) fixed effects to estimate the effect of spills on house prices through within-spill site variation over time</li>
+<li><strong>Absorbing vs.&nbsp;non-absorbing treatment:</strong> Treatment status can be defined in two ways. In a non-absorbing framework, locations may alternate between treated and control states, depending on spill severity in each period. For example, a location may experience a large spill in one quarter and no spill in the next quarter. Alternatively, in an absorbing framework, a location is considered treated from the first period it exceeds the threshold and remains treated thereafter.</li>
+<li><strong>Treatment is staggered:</strong> Spill events, and therefore treatment, occur at different times across different locations.</li>
+<li><strong>Treatment measurement:</strong> Spill severity is measured by either the number of incidents or by total duration in a given period <span class="math inline">\(t\)</span> (e.g., monthly or quarterly). While these measures are continuous, we can construct a binary treatment indicator by classifying a house as treated if it lies within radius X of a spill site whose severity exceeds a predetermined threshold.</li>
+<li><strong>Fixed effects:</strong> To (partially) address confounding, we include both time and location fixed effects. This ensures that identification relies on within-location variation over time, controlling for any time-invariant differences across locations and common shocks across periods.</li>
 </ul>
 <p>Given the potential problems with the vanilla TWFE presented in the recent literature, I decide to use the Chaisemartin &amp; d’Haultefoeuille (2024) estimator using the package <code>DIDmultiplegtDYN.</code> This estimator allows for a wide range of settings, including non-absorbing treatment, staggered treatment, continuous treatment, and many other settings that I still need to understand.</p>
 </section>
 <section id="sec-05-02-basic-event-study-regressions" class="level2" data-number="5.2">
-<h2 data-number="5.2" class="anchored" data-anchor-id="sec-05-02-basic-event-study-regressions"><span class="header-section-number">5.2</span> Basic Event Study Regressions</h2>
-<p>The following figures show the dynamic effect of sewage spills on house prices over time. Each graph plots changes in median house prices within X-metre radius buffers around spill sites, measured monthly. House prices are aggregated at the spill level using median values for each buffer distance. A buffer is considered “treated” in a given month when the number of spills exceeds either the average or a specified percentile of spill counts across all buffers, <strong>calculated over either a monthly or yearly period</strong>.</p>
-<p>In the event study regressions, the effects are estimated for:</p>
+<h2 data-number="5.2" class="anchored" data-anchor-id="sec-05-02-basic-event-study-regressions"><span class="header-section-number">5.2</span> Site-Level Event Study Regressions Within Spill Buffers</h2>
+<p>The following figures present the dynamic effects of sewage spills on house prices within an X-metre radius around spill sites. For each spill site and quarter, I aggregate spill statistics and average house prices within the corresponding X-metre buffer.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a> The estimated regression coefficients capture the within-buffer change in average house prices over time, relative to untreated periods, conditional on the buffer experiencing a high-severity spill in a given quarter. That is, they reflect how <strong>prices evolve in a given spill site’s buffer following the occurrence of a high-severity spill within that buffer</strong>.</p>
+<p>The regressions below are estimated using the Chaisemartin &amp; d’Haultefoeuille (2024) estimator using the package <code>DIDmultiplegtDYN.</code> This estimator allows for a wide range of settings, including non-absorbing treatment, staggered treatment, continuous treatment, and many other settings that I still need to understand. In the event study regressions, the effects are estimated for:</p>
 <ul>
 <li><strong>Same switchers only.</strong> This ensures that event-study effects are estimated only using switchers for whom all the event-study effects can be estimated. This avoids the problem that if treatment effects are heterogeneous across spill sites where treatment switches, changes in the estimated effects across different time horizons might reflect changes in the composition of the sample rather than actual dynamic treatment effects.</li>
 <li><strong>Normalised.</strong> This scales the estimates to represent effects per unit of treatment rather than total effects. For spill sites, this means showing the impact per unit of treatment intensity, making estimates comparable across time periods and sites.</li>
 </ul>
-<p>Overall, all specifications show practically no effect of spills on house prices.</p>
 <section id="sec-05-02-01-binary-average" class="level3" data-number="5.2.1">
 <h3 data-number="5.2.1" class="anchored" data-anchor-id="sec-05-02-01-binary-average"><span class="header-section-number">5.2.1</span> Binary Treatment - Average Spill Count</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold">
@@ -1219,16 +1221,185 @@ window.Quarto = {
 </div>
 </section>
 </section>
-<section id="notes-and-things-to-try" class="level2" data-number="5.3">
-<h2 data-number="5.3" class="anchored" data-anchor-id="notes-and-things-to-try"><span class="header-section-number">5.3</span> Notes and Things to Try</h2>
+<section id="sec-05-03-house-level-event-study" class="level2" data-number="5.3">
+<h2 data-number="5.3" class="anchored" data-anchor-id="sec-05-03-house-level-event-study"><span class="header-section-number">5.3</span> House-Level Event Study Regressions Within Admin Boundaries</h2>
+<p>The advantages of using house-level data relative to site-level data in the event study regressions are:</p>
 <ul>
-<li>Temporal lags: Correlation between lagged spills (1–6 months prior) and prices</li>
-<li>Event studies using distance weighted aggregations</li>
-<li>Using quarterly data to reduce seasonality</li>
-<li>Using P90</li>
+<li><strong>House-level controls:</strong> Working at the house-level allows us to include property attributes (e.g.&nbsp;newly built, property type etc.) as controls. This ensures that any post-spill changes in the composition of sales do not confound price effects.</li>
+<li><strong>No double-counting from overlapping buffers:</strong> Each property appears only once, even if it falls within 500 m of multiple outfalls. This avoids mechanical correlation among treated observations, which could inflate standard errors.</li>
+<li><strong>Larger control group:</strong> Properties outside of the X-metre buffer remain in the sample. We can therefore use different location fixed effects (e.g., LSOA, MSOA, Admin Ward, Admin County, County, Region, Country, NHS HA) to account for any pre-existing differences in house prices across the study area.</li>
 </ul>
+<p>The figures below show the dynamic effects of sewage spills on house prices across different administrative boundaries. Using geocoded transaction data, I calculate the total volume of sewage spills within a 500 m radius of each property for every calendar quarter. A property is classified as treated in a given quarter if the spill volume exceeds a specified threshold. This approach allows treatment timing to vary across properties, depending on the occurrence and intensity of nearby spills.</p>
+<p>The regressions estimate changes in house prices over time within the same location, comparing treated and untreated periods. This controls for time-invariant property characteristics and broader market trends. Regressions are estimated using the event-study estimator developed by Sun and Abraham (2021).</p>
+<section id="sec-05-03-01-binary-average" class="level3" data-number="5.3.1">
+<h3 data-number="5.3.1" class="anchored" data-anchor-id="sec-05-03-01-binary-average"><span class="header-section-number">5.3.1</span> Binary Treatment - Average Spill Count</h3>
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-29-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-29-1" role="tab" aria-controls="tabset-29-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-29-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-29-2" role="tab" aria-controls="tabset-29-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-29-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-29-3" role="tab" aria-controls="tabset-29-3" aria-selected="false">1000m</a></li></ul>
+<div class="tab-content" data-group="threshold">
+<div id="tabset-29-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-29-1-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-26-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-1" role="tab" aria-controls="tabset-26-1" aria-selected="true">Count - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-26-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-2" role="tab" aria-controls="tabset-26-2" aria-selected="false">Count - Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-26-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-3" role="tab" aria-controls="tabset-26-3" aria-selected="false">Duration - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-26-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-4" role="tab" aria-controls="tabset-26-4" aria-selected="false">Duration - Controls</a></li></ul>
+<div class="tab-content" data-group="radius-250m">
+<div id="tabset-26-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-26-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-84-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-26-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-26-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-85-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-26-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-26-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-86-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-26-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-26-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-87-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-29-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-29-2-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-500m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-27-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-1" role="tab" aria-controls="tabset-27-1" aria-selected="true">Count - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-27-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-2" role="tab" aria-controls="tabset-27-2" aria-selected="false">Count - Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-27-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-3" role="tab" aria-controls="tabset-27-3" aria-selected="false">Duration - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-27-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-4" role="tab" aria-controls="tabset-27-4" aria-selected="false">Duration - Controls</a></li></ul>
+<div class="tab-content" data-group="radius-500m">
+<div id="tabset-27-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-27-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-88-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-27-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-27-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-89-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-27-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-27-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-90-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-27-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-27-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-91-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-29-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-29-3-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-1000m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-28-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-1" role="tab" aria-controls="tabset-28-1" aria-selected="true">Count - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-28-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-2" role="tab" aria-controls="tabset-28-2" aria-selected="false">Count - Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-28-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-3" role="tab" aria-controls="tabset-28-3" aria-selected="false">Duration - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-28-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-4" role="tab" aria-controls="tabset-28-4" aria-selected="false">Duration - Controls</a></li></ul>
+<div class="tab-content" data-group="radius-1000m">
+<div id="tabset-28-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-28-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-92-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-28-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-28-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-93-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-28-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-28-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-94-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-28-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-28-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-95-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
 
 
+</section>
+</section>
+<section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes">
+<hr>
+<ol>
+<li id="fn1"><p>This aggregation is primarily for computational efficiency given the size of the dataset; the analysis could alternatively be conducted at the individual house level.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+</ol>
 </section>
 
 </main> <!-- /main -->
