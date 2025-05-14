@@ -190,6 +190,9 @@ window.Quarto = {
   <li><a href="#sec-05-03-house-level-event-study" id="toc-sec-05-03-house-level-event-study" class="nav-link" data-scroll-target="#sec-05-03-house-level-event-study"><span class="header-section-number">5.3</span> House-Level Event Study Regressions Within Admin Boundaries</a>
   <ul class="collapse">
   <li><a href="#sec-05-03-01-binary-average" id="toc-sec-05-03-01-binary-average" class="nav-link" data-scroll-target="#sec-05-03-01-binary-average"><span class="header-section-number">5.3.1</span> Binary Treatment - Average Spill Count</a></li>
+  <li><a href="#sec-05-03-02-binary-median" id="toc-sec-05-03-02-binary-median" class="nav-link" data-scroll-target="#sec-05-03-02-binary-median"><span class="header-section-number">5.3.2</span> Binary Treatment - Median Spill Count</a></li>
+  <li><a href="#sec-05-03-03-binary-p75" id="toc-sec-05-03-03-binary-p75" class="nav-link" data-scroll-target="#sec-05-03-03-binary-p75"><span class="header-section-number">5.3.3</span> Binary Treatment - 75th Percentile Spill Count</a></li>
+  <li><a href="#sec-05-03-04-binary-p90" id="toc-sec-05-03-04-binary-p90" class="nav-link" data-scroll-target="#sec-05-03-04-binary-p90"><span class="header-section-number">5.3.4</span> Binary Treatment - 90th Percentile Spill Count</a></li>
   </ul></li>
   </ul>
 </nav>
@@ -250,13 +253,13 @@ window.Quarto = {
 </ul>
 <section id="sec-05-02-01-binary-average" class="level3" data-number="5.2.1">
 <h3 data-number="5.2.1" class="anchored" data-anchor-id="sec-05-02-01-binary-average"><span class="header-section-number">5.2.1</span> Binary Treatment - Average Spill Count</h3>
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-site">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-5-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-1" role="tab" aria-controls="tabset-5-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-2" role="tab" aria-controls="tabset-5-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-3" role="tab" aria-controls="tabset-5-3" aria-selected="false">1000m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-4" role="tab" aria-controls="tabset-5-4" aria-selected="false">2000m</a></li></ul>
-<div class="tab-content" data-group="threshold">
+<div class="tab-content" data-group="threshold-site">
 <div id="tabset-5-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-5-1-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-250m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-250m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-1-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-1" role="tab" aria-controls="tabset-1-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-2" role="tab" aria-controls="tabset-1-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-3" role="tab" aria-controls="tabset-1-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-4" role="tab" aria-controls="tabset-1-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-250m">
+<div class="tab-content" data-group="radius-site-250m">
 <div id="tabset-1-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-1-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -305,9 +308,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-5-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-5-2-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-500m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-250m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-2-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-1" role="tab" aria-controls="tabset-2-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-2-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-2" role="tab" aria-controls="tabset-2-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-2-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-3" role="tab" aria-controls="tabset-2-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-2-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-4" role="tab" aria-controls="tabset-2-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-500m">
+<div class="tab-content" data-group="radius-site-250m">
 <div id="tabset-2-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-2-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -356,9 +359,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-5-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-5-3-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-1000m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-250m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-3-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-1" role="tab" aria-controls="tabset-3-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-3-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-2" role="tab" aria-controls="tabset-3-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-3-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-3" role="tab" aria-controls="tabset-3-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-3-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-4" role="tab" aria-controls="tabset-3-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-1000m">
+<div class="tab-content" data-group="radius-site-250m">
 <div id="tabset-3-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-3-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -462,13 +465,13 @@ window.Quarto = {
 </section>
 <section id="sec-05-02-02-binary-median" class="level3" data-number="5.2.2">
 <h3 data-number="5.2.2" class="anchored" data-anchor-id="sec-05-02-02-binary-median"><span class="header-section-number">5.2.2</span> Binary Treatment - Median Spill Count</h3>
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-site">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-10-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-1" role="tab" aria-controls="tabset-10-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-10-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-2" role="tab" aria-controls="tabset-10-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-10-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-3" role="tab" aria-controls="tabset-10-3" aria-selected="false">1000m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-10-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-4" role="tab" aria-controls="tabset-10-4" aria-selected="false">2000m</a></li></ul>
-<div class="tab-content" data-group="threshold">
+<div class="tab-content" data-group="threshold-site">
 <div id="tabset-10-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-10-1-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-250m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-250m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-6-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-1" role="tab" aria-controls="tabset-6-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-6-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-2" role="tab" aria-controls="tabset-6-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-6-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-3" role="tab" aria-controls="tabset-6-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-6-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-4" role="tab" aria-controls="tabset-6-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-250m">
+<div class="tab-content" data-group="radius-site-250m">
 <div id="tabset-6-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-6-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -517,9 +520,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-10-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-10-2-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-500m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-250m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-7-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-1" role="tab" aria-controls="tabset-7-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-7-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-2" role="tab" aria-controls="tabset-7-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-7-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-3" role="tab" aria-controls="tabset-7-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-7-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-4" role="tab" aria-controls="tabset-7-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-500m">
+<div class="tab-content" data-group="radius-site-250m">
 <div id="tabset-7-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-7-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -568,9 +571,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-10-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-10-3-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-1000m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-250m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-8-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-1" role="tab" aria-controls="tabset-8-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-8-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-2" role="tab" aria-controls="tabset-8-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-8-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-3" role="tab" aria-controls="tabset-8-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-8-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-4" role="tab" aria-controls="tabset-8-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-1000m">
+<div class="tab-content" data-group="radius-site-250m">
 <div id="tabset-8-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-8-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -674,13 +677,13 @@ window.Quarto = {
 </section>
 <section id="sec-05-02-03-binary-p75" class="level3" data-number="5.2.3">
 <h3 data-number="5.2.3" class="anchored" data-anchor-id="sec-05-02-03-binary-p75"><span class="header-section-number">5.2.3</span> Binary Treatment - 75th Percentile Spill Count</h3>
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-site">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-15-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-1" role="tab" aria-controls="tabset-15-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-15-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-2" role="tab" aria-controls="tabset-15-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-15-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-3" role="tab" aria-controls="tabset-15-3" aria-selected="false">1000m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-15-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-4" role="tab" aria-controls="tabset-15-4" aria-selected="false">2000m</a></li></ul>
-<div class="tab-content" data-group="threshold">
+<div class="tab-content" data-group="threshold-site">
 <div id="tabset-15-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-15-1-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-250m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-250m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-11-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-11-1" role="tab" aria-controls="tabset-11-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-11-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-11-2" role="tab" aria-controls="tabset-11-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-11-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-11-3" role="tab" aria-controls="tabset-11-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-11-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-11-4" role="tab" aria-controls="tabset-11-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-250m">
+<div class="tab-content" data-group="radius-site-250m">
 <div id="tabset-11-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-11-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -729,9 +732,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-15-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-15-2-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-500m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-500m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-12-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-12-1" role="tab" aria-controls="tabset-12-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-12-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-12-2" role="tab" aria-controls="tabset-12-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-12-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-12-3" role="tab" aria-controls="tabset-12-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-12-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-12-4" role="tab" aria-controls="tabset-12-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-500m">
+<div class="tab-content" data-group="radius-site-500m">
 <div id="tabset-12-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-12-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -780,9 +783,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-15-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-15-3-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-1000m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-1000m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-13-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-13-1" role="tab" aria-controls="tabset-13-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-13-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-13-2" role="tab" aria-controls="tabset-13-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-13-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-13-3" role="tab" aria-controls="tabset-13-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-13-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-13-4" role="tab" aria-controls="tabset-13-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-1000m">
+<div class="tab-content" data-group="radius-site-1000m">
 <div id="tabset-13-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-13-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -831,9 +834,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-15-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-15-4-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-2000m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-2000m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-14-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-14-1" role="tab" aria-controls="tabset-14-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-14-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-14-2" role="tab" aria-controls="tabset-14-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-14-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-14-3" role="tab" aria-controls="tabset-14-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-14-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-14-4" role="tab" aria-controls="tabset-14-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-2000m">
+<div class="tab-content" data-group="radius-site-2000m">
 <div id="tabset-14-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-14-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -886,13 +889,13 @@ window.Quarto = {
 </section>
 <section id="sec-05-02-04-binary-p90" class="level3" data-number="5.2.4">
 <h3 data-number="5.2.4" class="anchored" data-anchor-id="sec-05-02-04-binary-p90"><span class="header-section-number">5.2.4</span> Binary Treatment - 90th Percentile Spill Count</h3>
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-site">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-20-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-20-1" role="tab" aria-controls="tabset-20-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-20-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-20-2" role="tab" aria-controls="tabset-20-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-20-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-20-3" role="tab" aria-controls="tabset-20-3" aria-selected="false">1000m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-20-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-20-4" role="tab" aria-controls="tabset-20-4" aria-selected="false">2000m</a></li></ul>
-<div class="tab-content" data-group="threshold">
+<div class="tab-content" data-group="threshold-site">
 <div id="tabset-20-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-20-1-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-250m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-250m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-16-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-16-1" role="tab" aria-controls="tabset-16-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-16-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-16-2" role="tab" aria-controls="tabset-16-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-16-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-16-3" role="tab" aria-controls="tabset-16-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-16-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-16-4" role="tab" aria-controls="tabset-16-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-250m">
+<div class="tab-content" data-group="radius-site-250m">
 <div id="tabset-16-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-16-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -941,9 +944,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-20-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-20-2-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-500m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-500m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-17-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-17-1" role="tab" aria-controls="tabset-17-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-17-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-17-2" role="tab" aria-controls="tabset-17-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-17-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-17-3" role="tab" aria-controls="tabset-17-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-17-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-17-4" role="tab" aria-controls="tabset-17-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-500m">
+<div class="tab-content" data-group="radius-site-500m">
 <div id="tabset-17-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-17-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -992,9 +995,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-20-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-20-3-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-1000m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-1000m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-18-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-18-1" role="tab" aria-controls="tabset-18-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-18-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-18-2" role="tab" aria-controls="tabset-18-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-18-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-18-3" role="tab" aria-controls="tabset-18-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-18-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-18-4" role="tab" aria-controls="tabset-18-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-1000m">
+<div class="tab-content" data-group="radius-site-1000m">
 <div id="tabset-18-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-18-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -1043,9 +1046,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-20-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-20-4-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-2000m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-2000m">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-19-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-19-1" role="tab" aria-controls="tabset-19-1" aria-selected="true">Count Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-19-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-19-2" role="tab" aria-controls="tabset-19-2" aria-selected="false">Count Yr</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-19-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-19-3" role="tab" aria-controls="tabset-19-3" aria-selected="false">Duration Qt</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-19-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-19-4" role="tab" aria-controls="tabset-19-4" aria-selected="false">Duration Yr</a></li></ul>
-<div class="tab-content" data-group="radius-2000m">
+<div class="tab-content" data-group="radius-site-2000m">
 <div id="tabset-19-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-19-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -1098,13 +1101,13 @@ window.Quarto = {
 </section>
 <section id="sec-05-02-04-continuous-treatment" class="level3" data-number="5.2.5">
 <h3 data-number="5.2.5" class="anchored" data-anchor-id="sec-05-02-04-continuous-treatment"><span class="header-section-number">5.2.5</span> Continuous Treatment - Average Spill Count</h3>
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="continuous">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="continuous-site">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-25-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-25-1" role="tab" aria-controls="tabset-25-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-25-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-25-2" role="tab" aria-controls="tabset-25-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-25-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-25-3" role="tab" aria-controls="tabset-25-3" aria-selected="false">1000m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-25-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-25-4" role="tab" aria-controls="tabset-25-4" aria-selected="false">2000m</a></li></ul>
-<div class="tab-content" data-group="continuous">
+<div class="tab-content" data-group="continuous-site">
 <div id="tabset-25-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-25-1-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-250m-cont">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-250m-cont">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-21-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-21-1" role="tab" aria-controls="tabset-21-1" aria-selected="true">Count</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-21-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-21-2" role="tab" aria-controls="tabset-21-2" aria-selected="false">Duration</a></li></ul>
-<div class="tab-content" data-group="radius-250m-cont">
+<div class="tab-content" data-group="radius-site-250m-cont">
 <div id="tabset-21-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-21-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -1131,9 +1134,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-25-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-25-2-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-500m-cont">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-500m-cont">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-22-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-22-1" role="tab" aria-controls="tabset-22-1" aria-selected="true">Count</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-22-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-22-2" role="tab" aria-controls="tabset-22-2" aria-selected="false">Duration</a></li></ul>
-<div class="tab-content" data-group="radius-500m-cont">
+<div class="tab-content" data-group="radius-site-500m-cont">
 <div id="tabset-22-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-22-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -1160,9 +1163,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-25-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-25-3-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-1000m-cont">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-1000m-cont">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-23-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-23-1" role="tab" aria-controls="tabset-23-1" aria-selected="true">Count</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-23-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-23-2" role="tab" aria-controls="tabset-23-2" aria-selected="false">Duration</a></li></ul>
-<div class="tab-content" data-group="radius-1000m-cont">
+<div class="tab-content" data-group="radius-site-1000m-cont">
 <div id="tabset-23-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-23-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -1189,9 +1192,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-25-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-25-4-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-2000m-cont">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-site-2000m-cont">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-24-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-24-1" role="tab" aria-controls="tabset-24-1" aria-selected="true">Count</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-24-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-24-2" role="tab" aria-controls="tabset-24-2" aria-selected="false">Duration</a></li></ul>
-<div class="tab-content" data-group="radius-2000m-cont">
+<div class="tab-content" data-group="radius-site-2000m-cont">
 <div id="tabset-24-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-24-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -1230,16 +1233,22 @@ window.Quarto = {
 <li><strong>Larger control group:</strong> Properties outside of the X-metre buffer remain in the sample. We can therefore use different location fixed effects (e.g., LSOA, MSOA, Admin Ward, Admin County, County, Region, Country, NHS HA) to account for any pre-existing differences in house prices across the study area.</li>
 </ul>
 <p>The figures below show the dynamic effects of sewage spills on house prices across different administrative boundaries. Using geocoded transaction data, I calculate the total volume of sewage spills within a 500 m radius of each property for every calendar quarter. A property is classified as treated in a given quarter if the spill volume exceeds a specified threshold. This approach allows treatment timing to vary across properties, depending on the occurrence and intensity of nearby spills.</p>
-<p>The regressions estimate changes in house prices over time within the same location, comparing treated and untreated periods. This controls for time-invariant property characteristics and broader market trends. Regressions are estimated using the event-study estimator developed by Sun and Abraham (2021).</p>
+<p>The regressions estimate changes in house prices over time within the same location, comparing treated and untreated periods. Regressions are estimated both without controls (NC) and with controls (C):</p>
+<ul>
+<li><strong>Old/New:</strong> A binary variable indicating whether the property was a newly built property that had not been previosly sold.</li>
+<li><strong>Property Type:</strong> A categorical variable indicating the type of property (detached, semi-detached, terraced, flats/maisonettes, other)</li>
+<li><strong>Duration:</strong> A binary variable indicating the tenure of the property (freehold, leasehold)</li>
+</ul>
+<p>Regressions are estimated using the event-study estimator developed by Sun and Abraham (2021).</p>
 <section id="sec-05-03-01-binary-average" class="level3" data-number="5.3.1">
 <h3 data-number="5.3.1" class="anchored" data-anchor-id="sec-05-03-01-binary-average"><span class="header-section-number">5.3.1</span> Binary Treatment - Average Spill Count</h3>
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-house">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-29-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-29-1" role="tab" aria-controls="tabset-29-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-29-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-29-2" role="tab" aria-controls="tabset-29-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-29-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-29-3" role="tab" aria-controls="tabset-29-3" aria-selected="false">1000m</a></li></ul>
-<div class="tab-content" data-group="threshold">
+<div class="tab-content" data-group="threshold-house">
 <div id="tabset-29-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-29-1-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-250m">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-26-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-1" role="tab" aria-controls="tabset-26-1" aria-selected="true">Count - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-26-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-2" role="tab" aria-controls="tabset-26-2" aria-selected="false">Count - Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-26-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-3" role="tab" aria-controls="tabset-26-3" aria-selected="false">Duration - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-26-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-4" role="tab" aria-controls="tabset-26-4" aria-selected="false">Duration - Controls</a></li></ul>
-<div class="tab-content" data-group="radius-250m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-26-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-1" role="tab" aria-controls="tabset-26-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-26-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-2" role="tab" aria-controls="tabset-26-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-26-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-3" role="tab" aria-controls="tabset-26-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-26-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-26-4" role="tab" aria-controls="tabset-26-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
 <div id="tabset-26-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-26-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -1288,9 +1297,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-29-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-29-2-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-500m">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-27-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-1" role="tab" aria-controls="tabset-27-1" aria-selected="true">Count - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-27-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-2" role="tab" aria-controls="tabset-27-2" aria-selected="false">Count - Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-27-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-3" role="tab" aria-controls="tabset-27-3" aria-selected="false">Duration - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-27-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-4" role="tab" aria-controls="tabset-27-4" aria-selected="false">Duration - Controls</a></li></ul>
-<div class="tab-content" data-group="radius-500m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-27-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-1" role="tab" aria-controls="tabset-27-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-27-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-2" role="tab" aria-controls="tabset-27-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-27-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-3" role="tab" aria-controls="tabset-27-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-27-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-27-4" role="tab" aria-controls="tabset-27-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
 <div id="tabset-27-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-27-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -1339,9 +1348,9 @@ window.Quarto = {
 </div>
 </div>
 <div id="tabset-29-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-29-3-tab">
-<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-1000m">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-28-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-1" role="tab" aria-controls="tabset-28-1" aria-selected="true">Count - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-28-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-2" role="tab" aria-controls="tabset-28-2" aria-selected="false">Count - Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-28-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-3" role="tab" aria-controls="tabset-28-3" aria-selected="false">Duration - No Controls</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-28-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-4" role="tab" aria-controls="tabset-28-4" aria-selected="false">Duration - Controls</a></li></ul>
-<div class="tab-content" data-group="radius-1000m">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-28-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-1" role="tab" aria-controls="tabset-28-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-28-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-2" role="tab" aria-controls="tabset-28-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-28-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-3" role="tab" aria-controls="tabset-28-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-28-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-28-4" role="tab" aria-controls="tabset-28-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
 <div id="tabset-28-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-28-1-tab">
 <div class="cell">
 <div class="cell-output-display">
@@ -1381,6 +1390,489 @@ window.Quarto = {
 <div>
 <figure class="figure">
 <p><img src="event_study_files/figure-html/unnamed-chunk-95-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="sec-05-03-02-binary-median" class="level3" data-number="5.3.2">
+<h3 data-number="5.3.2" class="anchored" data-anchor-id="sec-05-03-02-binary-median"><span class="header-section-number">5.3.2</span> Binary Treatment - Median Spill Count</h3>
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-house">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-33-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-33-1" role="tab" aria-controls="tabset-33-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-33-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-33-2" role="tab" aria-controls="tabset-33-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-33-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-33-3" role="tab" aria-controls="tabset-33-3" aria-selected="false">1000m</a></li></ul>
+<div class="tab-content" data-group="threshold-house">
+<div id="tabset-33-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-33-1-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-30-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-30-1" role="tab" aria-controls="tabset-30-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-30-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-30-2" role="tab" aria-controls="tabset-30-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-30-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-30-3" role="tab" aria-controls="tabset-30-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-30-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-30-4" role="tab" aria-controls="tabset-30-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
+<div id="tabset-30-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-30-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-96-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-30-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-30-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-97-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-30-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-30-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-98-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-30-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-30-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-99-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-33-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-33-2-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-31-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-31-1" role="tab" aria-controls="tabset-31-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-31-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-31-2" role="tab" aria-controls="tabset-31-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-31-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-31-3" role="tab" aria-controls="tabset-31-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-31-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-31-4" role="tab" aria-controls="tabset-31-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
+<div id="tabset-31-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-31-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-100-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-31-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-31-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-101-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-31-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-31-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-102-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-31-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-31-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-103-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-33-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-33-3-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-32-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-32-1" role="tab" aria-controls="tabset-32-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-32-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-32-2" role="tab" aria-controls="tabset-32-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-32-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-32-3" role="tab" aria-controls="tabset-32-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-32-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-32-4" role="tab" aria-controls="tabset-32-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
+<div id="tabset-32-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-32-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-104-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-32-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-32-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-105-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-32-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-32-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-106-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-32-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-32-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-107-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="sec-05-03-03-binary-p75" class="level3" data-number="5.3.3">
+<h3 data-number="5.3.3" class="anchored" data-anchor-id="sec-05-03-03-binary-p75"><span class="header-section-number">5.3.3</span> Binary Treatment - 75th Percentile Spill Count</h3>
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-house">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-37-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-37-1" role="tab" aria-controls="tabset-37-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-37-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-37-2" role="tab" aria-controls="tabset-37-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-37-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-37-3" role="tab" aria-controls="tabset-37-3" aria-selected="false">1000m</a></li></ul>
+<div class="tab-content" data-group="threshold-house">
+<div id="tabset-37-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-37-1-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-34-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-34-1" role="tab" aria-controls="tabset-34-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-34-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-34-2" role="tab" aria-controls="tabset-34-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-34-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-34-3" role="tab" aria-controls="tabset-34-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-34-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-34-4" role="tab" aria-controls="tabset-34-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
+<div id="tabset-34-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-34-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-108-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-34-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-34-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-109-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-34-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-34-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-110-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-34-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-34-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-111-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-37-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-37-2-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-35-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-35-1" role="tab" aria-controls="tabset-35-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-35-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-35-2" role="tab" aria-controls="tabset-35-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-35-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-35-3" role="tab" aria-controls="tabset-35-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-35-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-35-4" role="tab" aria-controls="tabset-35-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
+<div id="tabset-35-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-35-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-112-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-35-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-35-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-113-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-35-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-35-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-114-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-35-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-35-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-115-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-37-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-37-3-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-36-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-36-1" role="tab" aria-controls="tabset-36-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-36-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-36-2" role="tab" aria-controls="tabset-36-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-36-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-36-3" role="tab" aria-controls="tabset-36-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-36-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-36-4" role="tab" aria-controls="tabset-36-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
+<div id="tabset-36-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-36-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-116-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-36-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-36-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-117-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-36-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-36-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-118-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-36-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-36-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-119-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="sec-05-03-04-binary-p90" class="level3" data-number="5.3.4">
+<h3 data-number="5.3.4" class="anchored" data-anchor-id="sec-05-03-04-binary-p90"><span class="header-section-number">5.3.4</span> Binary Treatment - 90th Percentile Spill Count</h3>
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-house">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-41-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-41-1" role="tab" aria-controls="tabset-41-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-41-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-41-2" role="tab" aria-controls="tabset-41-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-41-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-41-3" role="tab" aria-controls="tabset-41-3" aria-selected="false">1000m</a></li></ul>
+<div class="tab-content" data-group="threshold-house">
+<div id="tabset-41-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-41-1-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-38-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-38-1" role="tab" aria-controls="tabset-38-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-38-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-38-2" role="tab" aria-controls="tabset-38-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-38-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-38-3" role="tab" aria-controls="tabset-38-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-38-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-38-4" role="tab" aria-controls="tabset-38-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
+<div id="tabset-38-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-38-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-120-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-38-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-38-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-121-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-38-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-38-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-122-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-38-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-38-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-123-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-41-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-41-2-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-39-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-39-1" role="tab" aria-controls="tabset-39-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-39-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-39-2" role="tab" aria-controls="tabset-39-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-39-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-39-3" role="tab" aria-controls="tabset-39-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-39-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-39-4" role="tab" aria-controls="tabset-39-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
+<div id="tabset-39-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-39-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-124-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-39-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-39-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-125-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-39-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-39-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-126-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-39-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-39-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-127-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-41-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-41-3-tab">
+<div class="tabset-margin-container"></div><div class="panel-tabset" data-group="radius-house-250m">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-40-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-40-1" role="tab" aria-controls="tabset-40-1" aria-selected="true">Count (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-40-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-40-2" role="tab" aria-controls="tabset-40-2" aria-selected="false">Count (C)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-40-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-40-3" role="tab" aria-controls="tabset-40-3" aria-selected="false">Duration (NC)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-40-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-40-4" role="tab" aria-controls="tabset-40-4" aria-selected="false">Duration (C)</a></li></ul>
+<div class="tab-content" data-group="radius-house-250m">
+<div id="tabset-40-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-40-1-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-128-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-40-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-40-2-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-129-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-40-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-40-3-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-130-1.png" class="img-fluid figure-img" width="864"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+<div id="tabset-40-4" class="tab-pane" role="tabpanel" aria-labelledby="tabset-40-4-tab">
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="event_study_files/figure-html/unnamed-chunk-131-1.png" class="img-fluid figure-img" width="864"></p>
 </figure>
 </div>
 </div>
