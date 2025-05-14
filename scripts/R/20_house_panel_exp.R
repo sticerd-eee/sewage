@@ -1,15 +1,17 @@
 ############################################################
 # Create House Sale-Level Panel Data by Radius
 # Project: Sewage
-# Date: 07/03/2025
+# Date: 09/05/2025
 # Author: Jacopo Olivieri
 ############################################################
 
 #' This script reads house price data and the site-house lookup from
-#' DuckDB. For each specified radius, it creates a dataset containing
-#' individual house sale records, linking each sale to any site(s)
-#' within that radius. The final output is a partitioned parquet dataset
-#' containing all sales across all radii.
+#' DuckDB. For each specified radius, it creates a general dataset containing
+#' all house sale records, both within and outside the specified radius of sites.
+#' Houses are tagged with their relationship to sites (if any) and include metadata
+#' about whether they fall within the radius threshold. This creates a general panel
+#' that will require further processing depending on the specific analysis requirements.
+#' The final output is a partitioned parquet dataset.
 
 # Setup Functions
 ############################################################
@@ -41,7 +43,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "19_house_panel.log")
+  log_path <- here::here("output", "log", "20_house_panel_exp.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
   logger::log_appender(logger::appender_file(log_path))
@@ -56,8 +58,8 @@ setup_logging <- function() {
 CONFIG <- list(
   processed_dir = here::here("data", "processed"),
   db_path = here::here("data", "duckdb.duckdb"),
-  radius_thresholds = c(250, 500, 1000, 2000),
-  output_dir = here::here("data", "processed", "panel_house"),
+  radius_thresholds = c(250, 500, 1000),
+  output_dir = here::here("data", "processed", "general_house_panel_qtr"),
   base_year = 2021
 )
 
@@ -115,33 +117,51 @@ load_data_to_db <- function(con) {
     rm(spill_lookup)
     logger::log_info("Spill lookup data loaded")
   }
+
+  # Quarterly spill statistics
+  if (!"spill_statistics_qtr" %in% existing_tables) {
+    logger::log_info("Loading spill statistics data")
+    spill_qtr <- open_dataset(
+      file.path(CONFIG$processed_dir, "agg_spill_stats")
+    ) %>%
+      filter(period_type == "quarterly") %>%
+      collect() %>%
+      select(-contains("month"), -contains("_mo"))
+    copy_to(con, spill_qtr, "spill_statistics_qtr", temporary = FALSE)
+    rm(spill_qtr)
+    logger::log_info("Spill statistics data loaded")
+  }
 }
 
-#' Prepare base house price and lookup tables with necessary columns
+#' Prepare base house price, lookup, and quarterly spill statistics tables
 #' @param con DuckDB connection
 #' @return A list containing prepared lazy database tables
 prepare_tables <- function(con) {
   log_info("Preparing base tables")
-
-  house_tbl <- tbl(con, "house_price_data") %>%
-    select(house_id, price, date_of_transfer) %>%
-    mutate(
-      year = year(date_of_transfer),
-      month = month(date_of_transfer),
-      quarter = quarter(date_of_transfer),
-      transfer_date_mo = sql("DATE_TRUNC('month', date_of_transfer)"),
-      transfer_date_qtr = sql("DATE_TRUNC('quarter', date_of_transfer)")
-    )
-
-  spill_lookup_tbl <- tbl(con, "spill_lookup") %>%
+  
+  base_year <- CONFIG$base_year
+  
+  # House price data
+  house_tbl <- tbl(con, "house_price_data") 
+  house_tbl <- house_tbl %>%
+    select(house_id, price, qtr_id) 
+  
+  # Spill lookup
+  spill_lookup_tbl <- tbl(con, "spill_lookup") 
+  spill_lookup_tbl <- spill_lookup_tbl %>%
     select(house_id, site_id, distance_m)
-
+  
+  # Quarterly spill statistics
+  spill_qtr_tbl <- tbl(con, "spill_statistics_qtr") 
+  spill_qtr_tbl <- spill_qtr_tbl %>%
+    select(site_id, qtr_id, spill_count, spill_hrs)
+  
   return(list(
     house_tbl = house_tbl,
-    spill_lookup_tbl = spill_lookup_tbl
+    spill_lookup_tbl = spill_lookup_tbl,
+    spill_qtr_tbl = spill_qtr_tbl
   ))
 }
-
 
 
 #' Create house-sale-level panel data for a specific radius.
@@ -154,70 +174,60 @@ create_house_panel_for_radius <- function(prepared_tables, radius_m, con) {
 
   house_tbl <- prepared_tables$house_tbl
   spill_lookup_tbl <- prepared_tables$spill_lookup_tbl
-  base_year <- 2021
+  spill_qtr_tbl <- prepared_tables$spill_qtr_tbl
 
   # 1. Filter houses within the current radius and join with house price data
   log_info("Filtering sites within {radius_m}m radius")
   houses_in_radius_tbl <- spill_lookup_tbl %>%
     filter(distance_m <= .env$radius_m) %>%
     inner_join(house_tbl, by = "house_id") %>%
-    select(
-      site_id, house_id,
-      transfer_date_mo, transfer_date_qtr,
-      year, month, quarter,
-      price, distance_m
-    )
-
-  # 2. Monthly closest house panel
-  log_info("Building monthly panel for radius {radius_m}m")
-  monthly <- houses_in_radius_tbl %>%
-    select(site_id, transfer_date_mo, house_id, price, distance_m) %>%
-    rename(date = transfer_date_mo) %>%
-    # complete panel data
-    complete(site_id, date) %>%
-    # add metadata
+    select(site_id, house_id, qtr_id, distance_m) %>%
     mutate(
-      month = lubridate::month(date),
-      year = lubridate::year(date),
-      period_type = "monthly",
-      month_id = (lubridate::year(date) - base_year) * 12 + lubridate::month(date),
-      radius = as.integer(radius_m),
-      log_price = log(price)
+      qtr_id_transfer = qtr_id,
+      within_radius = TRUE
     )
 
-  # 3. Quarterly closest house
+  # 2. Filter houses outside the current radius and add metadata
+  houses_outside_radius_tbl <- house_tbl %>%
+    anti_join(select(houses_in_radius_tbl, house_id), by = "house_id") %>%
+    select(house_id, qtr_id) %>%
+    mutate(
+      qtr_id_transfer = qtr_id,
+      within_radius = FALSE,
+      distance_m = NA
+    )
+
+  # 3. Complete panel data for houses within the radius
   log_info("Building quarterly panel for radius {radius_m}m")
-  quarterly <- houses_in_radius_tbl %>%
-    select(site_id, transfer_date_qtr, house_id, price, distance_m) %>%
-    rename(date = transfer_date_qtr) %>%
-    # complete panel data
-    complete(site_id, date) %>%
-    mutate(
-      quarter = lubridate::quarter(date),
-      year = lubridate::year(date),
-      period_type = "quarterly",
-      qtr_id = (lubridate::year(date) - base_year) * 4 + lubridate::quarter(date),
-      radius = as.integer(radius_m),
-      log_price = log(price)
-    )
+  houses_in_radius_tbl_complete <- houses_in_radius_tbl %>%
+    select(house_id, qtr_id) %>%
+    complete(house_id, qtr_id) %>%
+    left_join(
+      houses_in_radius_tbl %>%
+        select(
+          house_id, site_id, qtr_id_transfer, distance_m, within_radius) %>%
+        distinct(),
+      by = "house_id"
+    ) %>%
+    left_join(spill_qtr_tbl, by = c("site_id", "qtr_id"))
 
   # 4. Combine, order variables, and sort
-  panel <- union_all(monthly, quarterly) %>%
+  panel <- union_all(houses_in_radius_tbl_complete, houses_outside_radius_tbl) %>%
+    # Add metadata
+    mutate(radius = as.integer(.env$radius_m)) %>%
     # order columns and sort
     select(
       # identifiers
-      site_id, house_id,
+      house_id, site_id,
       # date
-      month_id, month, qtr_id, quarter, year,
-      # outcome
-      price, log_price,
+      qtr_id, qtr_id_transfer,
       # metadata
-      distance_m, radius, period_type,
+      distance_m, radius, within_radius
     ) %>%
-    arrange(site_id, month_id, qtr_id)
+    arrange(house_id, site_id, qtr_id)
 
   # 5. Clean up intermediate data for the radius
-  rm(houses_in_radius_tbl, monthly, quarterly)
+  rm(houses_in_radius_tbl, houses_outside_radius_tbl)
   gc(full = TRUE)
 
   # 6. Return datasets for this radius
@@ -225,6 +235,8 @@ create_house_panel_for_radius <- function(prepared_tables, radius_m, con) {
 }
 
 #' Export panel data to partitioned parquet datasets.
+#' The exported data includes all houses (both within and outside the radius),
+#' providing a general dataset that can be further processed for specific analyses.
 #' @param duckdb_panels List of duckdb_tbl objects with panel data.
 #' @return NULL
 export_house_panel <- function(duckdb_panels) {
@@ -252,7 +264,7 @@ export_house_panel <- function(duckdb_panels) {
     arrow::write_dataset(
       dataset = arrow_tbl,
       path = CONFIG$output_dir,
-      partitioning = c("radius", "period_type"),
+      partitioning = "radius",
       format = "parquet",
       existing_data_behavior = "overwrite"
     )
@@ -287,13 +299,15 @@ main <- function(refresh_db = FALSE) {
         dbDisconnect(con, shutdown = TRUE)
       },
       add = TRUE
-    ) # Ensure disconnection even on error
+    )
 
     # Load data
     if (refresh_db) {
       log_info("Refresh requested – reloading data")
       tables <- DBI::dbListTables(con)
-      for (table in c("house_price_data", "spill_lookup")) {
+      for (table in c(
+        "house_price_data", "spill_lookup", "spill_statistics_qtr"
+      )) {
         if (table %in% tables) {
           logger::log_info("Dropping table: {table}")
           DBI::dbRemoveTable(con, table)

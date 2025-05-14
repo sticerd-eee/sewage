@@ -32,7 +32,7 @@ if (!requireNamespace("renv", quietly = TRUE)) {
 # Load required packages
 required_packages <- c(
   "rmarkdown", "rio", "tidyverse", "purrr", "here", "janitor", "viridis",
-  "data.table", "DIDmultiplegtDYN", "arrow", "furrr"
+  "data.table", "DIDmultiplegtDYN", "arrow", "furrr", "glue"
 )
 install_if_missing <- function(packages) {
   new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
@@ -72,6 +72,28 @@ theme_pref <- theme_minimal() +
   )
 ```
 
+
+## Setting {#sec-05-01-setting}
+
+*This section is currently being revised as I read and process the recent DiD and event study literature. Some statements may be unclear or incorrect, which I will try to refine them as I go.*
+
+We can conceptualise the empirical setting as an event study, where *treatment* occurs when a location experiences a sewage spill above a defined threshold, and house prices serve as the outcome variable.
+
+- **Absorbing vs. non-absorbing treatment:** Treatment status can be defined in two ways. In a non-absorbing framework, locations may alternate between treated and control states, depending on spill severity in each period. For example, a location may experience a large spill in one quarter and no spill in the next quarter. Alternatively, in an absorbing framework, a location is considered treated from the first period it exceeds the threshold and remains treated thereafter.
+- **Treatment is staggered:** Spill events, and therefore treatment, occur at different times across different locations.
+- **Treatment measurement:** Spill severity is measured by either the number of incidents or by total duration in a given period $t$ (e.g., monthly or quarterly). While these measures are continuous, we  can construct a binary treatment indicator by classifying a house as treated if it lies within radius X of a spill site whose severity exceeds a predetermined threshold.
+- **Fixed effects:** To (partially) address confounding, we include both time and location fixed effects. This ensures that identification relies on within-location variation over time, controlling for any time-invariant differences across locations and common shocks across periods.
+
+Given the potential problems with the vanilla TWFE presented in the recent literature, I decide to use the Chaisemartin & d'Haultefoeuille (2024) estimator using the package `DIDmultiplegtDYN.` This estimator allows for a wide range of settings, including non-absorbing treatment, staggered treatment, continuous treatment, and many other settings that I still need to understand. 
+
+## Site-Level Event Study Regressions Within Spill Buffers {#sec-05-02-basic-event-study-regressions}
+
+The following figures present the dynamic effects of sewage spills on house prices within an X-metre radius around spill sites. For each spill site and quarter, I aggregate spill statistics and average house prices within the corresponding X-metre buffer.^[This aggregation is primarily for computational efficiency given the size of the dataset; the analysis could alternatively be conducted at the individual house level.] The estimated regression coefficients capture the within-buffer change in average house prices over time, relative to untreated periods, conditional on the buffer experiencing a high-severity spill in a given quarter. That is, they reflect how prices evolve in a given spill site’s buffer following the occurrence of a high-severity spill within that buffer.
+
+The regressions below are estimated using the Chaisemartin & d'Haultefoeuille (2024) estimator using the package `DIDmultiplegtDYN.` This estimator allows for a wide range of settings, including non-absorbing treatment, staggered treatment, continuous treatment, and many other settings that I still need to understand. In the event study regressions, the effects are estimated for:
+
+- **Same switchers only.** This ensures that event-study effects are estimated only using switchers for whom all the event-study effects can be estimated. This avoids the problem that if treatment effects are heterogeneous across spill sites where treatment switches, changes in the estimated effects across different time horizons might reflect changes in the composition of the sample rather than actual dynamic treatment effects.
+- **Normalised.** This scales the estimates to represent effects per unit of treatment rather than total effects. For spill sites, this means showing the impact per unit of treatment intensity, making estimates comparable across time periods and sites.
 
 ```{r}
 #| eval: false
@@ -463,9 +485,6 @@ for (r in radii) {
 }
 ```
 
-
-## Setting {#sec-05-01-setting}
-
 ```{r}
 # Load results
 load_results <- function(radii = c(250, 500, 1000, 2000),
@@ -480,8 +499,8 @@ load_results <- function(radii = c(250, 500, 1000, 2000),
     r_chr <- as.character(r)
 
     for (f in freqs) {
-      pattern <- glue(pattern)
-      file <- Sys.glob(file.path(dir_path, pattern))[1] # take first match
+      pattern_eval <- glue::glue(pattern, .envir = rlang::env(f = f, r = r))
+      file <- Sys.glob(file.path(dir_path, pattern_eval))[1]
 
       # no file found → skip
       if (is.na(file) || is.null(file) || file == "") next
@@ -502,7 +521,7 @@ load_results <- function(radii = c(250, 500, 1000, 2000),
 
 
 # Make regression plot
-plot_regression <- function(
+plot_reg_chaisemartin <- function(
     data,
     radius,
     model,
@@ -570,31 +589,18 @@ results_qtr <- load_results(
   radii = c(250, 500, 1000, 2000),
   freqs = c("qtr", "mo"),
   dir_path = here("output", "regs"),
-  quiet = TRUE
+  quiet = TRUE,
+  pattern = "250507_did_results_site_{f}_{r}.rds"
+)
+
+results_house_qtr <- load_results(
+  radii = c(250, 500, 1000, 2000),
+  freqs = c("qtr"),
+  dir_path = here("output", "regs"),
+  quiet = TRUE,
+  pattern = "did_results_house_{f}_{r}.rds"
 )
 ```
-
-*This section is currently being revised as I read and process the recent DiD and event study literature. Some statements may be unclear or incorrect, which I will try to refine them as I go.*
-
-We can conceptualise the setting as an event study where sewage spills constitute the treatment. To reduce compute time, I have aggregated the data to the X-meter radius around the spill site level by taking the median of house prices.
-
-- **Treatment is non-absorbing:** spill sites can transition between treated and untreated states multiple times, as a location may experience large spill activity in one period and low in the next period (relative to other spill sites).
-- **Treatment is staggered:** spills occur at different times across different locations
-- **Treatment measurement:** spill severity is quantified by either incident count or duration in period $t$ (e.g., monthly), which is naturally continuous. However, we can simplify this into a binary treatment by classifying houses within radius X of a spill site as "treated" when the spill severity exceeds either the mean or a specified percentile threshold relative to other sites.
-- **Fixed effects:** we can include both period and location-specific (spill site) fixed effects to estimate the effect of spills on house prices through within-spill site variation over time
-
-Given the potential problems with the vanilla TWFE presented in the recent literature, I decide to use the Chaisemartin & d'Haultefoeuille (2024) estimator using the package `DIDmultiplegtDYN.` This estimator allows for a wide range of settings, including non-absorbing treatment, staggered treatment, continuous treatment, and many other settings that I still need to understand. 
-
-## Basic Event Study Regressions {#sec-05-02-basic-event-study-regressions}
-
-The following figures show the dynamic effect of sewage spills on house prices over time. Each graph plots changes in median house prices within X-metre radius buffers around spill sites, measured monthly. House prices are aggregated at the spill level using median values for each buffer distance. A buffer is considered "treated" in a given month when the number of spills exceeds either the average or a specified percentile of spill counts across all buffers, **calculated over either a monthly or yearly period**.
-
-In the event study regressions, the effects are estimated for:
-
-- **Same switchers only.** This ensures that event-study effects are estimated only using switchers for whom all the event-study effects can be estimated. This avoids the problem that if treatment effects are heterogeneous across spill sites where treatment switches, changes in the estimated effects across different time horizons might reflect changes in the composition of the sample rather than actual dynamic treatment effects.
-- **Normalised.** This scales the estimates to represent effects per unit of treatment rather than total effects. For spill sites, this means showing the impact per unit of treatment intensity, making estimates comparable across time periods and sites.
-
-Overall, all specifications show practically no effect of spills on house prices.
 
 ### Binary Treatment - Average Spill Count {#sec-05-02-01-binary-average}
 
@@ -607,7 +613,7 @@ Overall, all specifications show practically no effect of spills on house prices
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sc_mean_qtr_sw_norm"
 )
@@ -616,7 +622,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sc_mean_yr_sw_norm"
 )
@@ -624,7 +630,7 @@ plot_regression(
 
 ##### Duration Qt
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sh_mean_qtr_sw_norm"
 )
@@ -633,7 +639,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sh_mean_yr_sw_norm"
 )
@@ -648,7 +654,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sc_mean_qtr_sw_norm"
 )
@@ -657,7 +663,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sc_mean_yr_sw_norm"
 )
@@ -666,7 +672,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sh_mean_qtr_sw_norm"
 )
@@ -675,7 +681,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sh_mean_yr_sw_norm"
 )
@@ -690,7 +696,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sc_mean_qtr_sw_norm"
 )
@@ -699,7 +705,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sc_mean_yr_sw_norm"
 )
@@ -708,7 +714,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sh_mean_qtr_sw_norm"
 )
@@ -717,7 +723,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sh_mean_yr_sw_norm"
 )
@@ -732,7 +738,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sc_mean_qtr_sw_norm"
 )
@@ -741,7 +747,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sc_mean_yr_sw_norm"
 )
@@ -750,7 +756,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sh_mean_qtr_sw_norm"
 )
@@ -759,7 +765,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sh_mean_yr_sw_norm"
 )
@@ -780,7 +786,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sc_p50_qtr_sw_norm"
 )
@@ -789,7 +795,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sc_p50_yr_sw_norm"
 )
@@ -798,7 +804,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sh_p50_qtr_sw_norm"
 )
@@ -807,7 +813,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sh_p50_yr_sw_norm"
 )
@@ -822,7 +828,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sc_p50_qtr_sw_norm"
 )
@@ -831,7 +837,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sc_p50_yr_sw_norm"
 )
@@ -840,7 +846,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}  
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sh_p50_qtr_sw_norm"
 )
@@ -849,7 +855,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sh_p50_yr_sw_norm"
 )
@@ -864,7 +870,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sc_p50_qtr_sw_norm"
 )
@@ -873,7 +879,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sc_p50_yr_sw_norm"
 )
@@ -882,7 +888,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sh_p50_qtr_sw_norm"
 )
@@ -891,7 +897,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sh_p50_yr_sw_norm"
 )
@@ -906,7 +912,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sc_p50_qtr_sw_norm"
 )
@@ -915,7 +921,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sc_p50_yr_sw_norm"
 )
@@ -924,7 +930,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sh_p50_qtr_sw_norm"
 )
@@ -933,7 +939,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sh_p50_yr_sw_norm"
 )
@@ -954,7 +960,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sc_p75_qtr_sw_norm"
 )
@@ -963,7 +969,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}  
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sc_p75_yr_sw_norm"
 )
@@ -972,7 +978,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}  
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sh_p75_qtr_sw_norm"
 )
@@ -981,7 +987,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}  
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sh_p75_yr_sw_norm"
 )
@@ -996,7 +1002,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sc_p75_qtr_sw_norm"
 )
@@ -1005,7 +1011,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sc_p75_yr_sw_norm"
 )
@@ -1014,7 +1020,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sh_p75_qtr_sw_norm"
 )
@@ -1023,7 +1029,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sh_p75_yr_sw_norm"
 )
@@ -1038,7 +1044,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sc_p75_qtr_sw_norm"
 )
@@ -1047,7 +1053,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sc_p75_yr_sw_norm"
 )
@@ -1056,7 +1062,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sh_p75_qtr_sw_norm"
 )
@@ -1065,7 +1071,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sh_p75_yr_sw_norm"
 )
@@ -1080,7 +1086,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sc_p75_qtr_sw_norm"
 )
@@ -1089,7 +1095,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sc_p75_yr_sw_norm"
 )
@@ -1098,7 +1104,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sh_p75_qtr_sw_norm"
 )
@@ -1107,7 +1113,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sh_p75_yr_sw_norm"
 )
@@ -1128,7 +1134,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sc_p90_qtr_sw_norm"
 )
@@ -1137,7 +1143,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sc_p90_yr_sw_norm"
 )
@@ -1146,7 +1152,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sh_p90_qtr_sw_norm"
 )
@@ -1155,7 +1161,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_bin_logp_sh_p90_yr_sw_norm"
 )
@@ -1170,7 +1176,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sc_p90_qtr_sw_norm"
 )
@@ -1179,7 +1185,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sc_p90_yr_sw_norm"
 )
@@ -1188,7 +1194,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sh_p90_qtr_sw_norm"
 )
@@ -1197,7 +1203,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_bin_logp_sh_p90_yr_sw_norm"
 )
@@ -1212,7 +1218,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sc_p90_qtr_sw_norm"
 )
@@ -1221,7 +1227,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sc_p90_yr_sw_norm"
 )
@@ -1230,7 +1236,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sh_p90_qtr_sw_norm"
 )
@@ -1239,7 +1245,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_bin_logp_sh_p90_yr_sw_norm"
 )
@@ -1254,7 +1260,7 @@ plot_regression(
 ##### Count Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sc_p90_qtr_sw_norm"
 )
@@ -1263,7 +1269,7 @@ plot_regression(
 ##### Count Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sc_p90_yr_sw_norm"
 )
@@ -1272,7 +1278,7 @@ plot_regression(
 ##### Duration Qt
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sh_p90_qtr_sw_norm"
 )
@@ -1281,7 +1287,7 @@ plot_regression(
 ##### Duration Yr
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_bin_logp_sh_p90_yr_sw_norm"
 )
@@ -1302,7 +1308,7 @@ plot_regression(
 ##### Count
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_cont_logp_sc_cont_qtr_sw_norm"
 )
@@ -1311,7 +1317,7 @@ plot_regression(
 ##### Duration
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 250, freq = "qtr",
   model = "model_cont_logp_sh_cont_qtr_sw_norm"
 )
@@ -1326,7 +1332,7 @@ plot_regression(
 ##### Count
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_cont_logp_sc_cont_qtr_sw_norm"
 )
@@ -1335,7 +1341,7 @@ plot_regression(
 ##### Duration
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 500, freq = "qtr",
   model = "model_cont_logp_sh_cont_qtr_sw_norm"
 )
@@ -1350,7 +1356,7 @@ plot_regression(
 ##### Count
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_cont_logp_sc_cont_qtr_sw_norm"
 )
@@ -1359,7 +1365,7 @@ plot_regression(
 ##### Duration
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 1000, freq = "qtr",
   model = "model_cont_logp_sh_cont_qtr_sw_norm"
 )
@@ -1374,7 +1380,7 @@ plot_regression(
 ##### Count
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_cont_logp_sc_cont_qtr_sw_norm"
 )
@@ -1383,7 +1389,7 @@ plot_regression(
 ##### Duration
 
 ```{r}
-plot_regression(
+plot_reg_chaisemartin(
   data = results_qtr, radius = 2000, freq = "qtr",
   model = "model_cont_logp_sh_cont_qtr_sw_norm"
 )
@@ -1393,21 +1399,682 @@ plot_regression(
 
 :::
 
-## Notes and Things to Try
-
-- Temporal lags: Correlation between lagged spills (1–6 months prior) and prices
-- Event studies using distance weighted aggregations
-- Using quarterly data to reduce seasonality
-- Using P90
+## House-Level Event Study Regressions Within Admin Boundaries {#sec-05-03-house-level-event-study}
 
 ```{r}
 #| eval: false
-dat_panel_site <- open_dataset(
-  here::here("data", "processed", "dat_panel_site_qtr")
-) %>%
-  filter(radius == 250) %>%
-  collect()
 
-dat_panel_site %>%
-  filter(site_id == 2)
+# Define file paths
+path_house <- here::here("data", "processed", "general_house_panel_qtr")
+path_spill <- here::here("data", "processed", "agg_spill_stats")
+path_house_controls <- here::here("data", "processed", "house_price.parquet")
+
+# Load house panel data
+house_panel <- arrow::open_dataset(path_house)
+
+# Load quarterly spill stats, filter to quarterly data
+spill_qtr <- open_dataset(path_spill) %>%
+  filter(period_type == "quarterly") %>%
+  collect() %>%
+  select(-contains("month"), -contains("_mo")) %>%
+  as.data.table()
+
+# Load house controls, removing redundant columns
+house_controls <- open_dataset(path_house_controls) %>%
+  collect() %>%
+  select(
+    -transaction_id,
+    -date_of_transfer, -postcode, -saon, -locality, -year,
+    -easting, -northing, -longitude, -latitude
+  ) %>%
+  as.data.table()
 ```
+
+
+```{r}
+#| eval: false
+
+# Create event data for each radius
+radii <- c(250L, 500L, 1000L)
+event_data_list <- purrr::map(
+  radii,
+  function(rad) {
+    # 1. Load data for radius and add spill statistics
+    panel_dt_ext <- house_panel %>%
+      filter(radius == rad) %>%
+      collect() %>%
+      as.data.table()
+
+    # 2. Calculate spill summaries
+    # For houses within radius, merge with spill data
+    house_qtr_in_sum <- merge(
+      panel_dt_ext[within_radius == TRUE],
+      spill_qtr[, .(site_id, qtr_id, spill_count, spill_hrs)],
+      by = c("site_id", "qtr_id")
+    )[
+      ,
+      .(
+        qtr_id_transfer = first(qtr_id_transfer),
+        spill_count = sum(spill_count, na.rm = TRUE),
+        spill_hrs = sum(spill_hrs, na.rm = TRUE),
+        min_dist_m = min(distance_m, na.rm = TRUE),
+        avg_dist_m = mean(distance_m, na.rm = TRUE),
+        n_spill_sites = uniqueN(site_id),
+        within_radius = TRUE,
+        radius = rad
+      ),
+      by = .(house_id, qtr_id)
+    ]
+
+    # For houses outside radius, create zero-spill records
+    house_qtr_out_sum <- panel_dt_ext[
+      within_radius == FALSE,
+      .(
+        qtr_id_transfer = first(qtr_id_transfer),
+        spill_count = 0,
+        spill_hrs = 0,
+        min_dist_m = NA,
+        avg_dist_m = NA,
+        n_spill_sites = 0,
+        within_radius = FALSE,
+        radius = rad
+      ),
+      by = .(house_id, qtr_id)
+    ]
+
+    # Combine and sort data
+    house_qtr_sum <- rbind(house_qtr_in_sum, house_qtr_out_sum)
+    setorder(house_qtr_sum, house_id, qtr_id)
+
+    ## 3. Create treatment indicators
+
+    # Extract threshold column names
+    thr_col_names <- grep("^thr_.*_all$", names(spill_qtr), value = TRUE)
+    # Create threshold lookup
+    thr <- unique(spill_qtr[, c("qtr_id", thr_col_names), with = FALSE])
+    setorder(thr, qtr_id)
+
+    # Join houses with thresholds
+    treat_cand <- merge(
+      house_qtr_in_sum,
+      thr,
+      by = "qtr_id",
+      all.x = TRUE
+    )
+
+    # Separate threshold columns by type
+    count_thr <- grep("_spill_count_", thr_col_names, value = TRUE)
+    hrs_thr <- grep("_spill_hrs_", thr_col_names, value = TRUE)
+
+    # Create count threshold indicators
+    treat_cand[
+      , paste0("d_", count_thr) :=
+        lapply(.SD, \(x) as.integer(spill_count > x)),
+      .SDcols = count_thr
+    ]
+
+    # Create hours threshold indicators
+    treat_cand[
+      , paste0("d_", hrs_thr) :=
+        lapply(.SD, \(x) as.integer(spill_hrs > x)),
+      .SDcols = hrs_thr
+    ]
+
+    # 4. First-treated indicators
+
+    # Get all treatment columns
+    treat_cols <- grep("^d_", names(treat_cand), value = TRUE)
+
+    # Find first treatment quarter for each house-threshold combination
+    treat_long <- melt(
+      treat_cand,
+      id.vars = c("house_id", "qtr_id"),
+      measure.vars = treat_cols,
+      variable.name = "threshold",
+      value.name = "treated",
+      variable.factor = FALSE
+    )[
+      treated == 1L, # Keep only treated observations
+      .(first_qtr = min(qtr_id)), # Find earliest treatment quarter
+      by = .(house_id, threshold)
+    ]
+
+    # Convert to wide format
+    treat_wide <- dcast(
+      treat_long,
+      house_id ~ threshold,
+      value.var = "first_qtr",
+      fill = NA_integer_ # NA for never treated houses
+    )
+
+    # Rename threshold columns
+    setnames(
+      treat_wide,
+      old = grep("^d_thr_", names(treat_wide), value = TRUE),
+      new = sub("^d_thr_", "first_t_", grep("^d_thr_", names(treat_wide), value = TRUE))
+    )
+
+    # 5. Finalise data
+
+    # Join treatment data with house data
+    event_data <- treat_wide[
+      house_qtr_sum[qtr_id_transfer == qtr_id],
+      on = "house_id",
+      nomatch = NA
+    ][
+      # Join with house controls
+      house_controls,
+      on = "house_id",
+      nomatch = NA
+    ][
+      ,
+      .(
+        # IDs, time, and price
+        house_id, qtr_id, qtr_id_transfer, price,
+        log_price = log(price), # Add log price
+        # Spill data
+        spill_count, spill_hrs,
+        # Treatment quarters
+        first_t_mean_spill_count_all, first_t_mean_spill_hrs_all,
+        first_t_p50_spill_count_all, first_t_p50_spill_hrs_all,
+        first_t_p75_spill_count_all, first_t_p75_spill_hrs_all,
+        first_t_p90_spill_count_all, first_t_p90_spill_hrs_all,
+        first_t_max_spill_count_all, first_t_max_spill_hrs_all,
+        # Spatial data
+        min_dist_m, avg_dist_m, n_spill_sites, within_radius, radius,
+        # Add categorical columns
+        property_type, old_new, duration, town_city, district,
+        county, quality, country, nhs_ha, region, lsoa,
+        msoa, admin_county, admin_ward
+      )
+    ]
+
+    # Convert categorical columns to factors using purrr::map
+    categorical_cols <- c(
+      "property_type", "old_new", "duration", "town_city", "district",
+      "county", "quality", "country", "nhs_ha", "region", "lsoa",
+      "msoa", "admin_county", "admin_ward"
+    )
+
+    event_data[, (categorical_cols) :=
+      purrr::map(.SD, as.factor),
+    .SDcols = categorical_cols
+    ]
+
+    # Set quarter treated to above max quarter for never treated houses
+    event_data[, names(.SD) :=
+      purrr::map(.SD, ~ ifelse(is.na(.), 999999L, .)),
+    .SDcols = patterns("^first_t_")
+    ]
+
+    # Clean up local variables
+    rm(
+      house_qtr_in_sum, house_qtr_out_sum, treat_cand, treat_long, treat_wide,
+      house_qtr_sum, panel_dt_ext
+    )
+    gc()
+
+    return(event_data)
+  }
+) %>%
+  purrr::set_names(paste0("rad_", radii))
+```
+
+```{r}
+#| eval: false
+
+# Helper: build model name
+build_model_name <- function(
+    outcome,
+    treatment_threshold,
+    treatment_type,
+    time_agg,
+    thr_time_agg,
+    time_fe,
+    space_fe,
+    cluster_var,
+    controls = NULL) {
+  # Set binary (bin) or continuous
+  base <- ifelse(
+    treatment_threshold == "cont", "cont", "bin"
+  )
+
+  # Set outcome
+  base <- ifelse(grepl("log_price", outcome), paste0(base, "_logp"), base)
+  base <- ifelse(outcome == "price", paste0(base, "_p"), base)
+
+  # Set treatment
+  tt <- ifelse(treatment_type == "spill_count", "sc", "sh")
+  base <- paste(base, tt, treatment_threshold, sep = "_")
+
+  # Set time aggregation
+  base <- paste0(base, "_", thr_time_agg)
+
+  # Set FE unit
+  base <- paste0(base, "_fe_", time_fe, "-", space_fe)
+
+  # Set controls
+  if (!is.null(controls) && length(controls)) {
+    ctrl_suffix <- paste(controls, collapse = "_")
+    base <- paste(base, ctrl_suffix, sep = "_")
+  }
+
+  # Clean up
+  janitor::make_clean_names(base)
+}
+
+# Helper: Build Model Description
+build_description <- function(
+    outcome,
+    treatment_threshold,
+    treatment_type,
+    time_agg,
+    thr_time_agg,
+    time_fe,
+    space_fe,
+    cluster_var,
+    controls = NULL) {
+  # Outcome
+  outcome_lbl <- dplyr::case_when(
+    grepl("log_price", outcome) ~ "Log Price",
+    grepl("price", outcome) ~ "Price",
+    TRUE ~ outcome
+  )
+
+  # Threshold
+  threshold_lbl <- dplyr::case_when(
+    treatment_threshold == "mean" ~ "Mean",
+    treatment_threshold == "p50" ~ "P50",
+    treatment_threshold == "p75" ~ "P75",
+    treatment_threshold == "p90" ~ "P90",
+    treatment_threshold == "max" ~ "Max",
+    treatment_threshold == "cont" ~ "Continuous",
+    TRUE ~ stringr::str_to_title(treatment_threshold)
+  )
+
+  # Time aggregation
+  time_lbl <- dplyr::case_when(
+    grepl("mo", time_agg) ~ "Monthly",
+    grepl("qtr", time_agg) ~ "Quarterly",
+    grepl("yr", time_agg) ~ "Yearly",
+    TRUE ~ time_agg
+  )
+  time_lbl <- ifelse(threshold_lbl == "Continuous", "", time_lbl)
+
+  # Treatment
+  treat_lbl <- dplyr::case_when(
+    grepl("spill_count", treatment_type) & treatment_threshold != "cont" ~
+      "Spill Count",
+    grepl("spill_hrs", treatment_type) & treatment_threshold != "cont" ~
+      "Spill Hours",
+    grepl("spill_count", treatment_type) & treatment_threshold == "cont" ~
+      "Log Spill Count",
+    grepl("spill_hrs", treatment_type) & treatment_threshold == "cont" ~
+      "Log Spill Hours",
+    TRUE ~ NA_character_
+  )
+
+  # Fixed effects
+  time_fe_lbl <- dplyr::case_when(
+    time_fe == "mo" ~ "Monthly FE",
+    time_fe == "qtr" ~ "Quarterly FE",
+    time_fe == "yr" ~ "Yearly FE",
+    TRUE ~ "No time FE"
+  )
+  space_fe_lbl <- dplyr::case_when(
+    space_fe == "lsoa" ~ "LSOA FE",
+    space_fe == "msoa" ~ "MSOA FE",
+    space_fe == "admin_ward" ~ "Admin Ward FE",
+    space_fe == "admin_county" ~ "Admin County FE",
+    space_fe == "county" ~ "County FE",
+    space_fe == "region" ~ "Region FE",
+    space_fe == "country" ~ "Country FE",
+    space_fe == "nhs_ha" ~ "NHS HA FE",
+    TRUE ~ "No location FE"
+  )
+
+  # Controls
+  ctrl_lbl <- if (is.null(controls) || length(controls) == 0) {
+    "No controls"
+  } else {
+    paste(controls, collapse = ", ")
+  }
+
+  # Compose
+  glue::glue(
+    "Outcome: {outcome_lbl}; Treatment: {treat_lbl}; Aggregation: {time_lbl};
+    FE: {time_fe_lbl} + {space_fe_lbl}; Controls: {ctrl_lbl}"
+  ) %>%
+    as.character()
+}
+
+# Main function ------------------------------------------------------
+run_event_study_sunab <- function(
+    param_grid,
+    data,
+    rad,
+    overwrite = FALSE,
+    file_name = "sunab_results_{rad}.rds") {
+  # Data validation
+  stopifnot(
+    is.data.frame(param_grid),
+    is.data.frame(data),
+    length(rad) == 1
+  )
+
+  # ---- 0. results file ----------------------------------------------------- #
+  res_path <- here::here("book", "book_regs", glue::glue(file_name))
+  fs::dir_create(fs::path_dir(res_path))
+
+  existing <- if (!overwrite && fs::file_exists(res_path)) readRDS(res_path) else list()
+
+  # ---- 1. identify the models still to run ------------------------------- #
+  param_grid <- tibble::as_tibble(param_grid) %>%
+    dplyr::mutate(
+      model_name = purrr::pmap_chr(
+        list(
+          outcome,
+          treatment_threshold,
+          treatment_type,
+          thr_time_agg,
+          time_agg,
+          time_fe,
+          space_fe,
+          cluster_var,
+          controls
+        ),
+        build_model_name
+      )
+    )
+
+  existing_names <- if (length(existing)) names(existing) else character(0)
+
+  todo <- dplyr::anti_join(
+    param_grid,
+    tibble::tibble(model_name = existing_names),
+    by = "model_name"
+  )
+
+  if (nrow(todo) == 0) {
+    cli::cli_alert_info("No new models to run for radius {rad}.")
+    return(invisible(existing))
+  }
+  cli::cli_alert_info("Estimating {nrow(todo)} models for radius {rad} …")
+
+  # ---- 2. run the models (optionally in parallel) --------------------- #
+  furrr::future_map(todo$model_name,
+    function(mn) {
+      # Get model iteration
+      p <- dplyr::filter(todo, model_name == mn) %>%
+        dplyr::slice(1)
+
+      # Define treatment variable
+      treatment_var <- paste0(
+        "first_t_",
+        p$treatment_threshold, "_",
+        p$treatment_type, "_",
+        p$thr_time_agg
+      )
+
+      # Build formula -------------------------------------------------
+      rhs_terms <- c(
+        paste0("sunab(", treatment_var, ", ", p$time_agg, ")"),
+        unlist(p$controls)
+      ) %>%
+        purrr::compact()
+
+      fml <- as.formula(
+        paste0(
+          p$outcome, " ~ ", paste(rhs_terms, collapse = " + "),
+          " | ", p$space_fe, " + ", p$time_fe
+        )
+      )
+      cl_fml <- as.formula(paste0(" ~ ", p$cluster_var, " + ", p$time_fe))
+
+      desc <- build_description(
+        p$outcome,
+        p$treatment_threshold,
+        p$treatment_type,
+        p$time_agg,
+        p$thr_time_agg,
+        p$time_fe,
+        p$space_fe,
+        p$cluster_var,
+        unlist(p$controls)
+      )
+
+      cli::cli_alert(" • {mn}")
+
+      res <- fixest::feols(
+        fml = fml,
+        data = data,
+        vcov = cl_fml
+      )
+
+      # Build specification for ggplot
+      controls <- if (is.null(p$controls) || length(p$controls) == 0) {
+        ""
+      } else {
+        unlist(p$controls) %>%
+          paste(collapse = " + ")
+      }
+      spec <- glue::glue(
+        "{p$outcome} ~ {p$time_fe} + {p$space_fe} + {treatment_var} + {controls}"
+      )
+
+      attr(res, "description") <- desc
+      attr(res, "spec") <- spec
+      list(res) %>%
+        rlang::set_names(mn)
+    },
+    .options = furrr::furrr_options(seed = TRUE),
+    .progress = TRUE
+  ) %>%
+    purrr::flatten() -> new_results
+
+  # ---- 3. merge + save ----------------------------------------------------- #
+  final <- c(existing, new_results)
+  saveRDS(final, res_path)
+  cli::cli_alert_success("Results saved → {res_path}")
+
+  invisible(final)
+}
+```
+
+```{r}
+#| eval: false
+
+param_grid <- expand.grid(
+  outcome = c("log_price"),
+  treatment_threshold = c("mean", "p50", "p75", "p90"),
+  treatment_type = c("spill_count", "spill_hrs"),
+  thr_time_agg = "all",
+  time_agg = "qtr_id",
+  time_fe = "qtr_id",
+  space_fe = "lsoa",
+  cluster_var = "lsoa",
+  controls = I(list(
+    NULL,
+    c("old_new"), c("property_type"), c("duration"),
+    c("old_new", "property_type", "duration")
+  ))
+)
+
+event_data_list_sample <- purrr::map(1:length(event_data_list), function(i) {
+  event_data_list[[i]] %>%
+    slice_sample(prop = 0.05)
+}) %>%
+  purrr::set_names(paste0("rad_", radii))
+
+purrr::imap(event_data_list_sample, ~ {
+  rad_value <- as.numeric(gsub("rad_", "", .y))
+  run_event_study_sunab(
+    param_grid = param_grid,
+    data = .x,
+    rad = rad_value,
+    overwrite = TRUE,
+    file_name = glue::glue("sunab_results_{rad_value}.rds")
+  )
+})
+```
+
+```{r}
+# Make Sunab regression plot
+plot_reg_sunab <- function(
+    data,
+    radius,
+    model,
+    freq = c("qtr", "mo"),
+    use_desc = TRUE) {
+  freq <- match.arg(freq)
+  r <- as.character(radius)
+
+  stopifnot(r %in% names(data))
+  stopifnot(freq %in% names(data[[r]]))
+
+  mod <- data[[r]][[freq]][[model]]
+  if (is.null(mod)) {
+    stop(
+      "Model '", model, "' not found for radius ", r,
+      " and freq '", freq, "'."
+    )
+  }
+
+  # ------------------------------------------------------------------------
+  # Data Wrangling
+  subtitle <- if (use_desc && !is.null(attr(mod, "description"))) {
+    attr(mod, "description")
+  } else {
+    model
+  }
+  spec <- if (use_desc && !is.null(attr(mod, "spec"))) {
+    attr(mod, "spec")
+  } else {
+    ""
+  }
+
+  # Plot
+  p <- ggfixest::ggiplot(
+    mod,
+    aggr_eff = "post",
+    ci_level = c(.8, .9, .95)
+  )
+  mod_data <- p$data %>%
+    mutate(
+      estimate_names = estimate_names + 1,
+      group = factor(
+        ifelse(estimate_names <= 0, "Pre", "Post"),
+        levels = c("Pre", "Post")
+      )
+    ) %>%
+    filter(
+      estimate_names <= 8, estimate_names >= -2,
+      ci_level == .95
+    )
+
+  ggplot(
+    mod_data,
+    aes(x = estimate_names, y = estimate, color = group)
+  ) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2) +
+    geom_point(size = 1.2) +
+    # geom_line(aes(group = 1), linewidth = 0.25) +
+    scale_color_manual(
+      values = c(
+        "Pre" = viridis(1, option = "magma"),
+        "Post" = viridis(3, option = "magma")[2]
+      ),
+      breaks = c("Pre", "Post")
+    ) +
+    theme_minimal() +
+    labs(
+      x = "Time",
+      y = "Estimate",
+      title = "",
+      subtitle = subtitle,
+      caption = spec
+    ) +
+    theme_pref +
+    theme(plot.caption = element_text(hjust = 0))
+}
+```
+
+```{r}
+results_sunab <- load_results(
+  radii = c(250),
+  dir_path = here::here("book", "book_regs"),
+  quiet = TRUE,
+  pattern = "sunab_results*.rds"
+)
+
+strip_fixest_model <- function(mod) {
+  to_remove <- c(
+    "summary_flags",
+    "call_env",
+    "scores",
+    "residuals",
+    "fitted.values",
+    "cov.scaled",
+    "cov.iid",
+    "cov.unscaled",
+    "hessian",
+    "model_matrix_info",
+    "model",
+    "vcov",
+    "call",
+    "fixef.algo",
+    "fe.reorder",
+    "fixef_sizes",
+    "fixef_vars",
+    "fixef.tol",
+    "fixef.iter",
+    "summary",
+    "summary_from_fit",
+    "fml",
+    "fml_all",
+    "se",
+    "updating"
+  )
+
+  for (slot in to_remove) {
+    if (!is.null(mod[[slot]])) mod[[slot]] <- NULL
+  }
+
+  mod
+}
+
+
+```
+
+### Binary Treatment - Average Spill Count {#sec-05-03-01-binary-average}
+
+::: {.panel-tabset group="threshold"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-250m"}
+
+##### Count - No Controls
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "model_bin_logp_sc_mean_qtr_sw_norm"
+)
+```
+
+##### Count - 
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr, radius = 250, freq = "qtr",
+  model = "model_bin_logp_sc_mean_qtr_sw_norm"
+)
+```
+
+:::
+
+:::

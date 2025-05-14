@@ -213,11 +213,30 @@ calculate_period_spill_stats <- function(con, period_type) {
     ) %>%
     rename(!!paste0("n_sites_spills_yr") := n_sites_spills)
 
+  # Calculate all-time thresholds across the entire dataset
+  log_info("Calculating all-time thresholds")
+  all_time_thresholds <- metrics_base %>%
+    summarise(
+      across(c(spill_count, spill_hrs),
+        list(
+          p50 = ~ median(., na.rm = TRUE),
+          p75 = ~ quantile(., probs = 0.75, na.rm = TRUE),
+          p90 = ~ quantile(., probs = 0.90, na.rm = TRUE),
+          max = ~ max(., na.rm = TRUE),
+          mean = ~ mean(., na.rm = TRUE)
+        ),
+        .names = "thr_{.fn}_{.col}_all"
+      ),
+      n_sites_spills = n()
+    ) %>%
+    rename(n_sites_spills_all = n_sites_spills)
+
   # Combine base data with thresholds and calculate final metrics
   log_info("Joining data and calculating final {period_type} metrics")
   final_stats <- spill_tbl %>%
     left_join(period_thresholds, by = "spill_date") %>%
     left_join(yearly_thresholds, by = "year") %>%
+    cross_join(all_time_thresholds) %>%
     mutate(
       log_spill_count = log(1 + spill_count),
       log_spill_hrs = log(1 + spill_hrs),
@@ -253,6 +272,22 @@ calculate_period_spill_stats <- function(con, period_type) {
     mutate(
       across(
         starts_with("thr_") & contains("_spill_hrs_") & ends_with("_yr"),
+        ~ as.integer(spill_hrs > .x),
+        .names = "d_{.col}"
+      )
+    ) %>%
+    # All-time count indicators
+    mutate(
+      across(
+        starts_with("thr_") & contains("_spill_count_") & ends_with("_all"),
+        ~ as.integer(spill_count > .x),
+        .names = "d_{.col}"
+      )
+    ) %>%
+    # All-time hours indicators
+    mutate(
+      across(
+        starts_with("thr_") & contains("_spill_hrs_") & ends_with("_all"),
         ~ as.integer(spill_hrs > .x),
         .names = "d_{.col}"
       )

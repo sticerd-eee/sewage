@@ -15,6 +15,7 @@
 
 CONFIG <- list(
   years = 2021:2023,
+  base_year = 2021,
   input_dir = here::here("data", "raw", "lr_house_price"),
   output_dir = here::here("data", "processed"),
   postcode_cache_path = here::here("data", "raw", "lr_house_price", "postcode_data.rds"),
@@ -154,12 +155,17 @@ load_all_years <- function() {
 #' @return Cleaned data frame
 clean_data <- function(df, year) {
   colnames(df) <- CONFIG$column_name_mapping
+  base_year <- CONFIG$base_year
 
   df %>%
     mutate(
       year = year,
       postcode = str_remove_all(postcode, fixed(" ")),
-      date_of_transfer = ymd_hm(date_of_transfer)
+      date_of_transfer = ymd_hm(date_of_transfer),
+      qtr_id = (lubridate::year(date_of_transfer) - base_year) * 4 +
+        lubridate::quarter(date_of_transfer),
+      month_id = (lubridate::year(date_of_transfer) - base_year) * 12
+      + lubridate::month(date_of_transfer)
     )
 }
 
