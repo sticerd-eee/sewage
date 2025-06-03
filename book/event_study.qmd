@@ -604,11 +604,11 @@ results_house_qtr <- load_results(
 
 ### Binary Treatment - Average Spill Count {#sec-05-02-01-binary-average}
 
-::: {.panel-tabset group="threshold"}
+::: {.panel-tabset group="threshold-site"}
 
 #### 250m
 
-::: {.panel-tabset group="radius-250m"}
+::: {.panel-tabset group="radius-site-250m"}
 
 ##### Count Qt
 
@@ -649,7 +649,7 @@ plot_reg_chaisemartin(
 
 #### 500m
 
-::: {.panel-tabset group="radius-500m"}
+::: {.panel-tabset group="radius-site-500m"}
 
 ##### Count Qt
 
@@ -691,7 +691,7 @@ plot_reg_chaisemartin(
 
 #### 1000m
 
-::: {.panel-tabset group="radius-1000m"}  
+::: {.panel-tabset group="radius-site-1000m"}  
 
 ##### Count Qt
 
@@ -733,7 +733,7 @@ plot_reg_chaisemartin(
 
 #### 2000m
 
-::: {.panel-tabset group="radius-2000m"}
+::: {.panel-tabset group="radius-site-2000m"}
 
 ##### Count Qt
 
@@ -777,11 +777,11 @@ plot_reg_chaisemartin(
 
 ### Binary Treatment - Median Spill Count {#sec-05-02-02-binary-median}
 
-::: {.panel-tabset group="threshold"}
+::: {.panel-tabset group="threshold-site"}
 
 #### 250m
 
-::: {.panel-tabset group="radius-250m"}
+::: {.panel-tabset group="radius-site-250m"}
 
 ##### Count Qt
 
@@ -823,7 +823,7 @@ plot_reg_chaisemartin(
 
 #### 500m
 
-::: {.panel-tabset group="radius-500m"}
+::: {.panel-tabset group="radius-site-500m"}
 
 ##### Count Qt
 
@@ -865,7 +865,7 @@ plot_reg_chaisemartin(
 
 #### 1000m
 
-::: {.panel-tabset group="radius-1000m"}
+::: {.panel-tabset group="radius-site-1000m"}
 
 ##### Count Qt
 
@@ -907,7 +907,7 @@ plot_reg_chaisemartin(
 
 #### 2000m
 
-::: {.panel-tabset group="radius-2000m"}
+::: {.panel-tabset group="radius-site-2000m"}
 
 ##### Count Qt
 
@@ -951,11 +951,11 @@ plot_reg_chaisemartin(
 
 ### Binary Treatment - 75th Percentile Spill Count {#sec-05-02-03-binary-p75}
 
-::: {.panel-tabset group="threshold"}  
+::: {.panel-tabset group="threshold-site"}  
 
 #### 250m
 
-::: {.panel-tabset group="radius-250m"}
+::: {.panel-tabset group="radius-site-250m"}
 
 ##### Count Qt
 
@@ -997,7 +997,7 @@ plot_reg_chaisemartin(
 
 #### 500m
 
-::: {.panel-tabset group="radius-500m"}
+::: {.panel-tabset group="radius-site-500m"}
 
 ##### Count Qt
 
@@ -1039,7 +1039,7 @@ plot_reg_chaisemartin(
 
 #### 1000m
 
-::: {.panel-tabset group="radius-1000m"}
+::: {.panel-tabset group="radius-site-1000m"}
 
 ##### Count Qt
 
@@ -1081,7 +1081,7 @@ plot_reg_chaisemartin(
 
 #### 2000m
 
-::: {.panel-tabset group="radius-2000m"}
+::: {.panel-tabset group="radius-site-2000m"}
 
 ##### Count Qt
 
@@ -1125,11 +1125,11 @@ plot_reg_chaisemartin(
 
 ### Binary Treatment - 90th Percentile Spill Count {#sec-05-02-04-binary-p90}
 
-::: {.panel-tabset group="threshold"}    
+::: {.panel-tabset group="threshold-site"}    
 
 #### 250m
 
-::: {.panel-tabset group="radius-250m"}
+::: {.panel-tabset group="radius-site-250m"}
 
 ##### Count Qt
 
@@ -1171,7 +1171,7 @@ plot_reg_chaisemartin(
 
 #### 500m
 
-::: {.panel-tabset group="radius-500m"}
+::: {.panel-tabset group="radius-site-500m"}
 
 ##### Count Qt
 
@@ -1213,7 +1213,7 @@ plot_reg_chaisemartin(
 
 #### 1000m
 
-::: {.panel-tabset group="radius-1000m"}
+::: {.panel-tabset group="radius-site-1000m"}
 
 ##### Count Qt
 
@@ -1255,7 +1255,7 @@ plot_reg_chaisemartin(
 
 #### 2000m
 
-::: {.panel-tabset group="radius-2000m"}
+::: {.panel-tabset group="radius-site-2000m"}
 
 ##### Count Qt
 
@@ -1296,14 +1296,13 @@ plot_reg_chaisemartin(
 :::
 
 :::
-
 ### Continuous Treatment - Average Spill Count {#sec-05-02-04-continuous-treatment}
 
-::: {.panel-tabset group="continuous"}
+::: {.panel-tabset group="continuous-site"}
 
 #### 250m
 
-::: {.panel-tabset group="radius-250m-cont"}
+::: {.panel-tabset group="radius-site-250m-cont"}
 
 ##### Count
 
@@ -1327,7 +1326,7 @@ plot_reg_chaisemartin(
 
 #### 500m
 
-::: {.panel-tabset group="radius-500m-cont"}
+::: {.panel-tabset group="radius-site-500m-cont"}
 
 ##### Count
 
@@ -1351,7 +1350,7 @@ plot_reg_chaisemartin(
 
 #### 1000m
 
-::: {.panel-tabset group="radius-1000m-cont"}
+::: {.panel-tabset group="radius-site-1000m-cont"}
 
 ##### Count
 
@@ -1375,7 +1374,7 @@ plot_reg_chaisemartin(
 
 #### 2000m
 
-::: {.panel-tabset group="radius-2000m-cont"}
+::: {.panel-tabset group="radius-site-2000m-cont"}
 
 ##### Count
 
@@ -1407,13 +1406,19 @@ The advantages of using house-level data relative to site-level data in the even
 - **No double-counting from overlapping buffers:** Each property appears only once, even if it falls within 500 m of multiple outfalls. This avoids mechanical correlation among treated observations, which could inflate standard errors.
 - **Larger control group:** Properties outside of the X-metre buffer remain in the sample. We can therefore use different location fixed effects (e.g., LSOA, MSOA, Admin Ward, Admin County, County, Region, Country, NHS HA) to account for any pre-existing differences in house prices across the study area.
 
-The figures below show the dynamic effects of sewage spills on house prices across different administrative boundaries. Using geocoded transaction data, I calculate the total volume of sewage spills within a 500 m radius of each property for every calendar quarter. A property is classified as treated in a given quarter if the spill volume exceeds a specified threshold. This approach allows treatment timing to vary across properties, depending on the occurrence and intensity of nearby spills.
+The figures below show the dynamic effects of sewage spills on house prices across different administrative boundaries. Using geocoded transaction data, I calculate the total volume of sewage spills within an Xm radius of each property for every calendar quarter. A property is classified as treated in a given quarter if the spill volume exceeds a specified threshold. This approach allows treatment timing to vary across properties, depending on the occurrence and intensity of nearby spills.
 
-The regressions estimate changes in house prices over time within the same location, comparing treated and untreated periods. This controls for time-invariant property characteristics and broader market trends. Regressions are estimated using the event-study estimator developed by Sun and Abraham (2021).
+The regressions estimate changes in house prices over time within the same location, comparing treated and untreated periods. Regressions are estimated both without controls (NC) and with controls (C): 
+
+- **Old/New:** A binary variable indicating whether the property was a newly built property that had not been previosly sold.
+- **Property Type:** A categorical variable indicating the type of property (detached, semi-detached, terraced, flats/maisonettes, other)
+- **Duration:** A binary variable indicating the tenure of the property (freehold, leasehold)
+
+ Regressions are estimated using the event-study estimator developed by Sun and Abraham (2021).
 
 ```{r}
 #| eval: false
-#| Load Data
+# Load Data
 
 # Define file paths
 path_house <- here::here("data", "processed", "general_house_panel_qtr")
@@ -1899,11 +1904,14 @@ run_event_study_sunab <- function(
     controls <- if (is.null(p$controls) || length(p$controls) == 0) {
       ""
     } else {
-      unlist(p$controls) %>%
-        paste(collapse = " + ")
+      paste0(
+        "+ ",
+        paste(unlist(p$controls), collapse = " + ")
+      )
     }
+    
     spec <- glue::glue(
-      "{p$outcome} ~ {p$time_fe} + {p$space_fe} + {treatment_var} + {controls}"
+      "{p$outcome} ~ {p$time_fe} + {p$space_fe} + {treatment_var} {controls}"
     )
 
     attr(res, "description") <- desc
@@ -2080,7 +2088,7 @@ plot_reg_sunab <- function(
       )
     ) %>%
     filter(
-      estimate_names <= 8, estimate_names >= -2,
+      estimate_names <= 8, estimate_names >= -4,
       ci_level == .95
     ) %>%
     ggplot(aes(x = estimate_names, y = estimate, color = group)) +
@@ -2120,13 +2128,13 @@ results_sunab <- load_results_sunab(
 
 ### Binary Treatment - Average Spill Count {#sec-05-03-01-binary-average}
 
-::: {.panel-tabset group="threshold"}
+::: {.panel-tabset group="threshold-house"}
 
 #### 250m
 
-::: {.panel-tabset group="radius-250m"}
+::: {.panel-tabset group="radius-house-250m"}
 
-##### Count - No Controls
+##### Count (NC)
 
 ```{r}
 plot_reg_sunab(
@@ -2136,7 +2144,7 @@ plot_reg_sunab(
 )
 ```
 
-##### Count - Controls
+##### Count (C)
 
 ```{r}
 plot_reg_sunab(
@@ -2146,7 +2154,7 @@ plot_reg_sunab(
 )
 ```
 
-##### Duration - No Controls
+##### Duration (NC)
 
 ```{r}
 plot_reg_sunab(
@@ -2156,7 +2164,7 @@ plot_reg_sunab(
 )
 ```
 
-##### Duration - Controls
+##### Duration (C)
 
 ```{r}
 plot_reg_sunab(
@@ -2170,9 +2178,9 @@ plot_reg_sunab(
 
 #### 500m
 
-::: {.panel-tabset group="radius-500m"}
+::: {.panel-tabset group="radius-house-500m"}
 
-##### Count - No Controls
+##### Count (NC)
 
 ```{r}
 plot_reg_sunab(
@@ -2182,7 +2190,7 @@ plot_reg_sunab(
 )
 ```
 
-##### Count - Controls
+##### Count (C)
 
 ```{r}
 plot_reg_sunab(
@@ -2192,7 +2200,7 @@ plot_reg_sunab(
 )
 ```
 
-##### Duration - No Controls
+##### Duration (NC)
 
 ```{r}
 plot_reg_sunab(
@@ -2202,7 +2210,7 @@ plot_reg_sunab(
 )
 ```
 
-##### Duration - Controls
+##### Duration (C)
 
 ```{r}
 plot_reg_sunab(
@@ -2216,9 +2224,9 @@ plot_reg_sunab(
 
 #### 1000m
 
-::: {.panel-tabset group="radius-1000m"}
+::: {.panel-tabset group="radius-house-1000m"}
 
-##### Count - No Controls
+##### Count (NC)
 
 ```{r}
 plot_reg_sunab(
@@ -2228,7 +2236,7 @@ plot_reg_sunab(
 )
 ```
 
-##### Count - Controls
+##### Count (C)
 
 ```{r}
 plot_reg_sunab(
@@ -2238,7 +2246,7 @@ plot_reg_sunab(
 )
 ```
 
-##### Duration - No Controls
+##### Duration (NC)
 
 ```{r}
 plot_reg_sunab(
@@ -2248,7 +2256,7 @@ plot_reg_sunab(
 )
 ```
 
-##### Duration - Controls
+##### Duration (C)
 
 ```{r}
 plot_reg_sunab(
@@ -2262,3 +2270,434 @@ plot_reg_sunab(
 
 :::
 
+### Binary Treatment - Median Spill Count {#sec-05-03-02-binary-median}
+
+::: {.panel-tabset group="threshold-house"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-house-250m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-house-500m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-house-1000m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+:::
+
+### Binary Treatment - 75th Percentile Spill Count {#sec-05-03-03-binary-p75}
+
+::: {.panel-tabset group="threshold-house"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-house-250m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-house-500m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-house-1000m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+:::
+
+### Binary Treatment - 90th Percentile Spill Count {#sec-05-03-04-binary-p90}
+
+::: {.panel-tabset group="threshold-house"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-house-250m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-house-500m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-house-1000m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa_old_new_property_type_duration"
+)
+```
+
+:::
+
+:::

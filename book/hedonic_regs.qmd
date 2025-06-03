@@ -1,6 +1,6 @@
 ---
 author: "Jacopo Olivieri"
-date: 2025-03-04
+date: 2025-06-01
 editor: source
 format: html
 number-sections: true
@@ -25,8 +25,8 @@ if (!requireNamespace("renv", quietly = TRUE)) {
 
 # Load required packages
 required_packages <- c(
-  "rmarkdown", "rio", "tidyverse", "purrr", "here",
-  "janitor", "viridis", "data.table", "arrow", "fixest"
+  "rmarkdown", "rio", "tidyverse", "purrr", "here", "janitor", "viridis",
+  "data.table", "arrow", "fixest", "modelsummary"
 )
 install_if_missing <- function(packages) {
   new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
@@ -67,123 +67,544 @@ theme_pref <- theme_minimal() +
 ```
 
 ```{r}
-# Load data
-## Data paths
-path_house <- here::here("data", "processed", "panel_house")
+#| eval: false
+# Load Data
+
+# Define file paths
+path_house <- here::here("data", "processed", "general_house_panel_qtr")
 path_spill <- here::here("data", "processed", "agg_spill_stats")
 path_house_controls <- here::here("data", "processed", "house_price.parquet")
 
-# House panel data
-house_qtr <- open_dataset(path_house) %>%
-  filter(period_type == "quarterly") %>%
-  select(-contains("month")) %>%
-  filter(radius == 500) %>%
-  collect()
+# Load house panel data
+house_panel <- arrow::open_dataset(path_house)
+
+# Load quarterly spill stats, filter to quarterly data
 spill_qtr <- open_dataset(path_spill) %>%
   filter(period_type == "quarterly") %>%
   collect() %>%
-  select(-contains("month"), -contains("_mo"))
-# House controls
+  select(-contains("month"), -contains("_mo")) %>%
+  as.data.table()
+
+# Load house controls, removing redundant columns
 house_controls <- open_dataset(path_house_controls) %>%
   collect() %>%
   select(
     -transaction_id,
-    -price, -date_of_transfer, -postcode, -saon, -locality, -year,
+    -date_of_transfer, -postcode, -saon, -locality, -year,
     -easting, -northing, -longitude, -latitude
+  ) %>%
+  as.data.table()
+```
+
+```{r}
+#| eval: false
+
+# Create hedonic regression data for each radius
+radii <- c(1000L)
+event_data_list <- purrr::map(
+  radii,
+  function(rad) {
+    # 1. Load data for radius and add spill statistics
+    panel_dt_ext <- house_panel %>%
+      filter(radius == rad) %>%
+      collect() %>%
+      as.data.table()
+
+    # 2. Calculate spill summaries
+    # For houses within radius, merge with spill data
+    house_qtr_in_sum <- merge(
+      panel_dt_ext[within_radius == TRUE],
+      spill_qtr[, .(site_id, qtr_id, spill_count, spill_hrs)],
+      by = c("site_id", "qtr_id")
+    )[
+      ,
+      .(
+        qtr_id_transfer = first(qtr_id_transfer),
+        spill_count = sum(spill_count, na.rm = TRUE),
+        spill_hrs = sum(spill_hrs, na.rm = TRUE),
+        min_dist_m = min(distance_m, na.rm = TRUE),
+        avg_dist_m = mean(distance_m, na.rm = TRUE),
+        n_spill_sites = uniqueN(site_id),
+        within_radius = TRUE,
+        radius = rad
+      ),
+      by = .(house_id, qtr_id)
+    ]
+    gc(full = TRUE)
+
+    # Add lags and rolling sum
+    house_qtr_in_sum[, `:=`(
+      spill_count_l1 = shift(spill_count, n = 1, type = "lag"),
+      spill_hrs_l1 = shift(spill_hrs, n = 1, type = "lag"),
+      spill_count_c4 = frollsum(spill_count, n = 4),
+      spill_hrs_c4 = frollsum(spill_hrs, n = 4)
+    ), by = house_id]
+
+    # For houses outside radius, create zero-spill records
+    house_qtr_out_sum <- panel_dt_ext[
+      within_radius == FALSE,
+      .(
+        qtr_id_transfer = first(qtr_id_transfer),
+        spill_count = 0,
+        spill_count_l1 = 0,
+        spill_count_c4 = 0,
+        spill_hrs = 0,
+        spill_hrs_l1 = 0,
+        spill_hrs_c4 = 0,
+        min_dist_m = NA,
+        avg_dist_m = NA,
+        n_spill_sites = 0,
+        within_radius = FALSE,
+        radius = rad
+      ),
+      by = .(house_id, qtr_id)
+    ]
+    gc(full = TRUE)
+
+    # Combine and sort data
+    house_qtr_sum <- rbind(house_qtr_in_sum, house_qtr_out_sum)
+    setorder(house_qtr_sum, house_id, qtr_id)
+
+    # Filter to transaction quarters only
+    house_qtr_sum <- house_qtr_sum[qtr_id == qtr_id_transfer]
+
+    # 3. Finalise data
+
+    # Join with house controls
+    hedonic_data <- house_qtr_sum[
+      house_controls,
+      on = "house_id",
+      nomatch = NA
+    ][
+      ,
+      .(
+        # IDs, time, and price
+        house_id, qtr_id, qtr_id_transfer, price,
+        log_price = log(price), # Add log price
+        # Spill data
+        spill_count, spill_hrs,
+        log_spill_count = log1p(spill_count), log_spill_hrs = log1p(spill_hrs),
+        log_spill_count_l1 = log1p(spill_count_l1),
+        log_spill_hrs_l1 = log1p(spill_hrs_l1),
+        log_spill_count_c4 = log1p(spill_count_c4),
+        log_spill_hrs_c4 = log1p(spill_hrs_c4),
+        # Spatial data
+        min_dist_m, avg_dist_m, n_spill_sites, within_radius, radius,
+        inv_min_distance = 1 / min_dist_m, inv_avg_distance = 1 / avg_dist_m,
+        # Add categorical columns
+        property_type, old_new, duration, town_city, district,
+        county, quality, country, nhs_ha, region, lsoa,
+        msoa, admin_county, admin_ward
+      )
+    ]
+
+    # Convert categorical columns to factors using purrr::map
+    categorical_cols <- c(
+      "property_type", "old_new", "duration", "town_city", "district",
+      "county", "quality", "country", "nhs_ha", "region", "lsoa",
+      "msoa", "admin_county", "admin_ward"
+    )
+
+    hedonic_data[, (categorical_cols) :=
+      purrr::map(.SD, as.factor),
+    .SDcols = categorical_cols
+    ]
+
+    # Clean up local variables
+    rm(
+      house_qtr_in_sum, house_qtr_out_sum, house_qtr_sum, panel_dt_ext
+    )
+    gc(full = TRUE)
+
+    return(hedonic_data)
+  }
+) %>%
+  purrr::set_names(paste0("rad_", radii))
+
+
+# arrow::write_parquet(
+#   x = event_data_list$rad_1000,
+#   sink = here("data", "processed", "dat_complete_hedonic",
+#               "dat_complete_1000.parquet")
+# )
+```
+
+
+```{r}
+# Load data
+radii <- c(250, 500, 1000)
+dat_list <- setNames(
+  map(radii, ~ import(
+    here(
+      "data", "processed", "dat_complete_hedonic",
+      paste0("dat_complete_", .x, ".parquet")
+    )
+  )),
+  paste0("dat_", radii)
+)
+```
+
+
+```{r}
+# Run regressions
+run_hedonic_regs <- function(df) {
+  cluster_var <- "lsoa" # Define the clustering variable
+
+  # Define the spill variables to test
+  spill_vars <- c(
+    "log_spill_count_l1", "log_spill_hrs_l1",
+    "log_spill_count_c4", "log_spill_hrs_c4"
   )
 
-# Panel data
-panel_house <- left_join(
-  house_qtr, spill_qtr,
-  by = join_by(site_id, qtr_id, quarter, year, period_type)) %>%
-  left_join(house_controls, by = join_by(house_id)) %>%
-  mutate(
-    property_type = factor(property_type, levels = c("D", "S", "T", "F", "O")),
-    old_new = factor(old_new, levels = c("N", "Y")),
-    duration = factor(duration, levels = c("F", "L")),
-    inv_distance = 1/distance_m)
+  # Create models for each spill variable
+  results <- map(spill_vars, function(spill_var) {
+    # Block 1: no FE, just spill variable (and its interaction)
+    m1 <- feols(
+      as.formula(paste("log_price ~", spill_var)),
+      data = df,
+      cluster = cluster_var
+    )
+    m1i <- feols(
+      as.formula(paste("log_price ~", spill_var, "* inv_min_distance")),
+      data = df,
+      cluster = cluster_var
+    )
 
-panel_house_p <- panel(
-  data = panel_house,
-  panel.id = ~ site_id + qtr_id, 
-  duplicate.method = "first"  
-)
-``` 
+    # Block 2: with unit FE (qtr_id + lsoa), no additional controls
+    m2 <- feols(
+      as.formula(paste("log_price ~", spill_var, "| qtr_id + lsoa")),
+      data = df,
+      cluster = cluster_var
+    )
+    m2i <- feols(
+      as.formula(paste("log_price ~", spill_var, "* inv_min_distance | qtr_id + lsoa")),
+      data = df,
+      cluster = cluster_var
+    )
 
+    # Block 3: with FE + extra covariates (property_type, old_new, duration)
+    m3 <- feols(
+      as.formula(
+        paste(
+          "log_price ~", spill_var,
+          "+ property_type + old_new + duration | qtr_id + lsoa"
+        )
+      ),
+      data = df,
+      cluster = cluster_var
+    )
+    m3i <- feols(
+      as.formula(
+        paste(
+          "log_price ~", spill_var,
+          "* inv_min_distance + property_type + old_new + duration | qtr_id + lsoa"
+        )
+      ),
+      data = df,
+      cluster = cluster_var
+    )
 
-```{r}
-# Option 1: No lags
-model1 <- panel_house_p %>% 
-  feols(log_price ~ log_spill_count, data = .)
-summary(model1)
-coefplot(model1, keep = "log_spill_count", main = "Effect of Spills by Months Prior to Sale")
+    # Pack the six model objects into a structured list
+    list(
+      "Vanilla" = list(
+        "(I)" = m1,
+        "(II)" = m1i
+      ),
+      "Simple FE" = list(
+        "(I)" = m2,
+        "(II)" = m2i
+      ),
+      "Controls FE" = list(
+        "(I)" = m3,
+        "(II)" = m3i
+      )
+    )
+  })
 
-# Option 2: 8 lags
-model2 <- feols(
-  log_price ~ l(log_spill_count, 0:6), 
-  data = panel_house_p)
-summary(model2)
-coefplot(model2, keep = "log_spill_count", main = "Effect of Spills by Months Prior to Sale")
+  # Name the results by spill variable
+  names(results) <- spill_vars
+  return(results)
+}
 
-# Option 3: Current effect with inverse distance interaction (lag = 0)
-model3 <- feols(
-  log_price ~ l(log_spill_count, 0:6)*inv_distance,
-  data = panel_house_p
-)
-summary(model3)
-coefplot(model3, keep = "log_spill_count", main = "Effect of Spills by Months Prior to Sale")
+# Now map over dat_list:
+models_by_rad <- map(dat_list, run_hedonic_regs)
+names(models_by_rad) <- c("250", "500", "1000")
+```
+
+## House-Level Hedonic Regressions {#sec-06-01-hedonics-regs-house}
+
+### Setting {#sec-06-01-01-setting}
+
+We employ hedonic regression analysis to quantify the monetary impact of sewage spills on residential property values. This approach statistically isolates the effect of varying sewage spill volumes within a defined proximity to homes, while controlling for other property and locational characteristics. The hedonic methodology enables us to estimate the implicit price adjustment—either premium or discount—that buyers apply when sewage spills are present.
+
+The results below examine hedonic regressions across three spatial radii (250m, 500m, and 1000m) around each property. For each transaction, I calculate the total volume of sewage spills within the specified radius for every calendar quarter. Properties located beyond the radius boundary are assigned a spill statistic of zero. I also calculate the inverse of the minimum distance to the nearest sewage spill site, which serves as a spatial control variable, allowing us to account for the proximity effect of sewage spills on property values.
+
+The spill exposure variables are constructed using two temporal aggregation methods:
+
+1. **Lagged statistic**: Total sewage spill volume in the quarter immediately preceding the property transaction
+2. **Rolling statistic**: Cumulative sewage spill volume over the four quarters preceding the property transaction
+
+Regressions are estimated both without controls (NC) and with controls (C): 
+
+- **Old/New:** A binary variable indicating whether the property was a newly built property that had not been previosly sold.
+- **Property Type:** A categorical variable indicating the type of property (detached, semi-detached, terraced, flats/maisonettes, other)
+- **Duration:** A binary variable indicating the tenure of the property (freehold, leasehold)
+
+```{css, echo = FALSE}
+/* Custom CSS for modelsummary tables */
+.table, th, td {
+  font-size: 0.9em;  /* Base font size */
+}
+
+/* Headers */
+.table th {
+  font-size: 0.95em !important;     /* Header font size */
+  white-space: normal !important;  /* Allow header text wrapping */
+  padding: 0.25em 0.5em !important;  /* Compact padding */
+}
+
+/* Cells */
+.table td {
+  white-space: nowrap !important;  /* Prevent cell text wrapping */
+  padding: 0.25em 0.5em !important;  /* Compact padding */
+}
 ```
 
 ```{r}
-# Option 1: No lags
-model11 <- panel_house_p %>% 
-  feols(log_price ~ log_spill_count | site_id + qtr_id, 
-        data = .)
-summary(model11)
-coefplot(model11, keep = "log_spill_count", main = "Effect of Spills by Months Prior to Sale")
-
-# Option 2: 8 lags
-model22 <- feols(
-  log_price ~ l(log_spill_count, 0:6) | site_id + qtr_id, 
-  data = panel_house_p)
-summary(model22)
-coefplot(model22, keep = "log_spill_count", main = "Effect of Spills by Months Prior to Sale")
-
-# Option 3: Current effect with inverse distance interaction (lag = 0)
-model33 <- feols(
-  log_price ~ l(log_spill_count, 0:6)*inv_distance | site_id + qtr_id,  
-  data = panel_house_p
+coef_map_list <- c(
+  "log_spill_count" = "Log Spill Count",
+  "log_spill_count_l1" = "L1 Log Spill Count",
+  "log_spill_hrs_l1" = "L1 Log Spill Hours",
+  "log_spill_count_c4" = "C4 Log Spill Count",
+  "log_spill_hrs_c4" = "C4 Log Spill Hours",
+  "inv_min_distance" = "Inverse Min Distance",
+  "log_spill_count:inv_min_distance" = "Log Spill Count × Inverse Min Distance",
+  "log_spill_count_l1:inv_min_distance" = "L1 Log Spill Count × Inverse Min Distance",
+  "log_spill_hrs_l1:inv_min_distance" = "L1 Log Spill Hours × Inverse Min Distance",
+  "log_spill_count_c4:inv_min_distance" = "C4 Log Spill Count × Inverse Min Distance",
+  "log_spill_hrs_c4:inv_min_distance" = "C4 Log Spill Hours × Inverse Min Distance",
+  "property_typeF" = "Property Type: Flat",
+  "property_typeO" = "Property Type: Other",
+  "property_typeS" = "Property Type: Semi-detached",
+  "property_typeT" = "Property Type: Terraced",
+  "old_newY" = "Old/New: Yes",
+  "durationL" = "Duration: Leasehold"
 )
-summary(model33)
-coefplot(model33, keep = "log_spill_count", main = "Effect of Spills by Months Prior to Sale")
 ```
+
+### Lagged Spill Statistic {#sec-06-01-02-lagged-spill-statistic}
+
+::: {.panel-tabset group = "house-hedonic-regs"}
+
+#### 250m
+
+::: {.panel-tabset group = "radius-house-250m"}
+
+##### Count
 
 ```{r}
-# Option 1: No lags
-model111 <- panel_house_p %>% 
-  feols(log_price ~ log_spill_count 
-        + property_type + old_new + duration
-        | qtr_id, 
-        data = .)
-summary(model111)
-coefplot(model111, keep = "log_spill_count", main = "Effect of Spills by Months Prior to Sale")
-
-# Option 2: 8 lags
-model222 <- feols(
-  log_price ~ log_spill_count
-  + property_type + old_new + duration 
-  | site_id + qtr_id, 
-  data = panel_house_p)
-summary(model222)
-coefplot(model222, keep = "log_spill_count", main = "Effect of Spills by Months Prior to Sale")
-
-# Option 3: Current effect with inverse distance interaction (lag = 0)
-model333 <- feols(
-  log_price ~ l(log_spill_count, 0:6)*inv_distance 
-  + property_type + old_new + duration
-  | site_id + qtr_id,  
-  data = panel_house_p
+modelsummary(
+  models_by_rad$`250`$log_spill_count_l1,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
 )
-summary(model333)
-coefplot(model333, keep = "log_spill_count", main = "Effect of Spills by Months Prior to Sale")
 ```
+
+##### Hours
+
+```{r}
+modelsummary(
+  models_by_rad$`250`$log_spill_hrs_l1,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group = "radius-house-500m"}
+
+##### Count
+
+```{r}
+modelsummary(
+  models_by_rad$`500`$log_spill_count_l1,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+##### Hours
+
+```{r}
+modelsummary(
+  models_by_rad$`500`$log_spill_hrs_l1,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group = "radius-house-1000m"}
+
+##### Count
+
+```{r}
+modelsummary(
+  models_by_rad$`1000`$log_spill_count_l1,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+##### Hours
+
+```{r}
+modelsummary(
+  models_by_rad$`1000`$log_spill_hrs_l1,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+:::
+
+:::
+
+### Rolling Year Spill Statistic {#sec-06-01-03-rolling-year-spill-statistic}
+
+::: {.panel-tabset group = "house-hedonic-regs"}
+
+#### 250m
+
+::: {.panel-tabset group = "radius-house-250m"}
+
+##### Count
+
+```{r}
+modelsummary(
+  models_by_rad$`250`$log_spill_count_c4,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+##### Hours
+
+```{r}
+modelsummary(
+  models_by_rad$`250`$log_spill_hrs_c4,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group = "radius-house-500m"}
+
+##### Count
+
+```{r}
+modelsummary(
+  models_by_rad$`500`$log_spill_count_c4,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+##### Hours
+
+```{r}
+modelsummary(
+  models_by_rad$`500`$log_spill_hrs_c4,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group = "radius-house-1000m"}
+
+##### Count
+
+```{r}
+modelsummary(
+  models_by_rad$`1000`$log_spill_count_c4,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+##### Hours
+
+```{r}
+modelsummary(
+  models_by_rad$`1000`$log_spill_hrs_c4,
+  estimate = "{estimate}{stars}",
+  coef_map = coef_map_list,
+  statistic = "std.error",
+  fmt = 3,
+  gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
+  shape = "cbind"
+)
+```
+
+:::
+
+:::
+

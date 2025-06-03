@@ -12,6 +12,7 @@ book:
     - spill_data_exploration.qmd
     - house_data_exploration.qmd
     - event_study.qmd
+    - hedonic_regs.qmd
 
 bibliography: refs.bib
 
