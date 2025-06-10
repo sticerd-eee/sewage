@@ -25,8 +25,19 @@ if (!requireNamespace("renv", quietly = TRUE)) {
 
 # Load required packages
 required_packages <- c(
-  "rmarkdown", "rio", "tidyverse", "purrr", "here", "janitor", "viridis",
-  "data.table", "arrow", "fixest", "modelsummary"
+  "rmarkdown",
+  "rio",
+  "tidyverse",
+  "purrr",
+  "here",
+  "janitor",
+  "viridis",
+  "data.table",
+  "arrow",
+  "fixest",
+  "modelsummary",
+  "logger",
+  "nanoparquet"
 )
 install_if_missing <- function(packages) {
   new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
@@ -51,7 +62,8 @@ theme_pref <- theme_minimal() +
   theme(
     text = element_text(size = 12),
     plot.title = element_text(
-      face = "bold", size = 12,
+      face = "bold",
+      size = 12,
       margin = ggplot2::margin(b = 10, unit = "pt")
     ),
     axis.title = element_text(face = "bold", size = 10),
@@ -90,8 +102,15 @@ house_controls <- open_dataset(path_house_controls) %>%
   collect() %>%
   select(
     -transaction_id,
-    -date_of_transfer, -postcode, -saon, -locality, -year,
-    -easting, -northing, -longitude, -latitude
+    -date_of_transfer,
+    -postcode,
+    -saon,
+    -locality,
+    -year,
+    -easting,
+    -northing,
+    -longitude,
+    -latitude
   ) %>%
   as.data.table()
 ```
@@ -116,8 +135,7 @@ event_data_list <- purrr::map(
       panel_dt_ext[within_radius == TRUE],
       spill_qtr[, .(site_id, qtr_id, spill_count, spill_hrs)],
       by = c("site_id", "qtr_id")
-    )[
-      ,
+    )[,
       .(
         qtr_id_transfer = first(qtr_id_transfer),
         spill_count = sum(spill_count, na.rm = TRUE),
@@ -133,12 +151,15 @@ event_data_list <- purrr::map(
     gc(full = TRUE)
 
     # Add lags and rolling sum
-    house_qtr_in_sum[, `:=`(
-      spill_count_l1 = shift(spill_count, n = 1, type = "lag"),
-      spill_hrs_l1 = shift(spill_hrs, n = 1, type = "lag"),
-      spill_count_c4 = frollsum(spill_count, n = 4),
-      spill_hrs_c4 = frollsum(spill_hrs, n = 4)
-    ), by = house_id]
+    house_qtr_in_sum[,
+      `:=`(
+        spill_count_l1 = shift(spill_count, n = 1, type = "lag"),
+        spill_hrs_l1 = shift(spill_hrs, n = 1, type = "lag"),
+        spill_count_c4 = frollsum(spill_count, n = 4),
+        spill_hrs_c4 = frollsum(spill_hrs, n = 4)
+      ),
+      by = house_id
+    ]
 
     # For houses outside radius, create zero-spill records
     house_qtr_out_sum <- panel_dt_ext[
@@ -175,44 +196,78 @@ event_data_list <- purrr::map(
       house_controls,
       on = "house_id",
       nomatch = NA
-    ][
-      ,
+    ][,
       .(
         # IDs, time, and price
-        house_id, qtr_id, qtr_id_transfer, price,
+        house_id,
+        qtr_id,
+        qtr_id_transfer,
+        price,
         log_price = log(price), # Add log price
         # Spill data
-        spill_count, spill_hrs,
-        log_spill_count = log1p(spill_count), log_spill_hrs = log1p(spill_hrs),
+        spill_count,
+        spill_hrs,
+        log_spill_count = log1p(spill_count),
+        log_spill_hrs = log1p(spill_hrs),
         log_spill_count_l1 = log1p(spill_count_l1),
         log_spill_hrs_l1 = log1p(spill_hrs_l1),
         log_spill_count_c4 = log1p(spill_count_c4),
         log_spill_hrs_c4 = log1p(spill_hrs_c4),
         # Spatial data
-        min_dist_m, avg_dist_m, n_spill_sites, within_radius, radius,
-        inv_min_distance = 1 / min_dist_m, inv_avg_distance = 1 / avg_dist_m,
+        min_dist_m,
+        avg_dist_m,
+        n_spill_sites,
+        within_radius,
+        radius,
+        inv_min_distance = 1 / min_dist_m,
+        inv_avg_distance = 1 / avg_dist_m,
         # Add categorical columns
-        property_type, old_new, duration, town_city, district,
-        county, quality, country, nhs_ha, region, lsoa,
-        msoa, admin_county, admin_ward
+        property_type,
+        old_new,
+        duration,
+        town_city,
+        district,
+        county,
+        quality,
+        country,
+        nhs_ha,
+        region,
+        lsoa,
+        msoa,
+        admin_county,
+        admin_ward
       )
     ]
 
     # Convert categorical columns to factors using purrr::map
     categorical_cols <- c(
-      "property_type", "old_new", "duration", "town_city", "district",
-      "county", "quality", "country", "nhs_ha", "region", "lsoa",
-      "msoa", "admin_county", "admin_ward"
+      "property_type",
+      "old_new",
+      "duration",
+      "town_city",
+      "district",
+      "county",
+      "quality",
+      "country",
+      "nhs_ha",
+      "region",
+      "lsoa",
+      "msoa",
+      "admin_county",
+      "admin_ward"
     )
 
-    hedonic_data[, (categorical_cols) :=
-      purrr::map(.SD, as.factor),
-    .SDcols = categorical_cols
+    hedonic_data[,
+      (categorical_cols) := purrr::map(.SD, as.factor),
+      .SDcols = categorical_cols
     ]
 
     # Clean up local variables
     rm(
-      house_qtr_in_sum, house_qtr_out_sum, house_qtr_sum, panel_dt_ext
+      house_qtr_in_sum,
+      house_qtr_out_sum,
+      house_qtr_sum,
+      panel_dt_ext
     )
     gc(full = TRUE)
 
@@ -234,12 +289,17 @@ event_data_list <- purrr::map(
 # Load data
 radii <- c(250, 500, 1000)
 dat_list <- setNames(
-  map(radii, ~ import(
-    here(
-      "data", "processed", "dat_complete_hedonic",
-      paste0("dat_complete_", .x, ".parquet")
+  map(
+    radii,
+    ~ import(
+      here(
+        "data",
+        "processed",
+        "dat_complete_hedonic",
+        paste0("dat_complete_", .x, ".parquet")
+      )
     )
-  )),
+  ),
   paste0("dat_", radii)
 )
 ```
@@ -252,8 +312,10 @@ run_hedonic_regs <- function(df) {
 
   # Define the spill variables to test
   spill_vars <- c(
-    "log_spill_count_l1", "log_spill_hrs_l1",
-    "log_spill_count_c4", "log_spill_hrs_c4"
+    "log_spill_count_l1",
+    "log_spill_hrs_l1",
+    "log_spill_count_c4",
+    "log_spill_hrs_c4"
   )
 
   # Create models for each spill variable
@@ -277,7 +339,11 @@ run_hedonic_regs <- function(df) {
       cluster = cluster_var
     )
     m2i <- feols(
-      as.formula(paste("log_price ~", spill_var, "* inv_min_distance | qtr_id + lsoa")),
+      as.formula(paste(
+        "log_price ~",
+        spill_var,
+        "* inv_min_distance | qtr_id + lsoa"
+      )),
       data = df,
       cluster = cluster_var
     )
@@ -286,7 +352,8 @@ run_hedonic_regs <- function(df) {
     m3 <- feols(
       as.formula(
         paste(
-          "log_price ~", spill_var,
+          "log_price ~",
+          spill_var,
           "+ property_type + old_new + duration | qtr_id + lsoa"
         )
       ),
@@ -296,7 +363,8 @@ run_hedonic_regs <- function(df) {
     m3i <- feols(
       as.formula(
         paste(
-          "log_price ~", spill_var,
+          "log_price ~",
+          spill_var,
           "* inv_min_distance + property_type + old_new + duration | qtr_id + lsoa"
         )
       ),
@@ -410,7 +478,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_count_l1",
+    "Vanilla (II): log_price ~ log_spill_count_l1 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_count_l1 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_count_l1 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_count_l1 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_count_l1 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 250m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "L1 = lagged 1 quarter.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -424,7 +505,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_hrs_l1",
+    "Vanilla (II): log_price ~ log_spill_hrs_l1 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_hrs_l1 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_hrs_l1 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_hrs_l1 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_hrs_l1 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 250m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "L1 = lagged 1 quarter.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -444,7 +538,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_count_l1",
+    "Vanilla (II): log_price ~ log_spill_count_l1 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_count_l1 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_count_l1 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_count_l1 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_count_l1 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 500m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "L1 = lagged 1 quarter.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -458,7 +565,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_hrs_l1",
+    "Vanilla (II): log_price ~ log_spill_hrs_l1 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_hrs_l1 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_hrs_l1 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_hrs_l1 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_hrs_l1 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 500m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "L1 = lagged 1 quarter.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -478,7 +598,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_count_l1",
+    "Vanilla (II): log_price ~ log_spill_count_l1 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_count_l1 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_count_l1 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_count_l1 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_count_l1 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 1000m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "L1 = lagged 1 quarter.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -492,7 +625,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_hrs_l1",
+    "Vanilla (II): log_price ~ log_spill_hrs_l1 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_hrs_l1 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_hrs_l1 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_hrs_l1 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_hrs_l1 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 1000m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "L1 = lagged 1 quarter.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -518,7 +664,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_count_c4",
+    "Vanilla (II): log_price ~ log_spill_count_c4 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_count_c4 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_count_c4 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_count_c4 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_count_c4 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 250m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "C4 = cumulative 4 quarters.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -532,7 +691,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_hrs_c4",
+    "Vanilla (II): log_price ~ log_spill_hrs_c4 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_hrs_c4 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_hrs_c4 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_hrs_c4 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_hrs_c4 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 250m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "C4 = cumulative 4 quarters.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -552,7 +724,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_count_c4",
+    "Vanilla (II): log_price ~ log_spill_count_c4 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_count_c4 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_count_c4 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_count_c4 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_count_c4 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 500m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "C4 = cumulative 4 quarters.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -566,7 +751,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_hrs_c4",
+    "Vanilla (II): log_price ~ log_spill_hrs_c4 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_hrs_c4 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_hrs_c4 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_hrs_c4 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_hrs_c4 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 500m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "C4 = cumulative 4 quarters.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -586,7 +784,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_count_c4",
+    "Vanilla (II): log_price ~ log_spill_count_c4 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_count_c4 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_count_c4 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_count_c4 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_count_c4 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 1000m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "C4 = cumulative 4 quarters.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 
@@ -600,7 +811,20 @@ modelsummary(
   statistic = "std.error",
   fmt = 3,
   gof_omit = "IC|AIC|BIC|RMSE|R2 Within|R2 Within Adj.",
-  shape = "cbind"
+  shape = "cbind",
+  notes = list(
+    "Regression specifications:",
+    "Vanilla (I): log_price ~ log_spill_hrs_c4",
+    "Vanilla (II): log_price ~ log_spill_hrs_c4 * inv_min_distance",
+    "Simple FE (I): log_price ~ log_spill_hrs_c4 | qtr_id + lsoa",
+    "Simple FE (II): log_price ~ log_spill_hrs_c4 * inv_min_distance | qtr_id + lsoa",
+    "Controls FE (I): log_price ~ log_spill_hrs_c4 + property_type + old_new + duration | qtr_id + lsoa",
+    "Controls FE (II): log_price ~ log_spill_hrs_c4 * inv_min_distance + property_type + old_new + duration | qtr_id + lsoa",
+    "",
+    "Sample: Spill exposure aggregated across all sites within 1000m radius for each house-quarter, with zero exposure assigned to houses outside radius.",
+    "C4 = cumulative 4 quarters.",
+    "inv_min_distance = 1 / minimum distance to nearest spill site (meters)"
+  )
 )
 ```
 

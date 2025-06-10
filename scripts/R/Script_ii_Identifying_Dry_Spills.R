@@ -33,8 +33,7 @@ file_paths <- c(
 
 #(need to add the path for 2024 once that EDM data is available)
 #the 2024 rainfall data is already downloaded in that raw/haduk_rainfall_data/ folder
-#(same naming convention
-)
+#(same naming convention)
 
 #simple function to append them on the Z (time) dimension
 combine_rainfall <- function(file_paths) {

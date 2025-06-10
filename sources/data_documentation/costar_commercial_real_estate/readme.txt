@@ -1,0 +1,1 @@
+Could be used to extend the analysis to the commercial property sector or as a point of comparison for residential market impacts. Requires subscription or data purchase. The Geography & Environment Department at LSE may have access to fine-grained CoStar data for the UK (Contact: Christian Hilber).

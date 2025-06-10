@@ -8,7 +8,7 @@ renv/library/
 renv/staging/
 renv/local/
 
-# Data files (since these appear to be large and possibly sensitive)
+# Data files
 data/
 *.csv
 *.xlsx

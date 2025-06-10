@@ -1452,7 +1452,7 @@ house_controls <- open_dataset(path_house_controls) %>%
 # Create Event Data
 
 # Create event data for each radius
-radii <- c(250L)
+radii <- c(1000L)
 event_data_list <- purrr::map(
   radii,
   function(rad) {

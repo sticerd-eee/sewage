@@ -1,4 +1,3 @@
-# R specific
 library/
 local/
 cellar/
@@ -6,18 +5,3 @@ lock/
 python/
 sandbox/
 staging/
-.Rproj.user
-.Rhistory
-.RData
-.Ruserdata
-
-# Environment specific
-.env
-.venv
-env/
-venv/
-ENV/
-
-# Project specific
-data/*
-!data/.gitkeep
