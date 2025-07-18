@@ -194,9 +194,9 @@ ul.task-list li input[type="checkbox"] {
     <h2 id="toc-title">Table of contents</h2>
    
   <ul>
-  <li><a href="#sec-01-01-overview" id="toc-sec-01-01-overview" class="nav-link active" data-scroll-target="#sec-01-01-overview"><span class="header-section-number">7.1</span> Overview</a></li>
+  <li><a href="#sec-01-01-organisation" id="toc-sec-01-01-organisation" class="nav-link active" data-scroll-target="#sec-01-01-organisation"><span class="header-section-number">7.1</span> Pipeline Organisation</a></li>
   <li><a href="#sec-01-02-flowchart" id="toc-sec-01-02-flowchart" class="nav-link" data-scroll-target="#sec-01-02-flowchart"><span class="header-section-number">7.2</span> Flowchart</a></li>
-  <li><a href="#sec-01-03-script-overview" id="toc-sec-01-03-script-overview" class="nav-link" data-scroll-target="#sec-01-03-script-overview"><span class="header-section-number">7.3</span> Script Overview</a>
+  <li><a href="#sec-01-03-script-overview" id="toc-sec-01-03-script-overview" class="nav-link" data-scroll-target="#sec-01-03-script-overview"><span class="header-section-number">7.3</span> Scripts Overview</a>
   <ul class="collapse">
   <li><a href="#sec-01-03-01-raw-data-ingestion" id="toc-sec-01-03-01-raw-data-ingestion" class="nav-link" data-scroll-target="#sec-01-03-01-raw-data-ingestion"><span class="header-section-number">7.3.1</span> Raw Data Ingestion Layer</a></li>
   <li><a href="#sec-01-03-02-data-cleaning-standardisation" id="toc-sec-01-03-02-data-cleaning-standardisation" class="nav-link" data-scroll-target="#sec-01-03-02-data-cleaning-standardisation"><span class="header-section-number">7.3.2</span> Data Cleaning &amp; Standardisation Layer</a></li>
@@ -242,8 +242,8 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<section id="sec-01-01-overview" class="level2" data-number="7.1">
-<h2 data-number="7.1" class="anchored" data-anchor-id="sec-01-01-overview"><span class="header-section-number">7.1</span> Overview</h2>
+<section id="sec-01-01-organisation" class="level2" data-number="7.1">
+<h2 data-number="7.1" class="anchored" data-anchor-id="sec-01-01-organisation"><span class="header-section-number">7.1</span> Pipeline Organisation</h2>
 <p>The current data cleaning pipeline consists of 20 R scripts that process sewage discharge data, house price data, and spatial relationships to create datasets for analysis.</p>
 <p>The pipeline is structured across 6 layers:</p>
 <ol type="1">
@@ -261,7 +261,7 @@ ul.task-list li input[type="checkbox"] {
 <p><img src="../book_figs/pipeline_flowchart.svg" class="img-fluid"></p>
 </section>
 <section id="sec-01-03-script-overview" class="level2" data-number="7.3">
-<h2 data-number="7.3" class="anchored" data-anchor-id="sec-01-03-script-overview"><span class="header-section-number">7.3</span> Script Overview</h2>
+<h2 data-number="7.3" class="anchored" data-anchor-id="sec-01-03-script-overview"><span class="header-section-number">7.3</span> Scripts Overview</h2>
 <section id="sec-01-03-01-raw-data-ingestion" class="level3" data-number="7.3.1">
 <h3 data-number="7.3.1" class="anchored" data-anchor-id="sec-01-03-01-raw-data-ingestion"><span class="header-section-number">7.3.1</span> Raw Data Ingestion Layer</h3>
 <p><strong>EDM Data Standardisation (2021-2023)</strong></p>
@@ -270,15 +270,17 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>purpose</strong>: Standardises raw Event Duration Monitoring (EDM) data files from UK water companies for 2021-2023 by extracting, renaming, and organising files from zip archives.</li>
 <li><strong>inputs</strong>: <code>["data/raw/edm_data/EDM*.zip"]</code></li>
 <li><strong>outputs</strong>: <code>["data/raw/edm_data/YYYY_company_name_edm.*"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Raw Data Ingestion Layer"]</code></li>
 </ul>
 <p><strong>API Data Fetching (2024+)</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>fetch_edm_api_data_2024_onwards.R</code></li>
 <li><strong>purpose</strong>: Downloads and processes EDM data from ArcGIS API endpoints for 2024 onwards using pagination and saves as compressed JSON files.</li>
 <li><strong>inputs</strong>: <code>["scripts/config/api_config.R"]</code></li>
-<li><strong>outputs</strong>: <code>["data/raw/edm_data/raw_api_responses/company_name/*.json.gz", "output/log/edm_api_download_log.csv"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Raw Data Ingestion Layer"]</code></li>
+<li><strong>outputs</strong>:
+<ul>
+<li><code>"data/raw/edm_data/raw_api_responses/company_name/*.json.gz"</code></li>
+<li><code>"output/log/edm_api_download_log.csv"</code></li>
+</ul></li>
 </ul>
 </section>
 <section id="sec-01-03-02-data-cleaning-standardisation" class="level3" data-number="7.3.2">
@@ -288,8 +290,11 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>script_name</strong>: <code>convert_individ_raw_data_to_rdata_2021-2023.R</code></li>
 <li><strong>purpose</strong>: Converts and cleans individual raw EDM data files from CSV/Excel formats to standardised Parquet format for years 2021-2023.</li>
 <li><strong>inputs</strong>: <code>["data/raw/edm_data/YYYY_company_name_edm.*"]</code></li>
-<li><strong>outputs</strong>: <code>["data/processed/edm_data_2021_2023/*.parquet", "data/processed/edm_data_2021_2023/combined_edm_data_*.parquet"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Data Cleaning &amp; Standardisation Layer"]</code></li>
+<li><strong>outputs</strong>:
+<ul>
+<li><code>"data/processed/edm_data_2021_2023/*.parquet"</code></li>
+<li><code>"data/processed/edm_data_2021_2023/combined_edm_data_*.parquet"</code></li>
+</ul></li>
 </ul>
 <p><strong>Individual EDM Data Combination</strong></p>
 <ul>
@@ -297,7 +302,6 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>purpose</strong>: Combines and cleans individual water company Parquet files from 2021-2023 into a single consolidated dataset with standardised datetime parsing.</li>
 <li><strong>inputs</strong>: <code>["data/processed/edm_data_2021_2023/*.parquet"]</code></li>
 <li><strong>outputs</strong>: <code>["data/processed/combined_edm_data.parquet"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Data Cleaning &amp; Standardisation Layer"]</code></li>
 </ul>
 <p><strong>API Data Processing</strong></p>
 <ul>
@@ -305,7 +309,6 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>purpose</strong>: Processes raw API JSON data into standardised Parquet files, extracts features data, and handles incremental updates for 2024 onwards.</li>
 <li><strong>inputs</strong>: <code>["data/raw/edm_data/raw_api_responses/company_name/*.json.gz"]</code></li>
 <li><strong>outputs</strong>: <code>["data/processed/edm_api_data/*.parquet"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Data Cleaning &amp; Standardisation Layer"]</code></li>
 </ul>
 <p><strong>API Data Combination</strong></p>
 <ul>
@@ -313,7 +316,6 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>purpose</strong>: Combines and cleans individual water company API Parquet files from 2024 onwards into a single consolidated dataset.</li>
 <li><strong>inputs</strong>: <code>["data/processed/edm_api_data/*.parquet"]</code></li>
 <li><strong>outputs</strong>: <code>["data/processed/edm_api_data/combined_api_data.parquet"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Data Cleaning &amp; Standardisation Layer"]</code></li>
 </ul>
 <p><strong>Annual Return Data Processing</strong></p>
 <ul>
@@ -321,15 +323,17 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>purpose</strong>: Cleans and combines annual sewage spill return data from UK water companies for 2021-2024, standardising column names and formats.</li>
 <li><strong>inputs</strong>: <code>["data/raw/edm_data/YYYY_annual_return_edm.xlsx"]</code></li>
 <li><strong>outputs</strong>: <code>["data/processed/annual_return_edm.parquet"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Data Cleaning &amp; Standardisation Layer"]</code></li>
 </ul>
 <p><strong>Consented Discharges Database Cleaning</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>clean_consented_discharges_database.R</code></li>
 <li><strong>purpose</strong>: Cleans the Environment Agency’s consented discharges database, standardising water company names and column mappings.</li>
 <li><strong>inputs</strong>: <code>["data/raw/ea_consents/consents_all.csv"]</code></li>
-<li><strong>outputs</strong>: <code>["data/processed/consent_discharges_db.RData", "data/processed/consent_discharges_db.csv"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Data Cleaning &amp; Standardisation Layer"]</code></li>
+<li><strong>outputs</strong>:
+<ul>
+<li><code>"data/processed/consent_discharges_db.RData"</code></li>
+<li><code>"data/processed/consent_discharges_db.csv"</code></li>
+</ul></li>
 </ul>
 <p><strong>House Price Data Cleaning</strong></p>
 <ul>
@@ -337,7 +341,6 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>purpose</strong>: Cleans and combines HM Land Registry UK property sales data for 2021-2023, enriching with postcode coordinates using PostcodesioR API.</li>
 <li><strong>inputs</strong>: <code>["data/raw/lr_house_price/pp-YYYY.csv"]</code></li>
 <li><strong>outputs</strong>: <code>["data/processed/house_price.parquet"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Data Cleaning &amp; Standardisation Layer", "Data Enrichment &amp; Aggregation Layer"]</code></li>
 </ul>
 </section>
 <section id="sec-01-03-03-data-enrichment-aggregation" class="level3" data-number="7.3.3">
@@ -347,24 +350,35 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>script_name</strong>: <code>create_annual_return_lookup.R</code></li>
 <li><strong>purpose</strong>: Builds a cross-year lookup table linking the same spill sites across annual EDM returns (2021-2024) using deterministic and probabilistic matching.</li>
 <li><strong>inputs</strong>: <code>["data/processed/annual_return_edm.parquet"]</code></li>
-<li><strong>outputs</strong>: <code>["data/processed/annual_return_lookup.parquet", "data/processed/annual_return_lookup_edges.parquet", "data/processed/annual_return_lookup.xlsx"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Data Enrichment &amp; Aggregation Layer"]</code></li>
+<li><strong>outputs</strong>:
+<ul>
+<li><code>"data/processed/annual_return_lookup.parquet"</code></li>
+<li><code>"data/processed/annual_return_lookup_edges.parquet"</code></li>
+<li><code>"data/processed/annual_return_lookup.xlsx"</code></li>
+</ul></li>
 </ul>
 <p><strong>Spill Statistics Aggregation</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>aggregate_spill_stats.R</code></li>
 <li><strong>purpose</strong>: Aggregates individual sewage overflow spills into monthly, quarterly, and yearly statistics using the 12/24 hour counting method.</li>
 <li><strong>inputs</strong>: <code>["data/processed/matched_events_annual_data/matched_events_annual_data.parquet"]</code></li>
-<li><strong>outputs</strong>: <code>["data/processed/spill_aggregated/agg_spill_yr.parquet", "data/processed/spill_aggregated/agg_spill_mo.parquet", "data/processed/spill_aggregated/agg_spill_qtr.parquet"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Data Enrichment &amp; Aggregation Layer"]</code></li>
+<li><strong>outputs</strong>:
+<ul>
+<li><code>"data/processed/spill_aggregated/agg_spill_yr.parquet"</code></li>
+<li><code>"data/processed/spill_aggregated/agg_spill_mo.parquet"</code></li>
+<li><code>"data/processed/spill_aggregated/agg_spill_qtr.parquet"</code></li>
+</ul></li>
 </ul>
 <p><strong>Unique Spill Sites Creation</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>create_unique_spill_sites.R</code></li>
 <li><strong>purpose</strong>: Creates unique spill sites dataset by cleaning location data and parsing British National Grid coordinates from merged EDM data.</li>
 <li><strong>inputs</strong>: <code>["data/processed/matched_events_annual_data/matched_events_annual_data.parquet"]</code></li>
-<li><strong>outputs</strong>: <code>["data/processed/unique_spill_sites.parquet", "data/processed/unique_spill_sites.xlsx"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Data Enrichment &amp; Aggregation Layer"]</code></li>
+<li><strong>outputs</strong>:
+<ul>
+<li><code>"data/processed/unique_spill_sites.parquet"</code></li>
+<li><code>"data/processed/unique_spill_sites.xlsx"</code></li>
+</ul></li>
 </ul>
 </section>
 <section id="sec-01-03-04-feature-engineering-spatial-processing" class="level3" data-number="7.3.4">
@@ -373,17 +387,23 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>script_name</strong>: <code>10km_site_house_sale_match.R</code></li>
 <li><strong>purpose</strong>: Performs spatial matching between house sales and spill sites within 10km radius using spatial joins and distance calculations.</li>
-<li><strong>inputs</strong>: <code>["data/processed/house_price.parquet", "data/processed/unique_spill_sites.parquet"]</code></li>
+<li><strong>inputs</strong>:
+<ul>
+<li><code>"data/processed/house_price.parquet"</code></li>
+<li><code>"data/processed/unique_spill_sites.parquet"</code></li>
+</ul></li>
 <li><strong>outputs</strong>: <code>["data/processed/spill_house_lookup.parquet"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Feature Engineering &amp; Spatial Processing Layer"]</code></li>
 </ul>
 <p><strong>Spill Statistics Computing</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>compute_spill_stats.R</code></li>
 <li><strong>purpose</strong>: Calculates site-level spill statistics including cross-site thresholds and treatment indicators for monthly and quarterly periods.</li>
-<li><strong>inputs</strong>: <code>["data/processed/spill_aggregated/agg_spill_mo.parquet", "data/processed/spill_aggregated/agg_spill_qtr.parquet"]</code></li>
+<li><strong>inputs</strong>:
+<ul>
+<li><code>"data/processed/spill_aggregated/agg_spill_mo.parquet"</code></li>
+<li><code>"data/processed/spill_aggregated/agg_spill_qtr.parquet"</code></li>
+</ul></li>
 <li><strong>outputs</strong>: <code>["data/processed/agg_spill_stats/"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Feature Engineering &amp; Spatial Processing Layer"]</code></li>
 </ul>
 </section>
 <section id="sec-01-03-05-integration" class="level3" data-number="7.3.5">
@@ -392,17 +412,30 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>script_name</strong>: <code>combine_2021-2023_and_api_edm_data.R</code></li>
 <li><strong>purpose</strong>: Harmonises and combines the processed 2021-2023 EDM data with API-sourced 2024+ data into a single consolidated dataset.</li>
-<li><strong>inputs</strong>: <code>["data/processed/combined_edm_data.parquet", "data/processed/edm_api_data/combined_api_data.parquet"]</code></li>
+<li><strong>inputs</strong>:
+<ul>
+<li><code>"data/processed/combined_edm_data.parquet"</code></li>
+<li><code>"data/processed/edm_api_data/combined_api_data.parquet"</code></li>
+</ul></li>
 <li><strong>outputs</strong>: <code>["data/processed/combined_edm_data.parquet"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Integration Layer"]</code></li>
 </ul>
 <p><strong>Individual and Annual Data Merging</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>merge_individ_annual_location.R</code></li>
 <li><strong>purpose</strong>: Merges location data from annual sewage overflow datasets with individual spill data using windfall, many-to-many, and fuzzy matching methods.</li>
-<li><strong>inputs</strong>: <code>["data/processed/combined_edm_data.parquet", "data/processed/annual_return_edm.parquet", "data/processed/annual_return_lookup.parquet"]</code></li>
-<li><strong>outputs</strong>: <code>["data/processed/matched_events_annual_data/matched_events_annual_data.parquet", "data/processed/matched_events_annual_data/events_unmatched.parquet", "data/processed/matched_events_annual_data/annual_unmatched.parquet", "data/processed/matched_events_annual_data/site_metadata.parquet"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Integration Layer"]</code></li>
+<li><strong>inputs</strong>:
+<ul>
+<li><code>"data/processed/combined_edm_data.parquet"</code></li>
+<li><code>"data/processed/annual_return_edm.parquet"</code></li>
+<li><code>"data/processed/annual_return_lookup.parquet"</code></li>
+</ul></li>
+<li><strong>outputs</strong>:
+<ul>
+<li><code>"data/processed/matched_events_annual_data/matched_events_annual_data.parquet"</code></li>
+<li><code>"data/processed/matched_events_annual_data/events_unmatched.parquet"</code></li>
+<li><code>"data/processed/matched_events_annual_data/annual_unmatched.parquet"</code></li>
+<li><code>"data/processed/matched_events_annual_data/site_metadata.parquet"</code></li>
+</ul></li>
 </ul>
 </section>
 <section id="sec-01-03-06-master-dataset-assembly" class="level3" data-number="7.3.6">
@@ -411,33 +444,51 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>script_name</strong>: <code>cross_section_db.R</code></li>
 <li><strong>purpose</strong>: Creates cross-sectional databases aggregating spill data: one for all years and one for 12 months prior to house sales, partitioned by radius thresholds.</li>
-<li><strong>inputs</strong>: <code>["data/processed/house_price.parquet", "data/processed/spill_house_lookup.parquet", "data/processed/spill_aggregated/agg_spill_mo.parquet"]</code></li>
-<li><strong>outputs</strong>: <code>["data/processed/agg_all_yrs_cross_section/", "data/processed/agg_12mo_cross_section/"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Master Dataset Assembly Layer"]</code></li>
+<li><strong>inputs</strong>:
+<ul>
+<li><code>"data/processed/house_price.parquet"</code></li>
+<li><code>"data/processed/spill_house_lookup.parquet"</code></li>
+<li><code>"data/processed/spill_aggregated/agg_spill_mo.parquet"</code></li>
+</ul></li>
+<li><strong>outputs</strong>:
+<ul>
+<li><code>"data/processed/agg_all_yrs_cross_section/"</code></li>
+<li><code>"data/processed/agg_12mo_cross_section/"</code></li>
+</ul></li>
 </ul>
 <p><strong>Site-Level Panel Data</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>site_panel.R</code></li>
 <li><strong>purpose</strong>: Creates site-level panel data by aggregating house price statistics (median, mean, weighted) for each spill site across multiple distance radii and time periods.</li>
-<li><strong>inputs</strong>: <code>["data/processed/house_price.parquet", "data/processed/spill_house_lookup.parquet"]</code></li>
+<li><strong>inputs</strong>:
+<ul>
+<li><code>"data/processed/house_price.parquet"</code></li>
+<li><code>"data/processed/spill_house_lookup.parquet"</code></li>
+</ul></li>
 <li><strong>outputs</strong>: <code>["data/processed/dat_panel_site_level/"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Master Dataset Assembly Layer"]</code></li>
 </ul>
 <p><strong>House Panel Within Radius</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>house_panel_within_radius.R</code></li>
 <li><strong>purpose</strong>: Creates house sale-level panel data containing only houses within specified radius thresholds of spill sites, with monthly and quarterly aggregation.</li>
-<li><strong>inputs</strong>: <code>["data/processed/house_price.parquet", "data/processed/spill_house_lookup.parquet"]</code></li>
+<li><strong>inputs</strong>:
+<ul>
+<li><code>"data/processed/house_price.parquet"</code></li>
+<li><code>"data/processed/spill_house_lookup.parquet"</code></li>
+</ul></li>
 <li><strong>outputs</strong>: <code>["data/processed/houses_within_radius_panel/"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Master Dataset Assembly Layer"]</code></li>
 </ul>
 <p><strong>General House Panel</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>house_panel_exp.R</code></li>
 <li><strong>purpose</strong>: Creates comprehensive house sale-level panel data including all houses (within and outside radius thresholds) with spill site relationship metadata for experimental analysis.</li>
-<li><strong>inputs</strong>: <code>["data/processed/house_price.parquet", "data/processed/spill_house_lookup.parquet", "data/processed/agg_spill_stats/"]</code></li>
+<li><strong>inputs</strong>:
+<ul>
+<li><code>"data/processed/house_price.parquet"</code></li>
+<li><code>"data/processed/spill_house_lookup.parquet"</code></li>
+<li><code>"data/processed/agg_spill_stats/"</code></li>
+</ul></li>
 <li><strong>outputs</strong>: <code>["data/processed/general_house_panel_qtr/"]</code></li>
-<li><strong>suggested_layers</strong>: <code>["Master Dataset Assembly Layer"]</code></li>
 </ul>
 
 
