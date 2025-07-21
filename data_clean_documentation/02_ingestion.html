@@ -258,8 +258,8 @@ ul.task-list li input[type="checkbox"] {
 <h2 data-number="8.3" class="anchored" data-anchor-id="sec-02-03-edm-data-ingestion-2024"><span class="header-section-number">8.3</span> 2024-Present EDM Data Ingestion</h2>
 <p>Individual EDM data for 2024 onwards is available via ArcGIS API endpoints provided by Water UK. This data is ingested through a two-script pipeline designed for incremental, timestamped updates as new spill records are released.</p>
 <ol type="1">
-<li><strong>Automated Retrieval:</strong> Script fetch_edm_api_data_2024_onwards.R queries API endpoints for each water company, as defined in an external configuration file. It handles pagination, consolidates results into a single JSON object, and saves a timestamped, compressed file (e.g., 250405_1030_thames_water.json.gz). Each retrieval is logged in a persistent CSV.</li>
-<li><strong>Incremental Processing</strong> Script process_edm_api_json_to_parquet_2024_onwards.R identifies unprocessed .json.gz files and extracts the relevant features array from each.</li>
+<li><strong>Automated Retrieval:</strong> <code>Script fetch_edm_api_data_2024_onwards.R</code> queries API endpoints for each water company, as defined in an external configuration file. It handles pagination, consolidates results into a single JSON object, and saves a timestamped, compressed file (e.g., 250405_1030_thames_water.json.gz). Each retrieval is logged in a persistent CSV.</li>
+<li><strong>Incremental Processing</strong> Script <code>process_edm_api_json_to_parquet_2024_onwards.R</code> identifies unprocessed .json.gz files and extracts the relevant features array from each.</li>
 <li><strong>Standardisation:</strong> Extracted records are cleaned by standardising column names to snake_case and tagging each entry with a water_company identifier.</li>
 <li><strong>Deduplication and Update:</strong> New records are appquarto publish gh-pagesended to the company’s master Parquet file. The combined dataset is de-duplicated to ensure all entries are unique.</li>
 <li><strong>Archiving:</strong> After processing, source .json.gz files are moved to a processed subdirectory to prevent reprocessing.</li>
