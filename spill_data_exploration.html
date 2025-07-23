@@ -352,8 +352,8 @@ Figure&nbsp;3.1: Examples of CSO
 
     <script>
 
-      function styleCell_jcpowrp221zck2z5eia4(i, j, css_id) {
-          var table = document.getElementById("tinytable_jcpowrp221zck2z5eia4");
+      function styleCell_jzd1t8jjw6zi33a2doyp(i, j, css_id) {
+          var table = document.getElementById("tinytable_jzd1t8jjw6zi33a2doyp");
           var cell = table.rows[i]?.cells[j];  // Safe navigation to avoid errors
           if (cell) {
               console.log(`Styling cell at (${i}, ${j}) with class ${css_id}`);
@@ -363,7 +363,7 @@ Figure&nbsp;3.1: Examples of CSO
           }
       }
       function insertSpanRow(i, colspan, content) {
-        var table = document.getElementById('tinytable_jcpowrp221zck2z5eia4');
+        var table = document.getElementById('tinytable_jzd1t8jjw6zi33a2doyp');
         var newRow = table.insertRow(i);
         var newCell = newRow.insertCell(0);
         newCell.setAttribute("colspan", colspan);
@@ -371,8 +371,8 @@ Figure&nbsp;3.1: Examples of CSO
         // this may be unsafe, but innerText does not interpret <br>
         newCell.innerHTML = content;
       }
-      function spanCell_jcpowrp221zck2z5eia4(i, j, rowspan, colspan) {
-        var table = document.getElementById("tinytable_jcpowrp221zck2z5eia4");
+      function spanCell_jzd1t8jjw6zi33a2doyp(i, j, rowspan, colspan) {
+        var table = document.getElementById("tinytable_jzd1t8jjw6zi33a2doyp");
         const targetRow = table.rows[i];
         const targetCell = targetRow.cells[j];
         for (let r = 0; r < rowspan; r++) {
@@ -402,15 +402,15 @@ Figure&nbsp;3.1: Examples of CSO
       window.addEventListener('load', function () {
           var cellsToStyle = [
             // tinytable style arrays after
-          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_w2cs1mk37prpqazdrvea',}, 
-          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_6v5cbgpqcobj8svww9qo',}, 
-          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_i8vprydv93dikrk57wps',}, 
+          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_jztrjv4jgya1wbbb4ely',}, 
+          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_vk5nx1ne6b36yvyaxexf',}, 
+          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_xttuo46ktgffiqv18n0i',}, 
           ];
 
           // Loop over the arrays to style the cells
           cellsToStyle.forEach(function (group) {
               group.positions.forEach(function (cell) {
-                  styleCell_jcpowrp221zck2z5eia4(cell.i, cell.j, group.css_id);
+                  styleCell_jzd1t8jjw6zi33a2doyp(cell.i, cell.j, group.css_id);
               });
           });
       });
@@ -418,12 +418,12 @@ Figure&nbsp;3.1: Examples of CSO
 
     <style>
       /* tinytable css entries after */
-      .table td.tinytable_css_w2cs1mk37prpqazdrvea, .table th.tinytable_css_w2cs1mk37prpqazdrvea { border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_6v5cbgpqcobj8svww9qo, .table th.tinytable_css_6v5cbgpqcobj8svww9qo { border-top: solid black 0.1em; }
-      .table td.tinytable_css_i8vprydv93dikrk57wps, .table th.tinytable_css_i8vprydv93dikrk57wps { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_jztrjv4jgya1wbbb4ely, .table th.tinytable_css_jztrjv4jgya1wbbb4ely { border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_vk5nx1ne6b36yvyaxexf, .table th.tinytable_css_vk5nx1ne6b36yvyaxexf { border-top: solid black 0.1em; }
+      .table td.tinytable_css_xttuo46ktgffiqv18n0i, .table th.tinytable_css_xttuo46ktgffiqv18n0i { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
     </style>
     <div class="container">
-      <table class="table table-borderless" id="tinytable_jcpowrp221zck2z5eia4" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
+      <table class="table table-borderless" id="tinytable_jzd1t8jjw6zi33a2doyp" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
         <thead>
         
               <tr>
@@ -449,7 +449,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>18.00</td>
                   <td>366.00</td>
-                  <td><img src="./tinytable_assets/idst63xdyk51poieltozhf.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/id6xn6fburflm9nvjxnly7.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Spill Duration (hrs)</td>
@@ -460,7 +460,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>36.27</td>
                   <td>8760.00</td>
-                  <td><img src="./tinytable_assets/idpdfk6btugs6cequlg1ah.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/ids4gg74qfsfyv1xx86roc.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Count &gt; 0</td>
@@ -471,7 +471,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td><img src="./tinytable_assets/idcevi1wgvi3by47vtvd3q.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/id9w7cwll3iw6vmevxvcly.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Duration &gt;= 15m</td>
@@ -482,7 +482,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td><img src="./tinytable_assets/idcmpk2561eveyvi93oe6k.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idhly782t06r0zhkhc7hfo.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Water Company</td>
@@ -619,8 +619,8 @@ Figure&nbsp;3.1: Examples of CSO
 
     <script>
 
-      function styleCell_ns9hiv03089obqn9w8o1(i, j, css_id) {
-          var table = document.getElementById("tinytable_ns9hiv03089obqn9w8o1");
+      function styleCell_qfd7fkbo1jkq5h1ug7hn(i, j, css_id) {
+          var table = document.getElementById("tinytable_qfd7fkbo1jkq5h1ug7hn");
           var cell = table.rows[i]?.cells[j];  // Safe navigation to avoid errors
           if (cell) {
               console.log(`Styling cell at (${i}, ${j}) with class ${css_id}`);
@@ -630,7 +630,7 @@ Figure&nbsp;3.1: Examples of CSO
           }
       }
       function insertSpanRow(i, colspan, content) {
-        var table = document.getElementById('tinytable_ns9hiv03089obqn9w8o1');
+        var table = document.getElementById('tinytable_qfd7fkbo1jkq5h1ug7hn');
         var newRow = table.insertRow(i);
         var newCell = newRow.insertCell(0);
         newCell.setAttribute("colspan", colspan);
@@ -638,8 +638,8 @@ Figure&nbsp;3.1: Examples of CSO
         // this may be unsafe, but innerText does not interpret <br>
         newCell.innerHTML = content;
       }
-      function spanCell_ns9hiv03089obqn9w8o1(i, j, rowspan, colspan) {
-        var table = document.getElementById("tinytable_ns9hiv03089obqn9w8o1");
+      function spanCell_qfd7fkbo1jkq5h1ug7hn(i, j, rowspan, colspan) {
+        var table = document.getElementById("tinytable_qfd7fkbo1jkq5h1ug7hn");
         const targetRow = table.rows[i];
         const targetCell = targetRow.cells[j];
         for (let r = 0; r < rowspan; r++) {
@@ -669,15 +669,15 @@ Figure&nbsp;3.1: Examples of CSO
       window.addEventListener('load', function () {
           var cellsToStyle = [
             // tinytable style arrays after
-          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_p40y3gpoo4xtusgrmzvz',}, 
-          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_b0dghkp9fjgy700zzasq',}, 
-          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_kqcpjzuuohvkwhl3ps4a',}, 
+          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_m5x48zg77q22p1irnrxn',}, 
+          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_dfmtinfhls8gvgj4ud45',}, 
+          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_pjhueytgvf7ms2s9rec3',}, 
           ];
 
           // Loop over the arrays to style the cells
           cellsToStyle.forEach(function (group) {
               group.positions.forEach(function (cell) {
-                  styleCell_ns9hiv03089obqn9w8o1(cell.i, cell.j, group.css_id);
+                  styleCell_qfd7fkbo1jkq5h1ug7hn(cell.i, cell.j, group.css_id);
               });
           });
       });
@@ -685,12 +685,12 @@ Figure&nbsp;3.1: Examples of CSO
 
     <style>
       /* tinytable css entries after */
-      .table td.tinytable_css_p40y3gpoo4xtusgrmzvz, .table th.tinytable_css_p40y3gpoo4xtusgrmzvz { border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_b0dghkp9fjgy700zzasq, .table th.tinytable_css_b0dghkp9fjgy700zzasq { border-top: solid black 0.1em; }
-      .table td.tinytable_css_kqcpjzuuohvkwhl3ps4a, .table th.tinytable_css_kqcpjzuuohvkwhl3ps4a { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_m5x48zg77q22p1irnrxn, .table th.tinytable_css_m5x48zg77q22p1irnrxn { border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_dfmtinfhls8gvgj4ud45, .table th.tinytable_css_dfmtinfhls8gvgj4ud45 { border-top: solid black 0.1em; }
+      .table td.tinytable_css_pjhueytgvf7ms2s9rec3, .table th.tinytable_css_pjhueytgvf7ms2s9rec3 { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
     </style>
     <div class="container">
-      <table class="table table-borderless" id="tinytable_ns9hiv03089obqn9w8o1" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
+      <table class="table table-borderless" id="tinytable_qfd7fkbo1jkq5h1ug7hn" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
         <thead>
         
               <tr>
@@ -716,7 +716,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>12.00</td>
                   <td>366.00</td>
-                  <td><img src="./tinytable_assets/idqpwvtt3v3rt32sfiebl9.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idxm3sivc9vslionvi2xzv.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Spill Duration (hrs)</td>
@@ -727,7 +727,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>16.25</td>
                   <td>10082.11</td>
-                  <td><img src="./tinytable_assets/idy4xhalefwc755w6d8lb1.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idccvs97bdvtur3fbthfph.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Count &gt; 0</td>
@@ -738,7 +738,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td><img src="./tinytable_assets/id64zqjpike71cnjwgzcdq.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/ids9xp5iml9h5o03r7hfyn.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Duration &gt;= 15m</td>
@@ -749,7 +749,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td><img src="./tinytable_assets/idt236peyg3i4k784bnu0j.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idd2f9lj2fyoetnadutdf0.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Water Company</td>
@@ -886,8 +886,8 @@ Figure&nbsp;3.1: Examples of CSO
 
     <script>
 
-      function styleCell_lbjepxg0vexgrrf16bz1(i, j, css_id) {
-          var table = document.getElementById("tinytable_lbjepxg0vexgrrf16bz1");
+      function styleCell_rz3mjio1spd49hhtx2tw(i, j, css_id) {
+          var table = document.getElementById("tinytable_rz3mjio1spd49hhtx2tw");
           var cell = table.rows[i]?.cells[j];  // Safe navigation to avoid errors
           if (cell) {
               console.log(`Styling cell at (${i}, ${j}) with class ${css_id}`);
@@ -897,7 +897,7 @@ Figure&nbsp;3.1: Examples of CSO
           }
       }
       function insertSpanRow(i, colspan, content) {
-        var table = document.getElementById('tinytable_lbjepxg0vexgrrf16bz1');
+        var table = document.getElementById('tinytable_rz3mjio1spd49hhtx2tw');
         var newRow = table.insertRow(i);
         var newCell = newRow.insertCell(0);
         newCell.setAttribute("colspan", colspan);
@@ -905,8 +905,8 @@ Figure&nbsp;3.1: Examples of CSO
         // this may be unsafe, but innerText does not interpret <br>
         newCell.innerHTML = content;
       }
-      function spanCell_lbjepxg0vexgrrf16bz1(i, j, rowspan, colspan) {
-        var table = document.getElementById("tinytable_lbjepxg0vexgrrf16bz1");
+      function spanCell_rz3mjio1spd49hhtx2tw(i, j, rowspan, colspan) {
+        var table = document.getElementById("tinytable_rz3mjio1spd49hhtx2tw");
         const targetRow = table.rows[i];
         const targetCell = targetRow.cells[j];
         for (let r = 0; r < rowspan; r++) {
@@ -936,15 +936,15 @@ Figure&nbsp;3.1: Examples of CSO
       window.addEventListener('load', function () {
           var cellsToStyle = [
             // tinytable style arrays after
-          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_hnmc3vwv9j7d1nr78wmo',}, 
-          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_06k0ghfe8uxkon4buu87',}, 
-          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_zftpvs65u4jfjkpogw39',}, 
+          { positions: [ { i: 15, j: 0 }, { i: 15, j: 3 }, { i: 15, j: 2 }, { i: 15, j: 1 }, { i: 15, j: 4 }, { i: 15, j: 7 }, { i: 15, j: 6 }, { i: 15, j: 5 }, { i: 15, j: 8 },  ], css_id: 'tinytable_css_8kzopfyk78vg3es6199f',}, 
+          { positions: [ { i: 5, j: 0 }, { i: 5, j: 3 }, { i: 5, j: 2 }, { i: 5, j: 1 }, { i: 5, j: 4 }, { i: 5, j: 7 }, { i: 5, j: 6 }, { i: 5, j: 5 }, { i: 5, j: 8 },  ], css_id: 'tinytable_css_ndw2z103fnqvoak98mo2',}, 
+          { positions: [ { i: 0, j: 0 }, { i: 0, j: 3 }, { i: 0, j: 2 }, { i: 0, j: 1 }, { i: 0, j: 4 }, { i: 0, j: 7 }, { i: 0, j: 6 }, { i: 0, j: 5 }, { i: 0, j: 8 },  ], css_id: 'tinytable_css_vp6migy9627vlhrys813',}, 
           ];
 
           // Loop over the arrays to style the cells
           cellsToStyle.forEach(function (group) {
               group.positions.forEach(function (cell) {
-                  styleCell_lbjepxg0vexgrrf16bz1(cell.i, cell.j, group.css_id);
+                  styleCell_rz3mjio1spd49hhtx2tw(cell.i, cell.j, group.css_id);
               });
           });
       });
@@ -952,12 +952,12 @@ Figure&nbsp;3.1: Examples of CSO
 
     <style>
       /* tinytable css entries after */
-      .table td.tinytable_css_hnmc3vwv9j7d1nr78wmo, .table th.tinytable_css_hnmc3vwv9j7d1nr78wmo { border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_06k0ghfe8uxkon4buu87, .table th.tinytable_css_06k0ghfe8uxkon4buu87 { border-top: solid black 0.1em; }
-      .table td.tinytable_css_zftpvs65u4jfjkpogw39, .table th.tinytable_css_zftpvs65u4jfjkpogw39 { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_8kzopfyk78vg3es6199f, .table th.tinytable_css_8kzopfyk78vg3es6199f { border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_ndw2z103fnqvoak98mo2, .table th.tinytable_css_ndw2z103fnqvoak98mo2 { border-top: solid black 0.1em; }
+      .table td.tinytable_css_vp6migy9627vlhrys813, .table th.tinytable_css_vp6migy9627vlhrys813 { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
     </style>
     <div class="container">
-      <table class="table table-borderless" id="tinytable_lbjepxg0vexgrrf16bz1" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
+      <table class="table table-borderless" id="tinytable_rz3mjio1spd49hhtx2tw" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
         <thead>
         
               <tr>
@@ -983,7 +983,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>17.00</td>
                   <td>366.00</td>
-                  <td><img src="./tinytable_assets/id1lu4dihhxgqv2qp8pjwu.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/ido2q9v7xxxcte35qhbxxu.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Spill Duration (hrs)</td>
@@ -994,7 +994,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>30.75</td>
                   <td>14074.25</td>
-                  <td><img src="./tinytable_assets/idlce6k5jisxnnabk1gdae.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idhl6l3xajvul3sa4boctb.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Count &gt; 0</td>
@@ -1005,7 +1005,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td><img src="./tinytable_assets/idgli8fnutgsxhdy4sllvx.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idez6vu43wfidvoezcvi5z.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Sites with Spill Duration &gt;= 15m</td>
@@ -1016,7 +1016,7 @@ Figure&nbsp;3.1: Examples of CSO
                   <td>0.00</td>
                   <td>1.00</td>
                   <td>1.00</td>
-                  <td><img src="./tinytable_assets/idogsxhqlumacsh69m2ak6.png" style="height: 1em;"></td>
+                  <td><img src="./tinytable_assets/idq8ia31zcsk9rki0lz9ov.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td>Water Company</td>
