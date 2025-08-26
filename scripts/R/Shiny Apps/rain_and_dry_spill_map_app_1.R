@@ -276,7 +276,7 @@ server <- function(input, output, session) {
       
       addLegend("bottomright", 
                 colors = c("red", "black", "lightyellow"),
-                labels = c("Wet Spill", "Dry Spill", "Undefined"), 
+                labels = c("Dry Spill", "Wet Spill", "Undefined"), 
                 title = "Spill Type", 
                 opacity = 1)
   })

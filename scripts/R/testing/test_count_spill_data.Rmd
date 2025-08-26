@@ -1,0 +1,378 @@
+---
+title: "Your Document Title"
+author: "Jacopo Olivieri"
+date: "2023-02-22"
+output:
+  html_document:
+    fig_width: 6
+    fig_aspect_ratio: 0.618
+knitr:
+  opts_chunk:
+    echo: false
+    warning: false
+    message: false
+    fig.align: "center"
+server: shiny
+---
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+
+# Load required packages
+required_packages <- c("rmarkdown", "rio", "tidyverse", "purrr", "here",
+                       "janitor", "data.table", "lubridate")
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "explore_data.log")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+```
+
+## Load Data
+
+```{r}
+data <- import(here("data", "processed", 
+                    "individual_edm_location.RDATA"), trust = TRUE)
+data <- data$yearly
+```
+
+## Test Function
+
+```{r}
+correlation <- cor(data$total_spill_count, 
+                   data$sum_spill_count_yr, 
+                   use = "complete.obs")
+```
+
+```{r}
+ggplot(data, aes(x = total_spill_count, y = sum_spill_count_yr)) +
+  geom_point(color = "darkblue", alpha = 0.1, size = 1) +  # Scatter points
+  geom_abline(slope=1, color = "black", linewidth= 0.5) +
+  geom_smooth(method = "lm", color = "darkred", linewidth= 0.5,
+              se = TRUE) +  
+  labs(title = "Correlation between Total Spill Count and Sum Spill Count Yr",
+       subtitle = paste("Pearson Correlation: ", round(correlation, 2)),
+       x = "Total Spill Count",
+       y = "Sum Spill Count Yr") +
+  theme_minimal() 
+```
+
+```{r}
+# Basic Enhanced Scatter Plot
+# Convert 'water_company' to a factor if it's not already
+data$water_company <- as.factor(data$water_company)
+
+# If 'year' is numeric and you prefer it as a factor for discrete shapes
+data$year <- as.factor(data$year)
+
+ggplot(data, aes(x = total_spill_count, y = sum_spill_count_yr, 
+                         color = water_company, shape = year)) +
+  geom_point(alpha = 0.5, size = 1) +  # Scatter points with transparency and size
+  geom_abline(slope=1, color = "black", linewidth= 0.1) +
+  labs(title = "Correlation between Total Spill Count and Sum Spill Count Yr",
+       subtitle = "Colored by Water Company and Shaped by Year",
+       x = "Total Spill Count",
+       y = "Sum Spill Count Yr",
+       color = "Water Company",
+       shape = "Year") +
+  theme_minimal() +  # Clean theme
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    legend.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+
+```
+
+```{r}
+library(shiny)
+library(ggplot2)
+library(dplyr)
+
+ui <- fluidPage(
+  titlePanel("Spill Count Correlation Analysis"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("companies", "Select Water Companies:",
+                 choices = unique(data$water_company),
+                 multiple = TRUE,
+                 selected = unique(data$water_company)),
+      
+      selectInput("years", "Select Years:",
+                 choices = unique(data$year),
+                 multiple = TRUE,
+                 selected = unique(data$year))
+    ),
+    
+    mainPanel(
+      plotOutput("correlation_plot")
+    )
+  )
+)
+
+server <- function(input, output) {
+  
+  filtered_data <- reactive({
+    data %>%
+      filter(water_company %in% input$companies,
+             year %in% input$years)
+  })
+  
+  output$correlation_plot <- renderPlot({
+    ggplot(filtered_data(), 
+           aes(x = total_spill_count, y = sum_spill_count_yr,
+               color = water_company, shape = factor(year))) +
+      geom_point(alpha = 0.7, size = 3) +
+      geom_smooth(method = "lm", se = FALSE, aes(color = water_company)) +
+      labs(title = "Correlation between Total Spill Count and Sum Spill Count Yr",
+           x = "Total Spill Count",
+           y = "Sum Spill Count Yr",
+           color = "Water Company",
+           shape = "Year") +
+      theme_minimal()
+  })
+}
+
+shinyApp(ui = ui, server = server)
+```
+
+
+```{r}
+library(shiny)
+library(ggplot2)
+library(plotly)
+
+ui <- fluidPage(
+  titlePanel("Spill Count Correlation Analysis"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("companies", "Select Water Companies:",
+                 choices = unique(data$water_company),
+                 multiple = TRUE,
+                 selected = unique(data$water_company)),
+      
+      selectInput("years", "Select Years:",
+                 choices = unique(data$year),
+                 multiple = TRUE,
+                 selected = unique(data$year))
+    ),
+    
+    mainPanel(
+      plotlyOutput("correlation_plot")
+    )
+  )
+)
+
+server <- function(input, output) {
+  
+  filtered_data <- reactive({
+    data %>%
+      filter(water_company %in% input$companies,
+             year %in% input$years)
+  })
+  
+  output$correlation_plot <- renderPlotly({
+    p <- ggplot(filtered_data(), 
+                aes(x = total_spill_count, y = sum_spill_count_yr,
+                    color = water_company, shape = year,
+                    text = paste("Water Company:", water_company,
+                               "<br>Year:", year,
+                               "<br>Total Spill Count:", total_spill_count,
+                               "<br>Sum Spill Count Yr:", sum_spill_count_yr))) +
+      geom_point(alpha = 0.7, size = 3) +
+      geom_smooth(method = "lm", se = FALSE, aes(color = water_company)) +
+      labs(title = "Correlation between Total Spill Count and Sum Spill Count Yr",
+           x = "Total Spill Count",
+           y = "Sum Spill Count Yr",
+           color = "Water Company",
+           shape = "Year") +
+      theme_minimal()
+    
+    ggplotly(p, tooltip = "text")
+  })
+}
+
+shinyApp(ui = ui, server = server)
+```
+
+```{r}
+library(plotly)
+library(ggplot2)
+
+# Create base plot with hover text
+p <- ggplot(data, aes(x = total_spill_count, y = sum_spill_count_yr, 
+                             color = water_company, shape = year,
+                             text = paste("Water Company:", water_company,
+                                        "<br>Year:", year,
+                                        "<br>Total Spill Count:", total_spill_count,
+                                        "<br>Sum Spill Count Yr:", sum_spill_count_yr))) +
+  geom_point(alpha = 0.7, size = 3) +
+  geom_smooth(method = "lm", se = FALSE, aes(color = water_company)) +
+  labs(title = "Correlation between Total Spill Count and Sum Spill Count Yr",
+       subtitle = "Colored by Water Company and Shaped by Year",
+       x = "Total Spill Count",
+       y = "Sum Spill Count Yr",
+       color = "Water Company",
+       shape = "Year") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    legend.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+# Convert to interactive plotly
+interactive_plot <- ggplotly(p, tooltip = "text")
+
+# Add additional interactivity features
+interactive_plot <- interactive_plot %>%
+  layout(
+    hoverlabel = list(bgcolor = "white"),
+    legend = list(
+      title = list(text = '<b>Filter by:</b>'),
+      itemsizing = 'constant'
+    )
+  )
+
+# Save to HTML
+htmlwidgets::saveWidget(interactive_plot, "correlation_plot.html")
+```
+
+```{r}
+initialise_environment()
+setup_logging()
+data <- load_data()
+
+aggregate_spills <- function(data) {
+  # Ensure data.table and copy to avoid modifying input
+  dt <- as.data.table(data)
+  
+  # Add month column
+  dt[, month := month(start_time)]
+  
+  # Clean data and set keys in one step
+  dt <- dt[!is.na(outlet_discharge_ngr) & !is.na(start_time)]
+  data.table::setkey(dt, water_company, year, month, start_time)
+  
+  # Create yearly combinations
+  yearly_combinations <- expand_grid(
+    water_company = unique(dt$water_company),
+    year = 2021:2023
+  )
+  
+  # Create monthly combinations
+  monthly_combinations <- expand_grid(
+    water_company = unique(dt$water_company),
+    year = 2021:2023,
+    month = 1:12
+  )
+  
+  # Yearly aggregation
+  yearly_result <- map2(
+    yearly_combinations$water_company,
+    yearly_combinations$year,
+    ~{
+      # Get data for current company-year
+      current_data <- dt[water_company == .x & year == .y]
+      
+      if (nrow(current_data) == 0) {
+        return(data.table(
+          water_company = .x,
+          year = .y,
+          total_spill_count = 0L,
+          total_spill_hrs = 0,
+          sum_spill_count_yr = 0,
+          sum_spill_duration_hrs_yr = 0
+        ))
+      }
+      
+      # Get unique keys for current subset
+      keys_year <- unique(c(unlist(current_data$key_join), 
+                            "outlet_discharge_ngr"))
+      
+      # Group by keys and calculate statistics
+      current_data[, .(
+        total_spill_count = count_spills(start_time, end_time),
+        total_spill_hrs = sum(as.numeric(difftime(end_time, start_time, units = "hours")), na.rm = TRUE),
+        sum_spill_count_yr = mean(sum_spill_count_yr, na.rm = TRUE),
+        sum_spill_duration_hrs_yr = mean(sum_spill_duration_hrs_yr, na.rm = TRUE)
+      ), by = keys_year]
+    }
+  )
+  
+  # Monthly aggregation
+  monthly_result <- pmap(
+    list(
+      monthly_combinations$water_company,
+      monthly_combinations$year,
+      monthly_combinations$month
+    ),
+    ~{
+      # Get data for current company-year-month
+      current_data <- dt[water_company == ..1 & 
+                           year == ..2 & 
+                           month == ..3]
+      
+      if (nrow(current_data) == 0) {
+        return(data.table(
+          water_company = ..1,
+          year = ..2,
+          month = ..3,
+          total_spill_count = 0L,
+          total_spill_hrs = 0,
+          sum_spill_count_yr = 0,
+          sum_spill_duration_hrs_yr = 0
+        ))
+      }
+      
+      # Get unique keys for current subset
+      keys_month <- unique(c(unlist(current_data$key_join), 
+                             "outlet_discharge_ngr"))
+      
+      # Group by keys and calculate statistics
+      current_data[, .(
+        total_spill_count = count_spills(start_time, end_time),
+        total_spill_hrs = sum(as.numeric(difftime(end_time, start_time, units = "hours")), na.rm = TRUE),
+        sum_spill_count_yr = mean(sum_spill_count_yr, na.rm = TRUE),
+        sum_spill_duration_hrs_yr = mean(sum_spill_duration_hrs_yr, na.rm = TRUE)
+      ), by = keys_month]
+    }
+  )
+  
+  return(list(
+    yearly = bind_rows(yearly_result),
+    monthly = bind_rows(monthly_result)
+  ))
+}
+```
+
+```{r}
+monthly_result
+```
+

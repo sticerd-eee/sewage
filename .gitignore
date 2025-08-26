@@ -19,6 +19,8 @@ data/
 *.RData
 *.Rdata
 *.zip
+*.nc
+*.tif
 
 # LaTeX/PDF compilation files
 *.aux
@@ -66,3 +68,17 @@ Thumbs.db
 /book/book_figs/
 /book/test_files/
 /book/tinytable_assets/
+
+# Literature review with personal paths
+docs/lit_review/sewage_literature_review/
+
+# Folder to be integrated
+DD_work/
+
+# Large output files
+output/maps/
+
+# Python virtual environments
+scripts/python/.venv/
+*.pyc
+__pycache__/

@@ -1,0 +1,705 @@
+---
+title: "Your Document Title"
+author: "Jacopo Olivieri"
+date: "2023-02-22"
+output:
+  html_document:
+    fig_width: 6
+    fig_aspect_ratio: 0.618
+knitr:
+  opts_chunk:
+    echo: false
+    warning: false
+    message: false
+    fig.align: "center"
+---
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+
+# Load required packages
+required_packages <- c("rmarkdown", "tidyverse", "fs", "stringr", "here", "utils", "logger")
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "test_unmatched.log")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+```
+
+## Load Data
+
+```{r}
+data <- import(here("data", "processed", "merged_edm_data.RData"), trust = TRUE)
+data_summary <- import(here("data", "processed", "merged_edm_data_with_summary.RData"), trust = TRUE)
+annual_data <- import(here("data","processed", "annual_return_edm.rds"),
+                      trust = TRUE) 
+```
+
+
+```{r}
+data_summary$summary
+data_summary$data %>% 
+  filter(water_company == "Yorkshire Water",
+         year == 2022,
+         merge_quality == "no_match") %>% 
+  pull(site_name_ea) %>% unique()
+```
+
+
+### Fixing South West Water 2022 and 2023
+
+```{r}
+individ_data <- import(here("data","processed", "combined_edm_data.RData"),
+                       trust = TRUE) 
+
+# 2022 is problematic
+leftsouth22 <- individ_data %>% 
+  filter(water_company == "South West Water", year == 2022) %>% 
+   select(where(~!all(is.na(.))))
+
+rightsouth22 <- annual_data %>% 
+  filter(water_company == "South West Water", year == 2022) %>% 
+   select(where(~!all(is.na(.))))
+
+left_join(leftsouth22, rightsouth22) %>% 
+  filter(is.na(outlet_discharge_ngr))
+
+# 2023
+leftsouth23 <- individ_data %>% 
+  filter(water_company == "South West Water", year == 2023) %>% 
+   select(where(~!all(is.na(.)))) %>% 
+  select(-contains("site"))
+
+rightsouth23 <- annual_data %>% 
+  filter(water_company == "South West Water", year == 2023) %>% 
+  select(water_company, unique_id, outlet_discharge_ngr)
+rightsouth23$u
+
+# this fixes 2023
+left_join(leftsouth23, rightsouth23) %>% 
+  filter(is.na(outlet_discharge_ngr))
+```
+
+
+
+### Fixing Yorkshire Water 2022
+
+```{r}
+individ_data <- import(here("data","processed", "combined_edm_data.RData"),
+                       trust = TRUE) 
+
+york22 <- individ_data %>% 
+  filter(water_company == "Yorkshire Water", year == 2022) %>% 
+  mutate(unique_id = paste0("YW", unique_id))
+
+york23 <- annual_data %>% 
+  filter(water_company == "Yorkshire Water", year == 2023) %>% 
+  select(water_company, unique_id, outlet_discharge_ngr)
+
+left_join(york22, york23, by = join_by(water_company, unique_id)) %>% 
+  filter(!is.na(outlet_discharge_ngr)) %>% 
+  select(water_company, unique_id, outlet_discharge_ngr)
+```
+
+
+### Fixing Thames Water 2023
+
+```{r}
+leftthames23 <- individ_data %>% 
+  filter(water_company == "Thames Water", year == 2023) %>% 
+  select(where(~!all(is.na(.))))  %>% 
+  mutate(across(
+    where(is.character) & matches("site"), tolower))
+
+rightthames23 <- annual_data %>% 
+  filter(water_company == "Thames Water", year == 2023) %>% 
+  select(where(~!all(is.na(.))))  %>% 
+  mutate(across(
+    where(is.character) & matches("site"), tolower))
+
+left_join(leftthames23, rightthames23,
+          by = join_by(year, site_name_wa_sc, unique_id),
+          suffix = c("", "_annual")) %>% 
+  filter(is.na(outlet_discharge_ngr))
+  
+rightthames23 %>% 
+  mutate(across(where(is.character), tolower))
+```
+
+
+### Fixing merge key
+
+```{r}
+data <- data_summary$data
+dat <- load_data()
+
+water_companies <- unique(data$water_company)
+
+for (i in seq_along(water_companies)) {
+  company <- water_companies[i]
+  print(company)
+  
+  join <- data %>% 
+  filter(water_company == company, year == 2023) %>% 
+  pull(key_join) %>% 
+  unique()
+  print(join)
+
+}
+
+
+
+current_company <- "Southern Water"
+current_year <- 2023
+      
+# Get individual and annual spill data for current company-year
+# Remove columns that are all NA as they may differ between datasets
+indiv <- dat$individual %>%
+filter(water_company == current_company, year == current_year) %>%
+select(where(~!all(is.na(.))))
+
+annual <- annual_data %>%
+  filter(water_company == current_company, 
+         year == current_year, 
+         !is.na(counted_spills)) %>%
+  select(where(~!all(is.na(.))))
+
+# Define joining keys: common columns plus location identifier
+# In 2023, we have unique id, so we use that as the join key
+cols_annual_dat <- c("outlet_discharge_ngr")
+key_join <- intersect(names(indiv), names(annual))
+if (current_year == 2023 & "unique_id" %in% key_join) {
+  key_join <- c("water_company", "year", "unique_id")
+}
+key_cols <- c(key_join, cols_annual_dat)
+
+
+
+
+data %>% 
+  filter(water_company == "Southern Water", year == 2023) %>% 
+  pull(key_join) %>% 
+  unique()
+
+data %>% 
+  filter(year == 2023) 
+
+unique(data$key_join)
+grepl("unique_id", unique(data$key_join))
+unique(data$key_join)[grepl("unique_id", unique(data$key_join))]
+
+x <- unique(data$key_join)[[3]]
+x <- unique(data$key_join)[[1]]
+
+x
+if ("unique_id" %in% x) {
+  y = x[x!="unique_id"]
+} else {
+  y = x
+}
+y
+
+subset(x, x!="unique_id")
+
+x[x!="unique_id"]
+```
+
+```{r}
+x <- import(here("data", "processed", "combined_edm_data.parquet")) %>% 
+  as_tibble() %>% 
+  arrange(water_company)
+
+combined_df <- combined_df %>% 
+  arrange(water_company)
+
+names(x)
+all.equal(x$water_company, combined_df$water_company)
+
+tibble(x = x$water_company, y = combined_df$water_company) %>% 
+  filter(x!=y)
+
+```
+
+
+```{r}
+############################################################
+# Create Unique Spill Sites
+# Project: Sewage
+# Date: 03/02/2025
+# Author: Jacopo Olivieri
+############################################################
+
+#' This script creates unique spill sites from the merged EDM data
+#' by cleaning location data and extracting distinct sites.
+
+# Set Up Functions
+############################################################
+
+#' Initialize the R environment with required packages and settings
+#' @return NULL
+initialise_environment <- function() {
+    if (!requireNamespace("renv", quietly = TRUE)) {
+        install.packages("renv")
+        renv::init()
+    }
+
+    required_packages <- c(
+        "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue", 
+        "fs", "rnrfa", "arrow"
+    )
+
+    # Install and load packages
+    invisible(sapply(required_packages, function(pkg) {
+        if (!requireNamespace(pkg, quietly = TRUE)) {
+            install.packages(pkg)
+        }
+        library(pkg, character.only = TRUE)
+    }))
+}
+
+#' Set up logging configuration
+#' @return NULL
+setup_logging <- function() {
+    log_path <- here::here("output", "log", "13_create_unique_spill_sites.log")
+    dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
+
+    logger::log_appender(logger::appender_file(log_path))
+    logger::log_layout(logger::layout_glue_colors)
+    logger::log_threshold(logger::DEBUG)
+    logger::log_info("Script started at {Sys.time()}")
+}
+
+
+# Configuration
+############################################################
+
+CONFIG <- list(
+    spill_data_path = here::here(
+      "data", "processed", "matched_events_annual_data", 
+      "matched_events_annual_data.parquet"),
+    unique_spills_parquet = here::here(
+      "data", "processed", "matched_events_annual_data", 
+      "unique_spill_sites.parquet"),
+    unique_spills_xlsx = here::here(
+      "data", "processed", "matched_events_annual_data", 
+      "unique_spill_sites.xlsx")
+)
+
+
+# Functions
+############################################################
+
+#' Load individual sewage spill data
+#' @return A data frame containing individual sewage spill records
+load_data <- function() {
+    file_path <- fs::path(CONFIG$spill_data_path)
+    logger::log_info("Loading data: {file_path}")
+
+    if (!file.exists(file_path)) {
+        stop(glue::glue("File not found: {file_path}"))
+    }
+
+    tryCatch(
+        {
+            df <- rio::import(file_path, trust = TRUE)
+            logger::log_info("Loaded data")
+            return(df)
+        },
+        error = function(e) {
+            error_msg <- glue::glue("Failed to load data: {e$message}")
+            logger::log_error(error_msg)
+            stop(error_msg)
+        }
+    )
+}
+
+
+#' Standardize grid references (NGR)
+#' @param x Character vector of raw NGR strings
+#' @return Cleaned NGR strings or NA
+clean_ngr <- function(x) {
+  x <- dplyr::case_when(
+    toupper(x) %in% c("UNABLE TO MATCH TO CONSENTS DATABASE",
+                     "NOT IN CONSENTS DATABASE") ~ NA_character_,
+    TRUE ~ x
+  )
+
+  # Extract content after 'and', drop trailing notes
+  x <- ifelse(stringr::str_detect(x, "(?i)and"),
+              stringr::str_extract(x, "(?i)(?<=and).*"), x)
+  x <- stringr::str_replace(x, "(?i)Not.*", "")
+
+  # Keep only leading alphanumeric block
+  x <- stringr::str_extract(x, "^[^,&/\\(]+")
+  x <- stringr::str_remove_all(x, "\\s+")
+
+  trimws(x)
+}
+
+
+#' Derive unique spill sites with OSGB coordinates
+#' @param data Raw spill dataframe
+#' @return Tidy table: one row per site, availability per year, BNG coords
+clean_location <- function(data) {
+  data %>%
+    # clean ngr
+    mutate(ngr_clean = clean_ngr(ngr)) %>% 
+    # deduplicate on cleaned ref
+    distinct(water_company, year, site_id, ngr_clean) %>%
+    # pivot availability by year
+    mutate(available = TRUE) %>%
+    pivot_wider(
+      id_cols     = c(water_company, site_id, ngr_clean),
+      names_from  = year,
+      values_from = available,
+      names_prefix= "available_year_",
+      values_fill = FALSE
+    ) %>%
+    # parse British National Grid coords
+    mutate(
+      coords = map(ngr_clean, ~ tryCatch(
+        rnrfa::osg_parse(.x, coord_system = "BNG"),
+        error = function(e) list(easting=NA_real_, northing=NA_real_)
+      ))
+    ) %>%
+    mutate(
+      easting  = map_dbl(coords, "easting"),
+      northing = map_dbl(coords, "northing")
+    ) %>%
+    select(-coords)
+}
+
+
+#' Export unique spills data to parquet and Excel
+#' @param unique_spills_df The unique spills dataframe
+#' @param excel_output Path to Excel output file
+#' @param parquet_output Path to parquet output file
+#' @return NULL
+export_data <- function(
+    unique_spills_df,
+    excel_output = CONFIG$unique_spills_xlsx,
+    parquet_output = CONFIG$unique_spills_parquet) {
+  tryCatch(
+    {
+
+      # Export to parquet files
+      arrow::write_parquet(unique_spills_df, parquet_output)
+      logger::log_info("Exported to parquet: {parquet_output}")
+
+      # Export to Excel 
+      rio::export(unique_spills_df, excel_output)
+      logger::log_info("Exported data to Excel file: {excel_output}")
+    },
+    error = function(e) {
+      logger::log_error("Data export failed: {e$message}")
+      stop(glue::glue("Failed to export data: {e$message}"))
+    }
+  )
+}
+
+# Main execution
+############################################################
+
+main <- function() {
+    tryCatch(
+        {
+          # Setup
+          initialise_environment()
+          setup_logging()
+
+          # Load and process data
+          logger::log_info("Loading processed merged data")
+          spill_data <- load_data()
+
+          logger::log_info("Creating unique spill sites")
+          unique_sites <- spill_data %>%
+            clean_location() %>%
+            relocate(site_id, everything())
+
+          # Export results
+          logger::log_info("Exporting unique spill sites")
+          export_data(unique_spills_df = unique_sites)
+          logger::log_info("Processing completed successfully")
+        },
+        error = function(e) {
+            logger::log_error("Fatal error: {e$message}")
+            stop(e)
+        }
+    )
+}
+
+# Execute main function if script is run directly
+if (sys.nframe() == 0) {
+    main()
+}
+
+```
+
+```{r}
+df <- import("/Users/jacopoolivieri/Downloads/test.csv")
+```
+
+```{r}
+# Clean column names
+df_clean <- df %>%
+  janitor::clean_names()
+
+# Filter data to keep only the 'Negative' (baseline) and 'Negative + Negative x Treated' (combined effect) rows
+df_filtered <- df_clean %>%
+  filter(coefficient %in% c("Negative", "Negative + Negative x Treated"))
+
+# Reshape the data to long format
+df_long <- df_filtered %>%
+  pivot_longer(
+    cols = starts_with("est_") | starts_with("se_"),
+    names_to = c(".value", "condition"),
+    names_pattern = "(est|se)_(.*)"
+  ) %>%
+  # Improve readability of condition names
+  mutate(condition = case_when(
+    condition == "below_p50" ~ "Below p50",
+    condition == "above_p50" ~ "Above p50",
+    condition == "all_shocks" ~ "All Shocks",
+    TRUE ~ condition
+  )) %>%
+  # Convert 'condition' to a factor for ordering and colour mapping
+  mutate(condition = factor(condition, levels = c("Below p50", "Above p50", "All Shocks"))) %>%
+  # Improve readability of coefficient names for the x-axis
+   mutate(coefficient_label = case_when(
+     coefficient == "Negative" ~ "Baseline\n(Shock Only)", # Using \n for line break
+     coefficient == "Negative + Negative x Treated" ~ "Combined\n(Shock + Treatment)", # Using \n for line break
+     TRUE ~ coefficient
+   )) %>%
+   # Convert 'coefficient_label' to a factor to control x-axis order
+   mutate(coefficient_label = factor(coefficient_label, levels = c("Baseline\n(Shock Only)", "Combined\n(Shock + Treatment)"))) %>%
+   # Shorten variable names for better facet titles
+   mutate(variable_short = str_replace(variable, " Consumpti", " Cons.") %>%
+                           str_replace(" Intake", " Intake")) %>%
+   # Convert 'variable_short' to factor for facet ordering (optional, alphabetical by default)
+   mutate(variable_short = factor(variable_short))
+
+
+# --- Plotting ---
+
+# Define the amount of dodge
+dodge_width <- 0.4 # Adjust this value to control spacing
+
+# Create the ggplot object with updated aesthetics and faceting
+ggplot(
+    df_long,
+    # Define aesthetics:
+    # x-axis: effect type ('coefficient_label': Baseline vs Combined)
+    # y-axis: estimate value ('est')
+    # color: distinguish lines/points based on condition ('condition')
+    aes(x = coefficient_label, y = est, color = condition)
+  ) +
+  # Add lines connecting the baseline point to the combined effect point for each condition within each facet
+  # 'group = condition' ensures lines are drawn connecting the two points for the same condition
+  # 'position = position_dodge()' moves the lines side-by-side based on 'color'
+  geom_line(aes(group = condition), position = position_dodge(width = dodge_width), linewidth = 1, alpha = 0.8) +
+  # Add points representing the specific point estimates
+  # 'position = position_dodge()' moves the points side-by-side
+  geom_point(position = position_dodge(width = dodge_width), size = 3.5, alpha = 0.9) +
+  # Add vertical error bars representing standard error (Estimate +/- SE)
+  # 'position = position_dodge()' moves the error bars side-by-side
+  # 'width' controls the horizontal size of the error bar caps (make it smaller than dodge_width)
+  geom_errorbar(
+    aes(ymin = est - se, ymax = est + se),
+    position = position_dodge(width = dodge_width),
+    width = 0.1, # Width of the error bar caps
+    linewidth = 0.7
+   ) +
+  # Create separate panels (facets) for each outcome variable ('variable_short')
+  # 'ncol = 3' arranges the facets horizontally
+  facet_wrap(~ variable_short, ncol = 3) +
+  # Add a horizontal dashed line at y=0 for reference
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.8) +
+  # Customize labels and title
+  labs(
+    title = "Impact of Treatment during Negative Shocks by Outcome Variable",
+    subtitle = "Comparing Baseline (Shock Only) vs. Combined Effect (Shock + Treatment)",
+    x = "Effect Type", # Updated x-axis label
+    y = "Estimated Coefficient", # Updated y-axis label
+    color = "Shock Type" # Updated legend title
+  ) +
+  # Apply a minimal theme
+  theme_minimal(base_size = 12) +
+  # Further theme customization
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 11),
+    axis.title = element_text(size = 11),
+    axis.text.x = element_text(size = 9, angle = 0, vjust = 0.5, hjust=0.5),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(1.5, "lines")
+  ) +
+  # Use a colorblind-friendly color palette for the conditions
+  scale_color_brewer(palette = "Set1") # Or "Dark2", "Paired"
+
+# Display the plot
+print(plot_vertical_dodged)
+
+```
+
+```{r}
+# Load necessary libraries
+# Ensure you have these installed: install.packages(c("tidyverse", "janitor", "stringr"))
+library(tidyverse)
+library(janitor)
+library(stringr)
+
+# --- Data Preparation ---
+
+# Recreate the data provided by the user
+# In a real scenario, you would load this from a file, e.g., using read_csv("your_data_file.csv")
+data_text <- "
+Coefficient,Variable,Est below p50,SE below p50,Est above p50,SE above p50,Est all shocks,SE all shocks
+Negative,Total Consumpti,-0.2,0.1,-0.6,0.1,-0.42,0.1
+Negative x Treated,Total Consumpti,0.3,0.1,0.4,0.1,0.44,0.1
+Negative + Negative x Treated,Total Consumpti,0.1,0.1,-0.2,0.1,0.02,0.1
+Negative,Food Consumpti,-0.15,0.1,-0.55,0.1,-0.34,0.1
+Negative x Treated,Food Consumpti,0.25,0.1,0.35,0.1,0.35,0.1
+Negative + Negative x Treated,Food Consumpti,0.1,0.1,-0.2,0.1,0.01,0.1
+Negative,Protein Intake,-0.25,0.1,-0.7,0.1,-0.3,0.1
+Negative x Treated,Protein Intake,0.25,0.1,0.3,0.1,0.32,0.1
+Negative + Negative x Treated,Protein Intake,0,0.1,-0.4,0.1,0.02,0.1
+"
+
+# Read the data from the text string
+df <- read_csv(data_text, show_col_types = FALSE)
+
+# Clean column names
+df_clean <- df %>%
+  janitor::clean_names()
+
+# Filter data to keep only the 'Negative' (baseline) and 'Negative + Negative x Treated' (combined effect) rows
+df_filtered <- df_clean %>%
+  filter(coefficient %in% c("Negative", "Negative + Negative x Treated"))
+
+# Reshape the data to long format
+df_long <- df_filtered %>%
+  pivot_longer(
+    cols = starts_with("est_") | starts_with("se_"),
+    names_to = c(".value", "condition"),
+    names_pattern = "(est|se)_(.*)"
+  ) %>%
+  # Improve readability of condition names
+  mutate(condition_label = case_when( # Renamed to avoid conflict before filtering
+    condition == "below_p50" ~ "Below p50",
+    condition == "above_p50" ~ "Above p50",
+    condition == "all_shocks" ~ "All Shocks",
+    TRUE ~ condition
+  )) %>%
+  # *** ADDED FILTER: Remove 'All Shocks' condition ***
+  filter(condition_label != "All Shocks") %>%
+  # Convert 'condition_label' to a factor for ordering and colour mapping
+  # *** UPDATED LEVELS: Removed 'All Shocks' from factor levels ***
+  mutate(condition = factor(condition_label, levels = c("Below p50", "Above p50"))) %>%
+  # Improve readability of coefficient names for the x-axis
+   mutate(coefficient_label = case_when(
+     coefficient == "Negative" ~ "Baseline\n(Shock Only)", # Using \n for line break
+     coefficient == "Negative + Negative x Treated" ~ "Combined\n(Shock + Treatment)", # Using \n for line break
+     TRUE ~ coefficient
+   )) %>%
+   # Convert 'coefficient_label' to a factor to control x-axis order
+   mutate(coefficient_label = factor(coefficient_label, levels = c("Baseline\n(Shock Only)", "Combined\n(Shock + Treatment)"))) %>%
+   # Shorten variable names for better facet titles
+   mutate(variable_short = str_replace(variable, " Consumpti", " Cons.") %>%
+                           str_replace(" Intake", " Intake")) %>%
+   # Convert 'variable_short' to factor for facet ordering (optional, alphabetical by default)
+   mutate(variable_short = factor(variable_short))
+
+
+# --- Plotting ---
+
+# Define the amount of dodge
+dodge_width <- 0.4 # Adjust this value to control spacing
+
+# Create the ggplot object with updated aesthetics and faceting
+# The plotting code remains largely the same, ggplot handles the reduced data
+plot_vertical_dodged_filtered <- ggplot(
+    df_long,
+    # Define aesthetics:
+    # x-axis: effect type ('coefficient_label': Baseline vs Combined)
+    # y-axis: estimate value ('est')
+    # color: distinguish lines/points based on condition ('condition')
+    aes(x = coefficient_label, y = est, color = condition) # Uses the new 'condition' factor
+  ) +
+  # Add lines connecting the baseline point to the combined effect point for each condition within each facet
+  geom_line(aes(group = condition), position = position_dodge(width = dodge_width), linewidth = 1, alpha = 0.8) +
+  # Add points representing the specific point estimates
+  geom_point(position = position_dodge(width = dodge_width), size = 3.5, alpha = 0.9) +
+  # Add vertical error bars representing standard error (Estimate +/- SE)
+  geom_errorbar(
+    aes(ymin = est - se, ymax = est + se),
+    position = position_dodge(width = dodge_width),
+    width = 0.1, # Width of the error bar caps
+    linewidth = 0.7
+   ) +
+  # Create separate panels (facets) for each outcome variable ('variable_short')
+  facet_wrap(~ variable_short, ncol = 3) +
+  # Add a horizontal dashed line at y=0 for reference
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.8) +
+  # Customize labels and title
+  labs(
+    title = "Impact of Treatment during Negative Shocks by Outcome Variable",
+    subtitle = "Comparing Baseline (Shock Only) vs. Combined Effect (Shock + Treatment) - P50 Groups Only", # Updated subtitle
+    x = "Effect Type",
+    y = "Estimated Coefficient",
+    color = "Condition"
+  ) +
+  # Apply a minimal theme
+  theme_minimal(base_size = 12) +
+  # Further theme customization
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 11),
+    axis.title = element_text(size = 11),
+    axis.text.x = element_text(size = 9, angle = 0, vjust = 0.5, hjust=0.5),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(1.5, "lines")
+  ) +
+  # Use a colorblind-friendly color palette for the conditions
+  scale_color_brewer(palette = "Set1") # Or "Dark2", "Paired"
+
+# Display the plot
+print(plot_vertical_dodged_filtered)
+
+# --- Saving the Plot (Optional) ---
+# Uncomment the following lines to save the plot to a file
+
+# Save as PNG file
+# ggsave("treatment_effect_vertical_dodged_filtered_plot.png", plot = plot_vertical_dodged_filtered, width = 10, height = 6, dpi = 300)
+
+# Save as PDF file
+# ggsave("treatment_effect_vertical_dodged_filtered_plot.pdf", plot = plot_vertical_dodged_filtered, width = 10, height = 6)
+
+```
+

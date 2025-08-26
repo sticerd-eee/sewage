@@ -1,0 +1,291 @@
+# Event studies
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+
+# Load required packages
+required_packages <- c(
+  "arrow", "here", "dplyr", "DIDmultiplegtDYN", "ggplot2"
+)
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+# Ggplot theme
+theme_pref <- theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    plot.title = element_text(
+      face = "bold", size = 12,
+      margin = ggplot2::margin(b = 10, unit = "pt")
+    ),
+    axis.title = element_text(face = "bold", size = 10),
+    axis.text = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(color = "gray95"),
+    panel.grid.major.y = element_line(color = "gray95"),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(size = 8),
+    plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
+  )
+mappings
+```
+
+
+```{r}
+rad = 2000
+dat_panel_site <- open_dataset(
+  here::here("data", "processed", "dat_panel_site_mo")) %>%
+  filter(radius == rad) %>% 
+  collect()
+
+# Binary
+# Define a function for running binary did_multiplegt_dyn with common parameters
+run_binary_did_model <- function(
+    outcome,
+    treatment_threshold,
+    normalized,
+    same_switchers) {
+  model <- try(did_multiplegt_dyn(
+    df = dat_panel_site,
+    outcome = outcome,
+    group = "site_id",
+    time = "month_id",
+    treatment = paste0("treated_spill_count_", treatment_threshold, "_mo"), # Updated treatment column pattern
+    effects = 12,
+    placebo = 3,
+    cluster = "site_id",
+    normalized = normalized, # consider changing
+    trends_lin = FALSE, # consider changing
+    same_switchers = same_switchers, # doesn't make sense with so many periods
+    less_conservative_se = TRUE,
+    graph_off = FALSE
+    # drop_if_d_miss_before_first_switch = FALSE
+  ), silent = TRUE)
+  return(model)
+}
+
+# Create parameter grid
+param_grid <- expand.grid(
+  outcome = c("price_median", "log_price_median"),
+  treatment_threshold = c("mean", "p50", "p75"),
+  normalized = c(TRUE, FALSE),
+  same_switchers = c(TRUE, FALSE),
+  stringsAsFactors = FALSE
+)
+
+# Calculate total number of models
+total_models <- nrow(param_grid)
+
+# Generate model names and create models
+binary_did_results <- list()
+
+# Wrap the entire loop in try to ensure the code continues even if there are errors
+try({
+  cat("Starting model estimation - total models:", total_models, "\n")
+  
+  for (i in 1:nrow(param_grid)) {
+    # Extract parameters
+    outcome <- param_grid$outcome[i]
+    treatment_threshold <- param_grid$treatment_threshold[i]
+    normalized <- param_grid$normalized[i]
+    same_switchers <- param_grid$same_switchers[i]
+    
+    # Build model name
+    model_name <- "model_binary"
+    if (outcome == "log_price_median") model_name <- paste0(model_name, "_log")
+    model_name <- paste0(model_name, "_", treatment_threshold)
+    if (same_switchers) model_name <- paste0(model_name, "_sw")
+    if (normalized) model_name <- paste0(model_name, "_norm")
+    
+    # Create a descriptive model label
+    outcome_label <- ifelse(outcome == "price_median", "Price Median", "Log Price Median")
+    threshold_label <- paste0(toupper(substr(treatment_threshold, 1, 1)), substr(treatment_threshold, 2, nchar(treatment_threshold)), " Threshold")
+    norm_label <- ifelse(normalized, "Normalized", "Not Normalized")
+    switchers_label <- ifelse(same_switchers, "Same Switchers", "All Switchers")
+    
+    model_description <- paste0(
+      outcome_label, " ~ ", threshold_label, " Spill Count; ",
+      norm_label, ", ", switchers_label
+    )
+    
+    # Display progress information with description
+    cat(sprintf("\n[%d/%d] (%d%%)\n", 
+                i, total_models, round(i/total_models*100)))
+    cat(sprintf("Running model: %s\n", model_name))
+    cat(sprintf("Description: %s\n", model_description))
+    
+    # Run model and assign to environment
+    model <- run_binary_did_model(outcome, treatment_threshold, normalized, same_switchers)
+    assign(model_name, model)
+    
+    # Add to results list - even if it's an error
+    binary_did_results[[model_name]] <- model
+    
+    # Also store the description with the model
+    attr(binary_did_results[[model_name]], "description") <- model_description
+    
+    # Save intermediate results after each model (in case of later failure)
+    try(saveRDS(binary_did_results,
+      file = here("book", "book_regs", "binary_did_results_partial.rds")
+    ), silent = TRUE)
+    
+    # Print estimated progress
+    cat(sprintf("Progress: %d of %d models completed (%d%%)\n", 
+                i, total_models, round(i/total_models*100)))
+  }
+})
+
+# Save the final results
+try(saveRDS(binary_did_results,
+  file = here("book", "book_regs", "binary_did_results.rds")
+))
+
+cat("All models attempted - check results for any errors\n")
+
+# To access descriptions later:
+# binary_did_results$model_binary_p50_norm$description  # example
+
+plots_binary <- Map(function(x, name) {
+  x$plot +
+    labs(subtitle = name)
+}, binary_did_results, names(binary_did_results))
+
+binary_did_results$model_binary_mean_sw_norm$plot
+```
+
+
+
+```{r}
+# Continuous treatment
+# Define a function for running did_multiplegt_dyn with common parameters
+# Continuous treatment
+# Define a function for running did_multiplegt_dyn with common parameters
+run_did_model <- function(
+    outcome,
+    treatment,
+    normalized,
+    same_switchers) {
+  # Enhanced try with silent option to prevent stopping
+  model <- try(did_multiplegt_dyn(
+    df = dat_panel_site,
+    outcome = outcome,
+    group = "site_id",
+    time = "month_id",
+    treatment = treatment,
+    effects = 12,
+    placebo = 3,
+    cluster = "site_id",
+    normalized = normalized, # consider changing
+    trends_lin = FALSE, # consider changing
+    # continuous = 2,
+    same_switchers = same_switchers,
+    less_conservative_se = TRUE,
+    graph_off = FALSE,
+    effects_equal = TRUE
+  ), silent = TRUE)
+  return(model)
+}
+
+# Create parameter grid
+param_grid <- expand.grid(
+  outcome = c("price_median", "log_price_median"),
+  treatment = c("spill_count", "log_spill_count"),
+  normalized = c(TRUE, FALSE),
+  same_switchers = c(TRUE, FALSE),
+  stringsAsFactors = FALSE
+)
+
+# Calculate total number of models
+total_models <- nrow(param_grid)
+
+# Generate model names and create models
+cont_did_results <- list()
+
+# Wrap the entire loop in a try to ensure the code continues even if there are errors
+try({
+  cat("Starting continuous model estimation - total models:", total_models, "\n")
+  
+  for (i in 1:nrow(param_grid)) {
+    # Extract parameters
+    outcome <- param_grid$outcome[i]
+    treatment <- param_grid$treatment[i]
+    normalized <- param_grid$normalized[i]
+    same_switchers <- param_grid$same_switchers[i]
+    
+    # Build model name
+    model_name <- "model_cont_mean"
+    if (outcome == "log_price_median") model_name <- paste0(model_name, "_log")
+    if (treatment == "log_spill_count") model_name <- paste0(model_name, "_logtreat")
+    if (same_switchers) model_name <- paste0(model_name, "_sw")
+    if (normalized) model_name <- paste0(model_name, "_norm")
+    
+    # Create a descriptive model label
+    outcome_label <- ifelse(outcome == "price_median", "Price Median", "Log Price Median")
+    treatment_label <- ifelse(treatment == "spill_count", "Spill Count", "Log Spill Count")
+    norm_label <- ifelse(normalized, "Normalized", "Not Normalized")
+    switchers_label <- ifelse(same_switchers, "Same Switchers", "All Switchers")
+    
+    model_description <- paste0(
+      outcome_label, " ~ ", treatment_label, " (Continuous); ",
+      norm_label, ", ", switchers_label
+    )
+    
+    # Display progress information with description
+    cat(sprintf("\n[%d/%d] (%d%%)\n", 
+                i, total_models, round(i/total_models*100)))
+    cat(sprintf("Running model: %s\n", model_name))
+    cat(sprintf("Description: %s\n", model_description))
+    
+    # Run model and assign to environment
+    model <- run_did_model(outcome, treatment, normalized, same_switchers)
+    assign(model_name, model)
+    
+    # Add to results list - even if it's an error
+    cont_did_results[[model_name]] <- model
+    
+    # Also store the description with the model
+    attr(cont_did_results[[model_name]], "description") <- model_description
+    
+    # Save intermediate results after each model (in case of later failure)
+    try(saveRDS(cont_did_results,
+      file = here("book", "book_regs", "cont_did_results_partial.rds")
+    ), silent = TRUE)
+    
+    # Print estimated progress
+    cat(sprintf("Progress: %d of %d models completed (%d%%)\n", 
+                i, total_models, round(i/total_models*100)))
+  }
+})
+
+# Save the final results
+try(saveRDS(cont_did_results,
+  file = here("book", "book_regs", "cont_did_results.rds")
+))
+
+cat("All continuous models attempted - check results for any errors\n")
+
+# To access descriptions later:
+# cont_did_results$model_cont_mean_logtreat_sw_norm$description  # example
+
+plots_cont <- Map(function(x, name) {
+  x$plot +
+    labs(subtitle = name)
+}, cont_did_results, names(cont_did_results))
+```
+

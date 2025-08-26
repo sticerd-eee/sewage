@@ -66,6 +66,9 @@ events_unmatched <- import(
 annual_unmatched <- import(
   paste(output_dir, "annual_unmatched.parquet", sep = "/"), trust = TRUE
 )
+site_metadata <- import(
+  paste(output_dir, "site_metadata.parquet", sep = "/"), trust = TRUE
+)
 agg_yr <- import(
   here::here("data", "processed", "spill_aggregated", "agg_spill_yr.parquet"),
 )

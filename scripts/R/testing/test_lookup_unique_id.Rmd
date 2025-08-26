@@ -1,0 +1,1679 @@
+## Introduction
+
+Matching unique spill sites across 2021-2024.
+- 2024: `unique_id`
+- 2023: `unique_id` (matches `unique_id_2023` in 2024 data for non-WW; NA for WW)
+- 2021-2022: No reliable unique IDs; use composite keys.
+
+**Goal:** Consolidated lookup table: `primary_id_2024`, `primary_id_2023`, `primary_id_2022` (composite), `primary_id_2021` (composite).
+
+## Setup and Data Preparation
+
+Load packages and configure environment.
+```{r setup}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(
+  "tidyverse", "arrow", "stringr", "stringdist", "fastLink", "reclin2",
+  "pbapply", "rnrfa", "sf", "here", "ranger", "speedglm", "conflicted",
+  "igraph"
+)
+
+# Configuration
+YEARS <- 2021:2024
+DATA_PATH <- here("data", "processed", "annual_return_edm.parquet")
+CORE_IDENTIFIER_COLS <- c(
+  "year", "water_company",
+  "site_name_ea", "site_name_wa_sc",
+  "permit_reference_ea", "permit_reference_wa_sc",
+  "activity_reference",
+  "outlet_discharge_ngr"
+)
+
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+conflict_prefer("first", "dplyr")
+```
+
+Load and prepare data by year.
+```{r load_data}
+# Load and prepare data by year
+full_data <- arrow::read_parquet(DATA_PATH)
+
+data_list <- lapply(YEARS, function(yr) {
+  df <- filter(full_data, year == yr)
+
+  # Create primary_id for 2024
+  if (yr == 2024 && "unique_id" %in% names(df)) {
+    df <- df %>%
+      mutate(primary_id = unique_id)
+  }
+
+  # Handle 2023 unique IDs
+  if (yr == 2023 && "unique_id" %in% names(df)) {
+    df <- df %>%
+      mutate(unique_id_2023 = unique_id)
+  }
+
+  # Select base columns
+  year_site_id <- paste0("site_id_", yr)
+  df <- df %>%
+    select(any_of(
+      c(
+        "primary_id", "unique_id", "unique_id_2023", CORE_IDENTIFIER_COLS,
+        year_site_id
+      )
+    ))
+
+  return(df)
+})
+
+names(data_list) <- paste0("df", YEARS)
+data_list$df2021
+```
+
+
+## Windfall Matching
+
+### Windfall Matching Functions
+
+Define function to perform windfall matching. The function takes as input the left and right data frames, the join keys, and the suffixes for the left and right data frames. It returns a list of three data frames: the joined data frame, the left-only data frame, and the right-only data frame.
+
+```{r matching_functions}
+f_outer_join <- function(df_left, df_right, join_keys,
+                         suffix_left = "_left", suffix_right = "_right") {
+  df_left <- mutate(df_left, ..rowid_left = row_number())
+  df_right <- mutate(df_right, ..rowid_right = row_number())
+
+  joined_df <- full_join(df_left, df_right,
+    by = join_keys, suffix = c(suffix_left, suffix_right),
+    multiple = "all", na_matches = "never"
+  ) %>% suppressWarnings()
+
+  joined_df <- joined_df %>%
+    mutate(join_origin = case_when(
+      !is.na(..rowid_left) & is.na(..rowid_right) ~ "left_only",
+      is.na(..rowid_left) & !is.na(..rowid_right) ~ "right_only",
+      !is.na(..rowid_left) & !is.na(..rowid_right) ~ "matched",
+      TRUE ~ NA_character_
+    ))
+
+  matched_rows <- filter(joined_df, join_origin == "matched")
+
+  if (nrow(matched_rows) > 0) {
+    match_results <- matched_rows %>%
+      group_by(across(all_of(join_keys))) %>%
+      summarise(
+        n_left = n_distinct(..rowid_left),
+        n_right = n_distinct(..rowid_right),
+        .groups = "drop"
+      ) %>%
+      mutate(match_type = case_when(
+        n_left == 1 & n_right == 1 ~ "1_to_1",
+        n_left == 1 ~ "1_to_many",
+        n_right == 1 ~ "many_to_1",
+        TRUE ~ "many_to_many"
+      ))
+
+    joined_df <- left_join(joined_df,
+      select(match_results, all_of(join_keys), match_type),
+      by = join_keys, na_matches = "never"
+    )
+
+    problem_keys <- filter(match_results, match_type != "1_to_1") %>%
+      select(all_of(join_keys))
+  } else {
+    joined_df <- mutate(joined_df, match_type = NA_character_)
+    problem_keys <- data.frame()
+  }
+
+  get_problem_ids <- function(side) {
+    unmatched_ids <- joined_df %>%
+      filter(join_origin == paste0(side, "_only")) %>%
+      pull(!!sym(paste0("..rowid_", side)))
+
+    matched_problem_ids <- if (nrow(problem_keys) > 0) {
+      matched_rows %>%
+        semi_join(problem_keys, by = join_keys) %>%
+        pull(!!sym(paste0("..rowid_", side))) %>%
+        unique()
+    } else {
+      integer(0)
+    }
+
+    base::union(unmatched_ids, matched_problem_ids)
+  }
+
+  problem_left_ids <- get_problem_ids("left")
+  problem_right_ids <- get_problem_ids("right")
+
+  problem_left_df <- slice(df_left, sort(problem_left_ids)) %>%
+    select(-any_of("..rowid_left"))
+  problem_right_df <- slice(df_right, sort(problem_right_ids)) %>%
+    select(-any_of("..rowid_right"))
+
+  final_joined_df <- joined_df %>%
+    mutate(
+      join_keys = if_else(
+        join_origin == "matched" &
+          match_type %in% c("1_to_1", "1_to_many", "many_to_1"),
+        paste0(join_keys, collapse = "|"),
+        NA_character_
+      )
+    ) %>%
+    select(-c(..rowid_left, ..rowid_right))
+
+  return(list(
+    joined_data = final_joined_df,
+    non_1_to_1_matched_left = problem_left_df,
+    non_1_to_1_matched_right = problem_right_df
+  ))
+}
+```
+
+Define function to perform windfall matching. The function takes as input the pair key, the matching levels, the data list, and a verbose flag. It returns a list of three data frames: the joined data frame, the left-only data frame, and the right-only data frame.
+
+```{r}
+# Windfall matching function - simplified to work directly with data_list
+perform_windfall_matching <- function(
+    pair_key, matching_levels, data_list, verbose = FALSE) {
+  years <- as.numeric(unlist(strsplit(pair_key, "_")))
+  left_year <- years[1]
+  right_year <- years[2]
+
+  # Use full years for variable names
+  year_suffix <- paste0(left_year, "_", right_year)
+
+  df_left <- data_list[[paste0("df", left_year)]]
+  df_right <- data_list[[paste0("df", right_year)]]
+
+  left_remaining <- df_left
+  right_remaining <- df_right
+  all_matches <- list()
+
+  for (level in seq_along(matching_levels)) {
+    join_keys <- c("water_company", matching_levels[[level]])
+
+    match_res <- f_outer_join(
+      df_left = left_remaining,
+      df_right = right_remaining,
+      join_keys = join_keys,
+      suffix_left = paste0("_", left_year),
+      suffix_right = paste0("_", right_year)
+    )
+
+    matches <- match_res$joined_data %>%
+      filter(join_origin == "matched", match_type == "1_to_1") %>%
+      mutate(!!paste0("match_level_", year_suffix) := level)
+
+    all_matches[[level]] <- matches
+    left_remaining <- match_res$non_1_to_1_matched_left
+    right_remaining <- match_res$non_1_to_1_matched_right
+
+    if (verbose) {
+      cat(sprintf("%s Level %d: Matched %d rows\n", pair_key, level, nrow(matches)))
+    }
+  }
+
+  combined_matches <- bind_rows(all_matches) %>%
+    mutate(!!paste0("match_method_", year_suffix) := "windfall") %>%
+    rename(
+      !!paste0("match_type_", year_suffix) := match_type,
+      !!paste0("join_keys_", year_suffix) := join_keys
+    ) %>%
+    select(
+      !!sym(paste0("site_id_", right_year)),
+      !!sym(paste0("site_id_", left_year)),
+      starts_with(paste0("match_level_", year_suffix)),
+      starts_with(paste0("match_method_", year_suffix)),
+      starts_with(paste0("match_type_", year_suffix)),
+      starts_with(paste0("join_keys_", year_suffix))
+    )
+
+  return(list(
+    matches = combined_matches,
+    unmatched_left_ids = pull(left_remaining, !!sym(paste0("site_id_", left_year))),
+    unmatched_right_ids = pull(right_remaining, !!sym(paste0("site_id_", right_year)))
+  ))
+}
+```
+
+### Matching Configuration
+
+Define matching configurations.
+
+```{r matching_config}
+# Generate all variable combinations for matching
+vars <- c(
+  "site_name_ea", "site_name_wa_sc",
+  "permit_reference_ea", "permit_reference_wa_sc",
+  "activity_reference", "outlet_discharge_ngr"
+)
+
+# Generate all variable combinations for windfall matching
+var_list <- unlist(
+  lapply(1:length(vars), function(i) combn(vars, i, simplify = FALSE)),
+  recursive = FALSE
+) %>%
+  {
+    \(x) x[order(sapply(x, length), decreasing = TRUE)]
+  }()
+
+# Matching configurations
+config_general <- var_list
+config_2023_2024 <- c(list(c("unique_id_2023")), config_general)
+
+# Generate all year pairs to match
+year_pairs <- expand.grid(
+  left_year = YEARS,
+  right_year = YEARS,
+  stringsAsFactors = FALSE
+) %>%
+  filter(left_year < right_year) %>%
+  arrange(desc(right_year), desc(left_year))
+```
+
+### Run Matching Process
+
+Define function to run all matches. The function takes as input the year pairs, the data list, and a verbose flag. It returns a list of joined data frames.
+
+```{r run_matching}
+run_all_matches <- function(year_pairs, data_list, verbose = FALSE) {
+  # Generate pair keys
+  pair_keys <- apply(year_pairs, 1, function(x) paste(x[1], x[2], sep = "_"))
+
+  # Get configs for all pairs
+  configs <- lapply(seq_along(pair_keys), function(i) {
+    left_year <- year_pairs$left_year[i]
+    right_year <- year_pairs$right_year[i]
+
+    if (left_year == 2023 && right_year == 2024) {
+      return(config_2023_2024)
+    } else {
+      return(config_general)
+    }
+  })
+  names(configs) <- pair_keys
+
+  # Run matches in parallel over pair keys
+  match_results <- lapply(pair_keys, function(pair_key) {
+    perform_windfall_matching(
+      pair_key = pair_key,
+      matching_levels = configs[[pair_key]],
+      data_list = data_list,
+      verbose = verbose
+    )
+  })
+  names(match_results) <- pair_keys
+
+  match_dataframes <- lapply(match_results, function(x) x$matches)
+  return(match_dataframes)
+}
+
+# Execute matching more concisely
+match_dataframes <- run_all_matches(year_pairs, data_list, verbose = FALSE)
+```
+
+### Create Lookup Table
+
+We use graph theory to create a consolidated lookup table. In particular, we use the minimum spanning tree (MST) to create a consolidated lookup table. The MST is a tree that connects all the nodes with the minimum possible total edge weight. In this case, the edge weight is the number of join keys (proxy for match quality).
+
+```{r}
+## --- Build a year‑aware edge list ---
+edges_df <- lapply(match_dataframes, function(df) {
+  site_cols <- grep("^site_id_", names(df), value = TRUE)
+  match_method_col <- grep("^match_method_", names(df), value = TRUE)
+  match_type_col <- grep("^match_type_", names(df), value = TRUE)
+  level_col <- grep("^match_level_", names(df), value = TRUE)
+  join_keys_col <- grep("^join_keys_", names(df), value = TRUE)
+
+  yr_l <- str_extract(site_cols[1], "\\d{4}$")
+  yr_r <- str_extract(site_cols[2], "\\d{4}$")
+
+  df %>%
+    filter(!is.na(.data[[join_keys_col]])) %>%
+    transmute(
+      from = paste0(yr_l, "_", .data[[site_cols[1]]]),
+      to = paste0(yr_r, "_", .data[[site_cols[2]]]),
+      match_method = .data[[match_method_col]],
+      match_type = .data[[match_type_col]],
+      match_level = as.integer(.data[[level_col]]),
+      join_keys = .data[[join_keys_col]]
+    ) %>%
+    filter(from != "", to != "")
+}) %>%
+  bind_rows() %>%
+  distinct()
+
+### --- Compute weights ---
+
+# Compute number of join keys (proxy for match quality)
+edges_df <- edges_df %>%
+  mutate(n_keys = str_count(join_keys, "\\|") + 1)
+max_keys <- max(edges_df$n_keys, na.rm = TRUE)
+
+# Build weighting measure
+# unique_id edges get max weight, otherwise weight is number of join keys
+# tiebreak on match_level (1 is best), so subtract it
+edges_df <- edges_df %>%
+  mutate(
+    raw_score = if_else(
+      str_detect(join_keys, "unique_id"),
+      max_keys + 1,
+      n_keys
+    ),
+    weight = raw_score * 100 - match_level
+  )
+
+## --- Create graph and components ---
+g <- graph_from_data_frame(edges_df, directed = FALSE)
+g_mst <- mst(g, weights = -E(g)$weight)
+comps_mst <- components(g_mst)
+
+
+## --- Recover raw site_id and year from vertex names ---
+membership_mst <- tibble(
+  vertex    = names(comps_mst$membership),
+  component = comps_mst$membership
+) %>%
+  mutate(
+    year    = str_extract(vertex, "^\\d{4}"),
+    site_id = str_remove(vertex, "^\\d{4}_")
+  )
+
+## --- Assemble final cross‑year lookup table ---
+lookup_table <- membership_mst %>%
+  group_by(component, year) %>%
+  summarise(site_id = first(site_id), .groups = "drop") %>%
+  pivot_wider(
+    names_from   = year,
+    values_from  = site_id,
+    names_prefix = "site_id_",
+    values_fill  = NA_character_
+  ) %>%
+  select(site_id_2021, site_id_2022, site_id_2023, site_id_2024)
+
+## --- Edge metadata from the minimum‑spanning tree --------------------------
+edge_metadata <- igraph::as_data_frame(g_mst, what = "edges") %>%
+  mutate(
+    component     = comps_mst$membership[from],
+    year_from     = str_extract(from, "^\\d{4}"),
+    site_id_from  = str_remove(from, "^\\d{4}_"),
+    year_to       = str_extract(to, "^\\d{4}"),
+    site_id_to    = str_remove(to, "^\\d{4}_")
+  ) %>%
+  select(
+    component,
+    year_from, site_id_from,
+    year_to, site_id_to,
+    match_method, match_type, match_level, join_keys, weight
+  ) %>%
+  as_tibble()
+```
+
+We then use the lookup table to analyse coverage.
+
+```{r analyze_results}
+# Create clean year names for analysis
+year_names <- gsub("df", "", names(total_records_by_year))
+
+match_coverage <- data.frame(
+  year = year_names,
+  total_records = unname(total_records_by_year),
+  matched_records = matched_records_by_year[year_names],
+  stringsAsFactors = FALSE
+) %>%
+  mutate(coverage_pct = round(matched_records / total_records * 100, 1))
+
+match_coverage
+```
+
+
+## Fuzzy Matching using Reclin2 and Random Forest
+
+### Define Comparator Function
+
+```{r}
+# Helper function for Jaro-Winkler (JW) comparison with NA handling
+# Returns -1 if both inputs NA, -2 if one input NA, otherwise JW score.
+jaro_winkler_na <- function(threshold = 0.85, na_placeholder = "") {
+  SCORE_BOTH_NA <- -1L
+  SCORE_ONE_NA <- -2L
+  base_comparator <- reclin2::cmp_jarowinkler(threshold = threshold)
+
+  function(x, y) {
+    is_na_x <- is.na(x) | x == na_placeholder
+    is_na_y <- is.na(y) | y == na_placeholder
+
+    scores <- ifelse(
+      is_na_x & is_na_y, SCORE_BOTH_NA,
+      ifelse(is_na_x | is_na_y, SCORE_ONE_NA, base_comparator(x, y))
+    )
+    return(scores)
+  }
+}
+```
+
+### Train Model on 2024-2023 using Windfall Matches
+
+Train the Random Forest model using the windfall matches between 2023-2024 
+datasets as training data. The model will be used to predict matches for 
+unmatched records.
+
+```{r, use-rf-train-function}
+# Function to train a Random Forest model for record linkage using reclin2 framework.
+train_rf_linkage_model <- function(
+    df_left, df_right, # Dataframes to match (e.g., df2023, df2024)
+    known_matches, # Dataframe with known matches
+    match_vars = c( # Variables used for comparison vectors
+      "site_name_ea", "site_name_wa_sc", "permit_reference_ea",
+      "permit_reference_wa_sc", "activity_reference", "outlet_discharge_ngr"
+    ),
+    blocking_var = "water_company", # Variable for blocking pairs
+    comparators_list = NULL, # Optional custom reclin2 comparators
+    default_threshold = 0.85, # Default threshold for string comparisons if not specified
+    model_file = NULL, # Optional file path to save model (.rds)
+    num_trees = 500, # RF parameter
+    max_depth = 8, # RF parameter
+    importance = "impurity", # RF parameter
+    num_threads = 4, # RF parameter
+    probability = TRUE # RF parameter
+    ) {
+  # --- Input Validation and Setup ---
+  # Validate and extract site_id column name and year for left dataframe
+  site_id_cols_left <- names(df_left)[startsWith(names(df_left), "site_id_")]
+  if (length(site_id_cols_left) != 1) {
+    stop(
+      "df_left must have exactly one column starting with 'site_id_'"
+    )
+  }
+  site_id_left <- site_id_cols_left[1]
+  left_year <- sub("^site_id_", "", site_id_left)
+
+  # Validate and extract site_id column name and year for right dataframe
+  site_id_cols_right <- names(df_right)[startsWith(names(df_right), "site_id_")]
+  if (length(site_id_cols_right) != 1) {
+    stop(
+      "df_right must have exactly one column starting with 'site_id_'"
+    )
+  }
+  site_id_right <- site_id_cols_right[1]
+  right_year <- sub("^site_id_", "", site_id_right)
+
+  year_suffix <- paste0(left_year, "_", right_year)
+
+  # --- Data Preparation ---
+  # Clean specific text values ("TBC") and convert to data.table
+  df_left_clean <- df_left %>%
+    mutate(across(
+      all_of(match_vars),
+      ~ if_else(toupper(.) %in% c("TBC", "N/A"), NA_character_, .)
+    )) %>%
+    as.data.table()
+
+  df_right_clean <- df_right %>%
+    mutate(across(
+      all_of(match_vars),
+      ~ if_else(toupper(.) %in% c("TBC", "N/A"), NA_character_, .)
+    )) %>%
+    as.data.table()
+
+  # Assign a unique match_id to known matches and join to datasets
+  known_matches <- as.data.table(known_matches)[, match_id := .I]
+  df_left_clean[known_matches, on = site_id_left, match_id := i.match_id]
+  df_right_clean[known_matches, on = site_id_right, match_id := i.match_id]
+
+  # --- Pair Generation and Comparison ---
+  # Create candidate pairs using blocking
+  pairs <- pair_blocking(df_left_clean, df_right_clean, on = blocking_var, add_xy = TRUE)
+
+  # Define default comparators using the NA-aware Jaro-Winkler function
+  if (is.null(comparators_list)) {
+    comparators_list <- list(
+      site_name_ea = jaro_winkler_na(threshold = 0.89),
+      site_name_wa_sc = jaro_winkler_na(threshold = 0.85),
+      permit_reference_ea = jaro_winkler_na(threshold = 0.9),
+      permit_reference_wa_sc = jaro_winkler_na(threshold = 0.9),
+      activity_reference = jaro_winkler_na(threshold = 0.9),
+      outlet_discharge_ngr = jaro_winkler_na(threshold = 0.97)
+    )
+  }
+  # Ensure match_id comparator is always included for training label generation
+  if (!("match_id" %in% names(comparators_list))) {
+    comparators_list$match_id <- reclin2::cmp_identical()
+  }
+
+  # Compare candidate pairs based on specified variables
+  compare_pairs(
+    pairs,
+    on = c(match_vars, "match_id"), # Include match_id for comparison result
+    default_comparator = jaro_winkler_na(default_threshold),
+    comparators = comparators_list,
+    inplace = TRUE
+  )
+
+  # --- Model Training ---
+  # Convert the match_id comparison result into a factor for classification
+  pairs[, match_id := factor(
+    ifelse(is.na(match_id), 0L, as.integer(match_id > 0)), # Handles pairs not in known_matches
+    levels = c(0, 1), labels = c("non_match", "match")
+  )]
+
+  # Define formula for Random Forest
+  formula_rf <- as.formula(paste("match_id ~", paste(match_vars, collapse = " + ")))
+
+  cat("Training random forest model for", year_suffix, "...\n")
+  gc(full = TRUE)
+  m_rf <- ranger::ranger(
+    formula = formula_rf, data = pairs,
+    num.trees = num_trees, max.depth = max_depth,
+    probability = probability, importance = importance,
+    num.threads = num_threads
+  )
+
+  # --- Save and Return Results ---
+  # Save model object and metadata if path provided
+  if (!is.null(model_file)) {
+    dir.create(dirname(model_file), showWarnings = FALSE, recursive = TRUE)
+    results_to_save <- list(
+      m_rf = m_rf,
+      training_info = list(
+        left_year = left_year, right_year = right_year,
+        num_pairs = nrow(pairs), num_matches = sum(pairs$match_id == "match"),
+        match_vars = match_vars, year_suffix = year_suffix,
+        training_date = Sys.time()
+      )
+    )
+    saveRDS(results_to_save, model_file)
+    cat("Model saved to", model_file, "\n")
+  }
+
+  # Return model object, importance scores, and training pairs
+  return(list(
+    model = m_rf,
+    importance = ranger::importance(m_rf),
+    training_pairs = pairs, # Useful for diagnostics
+    comparison_vars = match_vars,
+    year_suffix = year_suffix
+  ))
+}
+```
+
+### Define NGR Cleaning Function
+
+```{r}
+# Helper function to clean and standardize NGR values
+# Attempts to extract valid NGR strings from potentially messy inputs.
+clean_ngr <- function(x) {
+  x <- case_when(
+    toupper(x) == "UNABLE TO MATCH TO CONSENTS DATABASE" ~ NA_character_,
+    toupper(x) == "NOT IN CONSENTS DATABASE" ~ NA_character_,
+    TRUE ~ x
+  )
+  x <- ifelse(stringr::str_detect(x, "(?i)and"), stringr::str_extract(x, "(?i)(?<=and).*"), x)
+  x <- stringr::str_replace(x, "(?i)Not.*", "")
+  x <- stringr::str_extract(x, "^[^,&/\\(]+")
+  x <- stringr::str_remove_all(x, "\\s+")
+  return(trimws(x))
+}
+```
+
+### Random Forest Matching Function
+
+```{r, rf-matching-function}
+# Function to apply a trained Random Forest model to find matches
+perform_rf_matching <- function(
+    df_left, df_right, # Dataframes with records to match
+    rf_model, # Trained ranger model object
+    match_threshold = 0.5, # Threshold for selecting matches based on predicted probability
+    blocking_var = "water_company",
+    match_vars = c(
+      "site_name_ea", "site_name_wa_sc", "permit_reference_ea",
+      "permit_reference_wa_sc", "activity_reference", "outlet_discharge_ngr"
+    ),
+    comparators_list = NULL,
+    default_threshold = 0.85,
+    calculate_distances = TRUE # Flag to enable NGR distance calculation
+    ) {
+  # --- Input Validation and Setup ---
+  # Validate and extract site_id column name and year for left dataframe
+  site_id_cols_left <- names(df_left)[startsWith(names(df_left), "site_id_")]
+  if (length(site_id_cols_left) != 1) {
+    stop(
+      "df_left must have exactly one column starting with 'site_id_'"
+    )
+  }
+  site_id_left <- site_id_cols_left[1]
+  left_year <- sub("^site_id_", "", site_id_left)
+
+  # Validate and extract site_id column name and year for right dataframe
+  site_id_cols_right <- names(df_right)[startsWith(names(df_right), "site_id_")]
+  if (length(site_id_cols_right) != 1) {
+    stop(
+      "df_right must have exactly one column starting with 'site_id_'"
+    )
+  }
+  site_id_right <- site_id_cols_right[1]
+  right_year <- sub("^site_id_", "", site_id_right)
+
+  year_suffix <- paste0(left_year, "_", right_year)
+
+  # --- Data Preparation ---
+  df_left_clean <- df_left %>%
+    mutate(
+      across(
+        all_of(match_vars),
+        ~ if_else(toupper(.) %in% c("TBC", "N/A"), NA_character_, .)
+      )
+    ) %>%
+    as.data.table()
+
+  df_right_clean <- df_right %>%
+    mutate(
+      across(
+        all_of(match_vars),
+        ~ if_else(toupper(.) %in% c("TBC", "N/A"), NA_character_, .)
+      )
+    ) %>%
+    as.data.table()
+
+  # --- Pair Generation and Comparison ---
+  # Create candidate pairs using blocking
+  pairs <- pair_blocking(
+    df_left_clean, df_right_clean,
+    on = blocking_var, add_xy = TRUE
+  )
+
+  # If no pairs are generated, return empty results
+  if (nrow(pairs) == 0) {
+    cat("No candidate pairs found for", year_suffix, "after blocking.\n")
+    return(list(
+      matches = data.frame(),
+      unmatched_left_ids = df_left[[site_id_left]],
+      unmatched_right_ids = df_right[[site_id_right]],
+      left_remaining = df_left,
+      right_remaining = df_right
+    ))
+  }
+
+  # Define default comparators if needed
+  if (is.null(comparators_list)) {
+    comparators_list <- list(
+      site_name_ea = jaro_winkler_na(threshold = 0.89),
+      site_name_wa_sc = jaro_winkler_na(threshold = 0.85),
+      permit_reference_ea = jaro_winkler_na(threshold = 0.9),
+      permit_reference_wa_sc = jaro_winkler_na(threshold = 0.9),
+      activity_reference = jaro_winkler_na(threshold = 0.9),
+      outlet_discharge_ngr = jaro_winkler_na(threshold = 0.97)
+    )
+  }
+
+  # Compare pairs
+  compare_pairs(
+    pairs,
+    on = match_vars,
+    default_comparator = jaro_winkler_na(default_threshold),
+    comparators = comparators_list, inplace = TRUE
+  )
+
+  # --- Prediction and Match Selection ---
+  # Apply the RF model to predict match probabilities
+  pred <- predict(rf_model, data = pairs)
+  match_prob_col <- paste0("match_prob_", year_suffix)
+  pairs[, (match_prob_col) := pred$predictions[, "match"]]
+
+  # Select the best 1-to-1 matches above the probability threshold
+  selected_var <- paste0("selected_ml_rf_", year_suffix)
+  results <- select_n_to_m(
+    pairs,
+    variable = selected_var, score = match_prob_col,
+    threshold = match_threshold, n = 1, m = 1, inplace = FALSE # Explicit 1:1
+  )
+
+  # Link selected pairs back to original data attributes
+  results <- link(
+    results,
+    selection = selected_var, all_x = TRUE, all_y = TRUE,
+    suffixes = c(paste0("_", left_year), paste0("_", right_year)),
+    keep_from_pairs = c(match_prob_col)
+  )
+
+  # Extract only the rows representing matches
+  matched_results <- results[!is.na(get(site_id_left)) & !is.na(get(site_id_right))]
+
+  # If no matches selected, return early
+  if (nrow(matched_results) == 0) {
+    cat(
+      "No matches found above threshold", match_threshold, "for", year_suffix, ".\n"
+    )
+    return(list(
+      matches = data.frame(),
+      unmatched_left_ids = df_left[[site_id_left]],
+      unmatched_right_ids = df_right[[site_id_right]],
+      left_remaining = df_left,
+      right_remaining = df_right
+    ))
+  }
+
+  # --- Optional: NGR Distance Calculation ---
+  if (calculate_distances) {
+    ngr_left_col <- paste0("outlet_discharge_ngr_", left_year)
+    ngr_right_col <- paste0("outlet_discharge_ngr_", right_year)
+    dist_col <- paste0("dist_ngr_", year_suffix) #
+
+    # Check if required NGR columns exist in the matched results
+    if (!all(c(ngr_left_col, ngr_right_col) %in% names(matched_results))) {
+      cat("NGR columns not found; skipping distance calculation for", year_suffix, ".\n")
+    } else {
+      # Prepare data for distance calculation: clean, parse, extract coordinates
+      coords_to_process <- matched_results %>%
+        # 1. Select necessary columns and clean NGRs
+        select(
+          all_of(c(site_id_left, site_id_right, ngr_left_col, ngr_right_col))
+        ) %>%
+        mutate(
+          ngr_left_clean = clean_ngr(.data[[ngr_left_col]]),
+          ngr_right_clean = clean_ngr(.data[[ngr_right_col]])
+        ) %>%
+        # 2. Filter out rows where cleaned NGRs are already missing
+        filter(!is.na(ngr_left_clean) & !is.na(ngr_right_clean)) %>%
+        # 3. Parse NGRs with error handling
+        mutate(
+          coords_left_parsed = lapply(ngr_left_clean, function(ngr) {
+            tryCatch(rnrfa::osg_parse(ngr, coord_system = "BNG"),
+              error = function(e) {
+                list(easting = NA_real_, northing = NA_real_)
+              }
+            )
+          }),
+          coords_right_parsed = lapply(ngr_right_clean, function(ngr) {
+            tryCatch(rnrfa::osg_parse(ngr, coord_system = "BNG"),
+              error = function(e) {
+                list(easting = NA_real_, northing = NA_real_)
+              }
+            )
+          })
+        ) %>%
+        # 4. Extract eastings and northings safely
+        mutate(
+          easting_left =
+            sapply(
+              coords_left_parsed,
+              function(x) ifelse(is.null(x$easting), NA_real_, x$easting)
+            ),
+          northing_left = sapply(
+            coords_left_parsed,
+            function(x) ifelse(is.null(x$northing), NA_real_, x$northing)
+          ),
+          easting_right = sapply(
+            coords_right_parsed,
+            function(x) ifelse(is.null(x$easting), NA_real_, x$easting)
+          ),
+          northing_right = sapply(
+            coords_right_parsed,
+            function(x) ifelse(is.null(x$northing), NA_real_, x$northing)
+          )
+        ) %>%
+        # 5. Keep only rows where both sets of coordinates are valid after parsing
+        filter(
+          !is.na(easting_left) & !is.na(northing_left) & !is.na(easting_right) &
+            !is.na(northing_right)
+        )
+
+      # Check if any valid coordinate pairs remain after preparation
+      if (nrow(coords_to_process) > 0) {
+        # Create sf points (CRS 27700 for OSGB)
+        points_left <- sf::st_as_sf(
+          coords_to_process,
+          coords = c("easting_left", "northing_left"), crs = 27700
+        )
+        points_right <- sf::st_as_sf(
+          coords_to_process,
+          coords = c("easting_right", "northing_right"), crs = 27700
+        )
+
+        # Calculate distances and create a tibble with IDs and distances
+        distances <- tibble::tibble(
+          !!site_id_left := coords_to_process[[site_id_left]],
+          !!site_id_right := coords_to_process[[site_id_right]],
+          !!dist_col := as.numeric(
+            sf::st_distance(points_left, points_right, by_element = TRUE)
+          )
+        )
+
+        # Join distances back to the main matched results table
+        matched_results <- matched_results %>%
+          left_join(distances, by = c(site_id_left, site_id_right))
+      } else {
+        cat("No valid coordinate pairs found for distance calculation for", year_suffix, "after cleaning/parsing.\n")
+      }
+    }
+  }
+
+  # --- Final Formatting and Return ---
+  # Prepare the final results dataframe with consistent naming
+  quality_col <- paste0("match_quality_rf_", year_suffix)
+  level_col <- paste0("match_level_", year_suffix)
+
+  final_results <- matched_results %>%
+    rename(!!quality_col := all_of(match_prob_col)) %>%
+    mutate(
+      !!paste0("match_type_", year_suffix) := "one_to_one", # From select_n_to_m
+      !!paste0("match_method_", year_suffix) := "rf",
+      !!paste0("join_keys_", year_suffix) := "rf_probabilistic",
+      !!level_col := (1 - !!sym(quality_col)) * 100
+    ) %>%
+    # Select relevant columns for output
+    select(
+      any_of(c(site_id_left, site_id_right)),
+      starts_with("match_method_"), starts_with("match_type_"),
+      starts_with("join_keys_"), starts_with("match_level_"),
+      starts_with("match_quality_rf_"), starts_with("dist_ngr_"),
+      any_of(paste0(blocking_var, "_", c(left_year, right_year))),
+    ) %>%
+    arrange(desc(!!sym(quality_col)))
+
+  # Identify IDs that remain unmatched after this process
+  matched_left_ids <- final_results[[site_id_left]]
+  matched_right_ids <- final_results[[site_id_right]]
+  unmatched_left_ids <- setdiff(df_left[[site_id_left]], matched_left_ids)
+  unmatched_right_ids <- setdiff(df_right[[site_id_right]], matched_right_ids)
+
+  # Get the actual data rows for remaining unmatched records
+  unmatched_left <- df_left %>% filter(.data[[site_id_left]] %in% unmatched_left_ids)
+  unmatched_right <- df_right %>% filter(.data[[site_id_right]] %in% unmatched_right_ids)
+
+  # Return list containing matches and remaining unmatched data/IDs
+  return(list(
+    matches = final_results,
+    unmatched_left_ids = unmatched_left_ids,
+    unmatched_right_ids = unmatched_right_ids,
+    left_remaining = unmatched_left,
+    right_remaining = unmatched_right
+  ))
+}
+```
+
+### Define Function to Perform RF Matching
+
+```{r}
+# Function to prepare data for RF matching by filtering to unmatched IDs
+prepare_rf_data <- function(df, unmatched_ids, fill_site_names = TRUE) {
+  # Validate and extract site_id column name
+  site_id_cols <- names(df)[startsWith(names(df), "site_id_")]
+  if (length(site_id_cols) != 1) {
+    stop("Input df must have exactly one column starting with 'site_id_'")
+  }
+  site_id_col <- site_id_cols[1]
+
+  # Filter to keep only specified unmatched observations
+  df_filtered <- filter(df, .data[[site_id_col]] %in% unmatched_ids)
+
+  # Fill missing site names using the other site name column
+  if (fill_site_names) {
+    df_filtered <- df_filtered %>%
+      mutate(
+        site_name_ea = if_else(is.na(site_name_ea) & !is.na(site_name_wa_sc),
+          site_name_wa_sc, site_name_ea
+        ),
+        site_name_wa_sc = if_else(is.na(site_name_wa_sc) & !is.na(site_name_ea),
+          site_name_ea, site_name_wa_sc
+        )
+      )
+  }
+
+  return(df_filtered)
+}
+```
+
+### Perform Random Forest Matching 
+
+We train the model on 2023-2024 using unique_id as training data.
+```{r}
+# Check if the model already exists, otherwise train it
+if (file.exists(here("output", "code_testing", "rf_model_2023_2024.rds"))) {
+  rf_model_res <- readRDS(here("output", "code_testing", "rf_model_2023_2024.rds"))
+  m_rf <- rf_model_res$m_rf
+} else {
+  # Get the unique_id matches
+  windfall_lookup <- match_dataframes$`2023_2024` %>%
+    filter(join_keys_2023_2024 == "water_company|unique_id_2023") %>%
+    select(site_id_2024, site_id_2023)
+
+  # Train the model
+  gc(full = TRUE)
+  rf_model_res <- train_rf_linkage_model(
+    df_left = data_list$df2023,
+    df_right = data_list$df2024,
+    known_matches = windfall_lookup,
+    left_id_col = "site_id_2023",
+    right_id_col = "site_id_2024",
+    model_file = here("output", "code_testing", "rf_model_2023_2024.rds")
+  )
+
+  # Extract the trained model
+  m_rf <- rf_model_res$model
+
+  # Display variable importance
+  importance_df <- data.frame(
+    variable = names(rf_model_res$importance),
+    importance = rf_model_res$importance
+  ) %>%
+    arrange(desc(importance))
+}
+```
+
+```{r, use-rf-matching-function-systematically}
+# Simple RF matching using year_pairs
+rf_match_results <- lapply(1:nrow(year_pairs), function(i) {
+  # Get years from year_pairs
+  left_year <- year_pairs$left_year[i]
+  right_year <- year_pairs$right_year[i]
+  pair_name <- paste(left_year, right_year, sep = "_")
+
+  # Get unmatched IDs for left and right years
+  site_id_left <- paste0("site_id_", left_year)
+  site_id_right <- paste0("site_id_", right_year)
+  data_left <- data_list[[paste0("df", left_year)]]
+  data_right <- data_list[[paste0("df", right_year)]]
+
+  um_id_left <- data_left[[site_id_left]] %>%
+    setdiff(pull(
+      filter(lookup_table, !is.na(!!sym(site_id_left))),
+      !!sym(site_id_left)
+    ))
+
+  um_id_right <- data_right[[site_id_right]] %>%
+    setdiff(pull(
+      filter(lookup_table, !is.na(!!sym(site_id_right))),
+      !!sym(site_id_right)
+    ))
+
+  # Apply RF matching
+  rf_match_res <- perform_rf_matching(
+    df_left = prepare_rf_data(data_left, um_id_left),
+    df_right = prepare_rf_data(data_right, um_id_right),
+    rf_model = m_rf,
+    match_threshold = 0.05
+  )
+  rf_match_res <- rf_match_res$matches %>%
+    select(
+      contains("site_id"),
+      contains("match_method"), contains("match_type"),
+      contains("join_keys"), contains("match_level"),
+      contains("match_quality"), contains("dist_ngr"),
+      contains("water_company"), contains("year"),
+      contains("site_name_ea"), contains("site_name_wa_sc"),
+      contains("permit_reference_ea"), contains("permit_reference_wa_sc"),
+      contains("activity_reference"), contains("outlet_discharge_ngr")
+    ) %>%
+    as_tibble()
+
+  return(rf_match_res)
+})
+
+# Name the results with pair names
+names(rf_match_results) <- apply(
+  year_pairs, 1, function(x) paste(x[1], x[2], sep = "_")
+)
+```
+
+### Create Lookup Table
+
+We use graph theory to create a consolidated lookup table. In particular, we use the minimum spanning tree (MST) to create a consolidated lookup table. The MST is a tree that connects all the nodes with the minimum possible total edge weight. In this case, the edge weight is the number of join keys (proxy for match quality).
+
+```{r}
+### --- Combine Windfall and RF Matches ---
+matches_dfs <- append(match_dataframes, rf_match_results)
+rf_match_results[[1]]
+
+## --- Build a year‑aware edge list ---
+edges_df <- lapply(matches_dfs, function(df) {
+  site_cols <- grep("^site_id_", names(df), value = TRUE)
+  match_method_col <- grep("^match_method_", names(df), value = TRUE)
+  match_type_col <- grep("^match_type_", names(df), value = TRUE)
+  level_col <- grep("^match_level_", names(df), value = TRUE)
+  join_keys_col <- grep("^join_keys_", names(df), value = TRUE)
+
+  yr_l <- str_extract(site_cols[1], "\\d{4}$")
+  yr_r <- str_extract(site_cols[2], "\\d{4}$")
+
+  df %>%
+    filter(!is.na(.data[[join_keys_col]])) %>%
+    transmute(
+      from = paste0(yr_l, "_", .data[[site_cols[1]]]),
+      to = paste0(yr_r, "_", .data[[site_cols[2]]]),
+      match_method = .data[[match_method_col]],
+      match_type = .data[[match_type_col]],
+      match_level = .data[[level_col]],
+      join_keys = .data[[join_keys_col]]
+    ) %>%
+    filter(from != "", to != "")
+}) %>%
+  bind_rows() %>%
+  distinct()
+
+### --- Compute weights ---
+
+# Compute number of join keys (proxy for match quality)
+edges_df <- edges_df %>%
+  mutate(n_keys = str_count(join_keys, "\\|") + 1)
+max_keys <- max(edges_df$n_keys, na.rm = TRUE)
+
+# Build weighting measure
+# unique_id edges get max weight, otherwise weight is number of join keys
+# tiebreak on match_level (1 is best), so subtract it
+edges_df <- edges_df %>%
+  mutate(
+    raw_score = case_when(
+      str_detect(join_keys, "unique_id") ~ max_keys + 2,
+      str_detect(join_keys, "rf_probabilistic") ~ 1,
+      TRUE ~ n_keys + 1
+    ),
+    weight = raw_score * 100 - match_level
+  )
+
+edges_df %>%
+  slice_sample(n = 100, by = match_type)
+filter(str_detect(join_keys, "rf_probabilistic"))
+
+## --- Create graph and components ---
+g <- graph_from_data_frame(edges_df, directed = FALSE)
+g_mst <- mst(g, weights = -E(g)$weight)
+comps_mst <- components(g_mst)
+
+
+## --- Recover raw site_id and year from vertex names ---
+membership_mst <- tibble(
+  vertex    = names(comps_mst$membership),
+  component = comps_mst$membership
+) %>%
+  mutate(
+    year    = str_extract(vertex, "^\\d{4}"),
+    site_id = str_remove(vertex, "^\\d{4}_")
+  )
+
+## --- Assemble final cross‑year lookup table ---
+lookup_table <- membership_mst %>%
+  group_by(component, year) %>%
+  summarise(site_id = first(site_id), .groups = "drop") %>%
+  pivot_wider(
+    names_from   = year,
+    values_from  = site_id,
+    names_prefix = "site_id_",
+    values_fill  = NA_character_
+  ) %>%
+  select(site_id_2021, site_id_2022, site_id_2023, site_id_2024)
+
+## --- Edge metadata from the minimum‑spanning tree --------------------------
+edge_metadata <- igraph::as_data_frame(g_mst, what = "edges") %>%
+  mutate(
+    component     = comps_mst$membership[from],
+    year_from     = str_extract(from, "^\\d{4}"),
+    site_id_from  = str_remove(from, "^\\d{4}_"),
+    year_to       = str_extract(to, "^\\d{4}"),
+    site_id_to    = str_remove(to, "^\\d{4}_")
+  ) %>%
+  select(
+    component,
+    year_from, site_id_from,
+    year_to, site_id_to,
+    match_method, match_type, match_level, join_keys, weight
+  ) %>%
+  as_tibble()
+```
+
+We then use the lookup table to analyse coverage.
+
+```{r analyze_results}
+# Create clean year names for analysis
+year_names <- gsub("df", "", names(total_records_by_year))
+
+match_coverage <- data.frame(
+  year = year_names,
+  total_records = unname(total_records_by_year),
+  matched_records = matched_records_by_year[year_names],
+  stringsAsFactors = FALSE
+) %>%
+  mutate(coverage_pct = round(matched_records / total_records * 100, 1))
+
+match_coverage
+```
+
+We then use the lookup table to analyse coverage.
+
+```{r analyze_results}
+# Create clean year names for analysis
+year_names <- gsub("df", "", names(total_records_by_year))
+
+match_coverage <- data.frame(
+  year = year_names,
+  total_records = unname(total_records_by_year),
+  matched_records = matched_records_by_year[year_names],
+  stringsAsFactors = FALSE
+) %>%
+  mutate(coverage_pct = round(matched_records / total_records * 100, 1))
+
+match_coverage
+```
+
+
+
+## Archive
+
+### Reclin2 - EM Algorithm
+
+```{r}
+# -----------------------------
+# Step 1. Initialise Data Frames and add row identifiers
+# -----------------------------
+
+# Blocking variable
+blocking_var <- "water_company"
+
+# Variables for fuzzy string matching
+match_vars <- c(
+  "site_name_ea",
+  "site_name_wa_sc",
+  "permit_reference_ea",
+  "permit_reference_wa_sc",
+  "activity_reference",
+  "outlet_discharge_ngr"
+)
+
+# Initialise data frames
+df2024_rl <- df2024_remaining3 %>%
+  mutate(across(
+    all_of(match_vars),
+    ~ if_else(toupper(.) == toupper("TBC"), NA_character_, .)
+  )) %>%
+  as.data.table()
+df2023_rl <- df2023_remaining3 %>%
+  mutate(across(
+    all_of(match_vars),
+    ~ if_else(toupper(.) == toupper("TBC"), NA_character_, .)
+  )) %>%
+  as.data.table()
+
+
+# -----------------------------
+# Step 2. Create Candidate Pairs using Blocking on 'water_company'
+# -----------------------------
+# Use pair_blocking to restrict candidate pairs to those where water_company is
+identical
+pairs_24_23_um <- pair_blocking(
+  df2024_rl, df2023_rl,
+  on = blocking_var,
+  add_xy = TRUE
+)
+
+
+# -----------------------------
+# Step 3. Compare Candidate Pairs
+# -----------------------------
+# Define comparators:
+comparators_list <- list(
+  site_name_ea = cmp_jarowinkler(threshold = 0.89),
+  site_name_wa_sc = cmp_jarowinkler(threshold = 0.85),
+  permit_reference_ea = cmp_jarowinkler(threshold = 0.9),
+  permit_reference_wa_sc = cmp_jarowinkler(threshold = 0.9),
+  activity_reference = cmp_jarowinkler(threshold = 0.9),
+  outlet_discharge_ngr = cmp_jarowinkler(threshold = 0.97)
+)
+
+# Compare on the selected variables
+compare_pairs(
+  pairs_24_23_um,
+  on = match_vars,
+  inplace = TRUE,
+  comparators = comparators_list
+)
+
+
+# -----------------------------
+# Step 4. Score the Pairs
+# -----------------------------
+# Use EM algorithm (Fellegi-Sunter) for probabilistic scoring
+formula_str <- paste("~", paste(match_vars, collapse = " + "))
+m_em <- problink_em(
+  formula = as.formula(formula_str),
+  data = pairs_24_23_um
+)
+
+# Calculate posterior probability P(Match | Comparison Vector) using EM model
+predict(
+  m_em,
+  pairs = pairs_24_23_um,
+  type = "mpost",
+  add = TRUE,
+  binary = TRUE,
+  inplace = TRUE
+)
+
+# -----------------------------
+# Step 5. Select Matches
+# -----------------------------
+matching_thr <- 0.2
+
+# Use select_n_to_m for optimal one-to-one mapping
+select_n_to_m(
+  pairs_24_23_um,
+  variable = "selected_match",
+  score = "mpost",
+  threshold = matching_thr,
+  inplace = TRUE
+)
+
+num_selected <- sum(pairs_24_23_um$selected_match, na.rm = TRUE)
+print(paste(
+  "Selected", format(num_selected, big.mark = ","),
+  "pairs based on threshold and 1:1 rule."
+))
+
+
+# -----------------------------
+# Step 6. Link Data
+# -----------------------------
+linked_data_um <- link(
+  pairs_24_23_um,
+  selection = "selected_match",
+  all_x = FALSE,
+  all_y = FALSE,
+  suffixes = c("_2024", "_2023"),
+  keep_from_pairs = c("mpost")
+)
+
+linked_data_um <- linked_data_um %>%
+  rename(match_quality = mpost) %>%
+  mutate(
+    match_type = "one_to_one",
+    match_method = "reclin2",
+    join_keys = "site_id_2024|site_id_2023"
+  ) %>%
+  select(
+    site_id_2024, site_id_2023, match_method, match_type, match_quality,
+    contains("site_name_ea"), contains("site_name_wa_sc"),
+    contains("permit_reference"), contains("outlet_discharge")
+  )
+
+# -----------------------------
+# Step 7. Extract incorrect matches
+# -----------------------------
+
+pairs_24_23
+
+incorrect_matches <- c()
+incorrect_matches_df <- linked_data %>%
+  filter(site_id_2024 %in% x)
+
+# -----------------------------
+# Step 7. Calculate distance between NGR coordinates using sf package
+# -----------------------------
+
+# # Function to clean and standardize NGR values
+# clean_ngr <- function(ngr) {
+#   ngr %>%
+#     # Handle problematic values
+#     {
+#       ifelse(. %in% c("Unable to match to Consents Database", "Not in
+# Consents Database"),
+#         NA_character_, .
+#       )
+#     } %>%
+#     # Remove "Not..." text
+#     str_replace("(?i)Not.*", "") %>%
+#     # Extract first reference if multiple exist
+#     str_extract("^[^,&/\\(]+") %>%
+#     # Remove all whitespace
+#     str_remove_all("\\s+")
+# }
+#
+# # Clean NGRs and calculate distance
+# linked_data <- linked_data %>%
+#   # Clean both NGR columns using the function
+#   mutate(across(
+#     .cols = c(outlet_discharge_ngr_2024, outlet_discharge_ngr_2023),
+#     .fns = clean_ngr
+#   ))
+#
+# # Parse coordinates separately
+# coords_2024 <- osg_parse(linked_data$outlet_discharge_ngr_2024)
+# coords_2023 <- osg_parse(linked_data$outlet_discharge_ngr_2023)
+#
+# # Create a dataframe with both sets of coordinates
+# coords_df <- data.frame(
+#   id = 1:nrow(linked_data),
+#   easting_2024 = coords_2024$easting,
+#   northing_2024 = coords_2024$northing,
+#   easting_2023 = coords_2023$easting,
+#   northing_2023 = coords_2023$northing
+# )
+#
+# # Convert to sf objects with British National Grid projection (EPSG:27700)
+# points_2024 <- st_as_sf(coords_df,
+#   coords = c("easting_2024", "northing_2024"),
+#   crs = 27700
+# )
+# points_2023 <- st_as_sf(coords_df,
+#   coords = c("easting_2023", "northing_2023"),
+#   crs = 27700
+# )
+#
+# # Calculate distances
+# distances <- st_distance(points_2024, points_2023, by_element = TRUE)
+#
+# # Add distances to original dataframe
+# linked_data$dist_ngr_24_23 <- as.numeric(distances)
+#
+# # Show results with distance information
+# linked_data %>%
+#   arrange(desc(dist_ngr_24_23))
+```
+
+#### GLM Simple
+
+```{r}
+# -----------------------------
+# Configuration
+# -----------------------------
+
+# Blocking variable
+blocking_var <- "water_company"
+
+# Variables for fuzzy string matching
+match_vars <- c(
+  "site_name_ea",
+  "site_name_wa_sc",
+  "permit_reference_ea",
+  "permit_reference_wa_sc",
+  "activity_reference",
+  "outlet_discharge_ngr"
+)
+# Known matches for supervised learning
+match_id <- "match_id"
+# all variables
+all_vars <- c(match_vars, match_id)
+
+
+# Initialise data tables
+df2024_ml <- df2024 %>%
+  mutate(across(
+    all_of(match_vars),
+    ~ if_else(toupper(.) == toupper("TBC"), NA_character_, .)
+  )) %>%
+  as.data.table()
+df2023_ml <- df2023 %>%
+  mutate(across(
+    all_of(match_vars),
+    ~ if_else(toupper(.) == toupper("TBC"), NA_character_, .)
+  )) %>%
+  as.data.table()
+
+# Generate ML training data using windfall matches
+windfall_lookup <- as.data.table(match_res_windfall_23_24)[
+  , .(site_id_2024, site_id_2023, match_id = .I)
+]
+df2024_ml[windfall_lookup, on = .(site_id_2024), match_id := i.match_id]
+df2023_ml[windfall_lookup, on = .(site_id_2023), match_id := i.match_id]
+
+
+# -----------------------------
+# Step 1. Create Candidate Pairs
+# -----------------------------
+# Use pair_blocking to restrict candidate pairs to those where water_company is
+identical
+pairs_24_23_ml <- pair_blocking(
+  df2024_ml, df2023_ml,
+  on = blocking_var,
+  add_xy = TRUE
+)
+
+
+# -----------------------------
+# Step 2. Compare Candidate Pairs
+# -----------------------------
+# Define comparators:
+comparators_list <- list(
+  site_name_ea = cmp_jarowinkler(threshold = 0.89),
+  site_name_wa_sc = cmp_jarowinkler(threshold = 0.85),
+  permit_reference_ea = cmp_jarowinkler(threshold = 0.9),
+  permit_reference_wa_sc = cmp_jarowinkler(threshold = 0.9),
+  activity_reference = cmp_jarowinkler(threshold = 0.9),
+  outlet_discharge_ngr = cmp_jarowinkler(threshold = 0.97),
+  match_id = cmp_identical()
+)
+
+# Compare on the selected variables
+thr <- 0.85
+compare_pairs(
+  pairs_24_23_ml,
+  on = all_vars,
+  default_comparator = cmp_jarowinkler(thr),
+  comparators = comparators_list,
+  inplace = TRUE
+)
+
+# -----------------------------
+# Step 3. Train Supervised Model
+# -----------------------------
+# Create formula for model
+formula_ml <- paste(match_id, "~", paste(match_vars, collapse = " + "))
+
+# Train logistic regression model
+m <- speedglm(
+  formula = as.formula(formula_ml),
+  data = pairs_24_23_ml,
+  family = binomial()
+)
+
+# -----------------------------
+# Step 4. Apply Model to Find New Matches
+# -----------------------------
+# Predict match probabilities for all candidate pairs
+pairs_24_23_ml[
+  ,
+  match_prob := predict(m, newdata = pairs_24_23_ml, type = "response")
+]
+pairs_24_23_ml[is.na(match_prob), match_prob := 0.0]
+
+# Select matches using score and 1:1 constraint
+results_simple <- select_n_to_m(
+  pairs_24_23_ml,
+  variable = "selected_ml",
+  score = "match_prob",
+  threshold = 0.5,
+  inplace = FALSE
+)
+
+results_simple <- link(
+  results_simple,
+  selection = "selected_ml",
+  all_x = TRUE,
+  all_y = TRUE,
+  suffixes = c("_24", "_23")
+)
+
+matched_data <- results_simple[!is.na(site_id_2024) & !is.na(site_id_2023)]
+nrow(matched_data)
+```
+
+#### Add NA handling
+
+```{r}
+# -----------------------------
+# Step 1. Create Candidate Pairs
+# -----------------------------
+# Use pair_blocking to restrict candidate pairs to those where water_company is
+identical
+pairs_24_23_ml <- pair_blocking(
+  df2024_ml, df2023_ml,
+  on = blocking_var,
+  add_xy = TRUE
+)
+
+# -----------------------------
+# Step 2. Compare Candidate Pairs
+# -----------------------------
+## NA cmp_jarowinkler
+jaro_winkler_na <- function(threshold = 0.85, na_placeholder = "") {
+  SCORE_BOTH_NA <- -1L
+  SCORE_ONE_NA <- -2L
+
+  base_comparator <- reclin2::cmp_jarowinkler(threshold = threshold)
+
+  function(x, y) {
+    is_na_x <- is.na(x) | x == na_placeholder
+    is_na_y <- is.na(y) | y == na_placeholder
+
+    scores <- ifelse(
+      is_na_x & is_na_y,
+      SCORE_BOTH_NA,
+      ifelse(
+        is_na_x | is_na_y,
+        SCORE_ONE_NA,
+        base_comparator(x, y)
+      )
+    )
+    return(scores)
+  }
+}
+
+# Define comparators:
+comparators_list <- list(
+  site_name_ea = jaro_winkler_na(threshold = 0.89),
+  site_name_wa_sc = jaro_winkler_na(threshold = 0.85),
+  permit_reference_ea = jaro_winkler_na(threshold = 0.9),
+  permit_reference_wa_sc = jaro_winkler_na(threshold = 0.9),
+  activity_reference = jaro_winkler_na(threshold = 0.9),
+  outlet_discharge_ngr = jaro_winkler_na(threshold = 0.97),
+  match_id = cmp_identical()
+)
+
+# Compare on the selected variables
+thr <- 0.85
+compare_pairs(
+  pairs_24_23_ml,
+  on = all_vars,
+  default_comparator = jaro_winkler_na(thr),
+  comparators = comparators_list,
+  inplace = TRUE
+)
+
+# -----------------------------
+# Step 3. Train Supervised Model
+# -----------------------------
+# Create formula for model
+formula_ml <- paste(match_id, "~", paste(match_vars, collapse = " + "))
+
+# Train logistic regression model
+m <- speedglm(
+  formula = as.formula(formula_ml),
+  data = pairs_24_23_ml,
+  family = binomial()
+)
+
+# -----------------------------
+# Step 4. Apply Model to Find New Matches
+# -----------------------------
+# Predict match probabilities for all candidate pairs
+pairs_24_23_ml[
+  ,
+  match_prob := predict(m, newdata = pairs_24_23_ml, type = "response")
+]
+pairs_24_23_ml[is.na(match_prob), match_prob := 0.0]
+
+# Select matches using score and 1:1 constraint
+results_na_handle <- select_n_to_m(
+  pairs_24_23_ml,
+  variable = "selected_ml",
+  score = "match_prob",
+  threshold = 0.5,
+  inplace = FALSE
+)
+
+results_na_handle <- link(
+  results_na_handle,
+  selection = "selected_ml",
+  all_x = TRUE,
+  all_y = TRUE,
+  suffixes = c("_24", "_23")
+)
+
+matched_data_na_handle <- results_na_handle[!is.na(site_id_2024) & !is.na
+(site_id_2023)]
+nrow(matched_data_na_handle)
+```
+
+
+
+
+```{r}
+data("linkexample1", "linkexample2")
+pairs <- pair_blocking(linkexample1, linkexample2, "postcode")
+linkexample1
+linkexample2
+
+na_as_class <- function(x, y) {
+  factor(
+    ifelse(is.na(x) | is.na(y), 2L, (y == x) * 1L),
+    levels = 0:2, labels = c("eq", "uneq", "mis")
+  )
+}
+
+compare_pairs(
+  pairs,
+  on = c("lastname", "firstname", "address", "sex"),
+  inplace = TRUE,
+  comparators = list(
+    lastname = cmp_jarowinkler(),
+    firstname = cmp_jarowinkler(),
+    address = cmp_jarowinkler(),
+    sex = na_as_class
+  )
+)
+
+linkexample2$known_id <- linkexample2$id
+linkexample2$known_id[c(2, 5)] <- NA
+setDT(linkexample2)
+
+compare_vars(
+  pairs,
+  "y",
+  on_x = "id",
+  on_y = "known_id",
+  y = linkexample2,
+  inplace = TRUE
+)
+
+
+compare_vars(pairs, "y_true", on_x = "id", on_y = "id", inplace = TRUE)
+
+m <- glm(y ~ lastname + firstname + address + sex,
+  data = pairs, family =
+    binomial()
+)
+pairs[, prob := predict(m, type = "response", newdata = pairs)]
+
+pairs[, select := prob > 0.5]
+table(pairs$select > 0.5, pairs$y_true)
+
+# or alternatively can use select_n_to_m
+select_n_to_m(pairs,
+  variable = "select", score = "prob", threshold = 0.5,
+  inplace = TRUE
+)
+table(pairs$select, pairs$y_true)
+
+linked_data_set <- link(pairs, selection = "select", all_y = TRUE, all_x = TRUE)
+
+linked_data_set %>%
+  select(order(colnames(linked_data_set)))
+linkexample1
+
+results <- list(
+  m_glm_na <- m,
+  glm_na_pairs_24_23 <- pairs_24_23_ml,
+  results_glm_na_24_23 <- results_na_handle,
+  m_rf = m_rf
+)
+saveRDS(results, here("output", "code_testing", "results.RData"))
+```

@@ -8,11 +8,19 @@ book:
   date: "last-modified"
   chapters:
     - index.qmd
-    - data_limitations.qmd
-    - spill_data_exploration.qmd
-    - house_data_exploration.qmd
-    - event_study.qmd
-    - hedonic_regs.qmd
+    - part: "Data Exploration"
+      chapters:
+      - data_limitations.qmd
+      - spill_data_exploration.qmd
+      - house_data_exploration.qmd
+    - part: "Analysis"
+      chapters:
+      - event_study.qmd
+      - hedonic_regs.qmd
+    - part: "Data Cleaning"
+      chapters: 
+      - data_clean_documentation/01_pipeline.qmd
+      - data_clean_documentation/02_ingestion.qmd
 
 bibliography: refs.bib
 
