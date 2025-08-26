@@ -1,0 +1,12 @@
+rasterio
+geopandas
+shapely
+matplotlib
+tqdm
+numpy
+pandas
+scipy
+contextily
+pyarrow
+folium
+plotly
