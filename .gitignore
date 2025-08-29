@@ -62,7 +62,7 @@ Thumbs.db
 .idea/
 
 # Website files
-# /book/_freeze/
+/book/_freeze/
 /book/.quarto/
 /book/_site/
 /book/book_figs/

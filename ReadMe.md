@@ -69,6 +69,7 @@ The project is organised as follows:
 |------------------------------|----------------------------------------|-------------------------------------------------------------------------------------------------------------|----------|
 | `data/raw/edm_data/`         | UK Government: Environment Agency     | **Event Duration Monitoring (2021–2024+):** Individual sewage spill events across all 10 WaSCs in England. Includes historical Excel files (2021-2023) and live API data (2024+) | [Environment Agency EDM](https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac) |
 | `data/raw/ea_consents/`      | UK Government: Environment Agency     | **Consented Discharges to Controlled Waters with Conditions:** Site locations, permit details, and discharge consent information under Environmental Permit Regulations | [EA Consents Data](https://www.data.gov.uk/dataset/55b8eaa8-60df-48a8-929a-060891b7a109) |
+| `data/raw/haduk_rainfall_data/` | UK Government: Met Office          | **HadUK-Grid Rainfall Data (2020–2023):** Daily precipitation totals on 60km grid across UK from nationally consistent observational dataset. Used to identify "dry spills" occurring during minimal rainfall periods. Monthly NetCDF files with transverse mercator projection | [Met Office HadUK-Grid](https://www.metoffice.gov.uk/research/climate/maps-and-data/data/haduk-grid/haduk-grid) |
 | `data/raw/lr_house_price/`   | UK Government: HM Land Registry       | **Land Registry House Prices:** Complete property transaction records for England and Wales (2021-2024+) including sale prices, addresses, and property characteristics | [Price Paid Data](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads) |
 
 
@@ -188,6 +189,13 @@ Scripts for cleaning, standardising, and converting raw data into consistent for
    - Converts timestamps, standardises location formats, and validates data quality.
    - **Output:** Processed API data in Parquet format for efficient analysis.
 
+**`clean_rainfall_data.R`**  
+    - **Input:** Raw UK Met Office HadUK-Grid NetCDF files (`rainfall_YYYY_MM.nc`) from `data/raw/haduk_rainfall_data/` and unique spill sites (`data/processed/unique_spill_sites.parquet`).
+    - Extracts daily rainfall data from NetCDF files for grid cells near sewage spill locations using spatial filtering.
+    - Implements neighbourhood analysis mapping each spill site to 3×3 grid area and handles various time encoding formats.
+    - Processes files in parallel with memory optimisation for efficient large dataset handling.
+    - **Output:** Cleaned rainfall dataset (`data/processed/rainfall/rainfall_data_cleaned.parquet`) and spill site to grid cell lookup table (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
+
 #### 03_data_enrichment/ - Data Enrichment & Aggregation Layer
 
 Scripts for aggregating raw data into statistics, creating lookup tables, and enriching datasets with additional information. Scripts handle temporal aggregation, site linkage, and statistical summarisation.
@@ -206,8 +214,22 @@ Scripts for aggregating raw data into statistics, creating lookup tables, and en
 **`create_unique_spill_sites.R`**  
     - **Input:** Merged individual spill data with location information.
     - Creates unique spill sites dataset by cleaning and validating location data.
-    - Converts National Grid References to eastings/northings coordinates using `rnrfa::osg_parse`.
+    - Converts National Grid References to eastings/northings coordinates.
     - **Output:** Dataset of unique spill sites with coordinates saved to `data/processed/unique_spill_sites.parquet`.
+
+**`identify_dry_spills.R`**  
+    - **Input:** Individual spill data (`data/processed/matched_events_annual_data/matched_events_annual_data.parquet`), cleaned rainfall data (`data/processed/rainfall/rainfall_data_cleaned.parquet`), and spill site to grid cell lookup table (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
+    - Identifies "dry spills" using six independent rainfall indicators combining spatial (1-cell vs 9-cell analysis), temporal (days 0-1 vs days 0-3), and NA handling (strict vs lenient) methodologies.
+    - Applies 0.25mm rainfall threshold and implements chunked parallel processing with memory optimisation for large dataset analysis.
+    - Generates rainfall metrics for each spill including single grid cell analysis and 9-cell neighbourhood maximum rainfall calculations.
+    - **Output:** Filtered dry spills dataset with rainfall classifications saved to `data/processed/rainfall/dry_spills.parquet`.
+
+**`aggregate_dry_spill_stats.R`**  
+    - **Input:** Dry spills dataset with rainfall metrics (`data/processed/rainfall/dry_spills.parquet`) and existing spill aggregation files (`data/processed/spill_aggregated/agg_spill_{yr|mo|qtr}.parquet`).
+    - Aggregates dry spill events into temporal statistics (yearly, monthly, quarterly) for each of the six rainfall indicators independently.
+    - Creates standardised column naming convention and integrates dry spill metrics with existing aggregation datasets.
+    - Implements zero imputation for periods with no dry spills and maintains compatibility with general spill analysis workflows.
+    - **Output:** Integrated aggregation datasets with dry spill statistics saved to `data/processed/spill_aggregated/agg_spill_dry_{yr|mo|qtr}.parquet`.
 
 #### 04_feature_engineering/ - Feature Engineering & Spatial Processing Layer
 
@@ -215,7 +237,7 @@ Scripts for spatial analysis, distance calculations, and feature engineering. Sc
 
 **`10km_site_house_sale_match.R`**  
     - **Input:** Geocoded house price data and unique spill sites with coordinates.
-    - Performs spatial join using `sf::st_is_within_distance` to identify spill sites within 10km of each property.
+    - Performs spatial join to identify spill sites within 10km of each property.
     - Calculates exact distances and counts discharge outlets within radius for each house.
     - **Output:** Spatial lookup table with house-site pairs and distances saved to `data/processed/spill_house_lookup.parquet`.
 
@@ -267,6 +289,53 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
     - Aggregates house prices within various radii (250m-10km) of each site using distance weighting.
     - Creates treatment indicators based on spill distribution thresholds (p50, p75, p90).
     - **Output:** Site-level panel datasets partitioned by radius saved to `data/processed/dat_panel_site_*/`.
+
+### Script Execution Order
+
+The following execution sequence ensures proper data dependencies across the 6-layer pipeline:
+
+#### Layer 01: Data Ingestion
+1. **`edm_individ_data_standardisation_2021-2023.R`** - Unzips and standardises historical EDM archive files
+2. **`fetch_edm_api_data_2024_onwards.R`** - Fetches current API data (can run in parallel with step 1)
+
+#### Layer 02: Data Cleaning
+3. **`clean_consented_discharges_database.R`** - Processes consented discharges (independent, can run early)
+4. **`clean_lr_house_price_data.R`** - Cleans house price data (independent, can run in parallel with other cleaning scripts)
+5. **`combine_annual_return_data.R`** - Combines annual return files (independent)
+6. **`convert_individ_raw_data_to_rdata_2021-2023.R`** - Converts individual EDM files to RData (requires step 1)
+7. **`process_edm_api_json_to_parquet_2024_onwards.R`** - Processes API JSON data (requires step 2)
+8. **`combine_individ_edm_data_2021-2023.R`** - Combines individual EDM data (requires step 6)
+9. **`combine_api_edm_data_2024_onwards.R`** - Combines API data (requires step 7)
+10. **`clean_rainfall_data.R`** - Cleans rainfall NetCDF files (requires unique spill sites from Layer 03, can run after step 14)
+
+#### Layer 03: Data Enrichment
+11. **`merge_individ_annual_location.R`** - Merges location data with individual spills (requires steps 5, 8)
+12. **`combine_2021-2023_and_api_edm_data.R`** - Combines historical and API data (requires steps 8, 9)
+13. **`create_annual_return_lookup.R`** - Creates site lookup tables (requires step 5)
+14. **`create_unique_spill_sites.R`** - Creates unique sites dataset (requires step 11)
+15. **`aggregate_spill_stats.R`** - Aggregates general spill statistics (requires step 11)
+16. **`identify_dry_spills.R`** - Identifies dry spills using rainfall data (requires steps 10, 11, 14)
+17. **`aggregate_dry_spill_stats.R`** - Aggregates dry spill statistics (requires steps 15, 16)
+
+#### Layer 04: Feature Engineering
+18. **`10km_site_house_sale_match.R`** - Spatial matching of houses to spill sites (requires steps 4, 14)
+19. **`compute_spill_stats.R`** - Enhanced spill statistics (requires step 11)
+
+#### Layer 05: Data Integration
+*Scripts in this layer depend on outputs from multiple previous layers and should run after Layer 04 completion*
+
+#### Layer 06: Analysis Datasets
+20. **`cross_section_db.R`** - Creates cross-sectional datasets (requires steps 4, 15, 18)
+21. **`site_panel.R`** - Creates site-level panel datasets (requires steps 4, 15, 18)
+22. **`house_panel_within_radius.R`** - Creates house-level panels (requires steps 4, 15, 18)
+23. **`house_panel_exp.R`** - Creates final analysis datasets (requires step 22)
+
+**Dependencies Notes:**
+- Steps 1-2 can run in parallel
+- Steps 3-5 are independent and can run in parallel
+- Step 10 has a circular dependency - run after step 14 completes
+- Steps 15-17 form the dry spill analysis sub-pipeline
+- Layer 6 scripts require careful sequencing as they build upon each other
 
 ### Key Data Flows
 

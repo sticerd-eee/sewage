@@ -34,6 +34,9 @@ initialise_environment <- function() {
     }
     library(pkg, character.only = TRUE)
   }))
+  
+  # Source shared utilities
+  source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
 }
 
 #' Set up logging configuration
@@ -102,145 +105,6 @@ load_data <- function() {
   )
 }
 
-#' Split records that cross month boundaries into separate monthly records
-#' @param df Data frame containing spill records
-#' @return Data frame with split records for cross-month spills
-split_monthly_records <- function(df) {
-  dt <- as.data.table(df)[end_time > start_time]
-  
-  # 1. Build a “calendar” of all month‐windows covering your data
-  all_months <- seq(
-    floor_date(min(dt$start_time), "month"),
-    floor_date(max(dt$end_time),   "month"),
-    by = "month"
-  )
-  cal <- data.table(
-    month_start = as.POSIXct(all_months,               tz = "UTC"),
-    month_end   = as.POSIXct(all_months + months(1), tz = "UTC") - 1
-  )
-  
-  # 2. Key both tables for an interval‐overlap join
-  setkey(dt,    start_time, end_time)
-  setkey(cal, month_start, month_end)
-  
-  # 3. Join, then “clamp” each record to its month‐slice
-  out <- foverlaps(dt, cal, nomatch = 0L)[
-    , .(
-      start_time = pmax(start_time, month_start),
-      end_time   = pmin(end_time,   month_end),
-      # carry through every other column from dt:
-      .SD[, setdiff(names(dt), c("start_time","end_time")), with = FALSE]
-    )
-  ]
-  
-  # 4. Return as a data.frame (or data.table)
-  return(out[])
-}
-
-
-#' Prepare spill data for aggregation by handling year/month boundaries
-#' @param data Input dataframe containing spill data
-#' @return List of data tables prepared for yearly and monthly aggregation
-prepare_spill_data <- function(data) {
-  # Initial data prep and year boundary handling
-  dt <- as.data.table(data) 
-  ## Remove key NAs
-  dt <- dt[!is.na(site_id) & !is.na(start_time)]
-  ## Truncate start/end times that cross year boundaries
-  dt[, c("lower", "upper") := {
-    lr <- as.POSIXct(ISOdatetime(year, 1, 1, 0, 0, 0), tz = "UTC")
-    ur <- as.POSIXct(ISOdatetime(year + 1, 1, 1, 0, 0, 0), tz = "UTC")
-    list(lr, ur)
-  }, by = year]
-  
-  dt[, `:=`(
-    start_time = pmax(start_time, lower),
-    end_time   = pmin(end_time,   upper)
-  )]
-  dt[, c("lower", "upper") := NULL]
-  data.table::setkey(dt, site_id, start_time)
-  
-  # Prepare yearly dataset
-  dt_yearly <- copy(dt)
-  
-  # Prepare monthly dataset from yearly data
-  dt_monthly <- split_monthly_records(dt)
-  dt_monthly[, month := data.table::month(start_time)]
-  dt_monthly[, quarter := ceiling(month/3)] 
-  
-  return(list(
-    yearly = dt_yearly,
-    monthly = dt_monthly
-  ))
-}
-
-
-#' Count spills using the 12/24 counting method
-#' @param start_times Vector of spill start times (POSIXct)
-#' @param end_times Vector of spill end times (POSIXct)
-#' @return Integer count of spill events
-count_spills <- function(start_times, end_times) {
-  if (!length(start_times)) {
-    return(0L)
-  }
-  
-  # POSIXct to numeric (seconds since epoch) to optimise speed
-  start_times <- as.numeric(start_times)
-  end_times <- as.numeric(end_times)
-  
-  # Pre-sort inputs by start_time
-  ord <- order(start_times)
-  start_times <- start_times[ord]
-  end_times <- end_times[ord]
-  
-  # Pre-compute durations in seconds
-  dur12 <- 12 * 3600
-  dur24 <- 24 * 3600
-  
-  # Initialise variables
-  spill_count <- 0L
-  block_start <- NA_real_
-  block_end <- NA_real_
-  
-  for (i in seq_along(start_times)) {
-    current_start <- start_times[i]
-    current_end <- end_times[i]
-    
-    # Calculate difference between spill start and current block end
-    if (!is.na(block_end)) {
-      gap <- (current_start - block_end) / 3600
-    }
-    
-    # 12-hour block (first spill or >24h gap)
-    if (is.na(block_end) || gap > 0) {
-      block_start <- current_start
-      block_end <- current_start + dur12
-      
-      # How many 24-hour blocks occur after the first 12 hours (if any)
-      diff_current <- (current_end - block_start) / 3600
-      spill_over_12h <- ceiling(pmax(0, diff_current - 12) / 24)
-      spill_count <- spill_count + 1L + spill_over_12h
-      
-      # Update block times
-      block_start <- block_end + (dur24 * spill_over_12h)
-      block_end <- block_start + dur24
-    } else {
-      # 24 hour block
-      # Update spill count
-      diff_current <- (current_end - block_start) / 3600
-      spill_over_24h <- ceiling(pmax(0, diff_current) / 24)
-      spill_count <- spill_count + spill_over_24h
-      
-      # Update block times
-      block_start <- block_end + dur24 * (spill_over_24h - 1)
-      block_end <- block_start + dur24
-    }
-  }
-  
-  return(spill_count)
-}
-
-
 #' Aggregate spill data by water company and year/month
 #' @param data Input dataframe containing individual spill data
 #' @return List with aggregated yearly and monthly spill statistics
@@ -285,9 +149,7 @@ aggregate_spills <- function(data) {
       current_data[,
                    .(
                      spill_count_yr    = count_spills(start_time, end_time),
-                     spill_hrs_yr      = sum(
-                       as.numeric(difftime(end_time, start_time, units = "hours")), 
-                       na.rm = TRUE)
+                     spill_hrs_yr      = calculate_spill_hours(start_time, end_time)
                    ),
                    by = .(water_company, site_id, year)
       ]
@@ -320,9 +182,7 @@ aggregate_spills <- function(data) {
       current_data[,
                    .(
                      spill_count_mo = count_spills(start_time, end_time),
-                     spill_hrs_mo   = sum(
-                       as.numeric(difftime(end_time, start_time, units = "hours")), 
-                       na.rm = TRUE)
+                     spill_hrs_mo   = calculate_spill_hours(start_time, end_time)
                    ),
                    by = .(water_company, site_id, year, month)
       ]
@@ -357,10 +217,7 @@ aggregate_spills <- function(data) {
       cur[,
           .(
             spill_count_qt = count_spills(start_time, end_time),
-            spill_hrs_qt   = sum(
-              as.numeric(difftime(end_time, start_time, units = "hours")),
-              na.rm = TRUE
-            )
+            spill_hrs_qt   = calculate_spill_hours(start_time, end_time)
           ),
           by = .(water_company, site_id, year, quarter)
       ]
@@ -528,37 +385,34 @@ export_results <- function(final_results) {
 # Main execution
 ############################################################
 
+# Note: split_monthly_records() function is imported from shared utilities
+# Note: prepare_spill_data() function is imported from shared utilities
+# Note: count_spills() function is imported from shared utilities
+
 main <- function() {
   # Setup
   initialise_environment()
   setup_logging()
   
-  tryCatch(
-    {
-      # Load and process data
-      logger::log_info("Starting data processing pipeline")
-      data <- load_data()
-      
-      # Aggregate spills
-      logger::log_info("Aggregating spill statistics")
-      aggregated_data <- aggregate_spills(data$spill_data)
-      
-      # Complete time series observations
-      logger::log_info("Completing time series observations")
-      completed_data <- complete_data_observations(
-        aggregated_data,
-        metadata = data$metadata)
-      
-      # Export results
-      logger::log_info("Exporting results")
-      export_results(completed_data)
-      
-      logger::log_info("Processing completed successfully")
-    },
-    error = function(e) {
-      logger::log_error("Pipeline failed: {e$message}")
-      stop(glue::glue("Pipeline failed: {e$message}"))
-    }
+  # Load and process data
+  logger::log_info("Starting data processing pipeline")
+  data <- load_data()
+  
+  # Aggregate spills
+  logger::log_info("Aggregating spill statistics")
+  aggregated_data <- aggregate_spills(data$spill_data)
+  
+  # Complete time series observations
+  logger::log_info("Completing time series observations")
+  completed_data <- complete_data_observations(
+    aggregated_data,
+    metadata = data$metadata)
+  
+  # Export results
+  logger::log_info("Exporting results")
+  export_results(completed_data)
+  
+  logger::log_info("Processing completed successfully")
   )
 }
 

@@ -8,6 +8,7 @@
 
 
 library(dplyr)
+library(here)
 library(tidyr)
 library(stringr)
 library(lubridate)
@@ -17,7 +18,8 @@ library(abind)
 library(pbapply)
 
 ##set dropbox path to data folder:
-dp_path<- "C:/Users/danan/Dropbox/sewage/data/"
+#dp_path<- "C:/Users/danan/Dropbox/sewage/data/"
+dp_path <- here("data/")
 #local alternative
 #dp_path <- "C:/Users/danan/Documents/2024 Internship/Circular economy project/Data/dp_backup/"
 
@@ -514,4 +516,6 @@ extra_missing_check<-dry_spills_defined%>%
 #local save
 
 #saved in dropbox under processed "merged_edm_1224_dry_spill_data.RData"
+#load("/Users/jacopoolivieri/Dropbox/01_projects/sewage/data/processed/merged_edm_1224_dry_spill_data.RData")
+#View(dry_spills_defined)
 
