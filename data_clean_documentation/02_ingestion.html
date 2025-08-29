@@ -9,7 +9,7 @@
 <meta name="author" content="Jacopo Olivieri">
 <meta name="dcterms.date" content="2025-07-18">
 
-<title>8&nbsp; Ingestion Layer – Sewage in Our Waters</title>
+<title>9&nbsp; Ingestion Layer – Sewage in Our Waters</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -84,7 +84,7 @@ ul.task-list li input[type="checkbox"] {
       <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
         <i class="bi bi-layout-text-sidebar-reverse"></i>
       </button>
-        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html">Data Cleaning</a></li><li class="breadcrumb-item"><a href="../data_clean_documentation/02_ingestion.html"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></a></li></ol></nav>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html">Data Cleaning</a></li><li class="breadcrumb-item"><a href="../data_clean_documentation/02_ingestion.html"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></a></li></ol></nav>
         <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
         </a>
       <button type="button" class="btn quarto-search-button" aria-label="Search" onclick="window.quartoOpenSearch();">
@@ -138,8 +138,14 @@ ul.task-list li input[type="checkbox"] {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
+  <a href="../dry_spills.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">4</span>&nbsp; <span class="chapter-title">Dry Spill Exploration</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
   <a href="../house_data_exploration.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">4</span>&nbsp; <span class="chapter-title">House Data Exploration</span></span></a>
+ <span class="menu-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">House Data Exploration</span></span></a>
   </div>
 </li>
       </ul>
@@ -156,13 +162,13 @@ ul.task-list li input[type="checkbox"] {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../event_study.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">Event Study</span></span></a>
+ <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Event Study</span></span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../hedonic_regs.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span></a>
+ <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span></a>
   </div>
 </li>
       </ul>
@@ -179,13 +185,13 @@ ul.task-list li input[type="checkbox"] {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../data_clean_documentation/01_pipeline.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span></a>
+ <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../data_clean_documentation/02_ingestion.html" class="sidebar-item-text sidebar-link active">
- <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span></a>
+ <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span></a>
   </div>
 </li>
       </ul>
@@ -200,18 +206,18 @@ ul.task-list li input[type="checkbox"] {
     <h2 id="toc-title">Table of contents</h2>
    
   <ul>
-  <li><a href="#sec-02-01-ingestion-overview" id="toc-sec-02-01-ingestion-overview" class="nav-link active" data-scroll-target="#sec-02-01-ingestion-overview"><span class="header-section-number">8.1</span> Overview of Ingestion Layer</a></li>
-  <li><a href="#sec-02-02-edm-data-ingestion" id="toc-sec-02-02-edm-data-ingestion" class="nav-link" data-scroll-target="#sec-02-02-edm-data-ingestion"><span class="header-section-number">8.2</span> 2021-2023 EDM Data Ingestion</a></li>
-  <li><a href="#sec-02-03-edm-data-ingestion-2024" id="toc-sec-02-03-edm-data-ingestion-2024" class="nav-link" data-scroll-target="#sec-02-03-edm-data-ingestion-2024"><span class="header-section-number">8.3</span> 2024-Present EDM Data Ingestion</a></li>
+  <li><a href="#sec-02-01-ingestion-overview" id="toc-sec-02-01-ingestion-overview" class="nav-link active" data-scroll-target="#sec-02-01-ingestion-overview"><span class="header-section-number">9.1</span> Overview of Ingestion Layer</a></li>
+  <li><a href="#sec-02-02-edm-data-ingestion" id="toc-sec-02-02-edm-data-ingestion" class="nav-link" data-scroll-target="#sec-02-02-edm-data-ingestion"><span class="header-section-number">9.2</span> 2021-2023 EDM Data Ingestion</a></li>
+  <li><a href="#sec-02-03-edm-data-ingestion-2024" id="toc-sec-02-03-edm-data-ingestion-2024" class="nav-link" data-scroll-target="#sec-02-03-edm-data-ingestion-2024"><span class="header-section-number">9.3</span> 2024-Present EDM Data Ingestion</a></li>
   </ul>
 </nav>
     </div>
 <!-- main -->
 <main class="content" id="quarto-document-content">
 
-<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html">Data Cleaning</a></li><li class="breadcrumb-item"><a href="../data_clean_documentation/02_ingestion.html"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></a></li></ol></nav>
+<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html">Data Cleaning</a></li><li class="breadcrumb-item"><a href="../data_clean_documentation/02_ingestion.html"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></a></li></ol></nav>
 <div class="quarto-title">
-<h1 class="title"><span id="sec-02-data-pipeline" class="quarto-section-identifier"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span></h1>
+<h1 class="title"><span id="sec-02-data-pipeline" class="quarto-section-identifier"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span></h1>
 </div>
 
 
@@ -240,8 +246,8 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<section id="sec-02-01-ingestion-overview" class="level2" data-number="8.1">
-<h2 data-number="8.1" class="anchored" data-anchor-id="sec-02-01-ingestion-overview"><span class="header-section-number">8.1</span> Overview of Ingestion Layer</h2>
+<section id="sec-02-01-ingestion-overview" class="level2" data-number="9.1">
+<h2 data-number="9.1" class="anchored" data-anchor-id="sec-02-01-ingestion-overview"><span class="header-section-number">9.1</span> Overview of Ingestion Layer</h2>
 <p>The ingestion layer is responsible for acquiring raw data and preparing it for downstream use. It handles data collection, retrieval, and basic organisation, but performs no cleaning or transformation. Its purpose is to ensure that all inputs to the pipeline are systematically acquired and stored in a standardised structure.</p>
 <p>Within this project, the ingestion layer is only required for the two sources of data:</p>
 <ol type="1">
@@ -249,13 +255,13 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>EDM 2024-present:</strong> Individual spill data obtained from ArcGIS API endpoints provided by Water UK.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a></li>
 </ol>
 </section>
-<section id="sec-02-02-edm-data-ingestion" class="level2" data-number="8.2">
-<h2 data-number="8.2" class="anchored" data-anchor-id="sec-02-02-edm-data-ingestion"><span class="header-section-number">8.2</span> 2021-2023 EDM Data Ingestion</h2>
+<section id="sec-02-02-edm-data-ingestion" class="level2" data-number="9.2">
+<h2 data-number="9.2" class="anchored" data-anchor-id="sec-02-02-edm-data-ingestion"><span class="header-section-number">9.2</span> 2021-2023 EDM Data Ingestion</h2>
 <p>The 2021–2023 EDM data was obtained via FOI requests from multiple water companies, each using different formats and naming conventions. The script <code>edm_individ_data_standardisation_2021-2023.R</code> standardises the raw files at the ingestion stage to ensure consistent structure and naming.</p>
 <p>It extracts files from <code>.zip</code> archives, identifies those with <code>.csv</code>, .<code>xlsx</code>, or <code>.xlsb</code> extensions, and renames them using the format YYYY_CompanyName_edm.ext, based on metadata inferred from the original filenames. The script performs only file system operations and does not load or modify the data. All standardised files are moved to a single directory for downstream processing.</p>
 </section>
-<section id="sec-02-03-edm-data-ingestion-2024" class="level2" data-number="8.3">
-<h2 data-number="8.3" class="anchored" data-anchor-id="sec-02-03-edm-data-ingestion-2024"><span class="header-section-number">8.3</span> 2024-Present EDM Data Ingestion</h2>
+<section id="sec-02-03-edm-data-ingestion-2024" class="level2" data-number="9.3">
+<h2 data-number="9.3" class="anchored" data-anchor-id="sec-02-03-edm-data-ingestion-2024"><span class="header-section-number">9.3</span> 2024-Present EDM Data Ingestion</h2>
 <p>Individual EDM data for 2024 onwards is available via ArcGIS API endpoints provided by Water UK. This data is ingested through a two-script pipeline designed for incremental, timestamped updates as new spill records are released.</p>
 <ol type="1">
 <li><strong>Automated Retrieval:</strong> <code>Script fetch_edm_api_data_2024_onwards.R</code> queries API endpoints for each water company, as defined in an external configuration file. It handles pagination, consolidates results into a single JSON object, and saves a timestamped, compressed file (e.g., 250405_1030_thames_water.json.gz). Each retrieval is logged in a persistent CSV.</li>
@@ -677,7 +683,7 @@ ul.task-list li input[type="checkbox"] {
 <nav class="page-navigation">
   <div class="nav-page nav-page-previous">
       <a href="../data_clean_documentation/01_pipeline.html" class="pagination-link" aria-label="Pipeline Overview">
-        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span>
+        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span>
       </a>          
   </div>
   <div class="nav-page nav-page-next">

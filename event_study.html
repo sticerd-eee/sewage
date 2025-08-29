@@ -9,7 +9,7 @@
 <meta name="author" content="Jacopo Olivieri">
 <meta name="dcterms.date" content="2024-04-01">
 
-<title>5&nbsp; Event Study – Sewage in Our Waters</title>
+<title>6&nbsp; Event Study – Sewage in Our Waters</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -114,7 +114,7 @@ window.Quarto = {
       <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
         <i class="bi bi-layout-text-sidebar-reverse"></i>
       </button>
-        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="./event_study.html">Analysis</a></li><li class="breadcrumb-item"><a href="./event_study.html"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">Event Study</span></a></li></ol></nav>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="./event_study.html">Analysis</a></li><li class="breadcrumb-item"><a href="./event_study.html"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Event Study</span></a></li></ol></nav>
         <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
         </a>
       <button type="button" class="btn quarto-search-button" aria-label="Search" onclick="window.quartoOpenSearch();">
@@ -168,8 +168,14 @@ window.Quarto = {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
+  <a href="./dry_spills.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">4</span>&nbsp; <span class="chapter-title">Dry Spill Exploration</span></span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
   <a href="./house_data_exploration.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">4</span>&nbsp; <span class="chapter-title">House Data Exploration</span></span></a>
+ <span class="menu-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">House Data Exploration</span></span></a>
   </div>
 </li>
       </ul>
@@ -186,13 +192,13 @@ window.Quarto = {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="./event_study.html" class="sidebar-item-text sidebar-link active">
- <span class="menu-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">Event Study</span></span></a>
+ <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Event Study</span></span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="./hedonic_regs.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span></a>
+ <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span></a>
   </div>
 </li>
       </ul>
@@ -209,13 +215,13 @@ window.Quarto = {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="./data_clean_documentation/01_pipeline.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span></a>
+ <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="./data_clean_documentation/02_ingestion.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span></a>
+ <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span></a>
   </div>
 </li>
       </ul>
@@ -230,21 +236,21 @@ window.Quarto = {
     <h2 id="toc-title">Table of contents</h2>
    
   <ul>
-  <li><a href="#sec-05-01-setting" id="toc-sec-05-01-setting" class="nav-link active" data-scroll-target="#sec-05-01-setting"><span class="header-section-number">5.1</span> Setting</a></li>
-  <li><a href="#sec-05-02-basic-event-study-regressions" id="toc-sec-05-02-basic-event-study-regressions" class="nav-link" data-scroll-target="#sec-05-02-basic-event-study-regressions"><span class="header-section-number">5.2</span> Site-Level Event Study Regressions Within Spill Buffers</a>
+  <li><a href="#sec-06-01-setting" id="toc-sec-06-01-setting" class="nav-link active" data-scroll-target="#sec-06-01-setting"><span class="header-section-number">6.1</span> Setting</a></li>
+  <li><a href="#sec-06-02-basic-event-study-regressions" id="toc-sec-06-02-basic-event-study-regressions" class="nav-link" data-scroll-target="#sec-06-02-basic-event-study-regressions"><span class="header-section-number">6.2</span> Site-Level Event Study Regressions Within Spill Buffers</a>
   <ul class="collapse">
-  <li><a href="#sec-05-02-01-binary-average" id="toc-sec-05-02-01-binary-average" class="nav-link" data-scroll-target="#sec-05-02-01-binary-average"><span class="header-section-number">5.2.1</span> Binary Treatment - Average Spill Count</a></li>
-  <li><a href="#sec-05-02-02-binary-median" id="toc-sec-05-02-02-binary-median" class="nav-link" data-scroll-target="#sec-05-02-02-binary-median"><span class="header-section-number">5.2.2</span> Binary Treatment - Median Spill Count</a></li>
-  <li><a href="#sec-05-02-03-binary-p75" id="toc-sec-05-02-03-binary-p75" class="nav-link" data-scroll-target="#sec-05-02-03-binary-p75"><span class="header-section-number">5.2.3</span> Binary Treatment - 75th Percentile Spill Count</a></li>
-  <li><a href="#sec-05-02-04-binary-p90" id="toc-sec-05-02-04-binary-p90" class="nav-link" data-scroll-target="#sec-05-02-04-binary-p90"><span class="header-section-number">5.2.4</span> Binary Treatment - 90th Percentile Spill Count</a></li>
-  <li><a href="#sec-05-02-04-continuous-treatment" id="toc-sec-05-02-04-continuous-treatment" class="nav-link" data-scroll-target="#sec-05-02-04-continuous-treatment"><span class="header-section-number">5.2.5</span> Continuous Treatment - Average Spill Count</a></li>
+  <li><a href="#sec-06-02-01-binary-average" id="toc-sec-06-02-01-binary-average" class="nav-link" data-scroll-target="#sec-06-02-01-binary-average"><span class="header-section-number">6.2.1</span> Binary Treatment - Average Spill Count</a></li>
+  <li><a href="#sec-06-02-02-binary-median" id="toc-sec-06-02-02-binary-median" class="nav-link" data-scroll-target="#sec-06-02-02-binary-median"><span class="header-section-number">6.2.2</span> Binary Treatment - Median Spill Count</a></li>
+  <li><a href="#sec-06-02-03-binary-p75" id="toc-sec-06-02-03-binary-p75" class="nav-link" data-scroll-target="#sec-06-02-03-binary-p75"><span class="header-section-number">6.2.3</span> Binary Treatment - 75th Percentile Spill Count</a></li>
+  <li><a href="#sec-06-02-04-binary-p90" id="toc-sec-06-02-04-binary-p90" class="nav-link" data-scroll-target="#sec-06-02-04-binary-p90"><span class="header-section-number">6.2.4</span> Binary Treatment - 90th Percentile Spill Count</a></li>
+  <li><a href="#sec-06-02-04-continuous-treatment" id="toc-sec-06-02-04-continuous-treatment" class="nav-link" data-scroll-target="#sec-06-02-04-continuous-treatment"><span class="header-section-number">6.2.5</span> Continuous Treatment - Average Spill Count</a></li>
   </ul></li>
-  <li><a href="#sec-05-03-house-level-event-study" id="toc-sec-05-03-house-level-event-study" class="nav-link" data-scroll-target="#sec-05-03-house-level-event-study"><span class="header-section-number">5.3</span> House-Level Event Study Regressions Within Admin Boundaries</a>
+  <li><a href="#sec-06-03-house-level-event-study" id="toc-sec-06-03-house-level-event-study" class="nav-link" data-scroll-target="#sec-06-03-house-level-event-study"><span class="header-section-number">6.3</span> House-Level Event Study Regressions Within Admin Boundaries</a>
   <ul class="collapse">
-  <li><a href="#sec-05-03-01-binary-average" id="toc-sec-05-03-01-binary-average" class="nav-link" data-scroll-target="#sec-05-03-01-binary-average"><span class="header-section-number">5.3.1</span> Binary Treatment - Average Spill Count</a></li>
-  <li><a href="#sec-05-03-02-binary-median" id="toc-sec-05-03-02-binary-median" class="nav-link" data-scroll-target="#sec-05-03-02-binary-median"><span class="header-section-number">5.3.2</span> Binary Treatment - Median Spill Count</a></li>
-  <li><a href="#sec-05-03-03-binary-p75" id="toc-sec-05-03-03-binary-p75" class="nav-link" data-scroll-target="#sec-05-03-03-binary-p75"><span class="header-section-number">5.3.3</span> Binary Treatment - 75th Percentile Spill Count</a></li>
-  <li><a href="#sec-05-03-04-binary-p90" id="toc-sec-05-03-04-binary-p90" class="nav-link" data-scroll-target="#sec-05-03-04-binary-p90"><span class="header-section-number">5.3.4</span> Binary Treatment - 90th Percentile Spill Count</a></li>
+  <li><a href="#sec-06-03-01-binary-average" id="toc-sec-06-03-01-binary-average" class="nav-link" data-scroll-target="#sec-06-03-01-binary-average"><span class="header-section-number">6.3.1</span> Binary Treatment - Average Spill Count</a></li>
+  <li><a href="#sec-06-03-02-binary-median" id="toc-sec-06-03-02-binary-median" class="nav-link" data-scroll-target="#sec-06-03-02-binary-median"><span class="header-section-number">6.3.2</span> Binary Treatment - Median Spill Count</a></li>
+  <li><a href="#sec-06-03-03-binary-p75" id="toc-sec-06-03-03-binary-p75" class="nav-link" data-scroll-target="#sec-06-03-03-binary-p75"><span class="header-section-number">6.3.3</span> Binary Treatment - 75th Percentile Spill Count</a></li>
+  <li><a href="#sec-06-03-04-binary-p90" id="toc-sec-06-03-04-binary-p90" class="nav-link" data-scroll-target="#sec-06-03-04-binary-p90"><span class="header-section-number">6.3.4</span> Binary Treatment - 90th Percentile Spill Count</a></li>
   </ul></li>
   </ul>
 </nav>
@@ -252,9 +258,9 @@ window.Quarto = {
 <!-- main -->
 <main class="content" id="quarto-document-content">
 
-<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="./event_study.html">Analysis</a></li><li class="breadcrumb-item"><a href="./event_study.html"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">Event Study</span></a></li></ol></nav>
+<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="./event_study.html">Analysis</a></li><li class="breadcrumb-item"><a href="./event_study.html"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Event Study</span></a></li></ol></nav>
 <div class="quarto-title">
-<h1 class="title"><span id="sec-05-event-study" class="quarto-section-identifier"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">Event Study</span></span></h1>
+<h1 class="title"><span id="sec-06-event-study" class="quarto-section-identifier"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Event Study</span></span></h1>
 </div>
 
 
@@ -283,8 +289,8 @@ window.Quarto = {
 </header>
 
 
-<section id="sec-05-01-setting" class="level2" data-number="5.1">
-<h2 data-number="5.1" class="anchored" data-anchor-id="sec-05-01-setting"><span class="header-section-number">5.1</span> Setting</h2>
+<section id="sec-06-01-setting" class="level2" data-number="6.1">
+<h2 data-number="6.1" class="anchored" data-anchor-id="sec-06-01-setting"><span class="header-section-number">6.1</span> Setting</h2>
 <p><em>This section is currently being revised as I read and process the recent DiD and event study literature. Some statements may be unclear or incorrect, which I will try to refine them as I go.</em></p>
 <p>We can conceptualise the empirical setting as an event study, where <em>treatment</em> occurs when a location experiences a sewage spill above a defined threshold, and house prices serve as the outcome variable.</p>
 <ul>
@@ -295,16 +301,16 @@ window.Quarto = {
 </ul>
 <p>Given the potential problems with the vanilla TWFE presented in the recent literature, I decide to use the Chaisemartin &amp; d’Haultefoeuille (2024) estimator using the package <code>DIDmultiplegtDYN.</code> This estimator allows for a wide range of settings, including non-absorbing treatment, staggered treatment, continuous treatment, and many other settings that I still need to understand.</p>
 </section>
-<section id="sec-05-02-basic-event-study-regressions" class="level2" data-number="5.2">
-<h2 data-number="5.2" class="anchored" data-anchor-id="sec-05-02-basic-event-study-regressions"><span class="header-section-number">5.2</span> Site-Level Event Study Regressions Within Spill Buffers</h2>
+<section id="sec-06-02-basic-event-study-regressions" class="level2" data-number="6.2">
+<h2 data-number="6.2" class="anchored" data-anchor-id="sec-06-02-basic-event-study-regressions"><span class="header-section-number">6.2</span> Site-Level Event Study Regressions Within Spill Buffers</h2>
 <p>The following figures present the dynamic effects of sewage spills on house prices within an X-metre radius around spill sites. For each spill site and quarter, I aggregate spill statistics and average house prices within the corresponding X-metre buffer.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a> The estimated regression coefficients capture the within-buffer change in average house prices over time, relative to untreated periods, conditional on the buffer experiencing a high-severity spill in a given quarter. That is, they reflect how <strong>prices evolve in a given spill site’s buffer following the occurrence of a high-severity spill within that buffer</strong>.</p>
 <p>The regressions below are estimated using the Chaisemartin &amp; d’Haultefoeuille (2024) estimator using the package <code>DIDmultiplegtDYN.</code> This estimator allows for a wide range of settings, including non-absorbing treatment, staggered treatment, continuous treatment, and many other settings that I still need to understand. In the event study regressions, the effects are estimated for:</p>
 <ul>
 <li><strong>Same switchers only.</strong> This ensures that event-study effects are estimated only using switchers for whom all the event-study effects can be estimated. This avoids the problem that if treatment effects are heterogeneous across spill sites where treatment switches, changes in the estimated effects across different time horizons might reflect changes in the composition of the sample rather than actual dynamic treatment effects.</li>
 <li><strong>Normalised.</strong> This scales the estimates to represent effects per unit of treatment rather than total effects. For spill sites, this means showing the impact per unit of treatment intensity, making estimates comparable across time periods and sites.</li>
 </ul>
-<section id="sec-05-02-01-binary-average" class="level3" data-number="5.2.1">
-<h3 data-number="5.2.1" class="anchored" data-anchor-id="sec-05-02-01-binary-average"><span class="header-section-number">5.2.1</span> Binary Treatment - Average Spill Count</h3>
+<section id="sec-06-02-01-binary-average" class="level3" data-number="6.2.1">
+<h3 data-number="6.2.1" class="anchored" data-anchor-id="sec-06-02-01-binary-average"><span class="header-section-number">6.2.1</span> Binary Treatment - Average Spill Count</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-site">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-5-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-1" role="tab" aria-controls="tabset-5-1" aria-selected="true" aria-current="page">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-2" role="tab" aria-controls="tabset-5-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-3" role="tab" aria-controls="tabset-5-3" aria-selected="false">1000m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-4" role="tab" aria-controls="tabset-5-4" aria-selected="false">2000m</a></li></ul>
 <div class="tab-content" data-group="threshold-site">
@@ -515,8 +521,8 @@ window.Quarto = {
 </div>
 </div>
 </section>
-<section id="sec-05-02-02-binary-median" class="level3" data-number="5.2.2">
-<h3 data-number="5.2.2" class="anchored" data-anchor-id="sec-05-02-02-binary-median"><span class="header-section-number">5.2.2</span> Binary Treatment - Median Spill Count</h3>
+<section id="sec-06-02-02-binary-median" class="level3" data-number="6.2.2">
+<h3 data-number="6.2.2" class="anchored" data-anchor-id="sec-06-02-02-binary-median"><span class="header-section-number">6.2.2</span> Binary Treatment - Median Spill Count</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-site">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-10-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-1" role="tab" aria-controls="tabset-10-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-10-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-2" role="tab" aria-controls="tabset-10-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-10-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-3" role="tab" aria-controls="tabset-10-3" aria-selected="false">1000m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-10-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-4" role="tab" aria-controls="tabset-10-4" aria-selected="false">2000m</a></li></ul>
 <div class="tab-content" data-group="threshold-site">
@@ -727,8 +733,8 @@ window.Quarto = {
 </div>
 </div>
 </section>
-<section id="sec-05-02-03-binary-p75" class="level3" data-number="5.2.3">
-<h3 data-number="5.2.3" class="anchored" data-anchor-id="sec-05-02-03-binary-p75"><span class="header-section-number">5.2.3</span> Binary Treatment - 75th Percentile Spill Count</h3>
+<section id="sec-06-02-03-binary-p75" class="level3" data-number="6.2.3">
+<h3 data-number="6.2.3" class="anchored" data-anchor-id="sec-06-02-03-binary-p75"><span class="header-section-number">6.2.3</span> Binary Treatment - 75th Percentile Spill Count</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-site">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-15-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-1" role="tab" aria-controls="tabset-15-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-15-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-2" role="tab" aria-controls="tabset-15-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-15-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-3" role="tab" aria-controls="tabset-15-3" aria-selected="false">1000m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-15-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-4" role="tab" aria-controls="tabset-15-4" aria-selected="false">2000m</a></li></ul>
 <div class="tab-content" data-group="threshold-site">
@@ -939,8 +945,8 @@ window.Quarto = {
 </div>
 </div>
 </section>
-<section id="sec-05-02-04-binary-p90" class="level3" data-number="5.2.4">
-<h3 data-number="5.2.4" class="anchored" data-anchor-id="sec-05-02-04-binary-p90"><span class="header-section-number">5.2.4</span> Binary Treatment - 90th Percentile Spill Count</h3>
+<section id="sec-06-02-04-binary-p90" class="level3" data-number="6.2.4">
+<h3 data-number="6.2.4" class="anchored" data-anchor-id="sec-06-02-04-binary-p90"><span class="header-section-number">6.2.4</span> Binary Treatment - 90th Percentile Spill Count</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-site">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-20-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-20-1" role="tab" aria-controls="tabset-20-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-20-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-20-2" role="tab" aria-controls="tabset-20-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-20-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-20-3" role="tab" aria-controls="tabset-20-3" aria-selected="false">1000m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-20-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-20-4" role="tab" aria-controls="tabset-20-4" aria-selected="false">2000m</a></li></ul>
 <div class="tab-content" data-group="threshold-site">
@@ -1151,8 +1157,8 @@ window.Quarto = {
 </div>
 </div>
 </section>
-<section id="sec-05-02-04-continuous-treatment" class="level3" data-number="5.2.5">
-<h3 data-number="5.2.5" class="anchored" data-anchor-id="sec-05-02-04-continuous-treatment"><span class="header-section-number">5.2.5</span> Continuous Treatment - Average Spill Count</h3>
+<section id="sec-06-02-04-continuous-treatment" class="level3" data-number="6.2.5">
+<h3 data-number="6.2.5" class="anchored" data-anchor-id="sec-06-02-04-continuous-treatment"><span class="header-section-number">6.2.5</span> Continuous Treatment - Average Spill Count</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset" data-group="continuous-site">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-25-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-25-1" role="tab" aria-controls="tabset-25-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-25-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-25-2" role="tab" aria-controls="tabset-25-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-25-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-25-3" role="tab" aria-controls="tabset-25-3" aria-selected="false">1000m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-25-4-tab" data-bs-toggle="tab" data-bs-target="#tabset-25-4" role="tab" aria-controls="tabset-25-4" aria-selected="false">2000m</a></li></ul>
 <div class="tab-content" data-group="continuous-site">
@@ -1276,8 +1282,8 @@ window.Quarto = {
 </div>
 </section>
 </section>
-<section id="sec-05-03-house-level-event-study" class="level2" data-number="5.3">
-<h2 data-number="5.3" class="anchored" data-anchor-id="sec-05-03-house-level-event-study"><span class="header-section-number">5.3</span> House-Level Event Study Regressions Within Admin Boundaries</h2>
+<section id="sec-06-03-house-level-event-study" class="level2" data-number="6.3">
+<h2 data-number="6.3" class="anchored" data-anchor-id="sec-06-03-house-level-event-study"><span class="header-section-number">6.3</span> House-Level Event Study Regressions Within Admin Boundaries</h2>
 <p>The advantages of using house-level data relative to site-level data in the event study regressions are:</p>
 <ul>
 <li><strong>House-level controls:</strong> Working at the house-level allows us to include property attributes (e.g.&nbsp;newly built, property type etc.) as controls. This ensures that any post-spill changes in the composition of sales do not confound price effects.</li>
@@ -1292,8 +1298,8 @@ window.Quarto = {
 <li><strong>Duration:</strong> A binary variable indicating the tenure of the property (freehold, leasehold)</li>
 </ul>
 <p>Regressions are estimated using the event-study estimator developed by Sun and Abraham (2021).</p>
-<section id="sec-05-03-01-binary-average" class="level3" data-number="5.3.1">
-<h3 data-number="5.3.1" class="anchored" data-anchor-id="sec-05-03-01-binary-average"><span class="header-section-number">5.3.1</span> Binary Treatment - Average Spill Count</h3>
+<section id="sec-06-03-01-binary-average" class="level3" data-number="6.3.1">
+<h3 data-number="6.3.1" class="anchored" data-anchor-id="sec-06-03-01-binary-average"><span class="header-section-number">6.3.1</span> Binary Treatment - Average Spill Count</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-house">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-29-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-29-1" role="tab" aria-controls="tabset-29-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-29-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-29-2" role="tab" aria-controls="tabset-29-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-29-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-29-3" role="tab" aria-controls="tabset-29-3" aria-selected="false">1000m</a></li></ul>
 <div class="tab-content" data-group="threshold-house">
@@ -1453,8 +1459,8 @@ window.Quarto = {
 </div>
 </div>
 </section>
-<section id="sec-05-03-02-binary-median" class="level3" data-number="5.3.2">
-<h3 data-number="5.3.2" class="anchored" data-anchor-id="sec-05-03-02-binary-median"><span class="header-section-number">5.3.2</span> Binary Treatment - Median Spill Count</h3>
+<section id="sec-06-03-02-binary-median" class="level3" data-number="6.3.2">
+<h3 data-number="6.3.2" class="anchored" data-anchor-id="sec-06-03-02-binary-median"><span class="header-section-number">6.3.2</span> Binary Treatment - Median Spill Count</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-house">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-33-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-33-1" role="tab" aria-controls="tabset-33-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-33-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-33-2" role="tab" aria-controls="tabset-33-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-33-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-33-3" role="tab" aria-controls="tabset-33-3" aria-selected="false">1000m</a></li></ul>
 <div class="tab-content" data-group="threshold-house">
@@ -1614,8 +1620,8 @@ window.Quarto = {
 </div>
 </div>
 </section>
-<section id="sec-05-03-03-binary-p75" class="level3" data-number="5.3.3">
-<h3 data-number="5.3.3" class="anchored" data-anchor-id="sec-05-03-03-binary-p75"><span class="header-section-number">5.3.3</span> Binary Treatment - 75th Percentile Spill Count</h3>
+<section id="sec-06-03-03-binary-p75" class="level3" data-number="6.3.3">
+<h3 data-number="6.3.3" class="anchored" data-anchor-id="sec-06-03-03-binary-p75"><span class="header-section-number">6.3.3</span> Binary Treatment - 75th Percentile Spill Count</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-house">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-37-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-37-1" role="tab" aria-controls="tabset-37-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-37-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-37-2" role="tab" aria-controls="tabset-37-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-37-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-37-3" role="tab" aria-controls="tabset-37-3" aria-selected="false">1000m</a></li></ul>
 <div class="tab-content" data-group="threshold-house">
@@ -1775,8 +1781,8 @@ window.Quarto = {
 </div>
 </div>
 </section>
-<section id="sec-05-03-04-binary-p90" class="level3" data-number="5.3.4">
-<h3 data-number="5.3.4" class="anchored" data-anchor-id="sec-05-03-04-binary-p90"><span class="header-section-number">5.3.4</span> Binary Treatment - 90th Percentile Spill Count</h3>
+<section id="sec-06-03-04-binary-p90" class="level3" data-number="6.3.4">
+<h3 data-number="6.3.4" class="anchored" data-anchor-id="sec-06-03-04-binary-p90"><span class="header-section-number">6.3.4</span> Binary Treatment - 90th Percentile Spill Count</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset" data-group="threshold-house">
 <ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-41-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-41-1" role="tab" aria-controls="tabset-41-1" aria-selected="true">250m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-41-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-41-2" role="tab" aria-controls="tabset-41-2" aria-selected="false">500m</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-41-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-41-3" role="tab" aria-controls="tabset-41-3" aria-selected="false">1000m</a></li></ul>
 <div class="tab-content" data-group="threshold-house">
@@ -2349,12 +2355,12 @@ window.Quarto = {
 <nav class="page-navigation">
   <div class="nav-page nav-page-previous">
       <a href="./house_data_exploration.html" class="pagination-link" aria-label="House Data Exploration">
-        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text"><span class="chapter-number">4</span>&nbsp; <span class="chapter-title">House Data Exploration</span></span>
+        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">House Data Exploration</span></span>
       </a>          
   </div>
   <div class="nav-page nav-page-next">
       <a href="./hedonic_regs.html" class="pagination-link" aria-label="Hedonics Regressions">
-        <span class="nav-page-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span> <i class="bi bi-arrow-right-short"></i>
+        <span class="nav-page-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span> <i class="bi bi-arrow-right-short"></i>
       </a>
   </div>
 </nav>
