@@ -16,6 +16,10 @@ execute:
 
 # Updates {#sec-index}
 
+## 29/08/2025 {.unnumbered}
+
+Added MSOA-level aggregation, population-adjusted metrics, and multi-perspective choropleth visualizations to sewage spill geographic analysis (Geographic Distribution, @sec-03-03-geo-distribution).
+
 ## 03/06/2025 {.unnumbered}
 
 Added section on hedonic regression analysis of house prices (Hedonic Regression Analysis, @sec-06-hedonics-regs).
