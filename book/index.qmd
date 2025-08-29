@@ -18,19 +18,21 @@ execute:
 
 ## 29/08/2025 {.unnumbered}
 
+Added comprehensive dry spill analysis section with three-condition traffic-light mapping system, geographic distribution analysis with Count + Duration choropleth maps, and MSOA-level aggregation with population-adjusted metrics (Dry Spill Exploration, @sec-04-dry-spills, @sec-04-04-geo-distribution).
+
 Added MSOA-level aggregation, population-adjusted metrics, and multi-perspective choropleth visualizations to sewage spill geographic analysis (Geographic Distribution, @sec-03-03-geo-distribution).
 
 ## 03/06/2025 {.unnumbered}
 
-Added section on hedonic regression analysis of house prices (Hedonic Regression Analysis, @sec-06-hedonics-regs).
+Added section on hedonic regression analysis of house prices (Hedonic Regression Analysis, @sec-07-hedonics-regs).
 
 ## 01/04/2025 {.unnumbered}
 
-Added section on event study analysis of sewage spills (Event Study Analysis, @sec-05-event-study).
+Added section on event study analysis of sewage spills (Event Study Analysis, @sec-06-event-study).
 
 ## 18/02/2025 {.unnumbered}
 
-Added section on initial data exploration of house prices and sewage spills (House Data Exploration @sec-04-house-exploration).
+Added section on initial data exploration of house prices and sewage spills (House Data Exploration @sec-05-house-exploration).
 
 ## 17/02/2025 {.unnumbered}
 
@@ -42,7 +44,7 @@ Added section on initial data exploration of sewage overflow spills (Sewage Spil
 
 ## 30/12/2024 {.unnumbered}
 
-Added section on incorrect spill data duration (Current Data Limitations, @sec-02-02-time-parsing).
+Added section on incorrect spill data duration (Current Data Limitations, @sec-02-02-incorrect-spill_data).
 
 ## 24/12/2024 {.unnumbered}
 

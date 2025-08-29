@@ -1,0 +1,949 @@
+---
+author: "Jacopo Olivieri"
+date: 2024-08-29
+editor: source
+format: html
+number-sections: true
+number-depth: 4
+execute: 
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+  fig-width: 9
+  fig-asp: 0.618 
+  fig-align: center
+---
+
+# Dry Spill Exploration {#sec-04-dry-spills}
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+# Load required packages
+required_packages <- c(
+  "rmarkdown",
+  "rio",
+  "tidyverse",
+  "purrr",
+  "here",
+  "janitor",
+  "sf",
+  "sp",
+  "rnaturalearth",
+  "rnaturalearthdata",
+  "rnrfa",
+  "DescTools",
+  "gridExtra",
+  "modelsummary",
+  "tmap",
+  "leaflet",
+  "htmltools",
+  "servr",
+  "viridis",
+  "readxl",
+  "reactable"
+)
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "spill_data_exploration.log")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+
+# Ggplot theme
+theme_pref <- theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    plot.title = element_text(
+      face = "bold",
+      size = 12,
+      margin = ggplot2::margin(b = 10, unit = "pt")
+    ),
+    axis.title = element_text(face = "bold", size = 10),
+    axis.text = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(color = "gray95"),
+    panel.grid.major.y = element_line(color = "gray95"),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(size = 8),
+    plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
+  )
+```
+
+```{css css-settings, echo = FALSE}
+/* Custom CSS for modelsummary tables */
+.table, th, td {
+  font-size: 0.9em;  /* Base font size (matches reactable's cell style) */
+}
+
+/* Headers */
+.table th {
+  font-size: 0.95em !important;     /* Header font size */
+  white-space: normal !important;  /* Allow header text wrapping */
+  padding: 0.25em 0.5em !important;  /* Compact padding */
+}
+
+/* Cells */
+.table td {
+  white-space: nowrap !important;  /* Prevent cell text wrapping */
+  padding: 0.25em 0.5em !important;  /* Compact padding */
+}
+```
+
+```{r load-data}
+# Aggregated spill data
+dat_yr <- import(
+  here::here(
+    "data",
+    "processed",
+    "spill_aggregated",
+    "agg_spill_dry_yr.parquet"
+  ),
+)
+dat_mo <- import(
+  here::here(
+    "data",
+    "processed",
+    "spill_aggregated",
+    "agg_spill_dry_mo.parquet"
+  ),
+)
+
+# Spill sites
+spill_sites <- import(
+  here("data", "processed", "unique_spill_sites.parquet"),
+  trust = TRUE
+)
+
+# UK Map
+uk_map <- ne_countries(scale = "medium", returnclass = "sf") %>%
+  filter(sovereignt %in% c("United Kingdom"))
+
+# Load MSOA boundaries from local shapefile
+msoa_boundaries <- st_read(
+  here::here("data", "raw", "shapefiles", "MSOA_BCG"),
+  quiet = TRUE
+) %>%
+  filter(str_detect(MSOA21CD, "^E")) %>% # England only
+  st_simplify(dTolerance = 200) %>% # Simplify geometry for smaller file size
+  select(MSOA21CD, MSOA21NM, geometry) %>%
+  rename(msoa_code = MSOA21CD, msoa_name = MSOA21NM) %>%
+  # Calculate area in km²
+  mutate(msoa_area_km2 = as.numeric(st_area(.)) / 1000000)
+
+# Load MSOA population data
+msoa_population <- readxl::read_excel(
+  here::here(
+    "data",
+    "raw",
+    "shapefiles",
+    "MSOA_population",
+    "sapemsoasyoatablefinal.xlsx"
+  ),
+  sheet = "Mid-2022 MSOA 2021",
+  range = "A4:E7268"
+) %>%
+  select(msoa_code = 3, msoa_population = 5) %>% # Column C and E
+  filter(!is.na(msoa_code), !is.na(msoa_population))
+```
+
+## What Is a Dry Spill? {#sec-04-01-definition}
+
+### Context {#sec-04-01-01-context}
+
+The earliest sewer systems in England, built during the Victorian era, were **combined systems**, using a single pipe to carry both wastewater from homes and businesses and stormwater from rainfall. Since the 1960s, however, new sewer networks have been constructed as separate systems, with one pipe for sewage and another for surface water in built-up areas. Today, **around 20% of England’s sewer network remains combined**.
+
+In most cases, wastewater is transported through the sewer network to treatment works, where it is processed and then released into rivers or the sea. However, in certain circumstances, such as periods of heavy rainfall, water companies are permitted to discharge untreated sewage into inland waters through storm overflows to prevent the system from being overwhelmed.
+
+![](book_figs/when_do_dry_spills_occur.png){width=60%}
+
+The deliberate discharge of sewage in dry conditions, known as a *dry spill*, is prohibited under environmental law. Because no rainfall is available to dilute the sewage, dry spills pose a particularly high risk of environmental harm to receiving waters and ecosystems.
+
+### Definitions {#sec-04-01-02-definitions}
+
+#### Environmental Agency
+
+The Environment Agency (EA) defines a dry spill as the use of a storm overflow on a *dry day*, meaning **no rainfall above 0.25 mm on that day or during the previous 24 hours**.^[https://environmentagency.blog.gov.uk/2024/08/28/what-are-dry-day-spills/]
+
+Storm overflows are not expected to operate on dry days, although exceptions can occur. In large catchments, for example, rainfall upstream may take significant time to travel downstream before reaching the overflow. For this reason, the EA treats any recorded dry-day spill as a potential breach until further investigation confirms the cause.
+
+#### BBC
+
+In its reporting, the BBC defines a dry day more conservatively: no measurable rainfall (≥0.25 mm) during the preceding four days within a 9 $km^2$ area around each overflow site.^[https://www.bbc.co.uk/news/science-environment-66670132] This approach was intended to ensure that spills flagged as occurring on dry days could not plausibly be attributed to recent rainfall still moving through the catchment. The 9 $km^2$ buffer was used as a proxy for the catchment feeding each overflow.
+
+![BBC Methodology](book_figs/bbc_dry_spill_method.png){width=60%}
+
+## Estimating Dry Spills {#sec-04-02-estimating-dry-spills}
+
+```{r dry-spills-table}
+# Helpers to streamline EA/BBC table creation
+
+# 1) Published benchmarks (join by year for safety)
+published_benchmarks <- tibble::tribble(
+  ~year,
+  ~EA,
+  ~BBC,
+  2021L,
+  NA_real_,
+  NA_real_,
+  2022L,
+  20000,
+  6000,
+  2023L,
+  18000,
+  NA_real_
+)
+
+# 2) Method labels (HTML)
+method_labels <- c(
+  dry_spill_count_yr_r0_d01_strict = "1km² Rainfall,<br>2-Day Window,<br>Complete Data",
+  dry_spill_count_yr_r1_d01_weak = "9km² Rainfall,<br>2-Day Window,<br>Partial Data OK",
+  dry_spill_count_yr_r1_d01_strict = "9km² Rainfall,<br>2-Day Window,<br>Complete Data",
+  dry_spill_count_yr_r1_d0123_strict = "9km² Rainfall,<br>4-Day Window,<br>Complete Data",
+  dry_spill_count_yr_r1_d0123_weak = "9km² Rainfall,<br>4-Day Window,<br>Partial Data OK"
+)
+
+method_cols <- names(method_labels)
+
+# 3) Compute dry-spill summaries with optional BBC filters
+compute_dry_summary <- function(data, sample = c("EA", "BBC"), thr = 1.25) {
+  sample <- match.arg(sample)
+  data_filt <- dplyr::as_tibble(data)
+
+  if (sample == "BBC") {
+    data_filt <- data_filt %>%
+      dplyr::filter(
+        water_company != "Welsh Water",
+        !(water_company == "United Utilities" &
+          spill_count_yr / spill_count_ea > thr)
+      )
+  }
+
+  out <- data_filt %>%
+    dplyr::summarise(
+      dplyr::across(starts_with("dry_spill_count"), ~ sum(., na.rm = TRUE)),
+      .by = c("year")
+    ) %>%
+    dplyr::select(dplyr::all_of(c("year", method_cols))) %>%
+    dplyr::left_join(published_benchmarks, by = "year")
+
+  out
+}
+
+# 4) Build a reactable with consistent options and one highlighted method
+build_dry_reactable <- function(
+  data,
+  published = c("EA", "BBC"),
+  highlight_method
+) {
+  published <- match.arg(published)
+  # Keep only desired columns in the rendered table
+  data <- dplyr::select(data, dplyr::all_of(c("year", method_cols, published)))
+
+  # Base colDefs for methods
+  method_defs <- lapply(method_cols, function(col) {
+    colDef(
+      name = method_labels[[col]],
+      html = TRUE,
+      format = colFormat(separators = TRUE),
+      align = "center",
+      cell = function(value) if (is.na(value)) "N/A" else value,
+      style = if (identical(col, highlight_method)) {
+        list(backgroundColor = "#e8f5e8")
+      } else {
+        NULL
+      }
+    )
+  })
+  names(method_defs) <- method_cols
+
+  # Published column def
+  published_def <- setNames(
+    list(colDef(
+      name = paste0(published, "<br>Estimate"),
+      html = TRUE,
+      align = "center",
+      format = colFormat(separators = TRUE),
+      cell = function(value) if (is.na(value)) "N/A" else value,
+      style = list(backgroundColor = "#fff3e0")
+    )),
+    published
+  )
+
+  reactable(
+    data,
+    columns = c(
+      list(
+        year = colDef(name = "Year", align = "center", width = 80)
+      ),
+      method_defs,
+      published_def
+    ),
+    columnGroups = list(
+      colGroup(
+        name = "Our Analysis Methods",
+        columns = method_cols
+      ),
+      colGroup(
+        name = "Published Estimates",
+        columns = c(published)
+      )
+    ),
+    defaultSorted = "year",
+    defaultSortOrder = "asc",
+    filterable = FALSE,
+    resizable = TRUE,
+    compact = TRUE,
+    defaultPageSize = 10,
+    showPageSizeOptions = FALSE,
+    showPagination = FALSE
+  )
+}
+
+# 5) Compose title and notes (shared)
+table_title <- tags$div(
+  tags$h4(
+    "Yearly Dry Spill Counts Under Alternative Methods",
+    style = "margin-bottom: 5px;"
+  ),
+  tags$p(
+    "Comparison of dry-spill estimation methods vs. published EA/BBC benchmarks",
+    style = "font-size: 0.9em; color: #555; margin-top: 0;"
+  )
+)
+
+table_notes <- tags$div(
+  style = "font-size: 0.9em; color: #666; text-align: left; margin: 5px 0 10px 0;",
+  tags$strong("Methodology Notes:"),
+  tags$ul(
+    style = "margin: 5px 0; padding-left: 20px;",
+    tags$li(HTML(
+      "<strong>Rainfall Coverage:</strong> <em>1km²</em> uses the nearest grid; <em>9km²</em> uses a 3×3 grid around each site (BBC)."
+    )),
+    tags$li(HTML(
+      "<strong>Temporal Window:</strong> <em>2-day</em> (day 0–1) vs <em>4-day</em> (day 0–3) lookback."
+    )),
+    tags$li(HTML(
+      "<strong>Data Handling:</strong> <em>Complete</em> requires full rainfall coverage; <em>Partial OK</em> allows missing values when applying the 0.25mm threshold."
+    )),
+    tags$li(HTML(
+      "<strong>Highlighting:</strong> <span style='background-color: #e8f5e8; padding: 2px 4px;'>Light green</span> marks the preferred method for each sample; <span style='background-color: #fff3e0; padding: 2px 4px;'>Light orange</span> marks the published benchmark."
+    ))
+  )
+)
+
+# 6) Build summaries and tables
+thr <- 1.25 # BBC data exclusion threshold for United Utilities consistency check
+united22 <- dat_yr |>
+  filter(water_company == "United Utilities") |>
+  group_by(year) |>
+  summarise(
+    prop_gt_1.3 = mean(spill_count_yr / spill_count_ea > thr, na.rm = TRUE)
+  ) |>
+  pull(prop_gt_1.3)
+
+dry_spills_summary_ea <- compute_dry_summary(dat_yr, sample = "EA", thr = thr)
+dry_spills_summary_bbc <- compute_dry_summary(dat_yr, sample = "BBC", thr = thr)
+
+reactable_table_ea <- build_dry_reactable(
+  dry_spills_summary_ea,
+  published = "EA",
+  highlight_method = "dry_spill_count_yr_r1_d01_weak" # 9km², 2-day, partial OK
+)
+
+reactable_table_bbc <- build_dry_reactable(
+  dry_spills_summary_bbc,
+  published = "BBC",
+  highlight_method = "dry_spill_count_yr_r1_d0123_weak" # 9km², 4-day, partial OK (BBC)
+)
+
+# 7) Display: EA and BBC tables with shared title & notes
+final_output_ea <- tags$div(table_title, reactable_table_ea, table_notes)
+final_output_bbc <- tags$div(table_title, reactable_table_bbc, table_notes)
+```
+
+We estimate dry spills using alternative methodologies and validate these against the figures reported by the EA^[https://environmentagency.blog.gov.uk/2024/10/10/regulating-the-water-industry-our-approach-what-were-changing-and-new-powers-in-the-water-bill/] and the BBC^[https://www.bbc.co.uk/news/articles/c4nn46rjej6o].
+
+We present two versions of the dry-spill totals to reflect differences in published samples:
+
+- **EA sample**: aggregates across all companies and sites.
+- **BBC sample**: excludes Welsh Water entirely and discounts *"more than one-third of United Utilities' overflows"* where *“the discharge data provided to the EA did not correspond to their 2022 annual report summarising this data.”* 
+
+The EA reports **20,000 dry spills in 2022** and **18,000 in 2023**. Our closest estimates use the criterion of no measurable rainfall (≥0.25 mm) in the preceding two days within either a $km^2$ (column 1) or a 9 $km^2$ buffer (column 2). We prefer the latter, as it is slightly more conservative.
+
+```{r ea}
+final_output_ea
+```
+
+The BBC—using a more conservative methodology—reports **6,000 dry spills in 2022**. To create a comparable sample, we exclude Welsh Water and remove any United Utilities overflow site where the annual spill count exceeds 25% of the EA’s published total for that site.^[https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac] (see also @sec-02-02-incorrect-spill_data). This adjustment removes 36% of United Utilities' sites, broadly matching the BBC’s approach.
+
+Our closest estimates apply the criterion of no measurable rainfall (≥0.25 mm) in the preceding four days within a 9 $km^2$ buffer around each spill site with complete rainfall coverage (column 4). However, we prefer the version that allows for sites with missing rainfall data (column 5), since—as shown in the map below—missing data occurs almost exclusively along the coast, where excluding sites would not be meaningful.
+
+```{r bbc}
+final_output_bbc
+```
+
+Going forward, we therefore report results using two definitions only: **(i) no measurable rainfall (≥0.25 mm) in the preceding two days within a 9 $km^2$ buffer, and (ii) no measurable rainfall in the preceding four days within a 9 $km^2$ buffer.**
+
+
+## Location of Dry Spills {#sec-04-03-dry-spill-locations}
+
+The map below shows all sites where dry spills occurred between 2021–2023, categorized by the most restrictive condition under which they experienced dry spills. Sites are colored using a traffic-light system:
+
+- **🟢 Green**: Sites with dry spills under the  *2-day* window with *partial data allowed* (allows missing values when applying the 0.25mm threshold)
+- **🟠 Orange**: Sites with dry spills under the *4-day* window with *partial data allowed*
+- **🔴 Red**: Sites with dry spills under the strictest *4-day* window with *complete data required* (full rainfall coverage, no missing values)
+
+We prefer including sites with missing rainfall data (orange), as these are concentrated along the coast, where exclusion would remove otherwise valid estimates.
+
+```{r spill-sites-map}
+#| eval: false
+
+# Aggregate dry spill data by site across all years
+spill_sites_dry <- dat_yr |>
+  dplyr::group_by(site_id, water_company) |>
+  dplyr::summarise(
+    # Sum across years for each condition
+    dry_spill_weak_total = sum(dry_spill_count_yr_r1_d01_weak, na.rm = TRUE),
+    dry_spill_moderate_total = sum(
+      dry_spill_count_yr_r1_d0123_weak,
+      na.rm = TRUE
+    ),
+    dry_spill_strict_total = sum(
+      dry_spill_count_yr_r1_d0123_strict,
+      na.rm = TRUE
+    ),
+    # Keep yearly breakdown for popups
+    dry_spills_2021 = sum(
+      ifelse(
+        year == 2021,
+        pmax(
+          dry_spill_count_yr_r1_d01_weak,
+          dry_spill_count_yr_r1_d0123_weak,
+          dry_spill_count_yr_r1_d0123_strict,
+          na.rm = TRUE
+        ),
+        0
+      ),
+      na.rm = TRUE
+    ),
+    dry_spills_2022 = sum(
+      ifelse(
+        year == 2022,
+        pmax(
+          dry_spill_count_yr_r1_d01_weak,
+          dry_spill_count_yr_r1_d0123_weak,
+          dry_spill_count_yr_r1_d0123_strict,
+          na.rm = TRUE
+        ),
+        0
+      ),
+      na.rm = TRUE
+    ),
+    dry_spills_2023 = sum(
+      ifelse(
+        year == 2023,
+        pmax(
+          dry_spill_count_yr_r1_d01_weak,
+          dry_spill_count_yr_r1_d0123_weak,
+          dry_spill_count_yr_r1_d0123_strict,
+          na.rm = TRUE
+        ),
+        0
+      ),
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) |>
+  # Filter to sites with at least one dry spill under any condition
+  dplyr::filter(
+    dry_spill_weak_total > 0 |
+      dry_spill_moderate_total > 0 |
+      dry_spill_strict_total > 0
+  ) |>
+  # Create hierarchical categorization (strict hierarchy)
+  dplyr::mutate(
+    condition_category = dplyr::case_when(
+      dry_spill_strict_total > 0 ~ "Strictest (4-day, complete data)",
+      dry_spill_moderate_total > 0 ~ "Moderate (4-day, partial data OK)",
+      dry_spill_weak_total > 0 ~ "Weakest (2-day, partial data OK)",
+      TRUE ~ "No dry spills"
+    ),
+    # Assign colors for traffic light system
+    fill_color = dplyr::case_when(
+      dry_spill_strict_total > 0 ~ "#C62828", # Dark red
+      dry_spill_moderate_total > 0 ~ "#FF9800", # Orange/amber
+      dry_spill_weak_total > 0 ~ "#7CB342", # Light green/yellow-green
+      TRUE ~ "#808080" # Gray (shouldn't appear due to filtering)
+    ),
+    # Total dry spills (using maximum across conditions for each year to avoid double counting)
+    total_dry_spills = dry_spills_2021 + dry_spills_2022 + dry_spills_2023
+  ) |>
+  # Join with spill sites for coordinates
+  dplyr::left_join(spill_sites, by = c("site_id", "water_company"))
+
+# Create function for dry spill sites map
+plot_dry_spill_sites_tmap <- function(data) {
+  # Convert spill sites to sf object
+  sites_sf <- data %>%
+    dplyr::filter(!is.na(easting), !is.na(northing)) %>%
+    st_as_sf(coords = c("easting", "northing"), crs = 27700) %>%
+    st_transform(crs = 4326)
+
+  # Create interactive map with OpenStreetMap background
+  tmap_mode("view")
+
+  # Create separate layers for each condition category to ensure proper layering
+  map_base <- tm_basemap("OpenStreetMap")
+
+  # Add points in reverse order (weakest first, then moderate, then strictest on top)
+  sites_weak <- sites_sf %>%
+    dplyr::filter(condition_category == "Weakest (2-day, partial data OK)")
+  sites_moderate <- sites_sf %>%
+    dplyr::filter(condition_category == "Moderate (4-day, partial data OK)")
+  sites_strict <- sites_sf %>%
+    dplyr::filter(condition_category == "Strictest (4-day, complete data)")
+
+  final_map <- map_base
+
+  # Layer 1: Weakest condition (light green)
+  if (nrow(sites_weak) > 0) {
+    final_map <- final_map +
+      tm_shape(sites_weak) +
+      tm_dots(
+        size = 0.4,
+        fill = "#7CB342",
+        fill_alpha = 0.8,
+        col = "white",
+        lwd = 0.5,
+        popup.vars = c(
+          "Water Company" = "water_company",
+          "Condition Category" = "condition_category",
+          "Dry Spills 2021" = "dry_spills_2021",
+          "Dry Spills 2022" = "dry_spills_2022",
+          "Dry Spills 2023" = "dry_spills_2023",
+          "Total Dry Spills" = "total_dry_spills"
+        )
+      )
+  }
+
+  # Layer 2: Moderate condition (orange)
+  if (nrow(sites_moderate) > 0) {
+    final_map <- final_map +
+      tm_shape(sites_moderate) +
+      tm_dots(
+        size = 0.4,
+        fill = "#FF9800",
+        fill_alpha = 0.8,
+        col = "white",
+        lwd = 0.5,
+        popup.vars = c(
+          "Water Company" = "water_company",
+          "Condition Category" = "condition_category",
+          "Dry Spills 2021" = "dry_spills_2021",
+          "Dry Spills 2022" = "dry_spills_2022",
+          "Dry Spills 2023" = "dry_spills_2023",
+          "Total Dry Spills" = "total_dry_spills"
+        )
+      )
+  }
+
+  # Layer 3: Strictest condition (dark red) - on top
+  if (nrow(sites_strict) > 0) {
+    final_map <- final_map +
+      tm_shape(sites_strict) +
+      tm_dots(
+        size = 0.4,
+        fill = "#C62828",
+        fill_alpha = 0.8,
+        col = "white",
+        lwd = 0.5,
+        popup.vars = c(
+          "Water Company" = "water_company",
+          "Condition Category" = "condition_category",
+          "Dry Spills 2021" = "dry_spills_2021",
+          "Dry Spills 2022" = "dry_spills_2022",
+          "Dry Spills 2023" = "dry_spills_2023",
+          "Total Dry Spills" = "total_dry_spills"
+        )
+      )
+  }
+
+  final_map +
+    tm_view(set_view = c(-2, 53, 6))
+}
+
+# Create the map
+dry_spill_sites_map <- plot_dry_spill_sites_tmap(spill_sites_dry)
+```
+
+```{r save-spill-sites-map}
+#| eval: false
+
+# Save the interactive map
+path <- here("book", "book_figs", "unique_dry_spill_sites.html")
+tmap_save(
+  dry_spill_sites_map,
+  filename = path,
+  selfcontained = TRUE
+)
+```
+
+```{=html}
+<iframe src="book_figs/unique_dry_spill_sites.html" width="800" height="600" frameborder="0"></iframe>
+```
+
+## Dry Spill Geographic Distribution in 2023 {#sec-04-04-geo-distribution}
+
+```{r plot-dry-spill-stats}
+#| eval: false
+
+# Join yearly dry spill aggregates with site metadata
+# Why: ensure coordinates and company/site attributes are available for spatial aggregation
+dat_yr_clean <- left_join(
+  select(dat_yr, -ngr),
+  spill_sites,
+  by = join_by(water_company, site_id)
+)
+
+# Choropleth helper for consistent, readable dry spill maps
+# Why: enforce consistent symbology and avoid re-implementing mapping boilerplate
+plot_dry_spill_map_tmap <- function(data, value_col, legend_title) {
+  data_for_map <- data %>%
+    mutate(
+      # Categorise to show zeros distinctly and avoid skewed colour scales
+      fill_category = case_when(
+        .data[[value_col]] == 0 ~ "No Dry Spills",
+        .data[[value_col]] > 0 ~ "Has Dry Spills"
+      ),
+      # Use continuous scale only for areas with positive values
+      fill_value = ifelse(.data[[value_col]] == 0, NA, .data[[value_col]])
+    ) %>%
+    select(
+      msoa_name,
+      msoa_code,
+      site_count,
+      water_companies,
+      dry_spill_count_yr,
+      dry_spill_hrs_yr,
+      dry_spill_count_yr_pop_density_weighted,
+      dry_spill_hrs_yr_pop_density_weighted,
+      log_dry_spill_count_yr,
+      log_dry_spill_hrs_yr,
+      fill_category,
+      fill_value,
+      all_of(value_col)
+    )
+
+  tm_basemap("CartoDB.Positron") +
+    # Layer 1: categorical layer to separate zeros
+    tm_shape(data_for_map) +
+    tm_polygons(
+      fill = "fill_category",
+      fill_alpha = 0.7,
+      col = alpha("grey95", 0.3),
+      lwd = 0.01,
+      fill.scale = tm_scale(
+        values = c("No Dry Spills" = "grey90", "Has Dry Spills" = "#440154")
+      ),
+      fill.legend = tm_legend_hide()
+    ) +
+    # Layer 2: continuous scale for positive values only
+    tm_shape(filter(data_for_map, fill_category == "Has Dry Spills")) +
+    tm_polygons(
+      fill = "fill_value",
+      fill_alpha = 0.7,
+      col = alpha("grey95", 0.3),
+      lwd = 0.01,
+      fill.scale = tm_scale(values = "-magma", interval = "continuous"),
+      fill.legend = tm_legend(
+        title = legend_title,
+        position = c("left", "bottom")
+      ),
+      popup.vars = c(
+        "MSOA Name" = "msoa_name",
+        "Number of Sites" = "site_count",
+        "Water Companies" = "water_companies",
+        "Total Dry Spill Count" = "dry_spill_count_yr",
+        "Total Dry Spill Hours" = "dry_spill_hrs_yr",
+        "Pop-Density Weighted Dry Spill Count" = "dry_spill_count_yr_pop_density_weighted",
+        "Pop-Density Weighted Dry Spill Hours" = "dry_spill_hrs_yr_pop_density_weighted"
+      )
+    ) +
+    tm_layout(legend.text.size = 0.8, legend.title.size = 1) +
+    tm_view(set_view = c(-2, 53, 5.5))
+}
+
+# Aggregate site-level dry spill data to MSOA polygons and build comparable metrics
+# Why: harmonise dry spill intensity by area/population to enable like-for-like comparison
+aggregate_dry_spills_to_msoa <- function(data, year) {
+  # Convert to sf and join to MSOA
+  dry_spill_sites_sf <- data %>%
+    filter(year == !!year) %>%
+    # Focus on dry_spill variables for the specified condition (2-day, partial data OK)
+    select(
+      water_company,
+      site_id,
+      easting,
+      northing,
+      dry_spill_count_yr = dry_spill_count_yr_r1_d01_weak,
+      dry_spill_hrs_yr = dry_spill_hrs_yr_r1_d01_weak
+    ) %>%
+    filter(!is.na(dry_spill_count_yr), !is.na(dry_spill_hrs_yr)) %>%
+    # Winsorize raw site-year inputs once to limit extreme leverage upstream
+    # Why: apply a single, transparent outlier treatment before any aggregation/derivation
+    mutate(
+      across(
+        c(dry_spill_count_yr, dry_spill_hrs_yr),
+        ~ DescTools::Winsorize(
+          .x,
+          val = stats::quantile(.x, probs = c(0.01, 0.99), na.rm = TRUE)
+        )
+      )
+    ) %>%
+    st_as_sf(coords = c("easting", "northing"), crs = 27700)
+
+  sites_with_msoa <- st_join(
+    dry_spill_sites_sf,
+    msoa_boundaries,
+    join = st_within
+  )
+
+  # Collapse to MSOA with counts and hours coverage
+  msoa_aggregated <- sites_with_msoa %>%
+    st_drop_geometry() %>%
+    filter(!is.na(msoa_code)) %>%
+    group_by(msoa_code, msoa_name) %>%
+    summarise(
+      dry_spill_count_yr = sum(dry_spill_count_yr, na.rm = TRUE),
+      dry_spill_hrs_yr = sum(dry_spill_hrs_yr, na.rm = TRUE),
+      site_count = n(),
+      water_companies = paste(unique(water_company), collapse = ", "),
+      .groups = "drop"
+    )
+
+  # Join to boundaries, fill zeros, compute derived metrics with across
+  msoa_with_dry_spills <- msoa_boundaries %>%
+    left_join(msoa_population, by = "msoa_code") %>%
+    left_join(msoa_aggregated, by = c("msoa_code", "msoa_name")) %>%
+    mutate(
+      dry_spill_count_yr = replace_na(dry_spill_count_yr, 0),
+      dry_spill_hrs_yr = replace_na(dry_spill_hrs_yr, 0),
+      site_count = replace_na(site_count, 0),
+      water_companies = replace_na(water_companies, "None")
+    ) %>%
+    # Population density: used as context rather than mapped directly
+    mutate(
+      pop_density = ifelse(
+        msoa_area_km2 > 0,
+        msoa_population / msoa_area_km2,
+        0
+      )
+    ) %>%
+    # Build area- and population-adjusted metrics compactly
+    mutate(
+      across(
+        c(dry_spill_count_yr, dry_spill_hrs_yr),
+        ~ .x / msoa_area_km2,
+        .names = "{.col}_per_km2"
+      ),
+      across(
+        c(dry_spill_count_yr, dry_spill_hrs_yr),
+        ~ ifelse(msoa_population > 0, (.x / msoa_population) * 1000, 0),
+        .names = "{.col}_per_1000_pop"
+      ),
+      across(
+        c(dry_spill_count_yr, dry_spill_hrs_yr),
+        ~ ifelse(
+          msoa_population > 0,
+          (.x * msoa_area_km2) / msoa_population,
+          0
+        ),
+        .names = "{.col}_pop_density_weighted"
+      )
+    ) %>%
+    # Log-transform for interpretability under skew; use log1p for zeros
+    mutate(
+      across(
+        c(
+          dry_spill_count_yr,
+          dry_spill_hrs_yr,
+          dry_spill_count_yr_per_km2,
+          dry_spill_hrs_yr_per_km2,
+          dry_spill_count_yr_per_1000_pop,
+          dry_spill_hrs_yr_per_1000_pop,
+          dry_spill_count_yr_pop_density_weighted,
+          dry_spill_hrs_yr_pop_density_weighted
+        ),
+        ~ log1p(.x),
+        .names = "log_{.col}"
+      )
+    ) %>%
+    # Transform to WGS84 for web mapping
+    st_transform(crs = 4326)
+
+  msoa_with_dry_spills
+}
+```
+
+```{r yearly-dry-plot-spec}
+#| eval: false
+
+process_yearly_dry_data <- function(data, year) {
+  aggregate_dry_spills_to_msoa(data, year)
+}
+
+# Create plots for multiple years with a compact spec table for dry spills
+create_yearly_dry_plots <- function(sf_data, year) {
+  spec <- tibble::tribble(
+    ~key,
+    ~var,
+    ~title,
+    "count_tmap",
+    "log_dry_spill_count_yr",
+    "Log Total\nDry Spill Count",
+    "hrs_tmap",
+    "log_dry_spill_hrs_yr",
+    "Log Total\nDry Spill Hours",
+    "count_popdens_tmap",
+    "log_dry_spill_count_yr_pop_density_weighted",
+    "Log Dry Spill Count\nPop-Density Weighted",
+    "hrs_popdens_tmap",
+    "log_dry_spill_hrs_yr_pop_density_weighted",
+    "Log Dry Spill Hours\nPop-Density Weighted"
+  )
+
+  plots <- purrr::pmap(
+    list(spec$var, spec$title),
+    ~ plot_dry_spill_map_tmap(sf_data, ..1, ..2)
+  )
+
+  rlang::set_names(plots, spec$key)
+}
+```
+
+```{r yearly-dry-plot-build}
+#| eval: false
+
+# Process data and create plots for selected years
+years <- c(2023)
+dry_plots <- years %>%
+  set_names(paste0("dat_dry_sf", str_sub(., 3, 4))) %>%
+  map(~ process_yearly_dry_data(dat_yr_clean, .)) %>%
+  imap(~ create_yearly_dry_plots(.x, .y))
+```
+
+```{r yearly-dry-plot-save}
+#| eval: false
+
+# Function to save dry spill tmap plots
+save_dry_tmap_plots <- function(plot_list, base_name) {
+  tmap_mode("view")
+
+  # Save total plots
+  tmap_save(
+    plot_list$count_tmap,
+    filename = here::here(
+      "book",
+      "book_figs",
+      paste0(base_name, "_dry_total_count.html")
+    ),
+    selfcontained = TRUE
+  )
+  tmap_save(
+    plot_list$hrs_tmap,
+    filename = here::here(
+      "book",
+      "book_figs",
+      paste0(base_name, "_dry_total_hours.html")
+    ),
+    selfcontained = TRUE
+  )
+
+  # Save population-density weighted plots
+  tmap_save(
+    plot_list$count_popdens_tmap,
+    filename = here::here(
+      "book",
+      "book_figs",
+      paste0(base_name, "_dry_popdens_count.html")
+    ),
+    selfcontained = TRUE
+  )
+  tmap_save(
+    plot_list$hrs_popdens_tmap,
+    filename = here::here(
+      "book",
+      "book_figs",
+      paste0(base_name, "_dry_popdens_hours.html")
+    ),
+    selfcontained = TRUE
+  )
+}
+
+# Save all dry spill plots for each year
+walk2(
+  dry_plots,
+  names(dry_plots),
+  ~ save_dry_tmap_plots(.x, .y)
+)
+```
+
+### Total Dry Spills {#sec-04-04-01-total}
+
+XXX The maps below display the total number of dry sewage overflow spills, aggregated at the Middle Layer Super Output Area (MSOA)---a standard statistical geography in England designed to represent areas with roughly similar population sizes (~8000 people or ~3000 households).
+
+XXX Because MSOAs differ considerably in land area, it's difficult to draw conclusions. Even so, dry spills appear relatively evenly distributed across England. XXX
+
+::: panel-tabset
+#### Count
+
+```{=html}
+<iframe src="book_figs/dat_dry_sf23_dry_total_count.html" width="800" height="600" frameborder="0"></iframe>
+```
+
+#### Duration
+
+```{=html}
+<iframe src="book_figs/dat_dry_sf23_dry_total_hours.html" width="800" height="600" frameborder="0"></iframe>
+```
+:::
+
+### Population-Density Weighted Dry Spills {#sec-04-04-02-popdens}
+
+XXX The maps display the total number of dry sewage overflows, normalised by residents per square kilometre. Dry spill intensity appears to be higher in certain regions. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, operational issues, or other factors. XXX
+
+::: panel-tabset
+#### Count
+
+```{=html}
+<iframe src="book_figs/dat_dry_sf23_dry_popdens_count.html" width="800" height="600" frameborder="0"></iframe>
+```
+
+#### Duration
+
+```{=html}
+<iframe src="book_figs/dat_dry_sf23_dry_popdens_hours.html" width="800" height="600" frameborder="0"></iframe>
+```
+:::
