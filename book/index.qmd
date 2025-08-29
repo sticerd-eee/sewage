@@ -18,7 +18,7 @@ execute:
 
 ## 29/08/2025 {.unnumbered}
 
-Added comprehensive dry spill analysis section with three-condition traffic-light mapping system, geographic distribution analysis with Count + Duration choropleth maps, and MSOA-level aggregation with population-adjusted metrics (Dry Spill Exploration, @sec-04-dry-spills, @sec-04-04-geo-distribution).
+Added dry spill analysis section with three-condition traffic-light mapping system, geographic distribution analysis with Count + Duration choropleth maps, and MSOA-level aggregation with population-adjusted metrics (Dry Spill Exploration, @sec-04-dry-spills).
 
 Added MSOA-level aggregation, population-adjusted metrics, and multi-perspective choropleth visualizations to sewage spill geographic analysis (Geographic Distribution, @sec-03-03-geo-distribution).
 

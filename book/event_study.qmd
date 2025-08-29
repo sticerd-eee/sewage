@@ -15,7 +15,7 @@ execute:
   fig-align: center
 ---
 
-# Event Study {#sec-05-event-study}
+# Event Study {#sec-06-event-study}
 
 ```{r setup, include=FALSE}
 # Initialize packages with version control
@@ -73,7 +73,7 @@ theme_pref <- theme_minimal() +
 ```
 
 
-## Setting {#sec-05-01-setting}
+## Setting {#sec-06-01-setting}
 
 *This section is currently being revised as I read and process the recent DiD and event study literature. Some statements may be unclear or incorrect, which I will try to refine them as I go.*
 
@@ -86,7 +86,7 @@ We can conceptualise the empirical setting as an event study, where *treatment* 
 
 Given the potential problems with the vanilla TWFE presented in the recent literature, I decide to use the Chaisemartin & d'Haultefoeuille (2024) estimator using the package `DIDmultiplegtDYN.` This estimator allows for a wide range of settings, including non-absorbing treatment, staggered treatment, continuous treatment, and many other settings that I still need to understand. 
 
-## Site-Level Event Study Regressions Within Spill Buffers {#sec-05-02-basic-event-study-regressions}
+## Site-Level Event Study Regressions Within Spill Buffers {#sec-06-02-basic-event-study-regressions}
 
 The following figures present the dynamic effects of sewage spills on house prices within an X-metre radius around spill sites. For each spill site and quarter, I aggregate spill statistics and average house prices within the corresponding X-metre buffer.^[This aggregation is primarily for computational efficiency given the size of the dataset; the analysis could alternatively be conducted at the individual house level.] The estimated regression coefficients capture the within-buffer change in average house prices over time, relative to untreated periods, conditional on the buffer experiencing a high-severity spill in a given quarter. That is, they reflect how **prices evolve in a given spill site's buffer following the occurrence of a high-severity spill within that buffer**.
 
@@ -602,7 +602,7 @@ results_house_qtr <- load_results(
 )
 ```
 
-### Binary Treatment - Average Spill Count {#sec-05-02-01-binary-average}
+### Binary Treatment - Average Spill Count {#sec-06-02-01-binary-average}
 
 ::: {.panel-tabset group="threshold-site"}
 
@@ -775,7 +775,7 @@ plot_reg_chaisemartin(
 
 :::
 
-### Binary Treatment - Median Spill Count {#sec-05-02-02-binary-median}
+### Binary Treatment - Median Spill Count {#sec-06-02-02-binary-median}
 
 ::: {.panel-tabset group="threshold-site"}
 
@@ -949,7 +949,7 @@ plot_reg_chaisemartin(
 
 :::
 
-### Binary Treatment - 75th Percentile Spill Count {#sec-05-02-03-binary-p75}
+### Binary Treatment - 75th Percentile Spill Count {#sec-06-02-03-binary-p75}
 
 ::: {.panel-tabset group="threshold-site"}  
 
@@ -1123,7 +1123,7 @@ plot_reg_chaisemartin(
 
 :::
 
-### Binary Treatment - 90th Percentile Spill Count {#sec-05-02-04-binary-p90}
+### Binary Treatment - 90th Percentile Spill Count {#sec-06-02-04-binary-p90}
 
 ::: {.panel-tabset group="threshold-site"}    
 
@@ -1296,7 +1296,7 @@ plot_reg_chaisemartin(
 :::
 
 :::
-### Continuous Treatment - Average Spill Count {#sec-05-02-04-continuous-treatment}
+### Continuous Treatment - Average Spill Count {#sec-06-02-04-continuous-treatment}
 
 ::: {.panel-tabset group="continuous-site"}
 
@@ -1398,7 +1398,7 @@ plot_reg_chaisemartin(
 
 :::
 
-## House-Level Event Study Regressions Within Admin Boundaries {#sec-05-03-house-level-event-study}
+## House-Level Event Study Regressions Within Admin Boundaries {#sec-06-03-house-level-event-study}
 
 The advantages of using house-level data relative to site-level data in the event study regressions are:
 
@@ -2126,7 +2126,7 @@ results_sunab <- load_results_sunab(
 )
 ```
 
-### Binary Treatment - Average Spill Count {#sec-05-03-01-binary-average}
+### Binary Treatment - Average Spill Count {#sec-06-03-01-binary-average}
 
 ::: {.panel-tabset group="threshold-house"}
 
@@ -2270,7 +2270,7 @@ plot_reg_sunab(
 
 :::
 
-### Binary Treatment - Median Spill Count {#sec-05-03-02-binary-median}
+### Binary Treatment - Median Spill Count {#sec-06-03-02-binary-median}
 
 ::: {.panel-tabset group="threshold-house"}
 
@@ -2414,7 +2414,7 @@ plot_reg_sunab(
 
 :::
 
-### Binary Treatment - 75th Percentile Spill Count {#sec-05-03-03-binary-p75}
+### Binary Treatment - 75th Percentile Spill Count {#sec-06-03-03-binary-p75}
 
 ::: {.panel-tabset group="threshold-house"}
 
@@ -2558,7 +2558,7 @@ plot_reg_sunab(
 
 :::
 
-### Binary Treatment - 90th Percentile Spill Count {#sec-05-03-04-binary-p90}
+### Binary Treatment - 90th Percentile Spill Count {#sec-06-03-04-binary-p90}
 
 ::: {.panel-tabset group="threshold-house"}
 

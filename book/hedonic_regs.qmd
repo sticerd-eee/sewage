@@ -15,7 +15,7 @@ execute:
   fig-align: center
 ---
 
-# Hedonics Regressions {#sec-06-hedonics-regs}
+# Hedonics Regressions {#sec-07-hedonics-regs}
 
 ```{r setup, include=FALSE}
 # Initialize packages with version control
@@ -399,9 +399,9 @@ models_by_rad <- map(dat_list, run_hedonic_regs)
 names(models_by_rad) <- c("250", "500", "1000")
 ```
 
-## House-Level Hedonic Regressions {#sec-06-01-hedonics-regs-house}
+## House-Level Hedonic Regressions {#sec-07-01-hedonics-regs-house}
 
-### Setting {#sec-06-01-01-setting}
+### Setting {#sec-07-01-01-setting}
 
 We employ hedonic regression analysis to quantify the monetary impact of sewage spills on residential property values. This approach statistically isolates the effect of varying sewage spill volumes within a defined proximity to homes, while controlling for other property and locational characteristics. The hedonic methodology enables us to estimate the implicit price adjustment—either premium or discount—that buyers apply when sewage spills are present.
 
@@ -460,7 +460,7 @@ coef_map_list <- c(
 )
 ```
 
-### Lagged Spill Statistic {#sec-06-01-02-lagged-spill-statistic}
+### Lagged Spill Statistic {#sec-07-01-02-lagged-spill-statistic}
 
 ::: {.panel-tabset group = "house-hedonic-regs"}
 
@@ -646,7 +646,7 @@ modelsummary(
 
 :::
 
-### Rolling Year Spill Statistic {#sec-06-01-03-rolling-year-spill-statistic}
+### Rolling Year Spill Statistic {#sec-07-01-03-rolling-year-spill-statistic}
 
 ::: {.panel-tabset group = "house-hedonic-regs"}
 

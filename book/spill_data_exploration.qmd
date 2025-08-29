@@ -574,7 +574,7 @@ Because MSOAs differ considerably in land area, it's difficult to draw conclusio
 
 ### Population-Density Weighted Spills {#sec-03-03-02-popdens}
 
-The maps display the total number and duration of sewage overflows, normalised by residents per square kilometre. Spill intensity appears to be higher in the North and the South West. We cannot determine whether this reflects older sewer infrastructure, higher rainfall, or both.
+The maps display the total number and duration of sewage overflows, normalised by residents per square kilometre. Spill intensity appears to be higher in the North and the South West. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, higher rainfall, or both.
 
 ::: panel-tabset
 #### Count

@@ -15,7 +15,7 @@ execute:
   fig-align: center
 ---
 
-# House Data Exploration {#sec-04-house-exploration}
+# House Data Exploration {#sec-05-house-exploration}
 
 ```{r setup, include=FALSE}
 # Initialize packages with version control
@@ -28,16 +28,33 @@ if (!requireNamespace("renv", quietly = TRUE)) {
 # renv::restore()  # Restore the environment if running for first time
 # renv::snapshot()  # After adding/updating packages, snapshot the state
 
-
 # Load required packages
 required_packages <- c(
-  "rmarkdown", "rio", "tidyverse", "purrr", "here",
-  "janitor", "sf", "sp", "rnaturalearth",
-  "rnaturalearthdata", "rnrfa", "DescTools",
-  "modelsummary", "tmap", "leaflet",
-  "htmltools", "servr", "viridis", "data.table",
-  "reactable", "htmlwidgets", "reactablefmtr", "dbplyr",
-  "DIDmultiplegtDYN", "arrow"
+  "rmarkdown",
+  "rio",
+  "tidyverse",
+  "purrr",
+  "here",
+  "janitor",
+  "sf",
+  "sp",
+  "rnaturalearth",
+  "rnaturalearthdata",
+  "rnrfa",
+  "DescTools",
+  "modelsummary",
+  "tmap",
+  "leaflet",
+  "htmltools",
+  "servr",
+  "viridis",
+  "data.table",
+  "reactable",
+  "htmlwidgets",
+  "reactablefmtr",
+  "dbplyr",
+  "DIDmultiplegtDYN",
+  "arrow"
 )
 install_if_missing <- function(packages) {
   new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
@@ -62,7 +79,8 @@ theme_pref <- theme_minimal() +
   theme(
     text = element_text(size = 12),
     plot.title = element_text(
-      face = "bold", size = 12,
+      face = "bold",
+      size = 12,
       margin = ggplot2::margin(b = 10, unit = "pt")
     ),
     axis.title = element_text(face = "bold", size = 10),
@@ -89,7 +107,8 @@ dat_mo <- import(
 
 # Spill sites
 spill_sites <- import(
-  here("data", "processed", "unique_spill_sites.parquet"), trust = TRUE
+  here("data", "processed", "unique_spill_sites.parquet"),
+  trust = TRUE
 )
 
 # House price
@@ -100,7 +119,8 @@ house_price_data <- import(
 
 # House price - spill site lookup
 spill_lookup <- import(
-  here("data", "processed", "spill_house_lookup.parquet"), trust = TRUE
+  here("data", "processed", "spill_house_lookup.parquet"),
+  trust = TRUE
 )
 
 # DuckDB connection
@@ -108,7 +128,7 @@ spill_lookup <- import(
 # DBI::dbDisconnect(con, shutdown=TRUE)
 ```
 
-## Data Description {#sec-04-01-data-descr}
+## Data Description {#sec-05-01-data-descr}
 
 I have spatially merged all house sales from the HM Land Registry data to nearby sewage spill sites within a 5km radius. This dataset includes, for each house sale, all sewage spill sites within that range, along with their respective distances and spill severity, measured by frequency and duration. This lookup database allows for filtering by spatial distance or time. Below is a visual representation of three house sales in London.
 
@@ -121,24 +141,28 @@ set.seed(1)
 london_house_ids <- house_price_data %>%
   filter(
     region == "London",
-    transaction_id %in% c("{1061746D-98D7-3C34-E063-4804A8C0F9E7}",
-                          "{F5E8B081-90BE-3A13-E053-6C04A8C060B7}",
-                          "{C18F412B-3F11-81A6-E053-6B04A8C0AD18}")) 
+    transaction_id %in%
+      c(
+        "{1061746D-98D7-3C34-E063-4804A8C0F9E7}",
+        "{F5E8B081-90BE-3A13-E053-6C04A8C060B7}",
+        "{C18F412B-3F11-81A6-E053-6B04A8C0AD18}"
+      )
+  )
 
 # Get a corresponding sample of sewage spill sitess
 sample_spill_ids <- spill_sites %>%
   inner_join(
     spill_lookup %>%
-      filter(house_id %in% london_house_ids$house_id,
-             distance_km <= 5) %>%
+      filter(house_id %in% london_house_ids$house_id, distance_km <= 5) %>%
       distinct(site_id),
     by = "site_id"
   ) %>%
   left_join(
-    select(dat_yr, -ngr), 
-    by = join_by(water_company, site_id))
+    select(dat_yr, -ngr),
+    by = join_by(water_company, site_id)
+  )
 
- # Convert to spatial objects (EPSG 27700: British National Grid)
+# Convert to spatial objects (EPSG 27700: British National Grid)
 sampled_houses_sf <- st_as_sf(
   london_house_ids,
   coords = c("easting", "northing"),
@@ -161,7 +185,8 @@ sampled_buffers <- st_transform(sampled_buffers, 4326)
 # London boundary
 london_boundary_sf <- ne_states(
   country = "United Kingdom",
-  returnclass = "sf") %>%
+  returnclass = "sf"
+) %>%
   filter(region == "Greater London")
 
 
@@ -220,11 +245,11 @@ rm(sampled_houses_sf, sampled_sites_sf, sampled_buffers, london_boundary_sf)
 ```
 
 
-## House Price Descriptive Statistics {#sec-04-02-house-descriptives}
+## House Price Descriptive Statistics {#sec-05-02-house-descriptives}
 
 House prices are strongly positively skewed approximate a log-normal distribution, though with heavier tails than expected under normality. There is heterogeneity in prices across house types. Overall, this suggests the need for trimming (if we believe that the 'outliers' don't belong to the distribution, but are of another kind) or winsorisation (if we believe that the 'outliers' belong to the distribution, but we want a less skewed distribution), and certain property types (e.g., 'Other') may need to be excluded from the analysis.
 
-### Summary Table {#sec-04-02-01-summary-table}
+### Summary Table {#sec-05-02-01-summary-table}
 
 ```{css, echo = FALSE}
 /* Custom CSS for modelsummary tables */
@@ -254,21 +279,20 @@ House prices are strongly positively skewed approximate a log-normal distributio
 datasummary_dat <- house_price_data %>%
   select(price, year, property_type, old_new, duration) %>%
   mutate(
-    property_type = recode_factor(property_type,
+    property_type = recode_factor(
+      property_type,
       "D" = "Detached",
       "F" = "Flats/Maisonettes",
       "O" = "Other",
       "S" = "Semi-Detached",
       "T" = "Terraced"
     ),
-    old_new = recode_factor(old_new,
+    old_new = recode_factor(
+      old_new,
       "N" = "Established Residential",
       "Y" = "Newly Built"
     ),
-    duration = recode_factor(duration,
-      "F" = "Freehold",
-      "L" = "Leasehold"
-    )
+    duration = recode_factor(duration, "F" = "Freehold", "L" = "Leasehold")
   ) %>%
   rename(
     `Property Type` = property_type,
@@ -288,7 +312,8 @@ datasummary_skim(
 
 ```{r, house_price_heterogeneity}
 datasummary(
-  `Price Paid` * (`Property Type` + `Old/New` + `Tenure`) +
+  `Price Paid` *
+    (`Property Type` + `Old/New` + `Tenure`) +
     Heading("Year Sold", nearData = FALSE) * `Year Sold` * Arguments(fmt = 2) ~
     Mean + SD + Min + Median + Max,
   data = datasummary_dat,
@@ -299,7 +324,7 @@ datasummary(
 
 ::: 
 
-### Histogram {#sec-04-02-02-histogram}
+### Histogram {#sec-05-02-02-histogram}
 
 ::: panel-tabset
 
@@ -309,7 +334,9 @@ datasummary(
 ggplot(house_price_data, aes(x = price)) +
   geom_histogram(
     bins = 20,
-    fill = viridis(1, option = "magma"), alpha = 0.8, col = "black"
+    fill = viridis(1, option = "magma"),
+    alpha = 0.8,
+    col = "black"
   ) +
   labs(
     title = "House Prices 2021-2023",
@@ -326,7 +353,9 @@ ggplot(house_price_data, aes(x = log(price))) +
   geom_histogram(
     aes(y = after_stat(density)),
     bins = 100,
-    fill = viridis(1, option = "magma"), alpha = 0.7, col = "black"
+    fill = viridis(1, option = "magma"),
+    alpha = 0.7,
+    col = "black"
   ) +
   stat_function(
     fun = dnorm,
@@ -334,7 +363,9 @@ ggplot(house_price_data, aes(x = log(price))) +
       mean = mean(log(house_price_data$price), na.rm = TRUE),
       sd = sd(log(house_price_data$price), na.rm = TRUE)
     ),
-    color = viridis(3, option = "magma")[2], alpha = .7, linewidth = .8
+    color = viridis(3, option = "magma")[2],
+    alpha = .7,
+    linewidth = .8
   ) +
   labs(
     title = "House Prices (Log-Transformed) with Normal Curve",
@@ -360,7 +391,7 @@ ggplot(house_price_data, aes(sample = log(price))) +
 
 :::
 
-### Temporal House Sale Distribution {#sec-04-02-03-temporal-distribution}  
+### Temporal House Sale Distribution {#sec-05-02-03-temporal-distribution}  
 
 House sales appear to be uniform over 2021-2023 in terms of both average sale price and volume of sales. There are a few exceptions in 2021, possibly due to the Covid-19 pandemic (but I have not looked further into this).
 
@@ -372,10 +403,13 @@ house_price_data_dt[, `:=`(
   month = lubridate::month(date_of_transfer, label = TRUE, abbr = TRUE)
 )]
 
-house_monthly <- house_price_data_dt[, .(
-  avg_price = mean(price, na.rm = TRUE),
-  count_sold = .N
-), by = .(year, month)] %>%
+house_monthly <- house_price_data_dt[,
+  .(
+    avg_price = mean(price, na.rm = TRUE),
+    count_sold = .N
+  ),
+  by = .(year, month)
+] %>%
   as_tibble()
 rm(house_price_data_dt)
 ```
@@ -387,8 +421,10 @@ rm(house_price_data_dt)
 ```{r, house_price_temporal_distribution_2}
 ggplot(house_monthly, aes(x = month, y = avg_price, fill = factor(year))) +
   geom_bar(
-    stat = "identity", position = position_dodge(width = 0.9),
-    width = 0.8, alpha = 0.9
+    stat = "identity",
+    position = position_dodge(width = 0.9),
+    width = 0.8,
+    alpha = 0.9
   ) +
   scale_fill_viridis_d(option = "magma") +
   labs(
@@ -408,8 +444,10 @@ ggplot(house_monthly, aes(x = month, y = avg_price, fill = factor(year))) +
 ```{r, house_price_temporal_distribution_3}
 ggplot(house_monthly, aes(x = month, y = count_sold, fill = factor(year))) +
   geom_bar(
-    stat = "identity", position = position_dodge(width = 0.9),
-    width = 0.8, alpha = 0.9
+    stat = "identity",
+    position = position_dodge(width = 0.9),
+    width = 0.8,
+    alpha = 0.9
   ) +
   scale_fill_viridis_d(option = "magma") +
   labs(
@@ -425,24 +463,24 @@ ggplot(house_monthly, aes(x = month, y = count_sold, fill = factor(year))) +
 :::
 
 
-## House Price and Sewage Spills Descriptive Statistics {#sec-04-03-house-spills-descriptives}
+## House Price and Sewage Spills Descriptive Statistics {#sec-05-03-house-spills-descriptives}
 
-### Cross section {#sec-04-03-01-cross-section}
+### Cross section {#sec-05-03-01-cross-section}
 
 I begin by examining the cross-sectional relationship between house prices and sewage spills, which can be characterised along three main dimensions: (i) house prices, (ii) spill severity (measured by the number of spills or the spill duration), and (iii) the distance to the nearest spill.
 
 Each house sale is spatially matched to all spill sites within a 5km radius, allowing me to compute the average spill severity and the average distance to the nearest spill for different distance thresholds. This allows me to see if there are any correlations between house prices and spill severity or distance.
 
-### Summary Tables {#sec-04-03-02-summary-tables}
+### Summary Tables {#sec-05-03-02-summary-tables}
 
 ```{r}
 # Calculate 5th and 95th house price percentiles
 house_price_data_trimmed <- house_price_data %>%
   filter(between(
-    price, 
-    quantile(price, 0.05, na.rm = TRUE), quantile(price, 0.95, na.rm = TRUE)
-    )
-  )
+    price,
+    quantile(price, 0.05, na.rm = TRUE),
+    quantile(price, 0.95, na.rm = TRUE)
+  ))
 trimmed_house_ids <- unique(house_price_data_trimmed$house_id)
 ```
 
@@ -454,25 +492,27 @@ There are a few patterns that stand out:
 - House prices increase within buffers of increasing distance from spill sites.
 - House prices decrease across spill count quartiles.
 - House prices remain positively skewed, even after trimming the 5th and 95th percentiles.
-- Spill counts are positively skewed (as we also saw in @sec-03-02-02-histogram)
+- Spill counts are positively skewed (as we also saw in @sec-05-02-02-histogram)
 
 ::: panel-tabset
 
-#### By Distance {#sec-04-03-02-01-distance}
+#### By Distance {#sec-05-03-02-01-distance}
 
 ```{r, house_price_spill_summary}
 # Load aggregated data
 dat_agg_all <- open_dataset(
-  here("data", "processed", "agg_all_yrs_cross_section")) %>%
+  here("data", "processed", "agg_all_yrs_cross_section")
+) %>%
   collect()
 dat_agg_12mo <- open_dataset(
-  here("data", "processed", "agg_12mo_cross_section")) %>%
+  here("data", "processed", "agg_12mo_cross_section")
+) %>%
   collect()
 
 # Filter for 5th and 95th house price percentiles
 dat_agg_all_trimmed <- dat_agg_all %>%
   filter(house_id %in% trimmed_house_ids)
-houses_within_5000 <- filter(dat_agg_all_trimmed, radius == 5000)$house_id %>% 
+houses_within_5000 <- filter(dat_agg_all_trimmed, radius == 5000)$house_id %>%
   unique()
 
 # Summary stats for houses beyond 5000m
@@ -481,8 +521,8 @@ dat_above_5000 <- house_price_data_trimmed %>%
   summarise(
     threshold_m = ">5000",
     n_houses = uniqueN(house_id),
-    n_spill_sites = 0, 
-    mean_price = mean(price, na.rm = TRUE), 
+    n_spill_sites = 0,
+    mean_price = mean(price, na.rm = TRUE),
     median_price = median(price, na.rm = TRUE),
     sd_price = sd(price, na.rm = TRUE),
     min_price = min(price, na.rm = TRUE),
@@ -511,7 +551,7 @@ summary_table_below <- dat_below_5000_prepared %>%
     sd_price = sd(price, na.rm = TRUE),
     min_price = min(price, na.rm = TRUE),
     max_price = max(price, na.rm = TRUE),
-    .groups = "drop" 
+    .groups = "drop"
   ) %>%
   select(-radius) %>%
   arrange(mean_distance_m)
@@ -567,8 +607,11 @@ reactable(
     colGroup(
       name = "Price Statistics",
       columns = c(
-        "mean_price", "median_price", "sd_price",
-        "min_price", "max_price"
+        "mean_price",
+        "median_price",
+        "sd_price",
+        "min_price",
+        "max_price"
       )
     )
   ),
@@ -605,7 +648,7 @@ reactable(
 # setwd(original_wd)
 ```
 
-#### By Spill Count {#sec-04-03-02-02-spill-count}
+#### By Spill Count {#sec-05-03-02-02-spill-count}
 
 ```{r}
 # Define threshold
@@ -619,8 +662,8 @@ spill_counts_base <- dat_agg_all_trimmed %>%
 # Calculate spill count quartile breakpoints
 spill_counts_quantiles <- quantile(
   filter(spill_counts_base, !is.na(mean_distance))$spill_count,
-  probs = seq(0, 1, 0.25), 
-  na.rm = TRUE 
+  probs = seq(0, 1, 0.25),
+  na.rm = TRUE
 )
 
 # Summary stats below threshold
@@ -630,10 +673,15 @@ spill_counts_summary_below_threshold <- spill_counts_base %>%
     quartile = cut(
       spill_count,
       breaks = spill_counts_quantiles,
-      labels = c("1st quartile (0-25%)", "2nd quartile (25-50%)",
-                 "3rd quartile (50-75%)", "4th quartile (75-100%)"),
-                   include.lowest = TRUE, 
-      right = TRUE)
+      labels = c(
+        "1st quartile (0-25%)",
+        "2nd quartile (25-50%)",
+        "3rd quartile (50-75%)",
+        "4th quartile (75-100%)"
+      ),
+      include.lowest = TRUE,
+      right = TRUE
+    )
   ) %>%
   group_by(quartile) %>%
   summarise(
@@ -641,18 +689,18 @@ spill_counts_summary_below_threshold <- spill_counts_base %>%
     spill_count_max = max(spill_count, na.rm = TRUE),
     spill_count_mean = mean(spill_count, na.rm = TRUE),
     spill_count_median = median(spill_count, na.rm = TRUE),
-    n_houses = n(), 
-    n_spill_sites = mean(n_spill_sites, na.rm = TRUE), 
+    n_houses = n(),
+    n_spill_sites = mean(n_spill_sites, na.rm = TRUE),
     mean_price = mean(price, na.rm = TRUE),
     median_price = median(price, na.rm = TRUE),
     sd_price = sd(price, na.rm = TRUE),
     min_price = min(price, na.rm = TRUE),
     max_price = max(price, na.rm = TRUE),
     .groups = "drop"
-  ) 
+  )
 
 houses_below_threshold_ids <- spill_lookup %>%
-  filter(distance_m <= threshold) %>% 
+  filter(distance_m <= threshold) %>%
   pull(house_id) %>%
   unique()
 
@@ -666,7 +714,7 @@ spill_counts_summary_above_threshold <- house_price_data_trimmed %>%
     spill_count_mean = 0,
     spill_count_median = 0,
     n_houses = uniqueN(house_id),
-    n_spill_sites = 0, 
+    n_spill_sites = 0,
     mean_price = mean(price, na.rm = TRUE),
     median_price = median(price, na.rm = TRUE),
     sd_price = sd(price, na.rm = TRUE),
@@ -685,38 +733,82 @@ reactable(
   spill_counts_summary,
   columns = list(
     quartile = colDef(name = "Spill Count Quartile"),
-    spill_count_min = colDef(name = "Min Count", format = colFormat(digits = 0)),
-    spill_count_max = colDef(name = "Max Count", format = colFormat(digits = 0)),
-    spill_count_mean = colDef(name = "Mean Count", format = colFormat(digits = 1)),
-    spill_count_median = colDef(name = "Median Count", format = colFormat(digits = 1)),
+    spill_count_min = colDef(
+      name = "Min Count",
+      format = colFormat(digits = 0)
+    ),
+    spill_count_max = colDef(
+      name = "Max Count",
+      format = colFormat(digits = 0)
+    ),
+    spill_count_mean = colDef(
+      name = "Mean Count",
+      format = colFormat(digits = 1)
+    ),
+    spill_count_median = colDef(
+      name = "Median Count",
+      format = colFormat(digits = 1)
+    ),
     n_houses = colDef(name = "# Houses", format = colFormat(separators = TRUE)),
-    n_spill_sites = colDef(name = "# Spill Sites", format = colFormat(separators = TRUE, digits = 1)),
-    mean_price = colDef(name = "Mean (£)", format = colFormat(separators = TRUE, digits = 0)),
-    median_price = colDef(name = "Median (£)", format = colFormat(separators = TRUE, digits = 0)),
-    sd_price = colDef(name = "SD (£)", format = colFormat(separators = TRUE, digits = 0)),
-    min_price = colDef(name = "Min (£)", format = colFormat(separators = TRUE, digits = 0)),
-    max_price = colDef(name = "Max (£)", format = colFormat(separators = TRUE, digits = 0))
+    n_spill_sites = colDef(
+      name = "# Spill Sites",
+      format = colFormat(separators = TRUE, digits = 1)
+    ),
+    mean_price = colDef(
+      name = "Mean (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    median_price = colDef(
+      name = "Median (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    sd_price = colDef(
+      name = "SD (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    min_price = colDef(
+      name = "Min (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    max_price = colDef(
+      name = "Max (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    )
   ),
   columnGroups = list(
     colGroup(
-      name = "Spill Count Statistics", 
-      columns = c("spill_count_min", "spill_count_max", 
-                  "spill_count_mean", "spill_count_median")),
+      name = "Spill Count Statistics",
+      columns = c(
+        "spill_count_min",
+        "spill_count_max",
+        "spill_count_mean",
+        "spill_count_median"
+      )
+    ),
     colGroup(
-      name = "Observations", 
-      columns = c("n_houses", "n_spill_sites")),
+      name = "Observations",
+      columns = c("n_houses", "n_spill_sites")
+    ),
     colGroup(
-      name = "Price Statistics", 
-      columns = c("mean_price", "median_price", "sd_price", 
-                  "min_price", "max_price"))
+      name = "Price Statistics",
+      columns = c(
+        "mean_price",
+        "median_price",
+        "sd_price",
+        "min_price",
+        "max_price"
+      )
+    )
   ),
   defaultColDef = colDef(
-    headerStyle = list(fontSize = "0.8em", whiteSpace = "wrap"), 
-    style = list(fontSize = "0.75em"), minWidth = 80),
-  resizable = TRUE, 
-  filterable = FALSE, 
-  defaultPageSize = 10, 
-  compact = TRUE, 
+    headerStyle = list(fontSize = "0.8em", whiteSpace = "wrap"),
+    style = list(fontSize = "0.75em"),
+    minWidth = 80
+  ),
+  resizable = TRUE,
+  filterable = FALSE,
+  defaultPageSize = 10,
+  compact = TRUE,
   style = list(maxWidth = "100%", overflowX = "auto")
 )
 ```
@@ -724,7 +816,7 @@ reactable(
 :::
 
 
-### Bivariate Plots {#sec-04-03-03-bivariate-plots}
+### Bivariate Plots {#sec-05-03-03-bivariate-plots}
 
 Below I plot the relationship between house prices and spill severity (spill count and spill duration), distance to spill sites, and spill severity weighted by the inverse of the distance to the nearest spill (accounting for the possibility that closer spills have a larger impact on house prices). I do this for a sample of 300,000 houses (approximately 3% of all houses in the dataset) to reduce computation time. I trim the data to the 5th and 95th percentiles of house prices (as I don't believe these belong to the distribution we are interested in).
 
@@ -747,16 +839,18 @@ dat_agg_12mo_sample <- dat_agg_12mo %>%
 # Reshape data to long format
 radius_levels <- c(250, 500, 1000, 2000, 5000)
 plot_data <- bind_rows(
-  dat_agg_all_sample %>% 
+  dat_agg_all_sample %>%
     mutate(time_frame = "All Years", .before = 1),
-  dat_agg_12mo_sample %>% 
+  dat_agg_12mo_sample %>%
     mutate(time_frame = "12 Months", .before = 1)
 ) %>%
   filter(radius %in% radius_levels) %>%
   mutate(
-    radius = factor(radius, 
-                    levels = radius_levels, 
-                    labels = paste0(radius_levels, "m")),
+    radius = factor(
+      radius,
+      levels = radius_levels,
+      labels = paste0(radius_levels, "m")
+    ),
     inverse_spill_count = spill_count / mean_distance,
     inverse_spill_hrs = spill_hrs / mean_distance,
     log_price = log(price)
@@ -764,10 +858,16 @@ plot_data <- bind_rows(
 
 
 # Create plotting function
-create_cs_plot <- function(x_var, x_label, y_var, y_label,
-                           method = c("lm", "loess"),
-                           time = NULL,
-                           title, facet = TRUE) {
+create_cs_plot <- function(
+  x_var,
+  x_label,
+  y_var,
+  y_label,
+  method = c("lm", "loess"),
+  time = NULL,
+  title,
+  facet = TRUE
+) {
   # Optionally filter data by time_frame
   plot_df <- plot_data
   if (!is.null(time)) {
@@ -775,7 +875,10 @@ create_cs_plot <- function(x_var, x_label, y_var, y_label,
   }
 
   # Base plot
-  p <- ggplot(plot_df, aes(y = .data[[y_var]], x = .data[[x_var]], color = radius)) +
+  p <- ggplot(
+    plot_df,
+    aes(y = .data[[y_var]], x = .data[[x_var]], color = radius)
+  ) +
     scale_color_viridis_d(option = "plasma", end = 0.8) +
     labs(
       x = x_label,
@@ -843,8 +946,10 @@ for (var_name in names(plot_specs)) {
 
     # Create the plot using create_cs_plot
     p <- create_cs_plot(
-      spec$var, spec$label,
-      "price", "House Price",
+      spec$var,
+      spec$label,
+      "price",
+      "House Price",
       method = v$method,
       time = v$time,
       title = spec$title,
@@ -856,19 +961,22 @@ for (var_name in names(plot_specs)) {
 
     # Save the plot - note that filename is now the first argument and plot is specified by 'plot'
     ggsave(
-      filename = here("book", "book_figs", file_name), 
-      plot = p, 
-      width = 8, height = 0.618 * 6, dpi = 600)
+      filename = here("book", "book_figs", file_name),
+      plot = p,
+      width = 8,
+      height = 0.618 * 6,
+      dpi = 600
+    )
   }
 }
 ```
 
 
-#### Spill Count {#sec-04-03-03-01-spill-count}
+#### Spill Count {#sec-05-03-03-01-spill-count}
 
 There's a negative cross-sectional linear relationship between spill count and house price. The negative correlation is stronger both for (i) the trailing 12 months compared to the full time period and (ii) smaller distance thresholds. 
 
-For distance thresholds below 2km, the non-parametric fit shows a U-shaped pattern, likely due to a few properties with both high spill counts and high prices. However, as the distance threshold increases, the curvature of the U-shape flattens. I have to look further into this, but this may be driven by water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also @sec-04-03-03-03-distance).
+For distance thresholds below 2km, the non-parametric fit shows a U-shaped pattern, likely due to a few properties with both high spill counts and high prices. However, as the distance threshold increases, the curvature of the U-shape flattens. I have to look further into this, but this may be driven by water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also @sec-05-03-03-03-distance).
 
 ::: panel-tabset
 
@@ -889,7 +997,7 @@ knitr::include_graphics(here("book", "book_figs", "spill_count_12mo.png"))
 
 :::
 
-#### Spill Duration {#sec-04-03-03-02-spill-duration}  
+#### Spill Duration {#sec-05-03-03-02-spill-duration}  
 
 The relationship between spill duration and house price is comparable to the relationship between spill count and house price. The confidence intervals are larger, suggesting greater statistical uncertainty. It seems plausible that there is greater variation in spill duration since duration records are influenced by extreme events or measurement errors that affect how long a spill lasts, whereas the 12/24 count method aggregates events more discretely.^[Start counting when the first discharge occurs. Any discharge (or discharges) in the first 12-hour block are counted as one spill. Any discharge (or discharges) in the next and subsequent 24-hour blocks are each counted as one additional spill per block. Continue counting until there is a 24-hour block with no discharge.]
 
@@ -912,11 +1020,11 @@ knitr::include_graphics(here("book", "book_figs", "spill_duration_12mo.png"))
 
 :::
 
-#### Distance {#sec-04-03-03-03-distance}  
+#### Distance {#sec-05-03-03-03-distance}  
 
 There's a negative cross-sectional linear relationship between distance to the nearest spill site (within thresholds) and house price for tresholds below 1km, and slight positive relationship for larger thresholds. There are no apparent differences between the trailing 12 months and the full time period.
 
-For all thresholds, the non-parametric fit shows a U-shaped pattern, which is consinstent with the story of water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also @sec-04-03-03-01-spill-count).
+For all thresholds, the non-parametric fit shows a U-shaped pattern, which is consinstent with the story of water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also @sec-05-03-03-01-spill-count).
 
 ::: panel-tabset
 
@@ -937,9 +1045,9 @@ knitr::include_graphics(here("book", "book_figs", "distance_12mo.png"))
 
 :::
 
-#### Inverse Spill Count - Distance {#sec-04-03-03-04-inverse}  
+#### Inverse Spill Count - Distance {#sec-05-03-03-04-inverse}  
 
-There's a negative cross-sectional linear relationship between inverse spill count and house price. The negative correlation is stronger both for (i) the trailing 12 months compared to the full time period and (ii) the larger distance thresholds. Additionally, the non-parametric fit shows a U-shaped pattern. Both of these observations are consistent with the story of water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also @sec-04-03-03-01-spill-count and @sec-04-03-03-03-distance).  
+There's a negative cross-sectional linear relationship between inverse spill count and house price. The negative correlation is stronger both for (i) the trailing 12 months compared to the full time period and (ii) the larger distance thresholds. Additionally, the non-parametric fit shows a U-shaped pattern. Both of these observations are consistent with the story of water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also @sec-05-03-03-01-spill-count and @sec-05-03-03-03-distance).  
 
 ::: panel-tabset
 
@@ -950,12 +1058,20 @@ knitr::include_graphics(here("book", "book_figs", "inverse_spill_count_lm.png"))
 
 ##### All Years - Linear and LOESS    
 ```{r}
-knitr::include_graphics(here("book", "book_figs", "inverse_spill_count_all.png"))
+knitr::include_graphics(here(
+  "book",
+  "book_figs",
+  "inverse_spill_count_all.png"
+))
 ```
 
 ##### 12 Months - Linear and LOESS
 ```{r}
-knitr::include_graphics(here("book", "book_figs", "inverse_spill_count_12mo.png"))
+knitr::include_graphics(here(
+  "book",
+  "book_figs",
+  "inverse_spill_count_12mo.png"
+))
 ```
 
 :::

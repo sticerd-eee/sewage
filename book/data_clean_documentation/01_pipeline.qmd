@@ -17,6 +17,31 @@ execute:
 
 # Pipeline Overview {#sec-01-data-pipeline}
 
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+# Load required packages
+required_packages <- c(
+  "DiagrammeR"
+)
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+```
+
 ## Pipeline Organisation {#sec-01-01-organisation}
 
 The current data cleaning pipeline consists of 20 R scripts that process sewage discharge data, house price data, and spatial relationships to create datasets for analysis. 
@@ -39,7 +64,7 @@ The flowchart below illustrates the data cleaning pipeline, showing how data flo
 ![](../book_figs/pipeline_flowchart.svg){.lightbox}
 
 ```{r}
-library(DiagrammeR)
+require(DiagrammeR)
 grViz(
   "
 digraph DataPipeline {

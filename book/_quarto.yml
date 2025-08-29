@@ -12,6 +12,7 @@ book:
       chapters:
       - data_limitations.qmd
       - spill_data_exploration.qmd
+      - dry_spills.qmd
       - house_data_exploration.qmd
     - part: "Analysis"
       chapters:
