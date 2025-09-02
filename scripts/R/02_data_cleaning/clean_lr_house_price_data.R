@@ -18,7 +18,8 @@ CONFIG <- list(
   base_year = 2021,
   input_dir = here::here("data", "raw", "lr_house_price"),
   output_dir = here::here("data", "processed"),
-  postcode_cache_path = here::here("data", "raw", "lr_house_price", "postcode_data.rds"),
+  # Shared cache path for postcode processing (used across scripts)
+  postcode_cache_path = here::here("data", "cache", "postcodes", "lr_house_price_postcodes.rds"),
   column_name_mapping = c(
     "transaction_id", # V1  - Transaction unique identifier
     "price", # V2  - Sale price
@@ -70,10 +71,17 @@ CONFIG <- list(
 #' Initialize the R environment with required packages and settings
 #' @return NULL
 initialise_environment <- function() {
+  # Packages used in this script (primary role per line)
   required_packages <- c(
-    "rio", "tidyverse", "purrr", "here", "logger", "glue", "fs",
-    "lubridate", "PostcodesioR", "furrr", "future", "memoise", 
-    "data.table", "arrow"
+    "rio",        # Data import/export
+    "tidyverse",  # Data manipulation and piping
+    "purrr",      # Iteration helpers
+    "here",       # Project-rooted paths
+    "logger",     # Structured logging
+    "glue",       # String interpolation
+    "fs",         # File-system ops
+    "lubridate",  # Date handling
+    "arrow"       # Parquet I/O
   )
 
   # Package management with renv
@@ -91,16 +99,9 @@ initialise_environment <- function() {
   }))
 }
 
-#' Set up parallel processing configuration
-#' @return NULL
+#' Sequential execution (no parallel plan) to avoid API rate/ordering issues
 setup_parallel <- function() {
-  n_workers <- parallelly::availableCores() - 1
-  machine_ram <- memuse::Sys.meminfo()$totalram
-  ram_limit <- as.numeric(0.8 * machine_ram)
-
-  options(future.globals.maxSize = ram_limit)
-  future::plan(future::multisession, workers = n_workers)
-  logger::log_info("Parallel processing initialized with {n_workers} workers")
+  logger::log_info("Running sequentially (no future::multisession)")
 }
 
 #' Set up logging configuration
@@ -159,181 +160,18 @@ clean_data <- function(df, year) {
 
   df %>%
     mutate(
-      year = year,
-      postcode = str_remove_all(postcode, fixed(" ")),
-      date_of_transfer = ymd_hm(date_of_transfer),
+      year = year,                                           # Source year tag
+      postcode = str_remove_all(postcode, fixed(" ")),     # Normalise for joins
+      date_of_transfer = ymd_hm(date_of_transfer),           # Parse timestamp
       qtr_id = (lubridate::year(date_of_transfer) - base_year) * 4 +
-        lubridate::quarter(date_of_transfer),
-      month_id = (lubridate::year(date_of_transfer) - base_year) * 12
-      + lubridate::month(date_of_transfer)
+        lubridate::quarter(date_of_transfer),               # Quarter index
+      month_id = (lubridate::year(date_of_transfer) - base_year) * 12 +
+        lubridate::month(date_of_transfer)                  # Month index
     )
 }
 
-#' Process postcode data using the PostcodesioR API with retry logic
-#' @param postcodes Vector of postcodes to process
-#' @param batch_size Number of postcodes to process in each batch
-#' @param max_tries Maximum number of retry attempts
-#' @param initial_backoff Initial backoff time in seconds
-#' @param resume_from Optional path to a previously saved intermediate result to resume from
-#' @return Tibble containing postcode data with coordinates
-process_postcodes <- function(postcodes, batch_size = 50, max_tries = 5, initial_backoff = 1, resume_from = NULL) {
-  # Create retry function with exponential backoff
-  retry_with_backoff <- function(expr, tries = max_tries, backoff = initial_backoff) {
-    attempt <- 1
-    while (attempt <= tries) {
-      result <- tryCatch(
-        {
-          expr()
-        },
-        error = function(e) {
-          if (attempt == tries) {
-            logger::log_error("All retry attempts failed. Last error: {e$message}")
-            stop(e)
-          }
-          backoff_time <- backoff * 2^(attempt - 1)
-          logger::log_warn("API request failed: {e$message}. Retrying in {backoff_time} seconds. Attempt {attempt}/{tries}")
-          Sys.sleep(backoff_time)
-          NULL
-        }
-      )
-      if (!is.null(result)) {
-        return(result)
-      }
-      attempt <- attempt + 1
-    }
-  }
-
-  # Handle resuming from previous run if specified
-  if (!is.null(resume_from) && file.exists(resume_from)) {
-    logger::log_info("Resuming from {resume_from}")
-    processed_data <- readRDS(resume_from)
-    processed_postcodes <- processed_data$postcode
-    postcodes <- postcodes[!postcodes %in% processed_postcodes]
-
-    if (length(postcodes) == 0) {
-      logger::log_info("All postcodes already processed")
-      return(processed_data)
-    }
-    logger::log_info("{length(postcodes)} postcodes remain to be processed")
-  }
-
-  n_batches <- ceiling(length(postcodes) / batch_size)
-  # Split postcodes into batches
-  batch_indices <- split(
-    seq_along(postcodes),
-    ceiling(seq_along(postcodes) / batch_size)
-  )
-
-  # Process batches sequentially with retry logic
-  logger::log_info(
-    "Processing {length(postcodes)} postcodes in {n_batches} batches"
-  )
-
-  results <- map(
-    seq_along(batch_indices),
-    function(i) {
-      idx <- batch_indices[[i]] # Fixed batch indexing
-      logger::log_info("Processing batch {i}/{n_batches} (postcodes {min(idx)}-{max(idx)})")
-
-      # Add small delay between batches to avoid hammering the API
-      Sys.sleep(0.2)
-
-      batch_postcodes <- list(postcodes = postcodes[idx])
-
-      # Use retry logic for the API call
-      batch_result <- retry_with_backoff(function() {
-        bulk_postcode_lookup(batch_postcodes)
-      })
-
-      # Process successful results, explicitly handling NULLs
-      results <- map(batch_result, function(x) {
-        if (is.null(x) || is.null(x$result)) {
-          logger::log_warn("Empty result for a postcode in batch {i}")
-          return(NULL)
-        }
-        res <- x$result
-        res <- res[names(res) %in% CONFIG$postcode_vars]
-        res
-      })
-
-      # Remove NULL results
-      results <- Filter(Negate(is.null), results)
-
-      return(results)
-    },
-    .progress = TRUE
-  )
-
-  # Save intermediate results every 10 batches
-  save_interval <- 10
-  for (i in seq_along(results)) {
-    if (i %% save_interval == 0 || i == length(results)) {
-      logger::log_info("Saving intermediate results after batch {i}/{length(results)}")
-      intermediate_path <- here::here("data", "temp", glue::glue("postcode_data_intermediate_{i}.rds"))
-
-      # Ensure temp directory exists
-      temp_dir <- dirname(intermediate_path)
-      if (!dir.exists(temp_dir)) {
-        dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
-      }
-
-      # Combine results so far
-      intermediate_results <- data.table::rbindlist(
-        unlist(results[1:i], recursive = FALSE),
-        fill = TRUE,
-        use.names = TRUE
-      )
-
-      saveRDS(intermediate_results, intermediate_path)
-    }
-  }
-
-  # Combine all results using data.table
-  logger::log_info("Combining results into single data frame")
-  final_results <- data.table::rbindlist(
-    unlist(results, recursive = FALSE),
-    fill = TRUE,
-    use.names = TRUE
-  ) %>%
-    as_tibble() %>%
-    suppressWarnings() %>%
-    filter(!is.na(eastings) & !is.na(northings)) %>%
-    mutate(
-      postcode = str_remove_all(postcode, fixed(" "))
-    ) %>%
-    rename(
-      northing = northings,
-      easting = eastings
-    )
-
-  # If resuming, combine with previous results
-  if (!is.null(resume_from) && file.exists(resume_from)) {
-    processed_data <- readRDS(resume_from)
-    final_results <- bind_rows(processed_data, final_results)
-  }
-
-  logger::log_info("Postcode processing complete. Successfully processed {nrow(final_results)} postcodes")
-  return(final_results)
-}
-
-#' Get postcode data, either from cache or by fetching new data
-#' @param df Data frame containing postcodes
-#' @param refresh Boolean indicating whether to force refresh of postcode data
-#' @return Tibble containing postcode data
-get_postcode_data <- function(df, refresh = FALSE) {
-  if (!refresh && file.exists(CONFIG$postcode_cache_path)) {
-    logger::log_info("Loading cached postcode data")
-    return(readRDS(CONFIG$postcode_cache_path))
-  }
-
-  logger::log_info("Fetching new postcode data")
-  unique_postcodes <- unique(df$postcode)
-
-  postcode_data <- process_postcodes(unique_postcodes)
-  saveRDS(postcode_data, CONFIG$postcode_cache_path)
-
-  postcode_data
-}
+# Postcode processing utilities (shared across scripts)
+source(here::here("scripts", "R", "utils", "postcode_processing_utils.R"))
 
 # Export Functions
 ############################################################
@@ -364,31 +202,29 @@ export_data <- function(df) {
 #' @param refresh_postcodes Boolean indicating whether to refresh postcode data
 #' @return NULL
 main <- function(refresh_postcodes = TRUE) {
-  tryCatch({
-    # Setup
-    initialise_environment()
-    setup_logging()
-    setup_parallel()
+  # Setup
+  initialise_environment()
+  setup_logging()
+  setup_parallel()
 
-    # Load and clean data
-    raw_data <- load_all_years()
+  # Load and clean data
+  raw_data <- load_all_years()
 
-    # Process postcode data
-    postcode_data <- get_postcode_data(raw_data, refresh = refresh_postcodes)
+  # Process postcode data (cached unless refresh = TRUE)
+  postcode_data <- get_postcode_data(
+    raw_data,
+    refresh = refresh_postcodes,
+    cache_path = CONFIG$postcode_cache_path
+  )
 
-    # Merge data
-    final_data <- left_join(raw_data, postcode_data, by = join_by(postcode)) %>%
-      mutate(house_id = row_number()) %>%
-      relocate(house_id, .before = transaction_id)
+  # Merge and add identifier
+  final_data <- left_join(raw_data, postcode_data, by = join_by(postcode)) %>%
+    mutate(house_id = row_number()) %>%
+    relocate(house_id, .before = transaction_id)
 
-    # Export results
-    export_data(final_data)
-  }, error = function(e) {
-    logger::log_error("Fatal error: {e$message}")
-    stop(e)
-  }, finally = {
-    logger::log_info("Script finished at {Sys.time()}")
-  })
+  # Export results
+  export_data(final_data)
+  logger::log_info("Script finished at {Sys.time()}")
 }
 
 # Execute main function if script is run directly
