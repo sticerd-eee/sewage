@@ -574,7 +574,7 @@ Because MSOAs differ considerably in land area, it's difficult to draw conclusio
 
 ### Population-Density Weighted Spills {#sec-03-03-02-popdens}
 
-The maps display the total number and duration of sewage overflows, normalised by residents per square kilometre. Spill intensity appears to be higher in the North and the South West. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, higher rainfall, or both.
+The maps below display the total number and duration of sewage overflows, normalised by residents per square kilometre. Spill intensity appears to be higher in the North and the South West. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, higher rainfall, or both.
 
 ::: panel-tabset
 #### Count
@@ -906,7 +906,7 @@ plots_list_violin <- map(2023:2021, function(yr) {
 
   # Create the violin plot with overlaid boxplots and facets by spill_metric
   ggplot(data_long, aes(x = water_company, y = value, fill = water_company)) +
-    geom_violin(trim = FALSE, alpha = 0.7) +
+    geom_violin(trim = FALSE, alpha = 0.7, scale = "width") +
     geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) +
     scale_fill_viridis_d(option = "magma") +
     facet_wrap(~spill_metric, scales = "free_y") +

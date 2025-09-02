@@ -50,7 +50,9 @@ required_packages <- c(
   "servr",
   "viridis",
   "readxl",
-  "reactable"
+  "reactable",
+  "plotly",
+  "ggExtra"
 )
 install_if_missing <- function(packages) {
   new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
@@ -128,6 +130,14 @@ dat_mo <- import(
     "spill_aggregated",
     "agg_spill_dry_mo.parquet"
   ),
+)
+
+# Rainfall data
+rainfall_yr <- import(
+  here::here("data", "processed", "rainfall", "rainfall_agg_yr.parquet"),
+)
+rainfall_mo <- import(
+  here::here("data", "processed", "rainfall", "rainfall_agg_mo.parquet"),
 )
 
 # Spill sites
@@ -355,12 +365,12 @@ table_notes <- tags$div(
 
 # 6) Build summaries and tables
 thr <- 1.25 # BBC data exclusion threshold for United Utilities consistency check
-united22 <- dat_yr |>
-  filter(water_company == "United Utilities") |>
-  group_by(year) |>
+united22 <- dat_yr %>%
+  filter(water_company == "United Utilities") %>%
+  group_by(year) %>%
   summarise(
     prop_gt_1.3 = mean(spill_count_yr / spill_count_ea > thr, na.rm = TRUE)
-  ) |>
+  ) %>%
   pull(prop_gt_1.3)
 
 dry_spills_summary_ea <- compute_dry_summary(dat_yr, sample = "EA", thr = thr)
@@ -411,9 +421,9 @@ Going forward, we therefore report results using two definitions only: **(i) no 
 
 The map below shows all sites where dry spills occurred between 2021–2023, categorized by the most restrictive condition under which they experienced dry spills. Sites are colored using a traffic-light system:
 
-- **🟢 Green**: Sites with dry spills under the  *2-day* window with *partial data allowed* (allows missing values when applying the 0.25mm threshold)
-- **🟠 Orange**: Sites with dry spills under the *4-day* window with *partial data allowed*
 - **🔴 Red**: Sites with dry spills under the strictest *4-day* window with *complete data required* (full rainfall coverage, no missing values)
+- **🟠 Orange**: Sites with dry spills under the *4-day* window with *partial data allowed*
+- **🟢 Green**: Sites with dry spills under the  *2-day* window with *partial data allowed* (allows missing values when applying the 0.25mm threshold)
 
 We prefer including sites with missing rainfall data (orange), as these are concentrated along the coast, where exclusion would remove otherwise valid estimates.
 
@@ -421,8 +431,8 @@ We prefer including sites with missing rainfall data (orange), as these are conc
 #| eval: false
 
 # Aggregate dry spill data by site across all years
-spill_sites_dry <- dat_yr |>
-  dplyr::group_by(site_id, water_company) |>
+spill_sites_dry <- dat_yr %>%
+  dplyr::group_by(site_id, water_company) %>%
   dplyr::summarise(
     # Sum across years for each condition
     dry_spill_weak_total = sum(dry_spill_count_yr_r1_d01_weak, na.rm = TRUE),
@@ -475,13 +485,13 @@ spill_sites_dry <- dat_yr |>
       na.rm = TRUE
     ),
     .groups = "drop"
-  ) |>
+  ) %>%
   # Filter to sites with at least one dry spill under any condition
   dplyr::filter(
     dry_spill_weak_total > 0 |
       dry_spill_moderate_total > 0 |
       dry_spill_strict_total > 0
-  ) |>
+  ) %>%
   # Create hierarchical categorization (strict hierarchy)
   dplyr::mutate(
     condition_category = dplyr::case_when(
@@ -499,7 +509,7 @@ spill_sites_dry <- dat_yr |>
     ),
     # Total dry spills (using maximum across conditions for each year to avoid double counting)
     total_dry_spills = dry_spills_2021 + dry_spills_2022 + dry_spills_2023
-  ) |>
+  ) %>%
   # Join with spill sites for coordinates
   dplyr::left_join(spill_sites, by = c("site_id", "water_company"))
 
@@ -912,9 +922,9 @@ walk2(
 
 ### Total Dry Spills {#sec-04-04-01-total}
 
-XXX The maps below display the total number of dry sewage overflow spills, aggregated at the Middle Layer Super Output Area (MSOA)---a standard statistical geography in England designed to represent areas with roughly similar population sizes (~8000 people or ~3000 households).
+The maps below display the total number of dry spills, aggregated at the Middle Layer Super Output Area (MSOA)---a standard statistical geography in England designed to represent areas with roughly similar population sizes (~8000 people or ~3000 households).
 
-XXX Because MSOAs differ considerably in land area, it's difficult to draw conclusions. Even so, dry spills appear relatively evenly distributed across England. XXX
+Because MSOAs differ considerably in land area, it's difficult to draw conclusions. Still, relative to the overall spill distribution (see @sec-03-03-01-total), dry spills are concentrated in a smaller set of MSOAs. Within this subset, spill activity is particularly pronounced in the North and South West.
 
 ::: panel-tabset
 #### Count
@@ -932,7 +942,7 @@ XXX Because MSOAs differ considerably in land area, it's difficult to draw concl
 
 ### Population-Density Weighted Dry Spills {#sec-04-04-02-popdens}
 
-XXX The maps display the total number of dry sewage overflows, normalised by residents per square kilometre. Dry spill intensity appears to be higher in certain regions. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, operational issues, or other factors. XXX
+The maps below display the total number of dry spills, normalised by residents per square kilometre. Spill intensity appears to be higher in the North and the South West. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, higher rainfall, or both.
 
 ::: panel-tabset
 #### Count
@@ -946,4 +956,742 @@ XXX The maps display the total number of dry sewage overflows, normalised by res
 ```{=html}
 <iframe src="book_figs/dat_dry_sf23_dry_popdens_hours.html" width="800" height="600" frameborder="0"></iframe>
 ```
+:::
+
+## Dry vs All Spill Correlation {#sec-04-05-dry-all-corr}
+
+::: panel-tabset
+#### Spill Count
+
+```{r corr-dry-all-count}
+# Prepare data
+corr_dat <- dat_yr %>%
+  dplyr::select(
+    water_company,
+    year,
+    site_id,
+    spill_count_yr,
+    dry_spill_count_yr_r1_d01_weak
+  ) %>%
+  dplyr::mutate(
+    water_company = as.factor(water_company),
+    year = as.factor(year)
+  )
+
+# Correlation (complete cases)
+correlation_count <- cor(
+  corr_dat$spill_count_yr,
+  corr_dat$dry_spill_count_yr_r1_d01_weak,
+  use = "complete.obs"
+)
+
+# Scatter with 1:1 reference
+p_count <- ggplot(
+  corr_dat,
+  aes(
+    x = spill_count_yr,
+    y = dry_spill_count_yr_r1_d01_weak,
+    color = water_company,
+    shape = year,
+    text = paste(
+      "Water Company:", water_company,
+      "<br>Year:", year,
+      "<br>All Spill Count:", spill_count_yr,
+      "<br>Dry Spill Count:", dry_spill_count_yr_r1_d01_weak,
+      "<br>Site ID:", site_id
+    )
+  )
+) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_abline(slope = 1, intercept = 0, color = "black", linewidth = 0.1) +
+  labs(
+    title = "Dry vs All: Spill Count Correlation",
+    subtitle = paste0("r = ", round(correlation_count, 3)),
+    x = "All Spill Count (yearly)",
+    y = "Dry Spill Count (yearly, 9km², 2-day, partial)",
+    color = "Water Company",
+    shape = "Year"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0),
+    plot.subtitle = element_text(hjust = 0, size = 11),
+    legend.title = element_text(face = "bold", size = 11),
+    legend.text = element_text(size = 10),
+    legend.position = "right"
+  )
+
+interactive_plot_count <- ggplotly(
+  p_count,
+  tooltip = "text",
+  dynamicTicks = TRUE
+) %>%
+  plotly::layout(
+    showlegend = FALSE,
+    title = list(
+      text = paste0(
+        "Dry vs All: Spill Count Correlation<br>",
+        "<sup>r = ", round(correlation_count, 3), "</sup>"
+      ),
+      x = 0.5,
+      font = list(size = 12, family = "Arial")
+    )
+  ) %>%
+  config(displayModeBar = FALSE)
+
+interactive_plot_count
+```
+
+#### Spill Duration
+
+```{r corr-dry-all-hrs}
+# Prepare data
+corr_dat_hrs <- dat_yr %>%
+  dplyr::select(
+    water_company,
+    year,
+    site_id,
+    spill_hrs_yr,
+    dry_spill_hrs_yr_r1_d01_weak
+  ) %>%
+  dplyr::mutate(
+    water_company = as.factor(water_company),
+    year = as.factor(year)
+  )
+
+# Correlation (complete cases)
+correlation_hrs <- cor(
+  corr_dat_hrs$spill_hrs_yr,
+  corr_dat_hrs$dry_spill_hrs_yr_r1_d01_weak,
+  use = "complete.obs"
+)
+
+# Scatter with 1:1 reference
+p_hrs <- ggplot(
+  corr_dat_hrs,
+  aes(
+    x = spill_hrs_yr,
+    y = dry_spill_hrs_yr_r1_d01_weak,
+    color = water_company,
+    shape = year,
+    text = paste(
+      "Water Company:", water_company,
+      "<br>Year:", year,
+      "<br>All Spill Hours:", spill_hrs_yr,
+      "<br>Dry Spill Hours:", dry_spill_hrs_yr_r1_d01_weak,
+      "<br>Site ID:", site_id
+    )
+  )
+) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_abline(slope = 1, intercept = 0, color = "black", linewidth = 0.1) +
+  labs(
+    title = "Dry vs All: Spill Duration Correlation",
+    subtitle = paste0("r = ", round(correlation_hrs, 3)),
+    x = "All Spill Duration (hours, yearly)",
+    y = "Dry Spill Duration (hours, yearly, 9km², 2-day, partial)",
+    color = "Water Company",
+    shape = "Year"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0),
+    plot.subtitle = element_text(hjust = 0, size = 11),
+    legend.title = element_text(face = "bold", size = 11),
+    legend.text = element_text(size = 10),
+    legend.position = "right"
+  )
+
+interactive_plot_hrs <- ggplotly(
+  p_hrs,
+  tooltip = "text",
+  dynamicTicks = TRUE
+) %>%
+  plotly::layout(
+    showlegend = FALSE,
+    title = list(
+      text = paste0(
+        "Dry vs All: Spill Duration Correlation<br>",
+        "<sup>r = ", round(correlation_hrs, 3), "</sup>"
+      ),
+      x = 0.5,
+      font = list(size = 12, family = "Arial")
+    )
+  ) %>%
+  config(displayModeBar = FALSE)
+
+interactive_plot_hrs
+```
+:::
+
+## Dry Spill vs Rainfall {#sec-04-06-dry-vs-rain}
+
+```{r prepare-dry-rain}
+dat_mo_rain <- left_join(
+  dat_mo, rainfall_mo, 
+  by = join_by(site_id, water_company, year, month)
+)
+
+# Build reusable site-month dataset with rainfall and dry spill metrics
+dat_mo_rain_df <- dat_mo_rain |>
+  dplyr::mutate(
+    dry_rate = dplyr::if_else(
+      spill_count_mo > 0,
+      dry_spill_count_mo_r1_d01_weak / spill_count_mo,
+      NA_real_
+    )
+  ) |>
+  dplyr::filter(!is.na(rainfall_r9_mo))
+```
+
+### Scatter with Marginal Distributions {#sec-04-06-01-scatter}
+
+```{r scatter-marginals}
+base_point_col <- viridis::viridis(1, option = "magma")
+
+# Scatter: Count
+p_scatter_count <- ggplot(
+  dat_mo_rain_df,
+  aes(x = rainfall_r9_mo, y = dry_spill_count_mo_r1_d01_weak)) +
+  geom_point(alpha = 0.2, size = 0.7, color = base_point_col) +
+  labs(
+    title = "Rainfall vs Dry Spill Count (Site-Month)",
+    x = "Monthly Rainfall (mm, 9-cell)",
+    y = "Dry Spill Count"
+  ) +
+  theme_pref
+
+plot_scatter_count_marg <- ggExtra::ggMarginal(
+  p_scatter_count,
+  type = "histogram",
+  fill = "grey70",
+  alpha = 0.6,
+  bins = 40
+)
+
+# Scatter: Duration
+p_scatter_hrs <- ggplot(
+  dat_mo_rain_df,
+  aes(x = rainfall_r9_mo, y = dry_spill_hrs_mo_r1_d01_weak)
+) +
+  geom_point(alpha = 0.2, size = 0.7, color = base_point_col) +
+  labs(
+    title = "Rainfall vs Dry Spill Duration (Site-Month)",
+    x = "Monthly Rainfall (mm, 9-cell)",
+    y = "Dry Spill Duration (hours)"
+  ) +
+  theme_pref
+
+plot_scatter_hrs_marg <- ggExtra::ggMarginal(
+  p_scatter_hrs,
+  type = "histogram",
+  fill = "grey70",
+  alpha = 0.6,
+  bins = 40
+)
+
+# Scatter: Rate (dry/total)
+p_scatter_rate <- ggplot(
+  dplyr::filter(dat_mo_rain_df, !is.na(dry_rate) & is.finite(dry_rate)),
+  aes(x = rainfall_r9_mo, y = dry_rate)
+) +
+  geom_point(alpha = 0.25, size = 0.7, color = base_point_col) +
+  labs(
+    title = "Rainfall vs Share of Dry/All Spills (Site-Month)",
+    x = "Monthly Rainfall (mm, 9-cell)",
+    y = "Dry Spills / Total Spills"
+  ) +
+  theme_pref
+
+plot_scatter_rate_marg <- ggExtra::ggMarginal(
+  p_scatter_rate,
+  type = "histogram",
+  fill = "grey70",
+  alpha = 0.6,
+  bins = 40
+)
+```
+
+::: panel-tabset
+#### Count
+
+```{r show-scatter-marg-count}
+plot_scatter_count_marg
+```
+
+#### Duration
+
+```{r show-scatter-marg-hrs}
+plot_scatter_hrs_marg
+```
+
+#### Rate
+
+```{r show-scatter-marg-rate}
+plot_scatter_rate_marg
+```
+
+:::
+
+## Frequency and Duration of Dry Spills {#sec-04-07-frequency-duration}
+
+Both the summary tables and the histograms show that dry-spill frequency and duration are very positively skewed. As with all right-skewed outcomes bounded at zero, log transforms help visualise the distribution.
+
+### Summary Tables {#sec-04-07-01-summary-tables}
+
+```{r build-dry-summary-tables}
+# r1_d01_weak: 9km² rainfall, 2-day window, partial data OK
+dat_yr_dry_list <- purrr::map(
+  2023:2021,
+  function(yr) {
+    dat_yr %>%
+      dplyr::filter(year == yr) %>%
+      dplyr::select(
+        water_company,
+        year,
+        dry_spill_count_yr_r1_d01_weak,
+        dry_spill_hrs_yr_r1_d01_weak
+      ) %>%
+      dplyr::mutate(
+        `Share of sites with any dry spill (count > 0)` = dplyr::if_else(
+          dry_spill_count_yr_r1_d01_weak > 0, 1L, 0L
+        ),
+        `Share of sites with annual dry spill duration ≥ 15 minutes (total hours ≥ 0.25)` = dplyr::if_else(
+          dry_spill_hrs_yr_r1_d01_weak >= 0.25, 1L, 0L
+        )
+      ) %>%
+      dplyr::rename(
+        `Dry Spill Count` = dry_spill_count_yr_r1_d01_weak,
+        `Dry Spill Duration (hrs)` = dry_spill_hrs_yr_r1_d01_weak,
+        `Water Company` = water_company
+      )
+  }
+)
+```
+
+::: panel-tabset
+#### 2023
+
+```{r show-dry-summary-2023}
+modelsummary::datasummary_skim(dat_yr_dry_list[[1]], fmt = 2)
+```
+
+#### 2022
+
+```{r show-dry-summary-2022}
+modelsummary::datasummary_skim(dat_yr_dry_list[[2]], fmt = 2)
+```
+
+#### 2021
+
+```{r show-dry-summary-2021}
+modelsummary::datasummary_skim(dat_yr_dry_list[[3]], fmt = 2)
+```
+
+:::
+
+### Histogram in 2023 {#sec-04-07-02-histogram}
+
+```{r hist-dry-helpers}
+plot_hist_dry <- function(data = dat_yr, yr, x_var, x_label, bins, title) {
+  dplyr::filter(data, year == yr) %>%
+    dplyr::filter({{ x_var }} > 0) %>%
+    (\(df) ggplot(df, aes(x = {{ x_var }})))() +
+    geom_histogram(
+      bins = bins,
+      fill = viridis::viridis(1, option = "magma"),
+      alpha = 0.7,
+      col = "black"
+    ) +
+    labs(
+      title = title,
+      x = x_label,
+      y = "Count"
+    ) +
+    theme_pref
+}
+
+plot_hist_norm_dry <- function(
+  data = dat_yr,
+  yr,
+  x_var,
+  x_label,
+  bins,
+  title
+) {
+  data <- dplyr::filter(data, year == yr) %>%
+    dplyr::filter({{ x_var }} > 0) %>%
+    dplyr::mutate({{ x_var }} := log(1 + {{ x_var }}))
+
+  mu <- mean(dplyr::pull(data, {{ x_var }}), na.rm = TRUE)
+  sigma <- stats::sd(dplyr::pull(data, {{ x_var }}), na.rm = TRUE)
+
+  ggplot(data, aes(x = {{ x_var }})) +
+    geom_histogram(
+      aes(y = ..density..),
+      bins = bins,
+      fill = viridis::viridis(1, option = "magma"),
+      alpha = 0.6,
+      col = "black"
+    ) +
+    stat_function(
+      fun = dnorm,
+      args = list(mean = mu, sd = sigma),
+      color = viridis::viridis(3, option = "magma")[2],
+      alpha = 0.7,
+      linewidth = 0.8
+    ) +
+    labs(
+      title = title,
+      x = x_label,
+      y = "Density"
+    ) +
+    theme_pref
+}
+```
+
+::: panel-tabset
+#### Dry Spill Duration
+
+```{r hist-dry-hrs-2023}
+plot_hist_dry(
+  yr = 2023,
+  x_var = dry_spill_hrs_yr_r1_d01_weak,
+  x_label = "Dry Spill Hours",
+  bins = 50,
+  title = "Duration of Dry Spills of all Water Companies in 2023 (>0)"
+)
+```
+
+#### Dry Spill Count
+
+```{r hist-dry-count-2023}
+plot_hist_dry(
+  yr = 2023,
+  x_var = dry_spill_count_yr_r1_d01_weak,
+  x_label = "Dry Spill Count",
+  bins = 60,
+  title = "Count of Dry Spills of all Water Companies in 2023 (>0)"
+)
+```
+
+#### Log Dry Spill Duration
+
+```{r hist-dry-log-hrs-2023}
+plot_hist_norm_dry(
+  yr = 2023,
+  x_var = dry_spill_hrs_yr_r1_d01_weak,
+  x_label = "Dry Spill Hours",
+  bins = 50,
+  title = "(1+Log) Duration of Dry Spills of all Water Companies in 2023 (>0) with Normal Curve"
+)
+```
+
+#### Log Dry Spill Count
+
+```{r hist-dry-log-count-2023}
+plot_hist_norm_dry(
+  yr = 2023,
+  x_var = dry_spill_count_yr_r1_d01_weak,
+  x_label = "Dry Spill Count",
+  bins = 50,
+  title = "(1+Log) Count of Dry Spills of all Water Companies in 2023 (>0) with Normal Curve"
+)
+```
+
+:::
+
+## Temporal Dry Spill Distribution {#sec-04-08-temporal}
+
+Dry spills also show seasonality. Monthly totals tend to be higher in the wetter months (roughly October–March). However, the difference is not as great as one would expect given the differences in rainfall.
+
+```{r clean-dry-data-mo}
+# Build monthly dry-spill panel (r1_d01_weak)
+dat_mo_dry_clean <- dat_mo %>%
+  dplyr::filter(dry_spill_hrs_mo_r1_d01_weak >= 0) %>%
+  dplyr::mutate(
+    month = factor(month, levels = 1:12, labels = month.abb),
+    year = factor(year)
+  ) %>%
+  dplyr::group_by(year) %>%
+  dplyr::mutate(
+    # Per-year winsorization at 1st/99th percentile for dry counts and hours
+    dplyr::across(
+      c(dry_spill_count_mo_r1_d01_weak, dry_spill_hrs_mo_r1_d01_weak),
+      ~ DescTools::Winsorize(
+        .x,
+        val = stats::quantile(.x, probs = c(0.01, 0.99), na.rm = TRUE)
+      )
+    )
+  ) %>%
+  dplyr::group_by(year, month) %>%
+  dplyr::summarize(
+    dry_spill_hrs_mo = sum(dry_spill_hrs_mo_r1_d01_weak, na.rm = TRUE),
+    dry_spill_count_mo = sum(dry_spill_count_mo_r1_d01_weak, na.rm = TRUE),
+    unique_spill_sites = dplyr::n_distinct(site_id),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    dplyr::across(
+      c(dry_spill_hrs_mo, dry_spill_count_mo),
+      ~ log(1 + .),
+      .names = "log_{.col}"
+    ),
+    dplyr::across(
+      c(dry_spill_hrs_mo, dry_spill_count_mo),
+      ~ . / unique_spill_sites,
+      .names = "{.col}_site"
+    )
+  )
+```
+
+```{r clean-rain-data-mo}
+# Build monthly rainfall panel (9 km^2: 3×3 grid max)
+dat_mo_rain_clean <- rainfall_mo |>
+  dplyr::mutate(
+    month = factor(month, levels = 1:12, labels = month.abb),
+    year = factor(year)
+  ) |>
+  dplyr::group_by(year, month) |>
+  dplyr::summarize(
+    avg_rainfall_mo_r9 = mean(rainfall_r9_mo, na.rm = TRUE),
+    med_rainfall_mo_r9 = median(rainfall_r9_mo, na.rm = TRUE),
+    unique_spill_sites = dplyr::n_distinct(site_id),
+    .groups = "drop"
+  )
+```
+
+### Total Dry Spill Duration and Count {#sec-04-08-01-total}
+
+::: panel-tabset
+#### Dry Spill Duration
+
+```{r temporal-dry-hrs-plot}
+plot_monthly_bars <- function(data, y_var, title, y_label) {
+  ggplot(data, aes(x = month, y = {{ y_var }}, fill = year)) +
+    geom_bar(
+      stat = "identity",
+      position = position_dodge(width = 0.9),
+      width = 0.8,
+      alpha = 0.9
+    ) +
+    scale_fill_viridis_d(option = "magma") +
+    labs(
+      title = title,
+      y = y_label,
+      x = NULL,
+      fill = "Year"
+    ) +
+    theme_pref +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+}
+
+fig_dry_temporal_hrs <- plot_monthly_bars(
+  dat_mo_dry_clean,
+  dry_spill_hrs_mo,
+  "Monthly Dry Spill Duration by Year",
+  "Dry Spill Duration per Month (hrs)"
+)
+
+fig_dry_temporal_hrs
+```
+
+#### Dry Spill Count
+
+```{r temporal-dry-count-plot}
+fig_dry_temporal_count <- plot_monthly_bars(
+  dat_mo_dry_clean,
+  dry_spill_count_mo,
+  "Monthly Dry Spill Count by Year",
+  "Dry Spill Count per Month"
+)
+
+fig_dry_temporal_count
+```
+
+#### Rainfall (9 km^2)
+
+```{r temporal-rain-plot}
+fig_rain_temporal <- plot_monthly_bars(
+  dat_mo_rain_clean,
+  avg_rainfall_mo_r9,
+  "Monthly Rainfall (9 km^2) by Year",
+  "Average of site-level monthly rainfall totals (mm), 9 km² grid"
+)
+
+fig_rain_temporal
+```
+
+:::
+
+### Per Unique Dry Spill Site {#sec-04-08-02-unique}
+
+::: panel-tabset
+#### Dry Spill Duration
+
+```{r temporal-dry-hrs-plot-standardised}
+plot_monthly_bars(
+  dat_mo_dry_clean,
+  dry_spill_hrs_mo_site,
+  "Monthly Dry Spill Duration by Year per Unique Active Spill Site",
+  "Dry Spill Duration per Month (hrs)"
+)
+```
+
+#### Dry Spill Count
+
+```{r temporal-dry-count-plot-standardised}
+plot_monthly_bars(
+  dat_mo_dry_clean,
+  dry_spill_count_mo_site,
+  "Monthly Dry Spill Count by Year",
+  "Dry Spill Count per Month"
+)
+```
+
+#### Rainfall (9 km^2)
+
+```{r temporal-rain-plot-standardised}
+# Average monthly rainfall per site is already a per-site metric.
+plot_monthly_bars(
+  dat_mo_rain_clean,
+  avg_rainfall_mo_r9,
+  "Monthly Rainfall (9 km^2) by Year per Unique Active Spill Site",
+  "Average of site-level monthly rainfall totals (mm), 9 km² grid"
+)
+```
+
+:::
+
+## Dry Spill Distribution by Water Company {#sec-04-09-company}
+
+The violin plots and bar charts below show the dry spill count and duration, normalised by the number of active spill sites (i.e., averages across sites) for each water company. Patterns mirror overall spill activity: some companies show heavier right tails and higher average levels.
+
+### Violin Plots {#sec-04-09-01-violin}
+
+```{r build-dry-violin-plots}
+# Generate a dry-only plot for each year (r1_d01_weak)
+plots_list_dry_violin <- purrr::map(2023:2021, function(yr) {
+  # Filter data by year
+  data_year <- dat_yr %>%
+    dplyr::filter(year == yr)
+
+  # Reshape to long format for both dry metrics
+  data_long <- data_year %>%
+    tidyr::pivot_longer(
+      cols = c(dry_spill_count_yr_r1_d01_weak, dry_spill_hrs_yr_r1_d01_weak),
+      names_to = "dry_metric",
+      values_to = "value"
+    ) %>%
+    dplyr::mutate(
+      dry_metric = dplyr::recode(
+        dry_metric,
+        dry_spill_count_yr_r1_d01_weak = "Dry Spill Count",
+        dry_spill_hrs_yr_r1_d01_weak = "Dry Spill Duration"
+      )
+    )
+
+  # Violin with overlaid boxplots, facets by metric
+  ggplot(data_long, aes(x = water_company, y = value, fill = water_company)) +
+    geom_violin(trim = FALSE, alpha = 0.7, scale = "width") +
+    geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) +
+    scale_fill_viridis_d(option = "magma") +
+    facet_wrap(~dry_metric, scales = "free_y") +
+    labs(
+      title = paste(
+        "Distribution of Dry Spill Statistics by Water Company in",
+        yr
+      ),
+      x = "Water Company",
+      y = "Value"
+    ) +
+    theme_pref +
+    theme(legend.position = "none")
+})
+```
+
+::: panel-tabset
+#### 2023
+
+```{r show-dry-violin-2023}
+plots_list_dry_violin[[1]]
+```
+
+#### 2022
+
+```{r show-dry-violin-2022}
+plots_list_dry_violin[[2]]
+```
+
+#### 2021
+
+```{r show-dry-violin-2021}
+plots_list_dry_violin[[3]]
+```
+
+:::
+
+### Bar Charts {#sec-04-09-02-bar}
+
+```{r build-dry-bar-plots}
+plots_list_dry_bar <- purrr::map(2023:2021, function(yr) {
+  # Filter data for the specified year
+  data_year <- dat_yr %>%
+    dplyr::filter(year == yr)
+
+  # Reshape to long format and calculate average values by water company and metric
+  data_summary <- data_year %>%
+    tidyr::pivot_longer(
+      cols = c(dry_spill_count_yr_r1_d01_weak, dry_spill_hrs_yr_r1_d01_weak),
+      names_to = "dry_metric",
+      values_to = "value"
+    ) %>%
+    dplyr::group_by(water_company, dry_metric) %>%
+    dplyr::summarise(avg_value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::mutate(
+      dry_metric = dplyr::recode(
+        dry_metric,
+        dry_spill_count_yr_r1_d01_weak = "Dry Spill Count",
+        dry_spill_hrs_yr_r1_d01_weak = "Dry Spill Duration"
+      )
+    )
+
+  # Bar chart (averages) with uniform viridis magma fill
+  ggplot(data_summary, aes(x = water_company, y = avg_value)) +
+    geom_bar(
+      stat = "identity",
+      fill = viridis::viridis(1, option = "magma"),
+      alpha = 0.7,
+      colour = "black",
+      position = "dodge"
+    ) +
+    facet_wrap(~dry_metric, scales = "free_y") +
+    labs(
+      title = paste("Average Dry Spill Statistics by Water Company in", yr),
+      x = "Water Company",
+      y = "Average Value"
+    ) +
+    theme_pref
+})
+```
+
+::: panel-tabset
+#### 2023
+
+```{r show-dry-bar-2023}
+plots_list_dry_bar[[1]]
+```
+
+#### 2022
+
+```{r show-dry-bar-2022}
+plots_list_dry_bar[[2]]
+```
+
+#### 2021
+
+```{r show-dry-bar-2021}
+plots_list_dry_bar[[3]]
+```
+
 :::

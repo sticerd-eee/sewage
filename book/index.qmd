@@ -16,6 +16,10 @@ execute:
 
 # Updates {#sec-index}
 
+## 02/09/2025 {.unnumbered}
+
+Rainfall vs Dry Spills visualisations in Dry Spill Exploration (@sec-04-dry-spills).
+
 ## 29/08/2025 {.unnumbered}
 
 Added dry spill analysis section with three-condition traffic-light mapping system, geographic distribution analysis with Count + Duration choropleth maps, and MSOA-level aggregation with population-adjusted metrics (Dry Spill Exploration, @sec-04-dry-spills).
