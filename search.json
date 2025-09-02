@@ -13,8 +13,8 @@
     "objectID": "index.html#section",
     "href": "index.html#section",
     "title": "Sewage in Our Waters",
-    "section": "29/08/2025",
-    "text": "29/08/2025\nAdded comprehensive dry spill analysis section with three-condition traffic-light mapping system, geographic distribution analysis with Count + Duration choropleth maps, and MSOA-level aggregation with population-adjusted metrics (Dry Spill Exploration, Chapter 4, Section 4.4).\nAdded MSOA-level aggregation, population-adjusted metrics, and multi-perspective choropleth visualizations to sewage spill geographic analysis (Geographic Distribution, Section 3.3).",
+    "section": "02/09/2025",
+    "text": "02/09/2025\nRainfall vs Dry Spills visualisations in Dry Spill Exploration (Chapter 4).",
     "crumbs": [
       "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
     ]
@@ -23,8 +23,8 @@
     "objectID": "index.html#section-1",
     "href": "index.html#section-1",
     "title": "Sewage in Our Waters",
-    "section": "03/06/2025",
-    "text": "03/06/2025\nAdded section on hedonic regression analysis of house prices (Hedonic Regression Analysis, Chapter 7).",
+    "section": "29/08/2025",
+    "text": "29/08/2025\nAdded dry spill analysis section with three-condition traffic-light mapping system, geographic distribution analysis with Count + Duration choropleth maps, and MSOA-level aggregation with population-adjusted metrics (Dry Spill Exploration, Chapter 4).\nAdded MSOA-level aggregation, population-adjusted metrics, and multi-perspective choropleth visualizations to sewage spill geographic analysis (Geographic Distribution, Section 3.3).",
     "crumbs": [
       "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
     ]
@@ -33,8 +33,8 @@
     "objectID": "index.html#section-2",
     "href": "index.html#section-2",
     "title": "Sewage in Our Waters",
-    "section": "01/04/2025",
-    "text": "01/04/2025\nAdded section on event study analysis of sewage spills (Event Study Analysis, Chapter 6).",
+    "section": "03/06/2025",
+    "text": "03/06/2025\nAdded section on hedonic regression analysis of house prices (Hedonic Regression Analysis, Chapter 7).",
     "crumbs": [
       "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
     ]
@@ -43,8 +43,8 @@
     "objectID": "index.html#section-3",
     "href": "index.html#section-3",
     "title": "Sewage in Our Waters",
-    "section": "18/02/2025",
-    "text": "18/02/2025\nAdded section on initial data exploration of house prices and sewage spills (House Data Exploration Chapter 5).",
+    "section": "01/04/2025",
+    "text": "01/04/2025\nAdded section on event study analysis of sewage spills (Event Study Analysis, Chapter 6).",
     "crumbs": [
       "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
     ]
@@ -53,8 +53,8 @@
     "objectID": "index.html#section-4",
     "href": "index.html#section-4",
     "title": "Sewage in Our Waters",
-    "section": "17/02/2025",
-    "text": "17/02/2025\nUpdated sewage overflow spills section with additional descriptive statistics (Sewage Spill Data Exploration, Chapter 3).",
+    "section": "18/02/2025",
+    "text": "18/02/2025\nAdded section on initial data exploration of house prices and sewage spills (House Data Exploration Chapter 5).",
     "crumbs": [
       "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
     ]
@@ -63,8 +63,8 @@
     "objectID": "index.html#section-5",
     "href": "index.html#section-5",
     "title": "Sewage in Our Waters",
-    "section": "02/01/2025",
-    "text": "02/01/2025\nAdded section on initial data exploration of sewage overflow spills (Sewage Spill Data Exploration, Chapter 3).",
+    "section": "17/02/2025",
+    "text": "17/02/2025\nUpdated sewage overflow spills section with additional descriptive statistics (Sewage Spill Data Exploration, Chapter 3).",
     "crumbs": [
       "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
     ]
@@ -73,8 +73,8 @@
     "objectID": "index.html#section-6",
     "href": "index.html#section-6",
     "title": "Sewage in Our Waters",
-    "section": "30/12/2024",
-    "text": "30/12/2024\nAdded section on incorrect spill data duration (Current Data Limitations, Section 2.2).",
+    "section": "02/01/2025",
+    "text": "02/01/2025\nAdded section on initial data exploration of sewage overflow spills (Sewage Spill Data Exploration, Chapter 3).",
     "crumbs": [
       "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
     ]
@@ -83,8 +83,8 @@
     "objectID": "index.html#section-7",
     "href": "index.html#section-7",
     "title": "Sewage in Our Waters",
-    "section": "24/12/2024",
-    "text": "24/12/2024\nAdded section on the merge of location data to inidividual spill data (Current Data Limitations, Chapter 2).",
+    "section": "30/12/2024",
+    "text": "30/12/2024\nAdded section on incorrect spill data duration (Current Data Limitations, Section 2.2).",
     "crumbs": [
       "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
     ]
@@ -92,6 +92,16 @@
   {
     "objectID": "index.html#section-8",
     "href": "index.html#section-8",
+    "title": "Sewage in Our Waters",
+    "section": "24/12/2024",
+    "text": "24/12/2024\nAdded section on the merge of location data to inidividual spill data (Current Data Limitations, Chapter 2).",
+    "crumbs": [
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Updates</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#section-9",
+    "href": "index.html#section-9",
     "title": "Sewage in Our Waters",
     "section": "22/12/2024",
     "text": "22/12/2024\nStart of Sewage in Our Waters website!",
@@ -192,7 +202,7 @@
     "href": "spill_data_exploration.html#sec-03-03-geo-distribution",
     "title": "3  Sewage Spill Data Exploration",
     "section": "3.3 Geographic Distribution in 2023",
-    "text": "3.3 Geographic Distribution in 2023\n\n3.3.1 Total Spills\nThe maps below display the total number and duration of sewage overflow spills, aggregated at the Middle Layer Super Output Area (MSOA)—a standard statistical geography in England designed to represent areas with roughly similar population sizes (~8000 people or ~3000 households).\nBecause MSOAs differ considerably in land area, it’s difficult to draw conclusions. Even so, sewage spills appear relatively evenly distributed across England. Fewer spill sites are visible around London, though this likely reflects the very small geographic size of MSOAs in high-density urban areas rather than a true absence of spills. There also appears to be heavier spill activitiy in the North and South West.\n\nCountDuration\n\n\n\n\n\n\n\n\n\n\n\n3.3.2 Population-Density Weighted Spills\nThe maps display the total number and duration of sewage overflows, normalised by residents per square kilometre. Spill intensity appears to be higher in the North and the South West. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, higher rainfall, or both.\n\nCountDuration",
+    "text": "3.3 Geographic Distribution in 2023\n\n3.3.1 Total Spills\nThe maps below display the total number and duration of sewage overflow spills, aggregated at the Middle Layer Super Output Area (MSOA)—a standard statistical geography in England designed to represent areas with roughly similar population sizes (~8000 people or ~3000 households).\nBecause MSOAs differ considerably in land area, it’s difficult to draw conclusions. Even so, sewage spills appear relatively evenly distributed across England. Fewer spill sites are visible around London, though this likely reflects the very small geographic size of MSOAs in high-density urban areas rather than a true absence of spills. There also appears to be heavier spill activitiy in the North and South West.\n\nCountDuration\n\n\n\n\n\n\n\n\n\n\n\n3.3.2 Population-Density Weighted Spills\nThe maps below display the total number and duration of sewage overflows, normalised by residents per square kilometre. Spill intensity appears to be higher in the North and the South West. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, higher rainfall, or both.\n\nCountDuration",
     "crumbs": [
       "Data Exploration",
       "<span class='chapter-number'>3</span>  <span class='chapter-title'>Sewage Spill Data Exploration</span>"
@@ -280,7 +290,7 @@
     "href": "dry_spills.html#sec-04-03-dry-spill-locations",
     "title": "4  Dry Spill Exploration",
     "section": "4.3 Location of Dry Spills",
-    "text": "4.3 Location of Dry Spills\nThe map below shows all sites where dry spills occurred between 2021–2023, categorized by the most restrictive condition under which they experienced dry spills. Sites are colored using a traffic-light system:\n\n🟢 Green: Sites with dry spills under the 2-day window with partial data allowed (allows missing values when applying the 0.25mm threshold)\n🟠 Orange: Sites with dry spills under the 4-day window with partial data allowed\n🔴 Red: Sites with dry spills under the strictest 4-day window with complete data required (full rainfall coverage, no missing values)\n\nWe prefer including sites with missing rainfall data (orange), as these are concentrated along the coast, where exclusion would remove otherwise valid estimates.",
+    "text": "4.3 Location of Dry Spills\nThe map below shows all sites where dry spills occurred between 2021–2023, categorized by the most restrictive condition under which they experienced dry spills. Sites are colored using a traffic-light system:\n\n🔴 Red: Sites with dry spills under the strictest 4-day window with complete data required (full rainfall coverage, no missing values)\n🟠 Orange: Sites with dry spills under the 4-day window with partial data allowed\n🟢 Green: Sites with dry spills under the 2-day window with partial data allowed (allows missing values when applying the 0.25mm threshold)\n\nWe prefer including sites with missing rainfall data (orange), as these are concentrated along the coast, where exclusion would remove otherwise valid estimates.",
     "crumbs": [
       "Data Exploration",
       "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dry Spill Exploration</span>"
@@ -291,7 +301,62 @@
     "href": "dry_spills.html#sec-04-04-geo-distribution",
     "title": "4  Dry Spill Exploration",
     "section": "4.4 Dry Spill Geographic Distribution in 2023",
-    "text": "4.4 Dry Spill Geographic Distribution in 2023\n\n4.4.1 Total Dry Spills\nXXX The maps below display the total number of dry sewage overflow spills, aggregated at the Middle Layer Super Output Area (MSOA)—a standard statistical geography in England designed to represent areas with roughly similar population sizes (~8000 people or ~3000 households).\nXXX Because MSOAs differ considerably in land area, it’s difficult to draw conclusions. Even so, dry spills appear relatively evenly distributed across England. XXX\n\nCountDuration\n\n\n\n\n\n\n\n\n\n\n\n4.4.2 Population-Density Weighted Dry Spills\nXXX The maps display the total number of dry sewage overflows, normalised by residents per square kilometre. Dry spill intensity appears to be higher in certain regions. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, operational issues, or other factors. XXX\n\nCountDuration",
+    "text": "4.4 Dry Spill Geographic Distribution in 2023\n\n4.4.1 Total Dry Spills\nThe maps below display the total number of dry spills, aggregated at the Middle Layer Super Output Area (MSOA)—a standard statistical geography in England designed to represent areas with roughly similar population sizes (~8000 people or ~3000 households).\nBecause MSOAs differ considerably in land area, it’s difficult to draw conclusions. Still, relative to the overall spill distribution (see Section 3.3.1), dry spills are concentrated in a smaller set of MSOAs. Within this subset, spill activity is particularly pronounced in the North and South West.\n\nCountDuration\n\n\n\n\n\n\n\n\n\n\n\n4.4.2 Population-Density Weighted Dry Spills\nThe maps below display the total number of dry spills, normalised by residents per square kilometre. Spill intensity appears to be higher in the North and the South West. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, higher rainfall, or both.\n\nCountDuration",
+    "crumbs": [
+      "Data Exploration",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dry Spill Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "dry_spills.html#sec-04-05-dry-all-corr",
+    "href": "dry_spills.html#sec-04-05-dry-all-corr",
+    "title": "4  Dry Spill Exploration",
+    "section": "4.5 Dry vs All Spill Correlation",
+    "text": "4.5 Dry vs All Spill Correlation\n\nSpill CountSpill Duration",
+    "crumbs": [
+      "Data Exploration",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dry Spill Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "dry_spills.html#sec-04-06-dry-vs-rain",
+    "href": "dry_spills.html#sec-04-06-dry-vs-rain",
+    "title": "4  Dry Spill Exploration",
+    "section": "4.6 Dry Spill vs Rainfall",
+    "text": "4.6 Dry Spill vs Rainfall\n\n4.6.1 Scatter with Marginal Distributions\n\nCountDurationRate",
+    "crumbs": [
+      "Data Exploration",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dry Spill Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "dry_spills.html#sec-04-07-frequency-duration",
+    "href": "dry_spills.html#sec-04-07-frequency-duration",
+    "title": "4  Dry Spill Exploration",
+    "section": "4.7 Frequency and Duration of Dry Spills",
+    "text": "4.7 Frequency and Duration of Dry Spills\nBoth the summary tables and the histograms show that dry-spill frequency and duration are very positively skewed. As with all right-skewed outcomes bounded at zero, log transforms help visualise the distribution.\n\n4.7.1 Summary Tables\n\n202320222021\n\n\n\n\n\n\n    \n\n    \n    \n      \n        \n        \n              \n                 \n                Unique\n                Missing Pct.\n                Mean\n                SD\n                Min\n                Median\n                Max\n                Histogram\n              \n        \n        \n        \n                \n                  year\n                  1\n                  0\n                  2023.00\n                  0.00\n                  2023.00\n                  2023.00\n                  2023.00\n                  \n                \n                \n                  Dry Spill Count\n                  78\n                  1\n                  1.20\n                  5.62\n                  0.00\n                  0.00\n                  222.00\n                  \n                \n                \n                  Dry Spill Duration (hrs)\n                  2137\n                  1\n                  8.77\n                  80.95\n                  0.00\n                  0.00\n                  5273.99\n                  \n                \n                \n                  Share of sites with any dry spill (count &gt; 0)\n                  3\n                  1\n                  0.21\n                  0.40\n                  0.00\n                  0.00\n                  1.00\n                  \n                \n                \n                  Share of sites with annual dry spill duration ≥ 15 minutes (total hours ≥ 0.25)\n                  3\n                  1\n                  0.18\n                  0.39\n                  0.00\n                  0.00\n                  1.00\n                  \n                \n                \n                  Water Company\n                  N\n                  %\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Anglian Water\n                  1439\n                  9.92\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Northumbrian Water\n                  1589\n                  10.96\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Severn Trent Water\n                  2595\n                  17.90\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  South West Water\n                  1382\n                  9.53\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Southern Water\n                  1028\n                  7.09\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Thames Water\n                  643\n                  4.43\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  United Utilities\n                  2199\n                  15.17\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Welsh Water\n                  118\n                  0.81\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Wessex Water\n                  1280\n                  8.83\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Yorkshire Water\n                  2227\n                  15.36\n                  \n                  \n                  \n                  \n                  \n                  \n                \n        \n      \n    \n\n\n\n\n\n\n\n\n\n    \n\n    \n    \n      \n        \n        \n              \n                 \n                Unique\n                Missing Pct.\n                Mean\n                SD\n                Min\n                Median\n                Max\n                Histogram\n              \n        \n        \n        \n                \n                  year\n                  1\n                  0\n                  2022.00\n                  0.00\n                  2022.00\n                  2022.00\n                  2022.00\n                  \n                \n                \n                  Dry Spill Count\n                  85\n                  1\n                  1.38\n                  7.12\n                  0.00\n                  0.00\n                  316.00\n                  \n                \n                \n                  Dry Spill Duration (hrs)\n                  2029\n                  1\n                  7.78\n                  99.61\n                  0.00\n                  0.00\n                  7475.12\n                  \n                \n                \n                  Share of sites with any dry spill (count &gt; 0)\n                  3\n                  1\n                  0.20\n                  0.40\n                  0.00\n                  0.00\n                  1.00\n                  \n                \n                \n                  Share of sites with annual dry spill duration ≥ 15 minutes (total hours ≥ 0.25)\n                  3\n                  1\n                  0.16\n                  0.37\n                  0.00\n                  0.00\n                  1.00\n                  \n                \n                \n                  Water Company\n                  N\n                  %\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Anglian Water\n                  1439\n                  9.92\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Northumbrian Water\n                  1589\n                  10.96\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Severn Trent Water\n                  2595\n                  17.90\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  South West Water\n                  1382\n                  9.53\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Southern Water\n                  1028\n                  7.09\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Thames Water\n                  643\n                  4.43\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  United Utilities\n                  2199\n                  15.17\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Welsh Water\n                  118\n                  0.81\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Wessex Water\n                  1280\n                  8.83\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Yorkshire Water\n                  2227\n                  15.36\n                  \n                  \n                  \n                  \n                  \n                  \n                \n        \n      \n    \n\n\n\n\n\n\n\n\n\n    \n\n    \n    \n      \n        \n        \n              \n                 \n                Unique\n                Missing Pct.\n                Mean\n                SD\n                Min\n                Median\n                Max\n                Histogram\n              \n        \n        \n        \n                \n                  year\n                  1\n                  0\n                  2021.00\n                  0.00\n                  2021.00\n                  2021.00\n                  2021.00\n                  \n                \n                \n                  Dry Spill Count\n                  108\n                  1\n                  2.18\n                  9.29\n                  0.00\n                  0.00\n                  252.00\n                  \n                \n                \n                  Dry Spill Duration (hrs)\n                  2641\n                  1\n                  13.88\n                  115.85\n                  0.00\n                  0.00\n                  6027.75\n                  \n                \n                \n                  Share of sites with any dry spill (count &gt; 0)\n                  3\n                  1\n                  0.25\n                  0.43\n                  0.00\n                  0.00\n                  1.00\n                  \n                \n                \n                  Share of sites with annual dry spill duration ≥ 15 minutes (total hours ≥ 0.25)\n                  3\n                  1\n                  0.21\n                  0.40\n                  0.00\n                  0.00\n                  1.00\n                  \n                \n                \n                  Water Company\n                  N\n                  %\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Anglian Water\n                  1439\n                  9.92\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Northumbrian Water\n                  1589\n                  10.96\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Severn Trent Water\n                  2595\n                  17.90\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  South West Water\n                  1382\n                  9.53\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Southern Water\n                  1028\n                  7.09\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Thames Water\n                  643\n                  4.43\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  United Utilities\n                  2199\n                  15.17\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Welsh Water\n                  118\n                  0.81\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Wessex Water\n                  1280\n                  8.83\n                  \n                  \n                  \n                  \n                  \n                  \n                \n                \n                  Yorkshire Water\n                  2227\n                  15.36\n                  \n                  \n                  \n                  \n                  \n                  \n                \n        \n      \n    \n\n\n\n\n\n\n\n\n4.7.2 Histogram in 2023\n\nDry Spill DurationDry Spill CountLog Dry Spill DurationLog Dry Spill Count",
+    "crumbs": [
+      "Data Exploration",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dry Spill Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "dry_spills.html#sec-04-08-temporal",
+    "href": "dry_spills.html#sec-04-08-temporal",
+    "title": "4  Dry Spill Exploration",
+    "section": "4.8 Temporal Dry Spill Distribution",
+    "text": "4.8 Temporal Dry Spill Distribution\nDry spills also show seasonality. Monthly totals tend to be higher in the wetter months (roughly October–March). However, the difference is not as great as one would expect given the differences in rainfall.\n\n4.8.1 Total Dry Spill Duration and Count\n\nDry Spill DurationDry Spill CountRainfall (9 km^2)\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n4.8.2 Per Unique Dry Spill Site\n\nDry Spill DurationDry Spill CountRainfall (9 km^2)",
+    "crumbs": [
+      "Data Exploration",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dry Spill Exploration</span>"
+    ]
+  },
+  {
+    "objectID": "dry_spills.html#sec-04-09-company",
+    "href": "dry_spills.html#sec-04-09-company",
+    "title": "4  Dry Spill Exploration",
+    "section": "4.9 Dry Spill Distribution by Water Company",
+    "text": "4.9 Dry Spill Distribution by Water Company\nThe violin plots and bar charts below show the dry spill count and duration, normalised by the number of active spill sites (i.e., averages across sites) for each water company. Patterns mirror overall spill activity: some companies show heavier right tails and higher average levels.\n\n4.9.1 Violin Plots\n\n202320222021\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n4.9.2 Bar Charts\n\n202320222021",
     "crumbs": [
       "Data Exploration",
       "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dry Spill Exploration</span>"
