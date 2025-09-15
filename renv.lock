@@ -409,6 +409,38 @@
       "Maintainer": "Martin Maechler <mmaechler+Matrix@gmail.com>",
       "Repository": "CRAN"
     },
+    "PostcodesioR": {
+      "Package": "PostcodesioR",
+      "Version": "0.3.1",
+      "Source": "Repository",
+      "Type": "Package",
+      "Title": "API Wrapper Around 'Postcodes.io'",
+      "Authors@R": "c(person(\"Eryk\", \"Walczak\",  email = \"erykjwalczak@gmail.com\",  role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-8724-462X\")), person(\"Claudia\", \"Vitolo\",  role = \"rev\", comment = c(ORCID = \"0000-0002-4252-1176\")), person(\"Robin\", \"Lovelace\", role = \"rev\", comment = c(ORCID = \"0000-0001-5679-6536\")))",
+      "Maintainer": "Eryk Walczak <erykjwalczak@gmail.com>",
+      "Description": "Free UK geocoding using data from Office for National Statistics. It is using several functions to get information about post codes, outward codes, reverse geocoding, nearest post codes/outward codes, validation, or randomly generate a post code. API wrapper around <https://postcodes.io>.",
+      "License": "GPL-3",
+      "URL": "https://docs.ropensci.org/PostcodesioR/",
+      "Depends": [
+        "R (>= 3.1)"
+      ],
+      "Imports": [
+        "httr"
+      ],
+      "RoxygenNote": "7.1.2",
+      "Suggests": [
+        "knitr",
+        "dplyr",
+        "rmarkdown",
+        "testthat",
+        "covr",
+        "purrr"
+      ],
+      "VignetteBuilder": "knitr",
+      "BugReports": "https://github.com/ropensci/PostcodesioR/issues",
+      "NeedsCompilation": "no",
+      "Author": "Eryk Walczak [aut, cre] (<https://orcid.org/0000-0001-8724-462X>), Claudia Vitolo [rev] (<https://orcid.org/0000-0002-4252-1176>), Robin Lovelace [rev] (<https://orcid.org/0000-0001-5679-6536>)",
+      "Repository": "CRAN"
+    },
     "R.methodsS3": {
       "Package": "R.methodsS3",
       "Version": "1.8.2",
@@ -3759,41 +3791,6 @@
       "Author": "Kirill Müller [aut, cre] (<https://orcid.org/0000-0002-1416-3412>), Jennifer Bryan [ctb] (<https://orcid.org/0000-0002-6983-2759>)",
       "Maintainer": "Kirill Müller <krlmlr+r@mailbox.org>",
       "Repository": "RSPM"
-    },
-    "hexbin": {
-      "Package": "hexbin",
-      "Version": "1.28.5",
-      "Source": "Repository",
-      "Title": "Hexagonal Binning Routines",
-      "Authors@R": "c(person(given = \"Dan\", family = \"Carr\", role = \"aut\", email = \"dcarr@voxel.galaxy.gmu.edu\"), person(given = c(\"Nicholas\"), family = \"Lewin-Koh\", role = \"aut\"), person(given = \"Martin\", family = \"Maechler\", role = \"aut\", email = \"maechler@stat.math.ethz.ch\"), person(given = \"Deepayan\", family = \"Sarkar\", role = \"aut\", email = \"deepayan.sarkar@r-project.org\"), person(given = \"Edzer\", family = \"Pebesma\", role = \"cre\", comment = c(ORCID = \"0000-0001-8049-7069\"), email = \"edzer.pebesma@uni-muenster.de\"))",
-      "Depends": [
-        "R (>= 2.0.1)",
-        "methods"
-      ],
-      "Imports": [
-        "lattice",
-        "grid",
-        "graphics",
-        "grDevices",
-        "stats",
-        "utils"
-      ],
-      "Suggests": [
-        "marray",
-        "affy",
-        "Biobase",
-        "limma",
-        "knitr"
-      ],
-      "Description": "Binning and plotting functions for hexagonal bins.",
-      "Collate": "lattice.R BTC.R BTY.R grid.hexagons.R grid.hexlegend.R hbox.R hdiffplot.R hexbinList.R hexbinplot.R hexbin.s4.R hexpanel.R hexplom.R hexPlotMA.R hexutil.R hexViewport.R HO.R LINGRAY.R LOCS.R MAG.R RB.R smoothHexbin.R",
-      "License": "GPL-2",
-      "VignetteBuilder": "knitr",
-      "NeedsCompilation": "yes",
-      "URL": "https://github.com/edzer/hexbin",
-      "Author": "Dan Carr [aut], Nicholas Lewin-Koh [aut], Martin Maechler [aut], Deepayan Sarkar [aut], Edzer Pebesma [cre] (<https://orcid.org/0000-0001-8049-7069>)",
-      "Maintainer": "Edzer Pebesma <edzer.pebesma@uni-muenster.de>",
-      "Repository": "CRAN"
     },
     "highr": {
       "Package": "highr",
@@ -8053,6 +8050,35 @@
       "NeedsCompilation": "yes",
       "Author": "Edzer Pebesma [aut, cre] (ORCID: <https://orcid.org/0000-0001-8049-7069>), Roger Bivand [ctb] (ORCID: <https://orcid.org/0000-0003-2392-6140>), Etienne Racine [ctb], Michael Sumner [ctb], Ian Cook [ctb], Tim Keitt [ctb], Robin Lovelace [ctb], Hadley Wickham [ctb], Jeroen Ooms [ctb] (ORCID: <https://orcid.org/0000-0002-4035-0289>), Kirill Müller [ctb], Thomas Lin Pedersen [ctb], Dan Baston [ctb], Dewey Dunnington [ctb] (ORCID: <https://orcid.org/0000-0002-9415-4582>)",
       "Maintainer": "Edzer Pebesma <edzer.pebesma@uni-muenster.de>",
+      "Repository": "CRAN"
+    },
+    "sfarrow": {
+      "Package": "sfarrow",
+      "Version": "0.4.1",
+      "Source": "Repository",
+      "Title": "Read/Write Simple Feature Objects ('sf') with 'Apache' 'Arrow'",
+      "Date": "2021-10-25",
+      "Authors@R": "person(given = \"Chris\", family = \"Jochem\", role = c(\"aut\", \"cre\"), email = \"w.c.jochem@soton.ac.uk\", comment = c(ORCID = \"0000-0003-2192-5988\"))",
+      "Description": "Support for reading/writing simple feature ('sf') spatial objects from/to 'Parquet' files. 'Parquet' files are an open-source, column-oriented data storage format from Apache (<https://parquet.apache.org/>), now popular across programming languages. This implementation converts simple feature list geometries into well-known binary format for use by 'arrow', and coordinate reference system information is maintained in a standard metadata format.",
+      "License": "MIT + file LICENSE",
+      "URL": "https://github.com/wcjochem/sfarrow, https://wcjochem.github.io/sfarrow/",
+      "BugReports": "https://github.com/wcjochem/sfarrow/issues",
+      "Encoding": "UTF-8",
+      "RoxygenNote": "7.1.1",
+      "Imports": [
+        "sf",
+        "arrow",
+        "jsonlite",
+        "dplyr"
+      ],
+      "Suggests": [
+        "knitr",
+        "rmarkdown"
+      ],
+      "VignetteBuilder": "knitr",
+      "NeedsCompilation": "no",
+      "Author": "Chris Jochem [aut, cre] (<https://orcid.org/0000-0003-2192-5988>)",
+      "Maintainer": "Chris Jochem <w.c.jochem@soton.ac.uk>",
       "Repository": "CRAN"
     },
     "shiny": {

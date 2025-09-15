@@ -35,7 +35,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "15_10km_site_house_sale_match.log")
+  log_path <- here::here("output", "log", "10km_site_house_sale_match.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
   logger::log_appender(logger::appender_file(log_path))
@@ -153,7 +153,7 @@ perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup, radius
 #' Process the spatial data by loading, preparing, and merging house price and spill site data.
 #' @param radius_km Numeric radius in kilometres for the spatial join (default: 10)
 #' @return sf object containing the merged data
-process_spatial_data <- function(data, radius_km = 10) {
+process_spatial_data <- function(data, radius_km = 5) {
   datasets <- data
 
   houses_sf <- prepare_house_data(datasets$house)

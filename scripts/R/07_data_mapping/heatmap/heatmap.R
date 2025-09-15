@@ -29,7 +29,7 @@ data_rdata    <- fs::path(dp_path, "merged_edm_1224_dry_spill_data.RData")
 data_rds      <- fs::path(dp_path, "merged_edm_1224_dry_spill_data.rds")
 
 # Output directory (absolute)
-fig_dir <- "/Users/odran/Dropbox/sewage/output/figures"
+fig_dir <- "/Users/odran/Dropbox/sewage/output/figures/Maps"
 fs::dir_create(fig_dir)
 
 # Optional filters (set to NULL to include all)
@@ -74,20 +74,18 @@ pick_name_col <- function(g, priority) {
   }
 }
 
-# Save a ggplot choropleth; toggle borders via 'borders' arg ("on"/"off")
-write_map <- function(sf_poly, fill_col, title, subtitle, legend_title, out_path, borders = c("on","off")) {
-  borders <- match.arg(borders)
+# Save a ggplot choropleth (NO borders)
+write_map <- function(sf_poly, fill_col, title, subtitle, legend_title, out_path) {
   vals <- sf_poly[[fill_col]]
   if (length(vals) == 0 || all(is.na(vals))) {
-    message("No data to plot for: ", title, " (", borders, ")")
+    message("No data to plot for: ", title)
     png(out_path, width = 1800, height = 1400, res = 200)
     plot.new(); text(0.5, 0.5, paste0(title, "\n(no data)"))
     dev.off()
     return(invisible(NULL))
   }
-  line_color <- if (borders == "on") "grey40" else NA
   p <- ggplot(sf_poly) +
-    geom_sf(aes(fill = .data[[fill_col]]), color = line_color, linewidth = 0.2) +
+    geom_sf(aes(fill = .data[[fill_col]]), color = NA, linewidth = 0) +
     scale_fill_gradientn(colors = RColorBrewer::brewer.pal(9, "YlOrRd"),
                          name = legend_title, na.value = "grey90",
                          labels = comma) +
@@ -157,7 +155,7 @@ agg_never <- function(pts_sf, polys_sf, nm_col, out_col) {
   polys_sf |> left_join(counts, by = setNames(nm_col, nm_col))
 }
 
-# One-shot map writer for a geography layer
+# One-shot map writer for a geography layer (NO border variants)
 make_maps_for_geo <- function(geo_name, nm_col, polys_sf,
                               spill_pts_sf, never_loose_sf, never_strict_sf,
                               year_range, company_filter, fig_dir, ts_tag) {
@@ -177,7 +175,6 @@ make_maps_for_geo <- function(geo_name, nm_col, polys_sf,
     sprintf("Projection: WGS84; Join: point-in-polygon to %s (2021)", toupper(geo_name))
   )
 
-  # Compose filenames + write for borders on/off
   metrics <- list(
     list(obj = polys_events,       col = "events",
          title = sprintf("Actual Spills — Total Events by %s", toupper(geo_name)),
@@ -194,19 +191,16 @@ make_maps_for_geo <- function(geo_name, nm_col, polys_sf,
   )
 
   for (m in metrics) {
-    for (b in c("on","off")) {
-      out_path <- file.path(fig_dir, sprintf("%s_heatmap_%s_borders-%s_%s.png",
-                                             tolower(geo_name), m$slug, b, ts_tag))
-      write_map(
-        sf_poly = m$obj,
-        fill_col = m$col,
-        title = m$title,
-        subtitle = subtitle_tag,
-        legend_title = m$legend,
-        out_path = out_path,
-        borders = b
-      )
-    }
+    out_path <- file.path(fig_dir, sprintf("%s_heatmap_%s_%s.png",
+                                           tolower(geo_name), m$slug, ts_tag))
+    write_map(
+      sf_poly = m$obj,
+      fill_col = m$col,
+      title = m$title,
+      subtitle = subtitle_tag,
+      legend_title = m$legend,
+      out_path = out_path
+    )
   }
 }
 
@@ -304,7 +298,7 @@ never_loose_sf  <- if (!is.null(never_loose_df))  df27700_to_sf4326(never_loose_
 
 ts_tag <- format(Sys.time(), "%Y%m%d_%H%M%S")
 
-# LSOA maps (with and without borders)
+# LSOA maps (no borders)
 make_maps_for_geo(
   geo_name = "lsoa", nm_col = "geo_name", polys_sf = lsoa,
   spill_pts_sf = spill_pts_sf,
@@ -313,7 +307,7 @@ make_maps_for_geo(
   fig_dir = fig_dir, ts_tag = ts_tag
 )
 
-# MSOA maps (with and without borders)
+# MSOA maps (no borders)
 make_maps_for_geo(
   geo_name = "msoa", nm_col = "geo_name", polys_sf = msoa,
   spill_pts_sf = spill_pts_sf,
@@ -324,7 +318,6 @@ make_maps_for_geo(
 
 message("\nDone. Figures saved to: ", fig_dir,
         "\nFiles are named like:\n",
-        "  lsoa_heatmap_events_borders-on_YYYYMMDD_HHMMSS.png\n",
-        "  lsoa_heatmap_events_borders-off_YYYYMMDD_HHMMSS.png\n",
-        "  msoa_heatmap_sites_borders-on_YYYYMMDD_HHMMSS.png\n",
-        "  msoa_heatmap_never_loose_borders-off_YYYYMMDD_HHMMSS.png\n")
+        "  lsoa_heatmap_events_YYYYMMDD_HHMMSS.png\n",
+        "  lsoa_heatmap_never_loose_YYYYMMDD_HHMMSS.png\n",
+        "  msoa_heatmap_sites_YYYYMMDD_HHMMSS.png\n")

@@ -1,171 +1,110 @@
 #!/usr/bin/env Rscript
-# ============================================================
-# Time series & continuous distance plots:
-#  1) Upstream vs Downstream: monthly price & log(price)
-#  2) Continuous distance to spill vs price & log(price)
-# ============================================================
+# Tag houses with spill activity in the SAME QUARTER as sale
+# Adds to households:
+#   - site_spilled      (TRUE/FALSE/NA)
+#   - site_spilled_date (Date of earliest episode start in that quarter)
 
 suppressPackageStartupMessages({
-  pkgs <- c("arrow","dplyr","lubridate","ggplot2","scales","readr","stringr")
+  pkgs <- c("arrow","dplyr","lubridate")
   miss <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]
   if (length(miss)) install.packages(miss)
   lapply(pkgs, library, character.only = TRUE)
 })
-options(arrow.use_threads = TRUE)
+options(arrow.use_threads = TRUE, dplyr.summarise.inform = FALSE)
 
-IN  <- "/Users/odran/Dropbox/sewage/data/processed/housing_graph_data/house_spill_enriched.parquet"
-OUT <- "/Users/odran/Dropbox/sewage/data/processed/housing_graph_data/visuals"
-dir.create(OUT, recursive = TRUE, showWarnings = FALSE)
-stopifnot(file.exists(IN))
+dbg <- function(...) message(format(Sys.time(), "%H:%M:%S"), " | ", paste0(..., collapse = ""))
 
-# Label helper (replacement for defunct label_number_si)
-num_short <- scales::label_number(scale_cut = scales::cut_short_scale())
+# ---- Paths ----
+HOUSE_IN  <- "/Users/odran/Dropbox/sewage/data/processed/housing_graph_data/house_spill_enriched.parquet"
+EVENTS_IN <- "/Users/odran/Dropbox/sewage/data/processed/matched_events_annual_data/matched_events_annual_data.parquet"
+HOUSE_OUT <- "/Users/odran/Dropbox/sewage/data/processed/housing_graph_data/house_spill_enriched_quartertag.parquet"
 
-# ---- Load & base fields ----
-df <- arrow::read_parquet(IN) %>%
-  mutate(
-    price      = as.numeric(price),
-    date       = as.Date(date_of_transfer),
-    year_month = lubridate::floor_date(date, "month"),
-    year       = lubridate::year(date),
-    log_price  = ifelse(is.finite(price) & price > 0, log(price), NA_real_)
-  )
+stopifnot(file.exists(HOUSE_IN), file.exists(EVENTS_IN))
 
-# Prefer river-network distance when present; else Euclidean
-has_river <- "river_dist_m_to_nearest_spill" %in% names(df)
-df <- df %>%
-  mutate(
-    dist_m_pref  = dplyr::case_when(
-      has_river & relation_to_nearest_spill == "downstream" ~ river_dist_m_to_nearest_spill,
-      TRUE ~ dist_km_to_nearest_spill * 1000
-    ),
-    dist_km_pref = dist_m_pref / 1000
-  )
+# ---- Load ----
+dbg("Loading households: ", HOUSE_IN)
+hh <- arrow::read_parquet(HOUSE_IN)
 
-# ============================================================
-# 1) Upstream vs Downstream — MONTHLY time series
-# ============================================================
-df_ud <- df %>% filter(relation_to_nearest_spill %in% c("upstream","downstream"))
+dbg("Loading matched events: ", EVENTS_IN)
+ev <- arrow::read_parquet(EVENTS_IN) %>%
+  dplyr::select(site_id, start_time, end_time, dplyr::any_of("group_id_event"))
 
-ts_ud <- df_ud %>%
-  filter(!is.na(year_month)) %>%
-  group_by(year_month, relation_to_nearest_spill) %>%
-  summarise(
-    n            = n(),
-    mean_price   = mean(price, na.rm = TRUE),
-    median_price = median(price, na.rm = TRUE),
-    mean_log     = mean(log_price, na.rm = TRUE),
-    median_log   = median(log_price, na.rm = TRUE),
+# Coerce to POSIXct and drop invalid rows
+ev$start_time <- lubridate::as_datetime(ev$start_time, tz = "UTC")
+ev$end_time   <- lubridate::as_datetime(ev$end_time,   tz = "UTC")
+
+ev <- ev %>%
+  dplyr::filter(!is.na(site_id), !is.na(start_time), !is.na(end_time), end_time >= start_time)
+
+dbg("Rows: households=", nrow(hh), " | valid event rows=", nrow(ev))
+
+# ---- Build EPISODES ----
+# 1) Collapse rows with a non-NA group_id_event to episodes
+epi_gid <- ev %>%
+  dplyr::filter(!is.na(group_id_event)) %>%
+  dplyr::group_by(site_id, group_id_event) %>%
+  dplyr::summarise(
+    episode_start = min(start_time),
+    episode_end   = max(end_time),
     .groups = "drop"
   )
 
-readr::write_csv(ts_ud, file.path(OUT, "ts_upstream_vs_downstream_monthly.csv"))
+# 2) Treat rows with NA group_id_event as single-interval episodes
+epi_raw <- ev %>%
+  dplyr::filter(is.na(group_id_event)) %>%
+  dplyr::transmute(site_id, episode_start = start_time, episode_end = end_time)
 
-p_ud_mean_price <- ggplot(ts_ud, aes(year_month, mean_price, colour = relation_to_nearest_spill)) +
-  geom_line(linewidth = 0.9, na.rm = TRUE) +
-  scale_y_continuous(labels = num_short) +
-  labs(title = "Mean Price over Time: Upstream vs Downstream",
-       x = NULL, y = "Mean price", colour = NULL) +
-  theme_minimal(base_size = 12)
-ggsave(file.path(OUT, "ts_ud_mean_price.png"), p_ud_mean_price, width = 10, height = 5.5, dpi = 150)
+episodes <- dplyr::bind_rows(epi_gid, epi_raw)
 
-p_ud_median_price <- ggplot(ts_ud, aes(year_month, median_price, colour = relation_to_nearest_spill)) +
-  geom_line(linewidth = 0.9, na.rm = TRUE) +
-  scale_y_continuous(labels = num_short) +
-  labs(title = "Median Price over Time: Upstream vs Downstream",
-       x = NULL, y = "Median price", colour = NULL) +
-  theme_minimal(base_size = 12)
-ggsave(file.path(OUT, "ts_ud_median_price.png"), p_ud_median_price, width = 10, height = 5.5, dpi = 150)
+dbg("Episodes: ", nrow(episodes), "  |  Sites: ", dplyr::n_distinct(episodes$site_id))
 
-p_ud_mean_log <- ggplot(ts_ud, aes(year_month, mean_log, colour = relation_to_nearest_spill)) +
-  geom_line(linewidth = 0.9, na.rm = TRUE) +
-  labs(title = "Mean log(Price) over Time: Upstream vs Downstream",
-       x = NULL, y = "Mean log(price)", colour = NULL) +
-  theme_minimal(base_size = 12)
-ggsave(file.path(OUT, "ts_ud_mean_log.png"), p_ud_mean_log, width = 10, height = 5.5, dpi = 150)
+# ---- Compute SALE QUARTER for each house ----
+hh_q <- hh %>%
+  dplyr::mutate(
+    sale_date = as.Date(date_of_transfer),
+    q_start   = lubridate::floor_date(sale_date, unit = "quarter"),
+    q_end     = lubridate::ceiling_date(sale_date, unit = "quarter")  # exclusive end
+  ) %>%
+  dplyr::select(house_id, spill_site_id, sale_date, q_start, q_end)
 
-p_ud_median_log <- ggplot(ts_ud, aes(year_month, median_log, colour = relation_to_nearest_spill)) +
-  geom_line(linewidth = 0.9, na.rm = TRUE) +
-  labs(title = "Median log(Price) over Time: Upstream vs Downstream",
-       x = NULL, y = "Median log(price)", colour = NULL) +
-  theme_minimal(base_size = 12)
-ggsave(file.path(OUT, "ts_ud_median_log.png"), p_ud_median_log, width = 10, height = 5.5, dpi = 150)
+# ---- Overlap episodes with house sale quarter (site-by-site) ----
+overlaps <- hh_q %>%
+  dplyr::filter(!is.na(spill_site_id)) %>%
+  dplyr::inner_join(
+    episodes,
+    by = c("spill_site_id" = "site_id"),
+    relationship = "many-to-many"  # this join is intentionally many-to-many
+  ) %>%
+  dplyr::mutate(
+    # quarter [q_start, q_end); overlap if episode crosses that window
+    overlap = (episode_end >  lubridate::as_datetime(q_start)) &
+              (episode_start < lubridate::as_datetime(q_end))
+  ) %>%
+  dplyr::filter(overlap) %>%
+  dplyr::group_by(house_id) %>%
+  dplyr::summarise(
+    site_spilled      = TRUE,
+    site_spilled_date = as.Date(min(episode_start)),
+    .groups = "drop"
+  )
 
-# ============================================================
-# 2) Continuous distance to spill vs price/log(price)
-#    (Focus on downstream rows where distance is meaningful)
-# ============================================================
+# ---- Attach to households (FALSE if site present but no overlap; NA if no site) ----
+hh_out <- hh %>%
+  dplyr::left_join(overlaps, by = "house_id") %>%
+  dplyr::mutate(
+    site_spilled = dplyr::case_when(
+      is.na(spill_site_id) ~ NA,       # no site to compare
+      !is.na(site_spilled) ~ TRUE,     # overlap found
+      TRUE                 ~ FALSE     # had a site but no overlap in sale quarter
+    )
+  )
 
-df_down <- df %>%
-  filter(relation_to_nearest_spill == "downstream",
-         is.finite(dist_km_pref),
-         is.finite(price), price > 0,
-         is.finite(log_price))
+# ---- Save & quick peek ----
+arrow::write_parquet(hh_out, HOUSE_OUT)
+dbg("Wrote: ", HOUSE_OUT)
+dbg("Counts — site_spilled: TRUE=", sum(hh_out$site_spilled %in% TRUE,  na.rm = TRUE),
+               " | FALSE=",         sum(hh_out$site_spilled %in% FALSE, na.rm = TRUE),
+               " | NA=",            sum(is.na(hh_out$site_spilled)))
 
-# --- Smooths (overall) ---
-p_dist_price_smooth <- ggplot(df_down, aes(dist_km_pref, price)) +
-  geom_point(alpha = 0.03, size = 0.4, show.legend = FALSE) +
-  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs")) +
-  scale_y_continuous(labels = num_short) +
-  labs(title = "Price vs Distance from Spill (Downstream, continuous)",
-       x = "Distance to nearest spill (km)", y = "Price") +
-  theme_minimal(base_size = 12)
-ggsave(file.path(OUT, "dist_vs_price_smooth_downstream.png"),
-       p_dist_price_smooth, width = 9, height = 5.5, dpi = 150)
-
-p_dist_log_smooth <- ggplot(df_down, aes(dist_km_pref, log_price)) +
-  geom_point(alpha = 0.03, size = 0.4, show.legend = FALSE) +
-  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs")) +
-  labs(title = "log(Price) vs Distance from Spill (Downstream, continuous)",
-       x = "Distance to nearest spill (km)", y = "log(Price)") +
-  theme_minimal(base_size = 12)
-ggsave(file.path(OUT, "dist_vs_logprice_smooth_downstream.png"),
-       p_dist_log_smooth, width = 9, height = 5.5, dpi = 150)
-
-# --- Optional: hexbin (handles very large N gracefully) ---
-if (requireNamespace("ggforce", quietly = TRUE)) {
-  suppressPackageStartupMessages(library(ggforce))
-
-  p_hex_price <- ggplot(df_down, aes(dist_km_pref, price)) +
-    ggforce::geom_hexbin(aes(z = price), bins = 60) +
-    scale_fill_continuous(type = "viridis") +
-    scale_y_continuous(labels = num_short) +
-    labs(title = "Hexbin: Price vs Distance from Spill (Downstream)",
-         x = "Distance (km)", y = "Price", fill = "Count") +
-    theme_minimal(base_size = 12)
-  ggsave(file.path(OUT, "dist_vs_price_hex_downstream.png"),
-         p_hex_price, width = 9, height = 5.5, dpi = 150)
-
-  p_hex_log <- ggplot(df_down, aes(dist_km_pref, log_price)) +
-    ggforce::geom_hexbin(aes(z = log_price), bins = 60) +
-    scale_fill_continuous(type = "viridis") +
-    labs(title = "Hexbin: log(Price) vs Distance from Spill (Downstream)",
-         x = "Distance (km)", y = "log(Price)", fill = "Count") +
-    theme_minimal(base_size = 12)
-  ggsave(file.path(OUT, "dist_vs_logprice_hex_downstream.png"),
-         p_hex_log, width = 9, height = 5.5, dpi = 150)
-}
-
-# --- Optional: year facets (see change over time in the distance relationship) ---
-p_dist_price_year <- ggplot(df_down, aes(dist_km_pref, price)) +
-  geom_point(alpha = 0.02, size = 0.35) +
-  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"), colour = "black") +
-  scale_y_continuous(labels = num_short) +
-  facet_wrap(~ year, scales = "free_y") +
-  labs(title = "Price vs Distance (Downstream) — Yearly smooths",
-       x = "Distance (km)", y = "Price") +
-  theme_minimal(base_size = 12)
-ggsave(file.path(OUT, "dist_vs_price_smooth_by_year.png"),
-       p_dist_price_year, width = 12, height = 8, dpi = 150)
-
-p_dist_log_year <- ggplot(df_down, aes(dist_km_pref, log_price)) +
-  geom_point(alpha = 0.02, size = 0.35) +
-  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"), colour = "black") +
-  facet_wrap(~ year, scales = "free_y") +
-  labs(title = "log(Price) vs Distance (Downstream) — Yearly smooths",
-       x = "Distance (km)", y = "log(Price)") +
-  theme_minimal(base_size = 12)
-ggsave(file.path(OUT, "dist_vs_logprice_smooth_by_year.png"),
-       p_dist_log_year, width = 12, height = 8, dpi = 150)
-
-cat("✅ Wrote outputs to:\n", OUT, "\n")
+print(utils::head(hh_out %>%
+  dplyr::select(house_id, spill_relation, spill_site_id, site_spilled, site_spilled_date), 10))

@@ -118,31 +118,20 @@ load_data <- function(file_path = CONFIG$input_dir) {
 #' Builds a year-ranged filename when possible; writes to processed/zoopla.
 #'
 #' @param df Cleaned tibble from `clean_zoopla_data()`
-#' @param output_dir Output directory (defaults to processed/zoopla)
-#' @param filename Optional filename override; if NULL, will infer from years
-#' @return Full output path (invisibly)
+#' @param output_file Optional override of the default output path.
+#'   Defaults to `CONFIG$output_file`.
+#' @return Full output file path (returned invisibly).
 export_zoopla_data <- function(
   df,
-  output_dir = here::here("data", "processed", "zoopla"),
-  filename = NULL
+  output_file = CONFIG$output_file
 ) {
   # Ensure output directory exists
-  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
 
-  if (is.null(filename)) {
-    if ("year" %in% names(df) && any(!is.na(df$year))) {
-      yr_min <- suppressWarnings(min(df$year, na.rm = TRUE))
-      yr_max <- suppressWarnings(max(df$year, na.rm = TRUE))
-      filename <- glue::glue("zoopla_rentals_{yr_min}-{yr_max}.parquet")
-    } else {
-      filename <- "zoopla_rentals.parquet"
-    }
-  }
+  logger::log_info("Exporting data to: {output_file}")
+  arrow::write_parquet(df, output_file)
 
-  out_path <- fs::path(output_dir, filename)
-  logger::log_info("Exporting data to: {out_path}")
-  arrow::write_parquet(df, out_path)
-  invisible(out_path)
+  invisible(output_file)
 }
 
 #' Clean Zoopla Rental Data
@@ -170,6 +159,8 @@ clean_zoopla_data <- function(df) {
         .x
       )
     ) |>
+    # Drop observations without price data
+    filter(!is.na(listing_price)) |> 
     # Postcode normalisation; prefer rented date, else latest_to_rent
     mutate(
       postcode = stringr::str_remove_all(postcode, stringr::fixed(" ")),
