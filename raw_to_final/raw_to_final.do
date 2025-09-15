@@ -157,7 +157,7 @@ save "raw_to_final/spill_house_lookup.dta", replace
 ****************************************************
 
 * script 16 creates the data for the spills 12 mos prior to house sale
-pq use "data/processed/agg_12mo_cross_section/radius=250/part-0.parquet", clear
+pq use "data/processed/cross_section/sales/prior_12mo/radius=250/part-0.parquet", clear
 * 1,798,189 households 
 
 ****************************************************

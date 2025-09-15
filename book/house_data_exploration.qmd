@@ -501,11 +501,11 @@ There are a few patterns that stand out:
 ```{r, house_price_spill_summary}
 # Load aggregated data
 dat_agg_all <- open_dataset(
-  here("data", "processed", "agg_all_yrs_cross_section")
+  here("data", "processed", "cross_section", "sales", "all_years")
 ) %>%
   collect()
 dat_agg_12mo <- open_dataset(
-  here("data", "processed", "agg_12mo_cross_section")
+  here("data", "processed", "cross_section", "sales", "prior_12mo")
 ) %>%
   collect()
 

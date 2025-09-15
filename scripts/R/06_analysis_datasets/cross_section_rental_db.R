@@ -1,14 +1,13 @@
-```{r}
 ############################################################
-# Create Cross-sectional Databases
+# Create Cross-sectional Databases (Zoopla Rentals)
 # Project: Sewage
-# Date: 27/02/2025
-# Author: Jacopo Olivieri
+# Date: 15/09/2025
+# Author: Jacopo Olivieri (rental adaptation)
 ############################################################
 
-#' This script creates two cross-sectional databases using DuckDB:
+#' This script creates two cross-sectional databases using DuckDB for Zoopla rentals:
 #' 1. One that aggregates sewage spill data across all years
-#' 2. One that aggregates data from the 12 months prior to house sales
+#' 2. One that aggregates data from the 12 months prior to rental date
 #' Both are then exported in parquet format for downstream analysis.
 
 # Setup Functions
@@ -40,7 +39,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "16_cross_section_sales_db")
+  log_path <- here::here("output", "log", "16_cross_section_rental_db")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
   logger::log_appender(logger::appender_file(log_path))
@@ -56,7 +55,11 @@ CONFIG <- list(
   processed_dir = here::here("data", "processed"),
   db_path = here::here("data", "duckdb.duckdb"),
   radius_thresholds = c(5000, 2000, 1000, 500, 250),
-  min_year = 2022
+  min_year = 2022,
+  # Input paths specific to rentals
+  rentals_path = here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
+  rental_lookup_path = here::here("data", "processed", "zoopla", "spill_rental_lookup.parquet"),
+  monthly_spill_path = here::here("data", "processed", "spill_aggregated", "agg_spill_mo.parquet")
 )
 
 # Database Functions
@@ -88,43 +91,33 @@ connect_to_db <- function() {
 #' @param con DuckDB connection
 #' @return NULL
 load_data_to_db <- function(con) {
-  logger::log_info("Loading datasets into DuckDB")
+  logger::log_info("Loading datasets into DuckDB (rentals)")
   
   # Check if tables already exist
   existing_tables <- DBI::dbListTables(con)
   
-  # Load house price data if needed
-  if (!"house_price_data" %in% existing_tables) {
-    logger::log_info("Loading house price data")
-    house_price_data <- import(
-      file.path(CONFIG$processed_dir, "house_price.parquet"),
-      trust = TRUE
-    )
-    copy_to(con, house_price_data, "house_price_data", temporary = FALSE)
-    rm(house_price_data)
-    logger::log_info("House price data loaded")
+  # Load rental data if needed
+  if (!"rental_data" %in% existing_tables) {
+    logger::log_info("Loading rental data from Zoopla parquet")
+    rental_data <- import(CONFIG$rentals_path, trust = TRUE)
+    copy_to(con, rental_data, "rental_data", temporary = FALSE)
+    rm(rental_data)
+    logger::log_info("Rental data loaded")
   }
   
-  # Load spill lookup data if needed
-  if (!"spill_lookup" %in% existing_tables) {
-    logger::log_info("Loading spill lookup data")
-    spill_lookup <- import(
-      file.path(CONFIG$processed_dir, "spill_house_lookup.parquet"),
-      trust = TRUE
-    )
-    copy_to(con, spill_lookup, "spill_lookup", temporary = FALSE)
-    rm(spill_lookup)
-    logger::log_info("Spill lookup data loaded")
+  # Load rental spill lookup data if needed
+  if (!"spill_rental_lookup" %in% existing_tables) {
+    logger::log_info("Loading rental spill lookup data")
+    spill_rental_lookup <- import(CONFIG$rental_lookup_path, trust = TRUE)
+    copy_to(con, spill_rental_lookup, "spill_rental_lookup", temporary = FALSE)
+    rm(spill_rental_lookup)
+    logger::log_info("Rental spill lookup data loaded")
   }
   
   # Load monthly spill data if needed
   if (!"dat_mo" %in% existing_tables) {
     logger::log_info("Loading monthly spill data")
-    dat_mo <- import(
-      file.path(
-        CONFIG$processed_dir, "spill_aggregated", "agg_spill_mo.parquet"),
-      trust = TRUE)
-    
+    dat_mo <- import(CONFIG$monthly_spill_path, trust = TRUE)
     dat_mo <- dat_mo %>%
       select(water_company, site_id, year, month, spill_count_mo, spill_hrs_mo) %>%
       arrange(site_id, year, month)
@@ -134,29 +127,29 @@ load_data_to_db <- function(con) {
   }
 }
 
-#' Prepare and join datasets for analysis
+#' Prepare and join datasets for analysis (rentals)
 #' @param con DuckDB connection
 #' @return A list containing the joined data and radius table
 prepare_data <- function(con) {
-  logger::log_info("Preparing datasets for analysis")
+  logger::log_info("Preparing rental datasets for analysis")
 
   # Create lazy table references
-  house_tbl <- tbl(con, "house_price_data")
-  spill_lookup_tbl <- tbl(con, "spill_lookup")
+  rental_tbl <- tbl(con, "rental_data")
+  spill_lookup_tbl <- tbl(con, "spill_rental_lookup")
   dat_mo_tbl <- tbl(con, "dat_mo")
 
-  # Prepare house price data
-  house_tbl <- house_tbl %>%
-    select(house_id, price, date_of_transfer) %>%
-    rename(transfer_date = date_of_transfer) %>%
+  # Prepare rental data
+  rental_tbl <- rental_tbl %>%
+    select(rental_id, listing_price, rented_est) %>%
+    rename(rent = listing_price, rented_date = rented_est) %>%
     mutate(
-      transfer_date = as.Date(transfer_date),
-      transfer_date_12mo = sql("DATE_TRUNC('month', transfer_date - INTERVAL '12 months')")
+      rented_date = as.Date(rented_date),
+      rented_date_12mo = sql("DATE_TRUNC('month', rented_date - INTERVAL '12 months')")
     )
 
   # Prepare spill lookup data
   spill_lookup_tbl <- spill_lookup_tbl %>%
-    select(house_id, site_id, distance_m)
+    select(rental_id, site_id, distance_m)
 
   # Prepare monthly spill data
   dat_mo_tbl <- dat_mo_tbl %>%
@@ -168,9 +161,9 @@ prepare_data <- function(con) {
     select(site_id, spill_date, spill_count_mo, spill_hrs_mo)
 
   # Merge data
-  house_spill_data_tbl <- house_tbl %>%
-    left_join(spill_lookup_tbl, by = "house_id") %>%
-    full_join(dat_mo_tbl, by = "site_id")
+  rental_spill_data_tbl <- rental_tbl %>%
+    left_join(spill_lookup_tbl, by = "rental_id") %>%
+    left_join(dat_mo_tbl, by = "site_id")
 
   # Define radius thresholds
   radius_tbl <- tibble(radius = CONFIG$radius_thresholds)
@@ -178,148 +171,198 @@ prepare_data <- function(con) {
 
   logger::log_info("Data preparation complete")
   return(list(
-    house_spill_data = house_spill_data_tbl,
+    rental_spill_data = rental_spill_data_tbl,
     radius_tbl = radius_tbl,
-    house_tbl = house_tbl
+    rental_tbl = rental_tbl
   ))
 }
 
-#' Create cross-sectional database for all years
+#' Create cross-sectional database for all years (rentals)
 #' @param prepared_data List containing prepared data
 #' @param con DuckDB connection
 #' @return Aggregated data for all years
 create_all_years_db <- function(prepared_data, con) {
-  logger::log_info("Creating cross-sectional database for all years")
+  logger::log_info("Creating rental cross-sectional database for all years")
 
-  house_spill_data_tbl <- prepared_data$house_spill_data
+  rental_spill_data_tbl <- prepared_data$rental_spill_data
   radius_tbl <- prepared_data$radius_tbl
-  house_tbl <- prepared_data$house_tbl
+  rental_tbl <- prepared_data$rental_tbl
 
   # 1. Spill statistics: aggregate across all years
-  dat_agg_all <- house_spill_data_tbl %>%
+  dat_agg_all <- rental_spill_data_tbl %>%
     cross_join(radius_tbl, copy = TRUE) %>%
-    group_by(house_id, radius) %>%
+    group_by(rental_id, radius) %>%
     summarise(
+      # Spill metrics
       spill_count = sum(
         if_else(distance_m <= radius, spill_count_mo, 0),
-        na.rm = FALSE
+        na.rm = TRUE
       ),
       spill_hrs = sum(
         if_else(distance_m <= radius, spill_hrs_mo, 0),
-        na.rm = FALSE
+        na.rm = TRUE
       ),
       n_spill_sites = n_distinct(
         if_else(distance_m <= radius, site_id, NA_integer_),
-        na.rm = FALSE
+        na.rm = TRUE
+      ),
+      # Quality metrics
+      n_site_months = sum(if_else(distance_m <= radius, 1, 0)),
+      n_spill_count_present = sum(
+        if_else(distance_m <= radius, as.integer(!is.na(spill_count_mo)), 0L),
+        na.rm = TRUE
+      ),
+      n_spill_hrs_present = sum(
+        if_else(distance_m <= radius, as.integer(!is.na(spill_hrs_mo)), 0L),
+        na.rm = TRUE
       ),
       .groups = "drop"
-    )
+    ) %>%
+    # Calculate quality proportions
+    mutate(
+      prop_spill_count_na = if_else(
+        n_site_months > 0,
+        1 - (n_spill_count_present / n_site_months), 0 
+      ),
+      prop_spill_hrs_na = if_else(
+        n_site_months > 0,
+        1 - (n_spill_hrs_present / n_site_months), 0 
+      )
+    ) %>% 
+    select(-n_spill_count_present, -n_spill_hrs_present) %>% 
+    filter(!(prop_spill_count_na == 1 & n_site_months > 0),
+           !(prop_spill_hrs_na == 1 & n_site_months > 0))
   gc(full = TRUE)
 
-  # 2. Mean distance: using distinct house-site pairs
-  agg_all_years_distances <- house_spill_data_tbl %>%
-    distinct(house_id, site_id, distance_m) %>%
+  # 2. Mean distance: using distinct rental-site pairs
+  agg_all_years_distances <- rental_spill_data_tbl %>%
+    distinct(rental_id, site_id, distance_m) %>%
     cross_join(radius_tbl, copy = TRUE) %>%
-    group_by(house_id, radius) %>%
+    group_by(rental_id, radius) %>%
     summarise(
       mean_distance = mean(
         if_else(distance_m <= radius, distance_m, NA_real_),
-        na.rm = FALSE
+        na.rm = TRUE
       ),
       min_distance = min(
         if_else(distance_m <= radius, distance_m, NA_real_),
-        na.rm = FALSE
+        na.rm = TRUE
       ),
       .groups = "drop"
     )
   gc(full = TRUE)
 
-  # 3. Join the spill, distance and price data
+  # 3. Join the spill, distance and rent data
   dat_agg_all <- dat_agg_all %>%
-    left_join(agg_all_years_distances, by = c("house_id", "radius")) %>%
-    left_join(select(house_tbl, house_id, price), by = "house_id") %>%
-    arrange(house_id, radius) %>%
+    left_join(agg_all_years_distances, by = c("rental_id", "radius")) %>%
+    left_join(select(rental_tbl, rental_id, rent), by = "rental_id") %>%
+    arrange(rental_id, radius) %>%
     collect()
   gc(full = TRUE)
 
-  logger::log_info("All years cross-sectional database created")
+  logger::log_info("All years rental cross-sectional database created")
   return(dat_agg_all)
 }
 
-#' Create cross-sectional database for prior 12 months
+#' Create cross-sectional database for prior 12 months (rentals)
 #' @param prepared_data List containing prepared data
 #' @param con DuckDB connection
 #' @return Aggregated data for prior 12 months
 create_prior_12mo_db <- function(prepared_data, con) {
-  logger::log_info("Creating cross-sectional database for prior 12 months")
+  logger::log_info("Creating rental cross-sectional database for prior 12 months")
 
-  house_spill_data_tbl <- prepared_data$house_spill_data
+  rental_spill_data_tbl <- prepared_data$rental_spill_data
   radius_tbl <- prepared_data$radius_tbl
-  house_tbl <- prepared_data$house_tbl
+  rental_tbl <- prepared_data$rental_tbl
 
   # 1. Spill statistics for the trailing 12 months
-  dat_agg_12mo <- house_spill_data_tbl %>%
+  dat_agg_12mo <- rental_spill_data_tbl %>%
     filter(
-      lubridate::year(transfer_date) >= CONFIG$min_year,
-      spill_date >= transfer_date_12mo,
-      spill_date <= transfer_date
+      lubridate::year(rented_date) >= CONFIG$min_year,
+      spill_date >= rented_date_12mo,
+      spill_date <= rented_date
     ) %>%
     cross_join(radius_tbl, copy = TRUE) %>%
-    group_by(house_id, radius) %>%
+    group_by(rental_id, radius) %>%
     summarise(
+      # Spill metrics
       spill_count = sum(
         if_else(distance_m <= radius, spill_count_mo, 0),
-        na.rm = FALSE
+        na.rm = TRUE
       ),
       spill_hrs = sum(
         if_else(distance_m <= radius, spill_hrs_mo, 0),
-        na.rm = FALSE
+        na.rm = TRUE
       ),
       n_spill_sites = n_distinct(
         if_else(distance_m <= radius, site_id, NA_integer_),
-        na.rm = FALSE
+        na.rm = TRUE
+      ),
+      # Quality metrics
+      n_site_months = sum(if_else(distance_m <= radius, 1, 0)),
+      n_spill_count_present = sum(
+        if_else(distance_m <= radius, as.integer(!is.na(spill_count_mo)), 0L),
+        na.rm = TRUE
+      ),
+      n_spill_hrs_present = sum(
+        if_else(distance_m <= radius, as.integer(!is.na(spill_hrs_mo)), 0L),
+        na.rm = TRUE
       ),
       .groups = "drop"
     ) %>%
-    filter(!is.na(spill_count) & !is.na(spill_hrs))
+    # Calculate quality proportions
+    mutate(
+      prop_spill_count_na = if_else(
+        n_site_months > 0,
+        1 - (n_spill_count_present / n_site_months), 0 
+      ),
+      prop_spill_hrs_na = if_else(
+        n_site_months > 0,
+        1 - (n_spill_hrs_present / n_site_months), 0 
+      )
+    ) %>% 
+    select(-n_spill_count_present, -n_spill_hrs_present) %>% 
+    filter(!(prop_spill_count_na == 1 & n_site_months > 0),
+           !(prop_spill_hrs_na == 1 & n_site_months > 0))
+  
   gc(full = TRUE)
 
-  # 2. Mean distance: first get unique house-site pairs, then aggregate
-  agg_12mo_distances <- house_spill_data_tbl %>%
+  # 2. Mean distance: unique rental-site pairs, then aggregate
+  agg_12mo_distances <- rental_spill_data_tbl %>%
     filter(
-      year(transfer_date) >= CONFIG$min_year,
-      spill_date >= transfer_date_12mo,
-      spill_date <= transfer_date
+      year(rented_date) >= CONFIG$min_year,
+      spill_date >= rented_date_12mo,
+      spill_date <= rented_date
     ) %>%
-    distinct(house_id, site_id, distance_m) %>%
+    distinct(rental_id, site_id, distance_m) %>%
     cross_join(radius_tbl, copy = TRUE) %>%
-    group_by(house_id, radius) %>%
+    group_by(rental_id, radius) %>%
     summarise(
       mean_distance = mean(
         if_else(distance_m <= radius, distance_m, NA_real_),
-        na.rm = FALSE
+        na.rm = TRUE
       ),
       min_distance = min(
         if_else(distance_m <= radius, distance_m, NA_real_),
-        na.rm = FALSE
+        na.rm = TRUE
       ),
       .groups = "drop"
     )
   gc(full = TRUE)
 
-  # 3. Join the spill, distance and price data
+  # 3. Join the spill, distance and rent data
   dat_agg_12mo <- dat_agg_12mo %>%
-    left_join(agg_12mo_distances, by = c("house_id", "radius")) %>%
-    left_join(select(house_tbl, house_id, price), by = "house_id") %>%
-    arrange(house_id, radius) %>%
+    left_join(agg_12mo_distances, by = c("rental_id", "radius")) %>%
+    left_join(select(rental_tbl, rental_id, rent), by = "rental_id") %>%
+    arrange(rental_id, radius) %>%
     collect()
   gc(full = TRUE)
 
-  logger::log_info("Prior 12 months cross-sectional database created")
+  logger::log_info("Prior 12 months rental cross-sectional database created")
   return(dat_agg_12mo)
 }
 
-#' Export data to Parquet format
+#' Export data to Parquet format (partitioned by radius)
 #' @param all_years_data Data frame for all years
 #' @param prior_12mo_data Data frame for prior 12 months
 #' @return NULL
@@ -327,23 +370,23 @@ export_data <- function(all_years_data, prior_12mo_data) {
   tryCatch(
     {
       # Export paths (directories for partitioned datasets)
-      all_years_path <- here::here("data", "processed", "cross_section", "sales", "all_years")
-      prior_12mo_path <- here::here("data", "processed", "cross_section", "sales", "prior_12mo")
+      all_years_path <- here::here("data", "processed", "cross_section", "rentals", "all_years")
+      prior_12mo_path <- here::here("data", "processed", "cross_section", "rentals", "prior_12mo")
 
       # Export data to parquet format
-      logger::log_info("Exporting all years data to parquet")
+      logger::log_info("Exporting all years rental data to parquet")
       all_years_data %>%
         group_by(radius) %>%
         write_dataset(path = all_years_path, format = "parquet")
 
-      logger::log_info("Exporting prior 12 months data to parquet")
+      logger::log_info("Exporting prior 12 months rental data to parquet")
       prior_12mo_data %>%
         group_by(radius) %>%
         write_dataset(path = prior_12mo_path, format = "parquet")
 
       logger::log_info("Data export complete")
-      logger::log_info("All years data saved to: {all_years_path}")
-      logger::log_info("Prior 12 months data saved to: {prior_12mo_path}")
+      logger::log_info("All years rental data saved to: {all_years_path}")
+      logger::log_info("Prior 12 months rental data saved to: {prior_12mo_path}")
     },
     error = function(e) {
       logger::log_error("Data export failed: {e$message}")
@@ -375,9 +418,9 @@ main <- function(refresh_db = FALSE) {
 
     # Load data to database if needed or if refresh requested
     if (refresh_db) {
-      logger::log_info("Refresh requested, reloading all data")
+      logger::log_info("Refresh requested, reloading rental-related tables")
       tables <- DBI::dbListTables(con)
-      for (table in c("house_price_data", "spill_lookup", "dat_mo")) {
+      for (table in c("rental_data", "spill_rental_lookup", "dat_mo")) {
         if (table %in% tables) {
           logger::log_info("Dropping table: {table}")
           DBI::dbRemoveTable(con, table)
@@ -396,7 +439,7 @@ main <- function(refresh_db = FALSE) {
     # Export data
     export_data(all_years_data, prior_12mo_data)
 
-    logger::log_info("Cross-sectional database creation completed successfully")
+    logger::log_info("Rental cross-sectional database creation completed successfully")
   }, error = function(e) {
     logger::log_error("Fatal error: {e$message}")
     stop(e)
@@ -405,46 +448,7 @@ main <- function(refresh_db = FALSE) {
   })
 }
 
-
-```
-
-```{r}
-# 1. Spill statistics: aggregate across all years
-  dat_agg_all <- house_spill_data_tbl %>%
-    cross_join(radius_tbl, copy = TRUE) %>%
-    group_by(house_id, radius) %>%
-    summarise(
-      spill_count = sum(
-        if_else(distance_m <= radius, spill_count_mo, 0),
-        na.rm = TRUE
-      ),
-      spill_hrs = sum(
-        if_else(distance_m <= radius, spill_hrs_mo, 0),
-        na.rm = TRUE
-      ),
-      n_spill_sites = n_distinct(
-        if_else(distance_m <= radius, site_id, NA_integer_),
-        na.rm = TRUE
-      ),
-      .groups = "drop"
-    )
-  gc(full = TRUE)
-
-  # 2. Mean distance: using distinct house-site pairs
-  agg_all_years_distances <- house_spill_data_tbl %>%
-    distinct(house_id, site_id, distance_m) %>%
-    cross_join(radius_tbl, copy = TRUE) %>%
-    group_by(house_id, radius) %>%
-    summarise(
-      mean_distance = mean(
-        if_else(distance_m <= radius, distance_m, NA_real_),
-        na.rm = TRUE
-      ),
-      min_distance = min(
-        if_else(distance_m <= radius, distance_m, NA_real_),
-        na.rm = TRUE
-      ),
-      .groups = "drop"
-    )
-  gc(full = TRUE)
-```
+# Execute main function if script is run directly
+if (sys.nframe() == 0) {
+  main(refresh_db = FALSE)
+}

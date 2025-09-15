@@ -157,9 +157,16 @@ Scripts for cleaning, standardising, and converting raw data into consistent for
 
 **`clean_lr_house_price_data.R`**  
     - **Input:** Raw Land Registry Price Paid Data CSV files (`pp-{year}.csv`) from `data/raw/lr_house_price/`.
-    - Cleans and combines Land Registry data (2021-2024+) with geocoding via Postcodes.io API.
-    - Creates unique house identifiers and validates property transaction data.
-    - **Output:** Complete geocoded house price dataset with unique `house_id` saved to `data/processed/house_price.parquet`.
+    - Cleans and combines Land Registry data (2021–2024+) and geocodes via the PostcodesioR client to the postcodes.io API with retry/backoff and caching.
+    - Adds `house_id`, `qtr_id`, and `month_id`; normalises postcodes and validates transactions.
+    - **Caching:** Shared postcode cache at `data/cache/postcodes/lr_house_price_postcodes.rds`.
+    - **Output:** Geocoded house price dataset saved to `data/processed/house_price.parquet`.
+
+**`clean_zoopla_data.R`**  
+    - **Input:** WhenFresh/CDRC safeguarded Zoopla rentals CSVs from `data/raw/zoopla/` (`rentals_safeguarded_2014-2022.csv`, `rentals_safeguarded_2023.csv`).
+    - Cleans, standardises, and filters to study years (2021–2023); harmonises property types; computes `year`, `qtr_id`, `month_id` from listing/rented dates.
+    - Geocodes by postcode using shared utilities (`scripts/R/utils/postcode_processing_utils.R`) with caching and API retries.
+    - **Output:** Parquet in `data/processed/zoopla/` with year-ranged filename (e.g., `zoopla_rentals_2021-2023.parquet`).
 
 **`combine_annual_return_data.R`**  
    - **Input:** Raw annual return Excel files (`{year}_annual_return_edm.xlsx`) containing aggregated site-level statistics.
@@ -217,6 +224,12 @@ Scripts for aggregating raw data into statistics, creating lookup tables, and en
     - Converts National Grid References to eastings/northings coordinates.
     - **Output:** Dataset of unique spill sites with coordinates saved to `data/processed/unique_spill_sites.parquet`.
 
+**`aggregate_rainfall_stats.R`**  
+    - **Input:** Unique spill sites (`data/processed/unique_spill_sites.parquet`), cleaned rainfall (`data/processed/rainfall/rainfall_data_cleaned.parquet`), and site-to-grid lookup (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
+    - Builds a complete site-day panel and aggregates rainfall by site-year, site-month, and site-quarter using center-cell and 9-cell neighbourhood indicators.
+    - Chunked processing for memory efficiency; logs to `output/log/aggregate_rainfall_stats.log`.
+    - **Output:** `data/processed/rainfall/rainfall_agg_yr.parquet`, `rainfall_agg_mo.parquet`, `rainfall_agg_qtr.parquet`.
+
 **`identify_dry_spills.R`**  
     - **Input:** Individual spill data (`data/processed/matched_events_annual_data/matched_events_annual_data.parquet`), cleaned rainfall data (`data/processed/rainfall/rainfall_data_cleaned.parquet`), and spill site to grid cell lookup table (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
     - Identifies "dry spills" using six independent rainfall indicators combining spatial (1-cell vs 9-cell analysis), temporal (days 0-1 vs days 0-3), and NA handling (strict vs lenient) methodologies.
@@ -240,6 +253,12 @@ Scripts for spatial analysis, distance calculations, and feature engineering. Sc
     - Performs spatial join to identify spill sites within 10km of each property.
     - Calculates exact distances and counts discharge outlets within radius for each house.
     - **Output:** Spatial lookup table with house-site pairs and distances saved to `data/processed/spill_house_lookup.parquet`.
+
+**`10km_site_rental_match.R`**  
+    - **Input:** Geocoded Zoopla rental data (`data/processed/zoopla/zoopla_rentals.parquet`) and unique spill sites with coordinates.
+    - Performs spatial join to identify spill sites within 10km of each rental listing.
+    - Calculates exact distances and counts discharge outlets within radius for each rental.
+    - **Output:** Spatial lookup table with rental–site pairs and distances saved to `data/processed/zoopla/spill_rental_lookup.parquet`.
 
 **`compute_spill_stats.R`**  
     - **Input:** Combined spill data with location information.
@@ -265,11 +284,17 @@ Scripts for merging and integrating data from different sources and time periods
 
 Scripts for creating final analysis-ready datasets for econometric analysis. Scripts handle panel construction, treatment variable creation, and final dataset optimisation for different analytical approaches.
 
-**`cross_section_db.R`**  
-    - **Input:** House price data, spill-house lookup table, and monthly spill data loaded into DuckDB database.
+**`cross_section_sales_db.R`**  
+    - **Input:** House price data, spill-house lookup table, and monthly spill data loaded into DuckDB.
     - Creates cross-sectional datasets aggregated at house level for multiple timeframes and spatial radii.
     - Calculates spill exposure metrics: total counts, total hours, number of sites, mean/minimum distances.
-    - **Output:** Cross-sectional datasets partitioned by radius saved to `data/processed/agg_all_yrs_cross_section/` and `data/processed/agg_12mo_cross_section/`.
+    - **Output:** Partitioned by `radius` under `data/processed/cross_section/sales/` in two directories: `all_years/` and `prior_12mo/`.
+
+**`cross_section_rental_db.R`**  
+    - **Input:** Zoopla rentals data (`zoopla_rentals.parquet`), rental–spill lookup (`spill_rental_lookup.parquet`), and monthly spill data loaded into DuckDB.
+    - Creates cross-sectional datasets aggregated at rental level for multiple timeframes and spatial radii (12‑month window anchored on `rented_est`).
+    - Calculates spill exposure metrics and distance summaries as per sales.
+    - **Output:** Partitioned by `radius` under `data/processed/cross_section/rentals/` in two directories: `all_years/` and `prior_12mo/`.
 
 **`house_panel_exp.R`**  
     - **Input:** House-level panel data from house panel scripts.
@@ -290,52 +315,61 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
     - Creates treatment indicators based on spill distribution thresholds (p50, p75, p90).
     - **Output:** Site-level panel datasets partitioned by radius saved to `data/processed/dat_panel_site_*/`.
 
+### Utilities
+
+- `scripts/R/utils/postcode_processing_utils.R`: Postcode geocoding utilities using PostcodesioR with retry/backoff, batch processing, shared cache management (`get_postcode_data`, `process_postcodes`, `cleanup_postcode_cache`).
+- `scripts/R/utils/spill_aggregation_utils.R`: Shared spill aggregation helpers including `split_monthly_records`, `prepare_spill_data`, 12/24 counting via `count_spills`, and `calculate_spill_hours`.
+
 ### Script Execution Order
 
-The following execution sequence ensures proper data dependencies across the 6-layer pipeline:
+The following sequence removes circular dependencies and includes all scripts in layers 01–06:
 
 #### Layer 01: Data Ingestion
-1. **`edm_individ_data_standardisation_2021-2023.R`** - Unzips and standardises historical EDM archive files
-2. **`fetch_edm_api_data_2024_onwards.R`** - Fetches current API data (can run in parallel with step 1)
+1. **`edm_individ_data_standardisation_2021-2023.R`** — Unzips and standardises historical EDM archives
+2. **`fetch_edm_api_data_2024_onwards.R`** — Fetches current API data (can run in parallel with step 1)
 
 #### Layer 02: Data Cleaning
-3. **`clean_consented_discharges_database.R`** - Processes consented discharges (independent, can run early)
-4. **`clean_lr_house_price_data.R`** - Cleans house price data (independent, can run in parallel with other cleaning scripts)
-5. **`combine_annual_return_data.R`** - Combines annual return files (independent)
-6. **`convert_individ_raw_data_to_rdata_2021-2023.R`** - Converts individual EDM files to RData (requires step 1)
-7. **`process_edm_api_json_to_parquet_2024_onwards.R`** - Processes API JSON data (requires step 2)
-8. **`combine_individ_edm_data_2021-2023.R`** - Combines individual EDM data (requires step 6)
-9. **`combine_api_edm_data_2024_onwards.R`** - Combines API data (requires step 7)
-10. **`clean_rainfall_data.R`** - Cleans rainfall NetCDF files (requires unique spill sites from Layer 03, can run after step 14)
+3. **`clean_consented_discharges_database.R`** — Processes consented discharges (independent)
+4. **`clean_lr_house_price_data.R`** — Cleans LR house prices; geocodes with caching (independent)
+5. **`clean_zoopla_data.R`** — Cleans Zoopla rentals; geocodes with shared utilities (independent, optional until integrated)
+6. **`combine_annual_return_data.R`** — Combines annual return files (independent)
+7. **`convert_individ_raw_data_to_rdata_2021-2023.R`** — Converts individual EDM files (requires step 1)
+8. **`process_edm_api_json_to_parquet_2024_onwards.R`** — Processes API JSON (requires step 2)
+9. **`combine_individ_edm_data_2021-2023.R`** — Combines individual EDM data (requires step 7)
+10. **`combine_api_edm_data_2024_onwards.R`** — Combines API data (requires step 8)
 
 #### Layer 03: Data Enrichment
-11. **`merge_individ_annual_location.R`** - Merges location data with individual spills (requires steps 5, 8)
-12. **`combine_2021-2023_and_api_edm_data.R`** - Combines historical and API data (requires steps 8, 9)
-13. **`create_annual_return_lookup.R`** - Creates site lookup tables (requires step 5)
-14. **`create_unique_spill_sites.R`** - Creates unique sites dataset (requires step 11)
-15. **`aggregate_spill_stats.R`** - Aggregates general spill statistics (requires step 11)
-16. **`identify_dry_spills.R`** - Identifies dry spills using rainfall data (requires steps 10, 11, 14)
-17. **`aggregate_dry_spill_stats.R`** - Aggregates dry spill statistics (requires steps 15, 16)
+11. **`merge_individ_annual_location.R`** — Merge location into individual spills (requires steps 6, 9)
+12. **`combine_2021-2023_and_api_edm_data.R`** — Combine historical and API data (requires steps 9, 10)
+13. **`create_annual_return_lookup.R`** — Site lookup tables (requires step 6)
+14. **`create_unique_spill_sites.R`** — Unique sites dataset (requires step 11)
+15. **`aggregate_spill_stats.R`** — General spill aggregations (requires step 11)
+16. **`clean_rainfall_data.R`** — Clean rainfall NetCDFs (requires step 14; file lives in `02_data_cleaning/`)
+17. **`aggregate_rainfall_stats.R`** — Aggregate rainfall by year/month/qtr (requires steps 14, 16)
+18. **`identify_dry_spills.R`** — Detect dry spills (requires steps 11, 14, 16)
+19. **`aggregate_dry_spill_stats.R`** — Aggregate dry-spill statistics (requires steps 15, 18)
 
 #### Layer 04: Feature Engineering
-18. **`10km_site_house_sale_match.R`** - Spatial matching of houses to spill sites (requires steps 4, 14)
-19. **`compute_spill_stats.R`** - Enhanced spill statistics (requires step 11)
+20. **`10km_site_house_sale_match.R`** — House-to-site spatial matching (requires steps 4, 14)
+21. **`compute_spill_stats.R`** — Enhanced spill statistics (requires step 11)
+21a. **`10km_site_rental_match.R`** — Rental-to-site spatial matching (requires steps 5, 14)
 
 #### Layer 05: Data Integration
-*Scripts in this layer depend on outputs from multiple previous layers and should run after Layer 04 completion*
+• Note: Integration scripts are executed earlier for dependency reasons — see steps 11–12.
 
 #### Layer 06: Analysis Datasets
-20. **`cross_section_db.R`** - Creates cross-sectional datasets (requires steps 4, 15, 18)
-21. **`site_panel.R`** - Creates site-level panel datasets (requires steps 4, 15, 18)
-22. **`house_panel_within_radius.R`** - Creates house-level panels (requires steps 4, 15, 18)
-23. **`house_panel_exp.R`** - Creates final analysis datasets (requires step 22)
+22. **`cross_section_sales_db.R`** — Cross-sectional datasets (sales; requires steps 4, 15, 20)
+23. **`cross_section_rental_db.R`** — Cross-sectional datasets (rentals; requires steps 5, 15, 20 & 21)
+24. **`site_panel.R`** — Site-level panels (requires steps 4, 15, 20)
+25. **`house_panel_within_radius.R`** — House-level panels (requires steps 4, 15, 20)
+26. **`house_panel_exp.R`** — Final analysis datasets (requires step 25)
 
 **Dependencies Notes:**
-- Steps 1-2 can run in parallel
-- Steps 3-5 are independent and can run in parallel
-- Step 10 has a circular dependency - run after step 14 completes
-- Steps 15-17 form the dry spill analysis sub-pipeline
-- Layer 6 scripts require careful sequencing as they build upon each other
+- Steps 1–2 can run in parallel.
+- Steps 3–6 are independent and can run in parallel; step 5 (Zoopla) is optional until used downstream.
+- Steps 7–10 depend on ingestion outputs.
+- Step 16 runs after unique spill sites (step 14) to avoid circularity; steps 17–19 form the rainfall/dry-spill sub-pipeline.
+- Layer 06 scripts build on spill aggregations and spatial matching; keep order 22/23 → 24/25 → 26.
 
 ### Key Data Flows
 
@@ -368,4 +402,4 @@ For detailed analysis results, methodology, and interactive visualisations, visi
 
 ---
 
-Last updated: 18 July 2025
+Last updated: 2 September 2025

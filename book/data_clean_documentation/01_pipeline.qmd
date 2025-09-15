@@ -146,7 +146,7 @@ digraph DataPipeline {
     label = '06 Final Dataset Assembly Layer';
     style='filled,rounded'; fillcolor='#faf5ff'; color='#a855f7'; fontcolor='#581c87'; penwidth=2;
     node [style='filled,rounded', rx=6, ry=6, fillcolor='#e0e7ff', color='#6366f1', penwidth=2, fontcolor='#312e81'];
-    S16 [label='cross_section_db.R\\nCreates cross-sectional databases aggregating spill data'];
+    S16 [label='cross_section_sales_db.R\\nCreates cross-sectional databases aggregating spill data (sales)'];
     S18 [label='site_panel.R\\nCreates site-level panel data by aggregating house price statistics'];
     S19 [label='house_panel_within_radius.R\\nCreates house panel data for houses within specified radius thresholds'];
     S20 [label='house_panel_exp.R\\nCreates comprehensive house panel data including all houses'];
@@ -368,17 +368,29 @@ digraph DataPipeline {
 
 ### Master Dataset Assembly Layer {#sec-01-03-06-master-dataset-assembly}
 
-**Cross-Sectional Database Creation**
+**Cross-Sectional Database Creation (Sales)**
 
-- **script_name**: `cross_section_db.R`
+- **script_name**: `cross_section_sales_db.R`
 - **purpose**: Creates cross-sectional databases aggregating spill data: one for all years and one for 12 months prior to house sales, partitioned by radius thresholds.
 - **inputs**: 
   - `"data/processed/house_price.parquet"`
   - `"data/processed/spill_house_lookup.parquet"`
   - `"data/processed/spill_aggregated/agg_spill_mo.parquet"`
 - **outputs**: 
-  - `"data/processed/agg_all_yrs_cross_section/"`
-  - `"data/processed/agg_12mo_cross_section/"`
+  - `"data/processed/cross_section/sales/all_years/"`
+  - `"data/processed/cross_section/sales/prior_12mo/"`
+
+**Cross-Sectional Database Creation (Rentals)**
+
+- **script_name**: `cross_section_rental_db.R`
+- **purpose**: Creates cross-sectional rental datasets: all years and 12 months prior to `rented_est`, partitioned by radius thresholds.
+- **inputs**: 
+  - `"data/processed/zoopla/zoopla_rentals.parquet"`
+  - `"data/processed/zoopla/spill_rental_lookup.parquet"`
+  - `"data/processed/spill_aggregated/agg_spill_mo.parquet"`
+- **outputs**: 
+  - `"data/processed/cross_section/rentals/all_years/"`
+  - `"data/processed/cross_section/rentals/prior_12mo/"`
 
 **Site-Level Panel Data**
 
@@ -407,5 +419,3 @@ digraph DataPipeline {
   - `"data/processed/spill_house_lookup.parquet"`
   - `"data/processed/agg_spill_stats/"`
 - **outputs**: `["data/processed/general_house_panel_qtr/"]`
-
-
