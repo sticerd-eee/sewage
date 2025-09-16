@@ -39,7 +39,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "18_site_panel.log")
+  log_path <- here::here("output", "log", "18_site_panel_sales.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
   log_appender(appender_file(log_path))
   log_layout(layout_glue_colors)
@@ -54,7 +54,7 @@ CONFIG <- list(
   processed_dir = here::here("data", "processed"),
   db_path = here::here("data", "duckdb.duckdb"),
   radius_thresholds = c(250, 500, 1000, 2000),
-  output_dir = here::here("data", "processed", "dat_panel_site_level")
+  output_dir = here::here("data", "processed", "dat_panel_site", "sales")
 )
 
 # Database Functions
@@ -459,7 +459,7 @@ main <- function(refresh_db = FALSE) {
 # check they are the same
 file_path_mo_og <- here::here("data", "processed", "dat_panel_site_mo")
 file_path_qtr_og <- here::here("data", "processed", "dat_panel_site_qtr")
-file_path_new <- here::here("data", "processed", "dat_panel_site_level")
+file_path_new <- here::here("data", "processed", "dat_panel_site", "sales")
 
 data_mo_og <- open_dataset(file_path_mo_og) %>%
   filter(radius == 2000) %>%
@@ -486,4 +486,3 @@ data_new_qtr <- open_dataset(file_path_new) %>%
   collect() %>% 
   arrange(site_id, qtr_id)
 ```
-

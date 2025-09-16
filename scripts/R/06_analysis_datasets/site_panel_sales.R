@@ -35,7 +35,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "18_site_panel.log")
+  log_path <- here::here("output", "log", "18_site_panel_sales.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
   log_appender(appender_file(log_path))
   log_layout(layout_glue_colors)
@@ -50,7 +50,8 @@ CONFIG <- list(
   processed_dir = here::here("data", "processed"),
   db_path = here::here("data", "duckdb.duckdb"),
   radius_thresholds = c(250, 500, 1000, 2000),
-  output_dir = here::here("data", "processed", "dat_panel_site_level")
+  base_year = 2021,
+  output_dir = here::here("data", "processed", "dat_panel_site", "sales")
 )
 
 # Database Functions
@@ -174,7 +175,7 @@ create_site_panel_for_radius <- function(prepared_tables, radius_m, con = NULL) 
 
   house_tbl <- prepared_tables$house_tbl
   spill_lookup_tbl <- prepared_tables$spill_lookup_tbl
-  base_year <- 2021
+  base_year <- CONFIG$base_year
 
   # 1. Filter houses within the current radius
   houses_in_radius_tbl <- spill_lookup_tbl %>%
