@@ -174,16 +174,16 @@ pq use "data/processed/agg_spill_stats/period_type=monthly/part-0.parquet", clea
 
 ****************************************************
 
-* script 18 aggregates house price statistics at the site level (i.e., linked to spill sites) over monthly and quarterly periods for different distance radii from the site.
+* script 18 (site_panel_sales.R) aggregates house price statistics at the site level over monthly and quarterly periods for different distance radii from the site.
 * period_type (monthly or quarterly) and different radii 
 * summarizes house prices around each spill site, separately for different spatial scales (radii) and temporal scales (month/quarter), capturing both unweighted and distance-weighted price measures and the number of contributing houses
-pq use "data/processed/dat_panel_site_level/radius=250/period_type=monthly/part-0.parquet", clear
+pq use "data/processed/dat_panel_site/sales/radius=250/period_type=monthly/part-0.parquet", clear
 * 10,004 site_id * 12*3 = 360,144 obs
 
 ****************************************************
 
 * script 19 constructs panel of house sales linked to nearby spill sites, structured by time period and radius threshold
-pq use "data/processed/houses_within_radius_panel/radius=250/period_type=monthly/part-0.parquet", clear
+pq use "data/processed/within_radius_panel/sales/radius=250/period_type=monthly/part-0.parquet", clear
 * 10,004 site_id  172,103 house_id 
 * house_id version of scrip18 data
 

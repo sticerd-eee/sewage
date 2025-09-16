@@ -147,9 +147,12 @@ digraph DataPipeline {
     style='filled,rounded'; fillcolor='#faf5ff'; color='#a855f7'; fontcolor='#581c87'; penwidth=2;
     node [style='filled,rounded', rx=6, ry=6, fillcolor='#e0e7ff', color='#6366f1', penwidth=2, fontcolor='#312e81'];
     S16 [label='cross_section_sales_db.R\\nCreates cross-sectional databases aggregating spill data (sales)'];
-    S18 [label='site_panel.R\\nCreates site-level panel data by aggregating house price statistics'];
+    S18 [label='site_panel_sales.R\\nCreates site-level panel data by aggregating house price statistics'];
     S19 [label='house_panel_within_radius.R\\nCreates house panel data for houses within specified radius thresholds'];
-    S20 [label='house_panel_exp.R\\nCreates comprehensive house panel data including all houses'];
+    S20 [label='sale_panel_exp.R\\nCreates comprehensive house panel data including all houses'];
+    S21 [label='rental_panel_exp.R\\nCreates comprehensive rental panel data including all listings'];
+    S22 [label='site_panel_rental.R\\nCreates site-level rental panel data by aggregating listing prices'];
+    S23 [label='rental_panel_within_radius.R\\nCreates rental panel data for listings within radius thresholds'];
   }
 
   // --- External and Data Node Definitions ---
@@ -180,12 +183,17 @@ digraph DataPipeline {
   D15 [label='data/processed/spill_house_lookup.parquet\\nSpatial lookup between spills and houses within 10km'];
   D16 [label='output/log/edm_api_download_log.csv\\nDownload log for API data fetching'];
   D17 [label='data/processed/agg_spill_stats/\\nComputed spill statistics with treatment indicators'];
+  D18 [label='data/processed/zoopla/zoopla_rentals.parquet\\nCleaned Zoopla rental listings'];
+  D19 [label='data/processed/zoopla/spill_rental_lookup.parquet\\nSpatial lookup between spills and rentals within 10km'];
 
   node [fillcolor='#fce7f3', color='#ec4899', penwidth=3, fontcolor='#831843'];
   F01 [label=< <B>data/processed/agg_*_cross_section/</B><BR/>Cross-sectional databases >];
-  F02 [label=< <B>data/processed/dat_panel_site_level/</B><BR/>Site-level panel data >];
-  F03 [label=< <B>data/processed/houses_within_radius_panel/</B><BR/>House panel data within radius >];
-  F04 [label=< <B>data/processed/general_house_panel_qtr/</B><BR/>General house panel data >];
+  F02 [label=< <B>data/processed/dat_panel_site/sales/</B><BR/>Site-level panel data (sales) >];
+  F03 [label=< <B>data/processed/within_radius_panel/sales/</B><BR/>House panel data within radius >];
+  F04 [label=< <B>data/processed/general_panel/sales/</B><BR/>General sale panel data >];
+  F05 [label=< <B>data/processed/general_panel/rentals/</B><BR/>General rental panel data >];
+  F06 [label=< <B>data/processed/dat_panel_site/rentals/</B><BR/>Site-level panel data (rentals) >];
+  F07 [label=< <B>data/processed/within_radius_panel/rentals/</B><BR/>Rental panel data within radius >];
 
   // --- Edge Definitions (Connections) ---
   EXT1 -> S01; EXT2 -> S04; EXT3 -> S08; EXT4 -> S11; EXT5 -> S14;
@@ -205,6 +213,9 @@ digraph DataPipeline {
   {D14, D15} -> S18 -> F02;
   {D14, D15} -> S19 -> F03;
   {D14, D15, D17} -> S20 -> F04;
+  {D18, D19, D17} -> S21 -> F05;
+  {D18, D19} -> S22 -> F06;
+  {D18, D19} -> S23 -> F07;
 
   edge [style=dashed, color='#9ca3af', penwidth=1.5, constraint=false];
   S04 -> D16;
@@ -392,14 +403,23 @@ digraph DataPipeline {
   - `"data/processed/cross_section/rentals/all_years/"`
   - `"data/processed/cross_section/rentals/prior_12mo/"`
 
-**Site-Level Panel Data**
+**Site-Level Panel Data (Sales)**
 
-- **script_name**: `site_panel.R`
+- **script_name**: `site_panel_sales.R`
 - **purpose**: Creates site-level panel data by aggregating house price statistics (median, mean, weighted) for each spill site across multiple distance radii and time periods.
 - **inputs**: 
   - `"data/processed/house_price.parquet"`
   - `"data/processed/spill_house_lookup.parquet"`
-- **outputs**: `["data/processed/dat_panel_site_level/"]`
+- **outputs**: `["data/processed/dat_panel_site/sales/"]`
+
+**Site-Level Panel Data (Rentals)**
+
+- **script_name**: `site_panel_rental.R`
+- **purpose**: Builds site-level panel datasets of rental prices (median, mean, weighted) around each spill site for specified distance radii and periods.
+- **inputs**:
+  - `"data/processed/zoopla/zoopla_rentals.parquet"`
+  - `"data/processed/zoopla/spill_rental_lookup.parquet"`
+- **outputs**: `["data/processed/dat_panel_site/rentals/"]`
 
 **House Panel Within Radius**
 
@@ -408,14 +428,33 @@ digraph DataPipeline {
 - **inputs**: 
   - `"data/processed/house_price.parquet"`
   - `"data/processed/spill_house_lookup.parquet"`
-- **outputs**: `["data/processed/houses_within_radius_panel/"]`
+- **outputs**: `["data/processed/within_radius_panel/sales/"]`
+
+**Rental Panel Within Radius**
+
+- **script_name**: `rental_panel_within_radius.R`
+- **purpose**: Builds rental listing-level panel data containing only listings within specified radii of spill sites, with monthly and quarterly aggregation.
+- **inputs**:
+  - `"data/processed/zoopla/zoopla_rentals.parquet"`
+  - `"data/processed/zoopla/spill_rental_lookup.parquet"`
+- **outputs**: `["data/processed/within_radius_panel/rentals/"]`
 
 **General House Panel**
 
-- **script_name**: `house_panel_exp.R`
+- **script_name**: `sale_panel_exp.R`
 - **purpose**: Creates comprehensive house sale-level panel data including all houses (within and outside radius thresholds) with spill site relationship metadata for experimental analysis.
 - **inputs**: 
   - `"data/processed/house_price.parquet"`
   - `"data/processed/spill_house_lookup.parquet"`
   - `"data/processed/agg_spill_stats/"`
-- **outputs**: `["data/processed/general_house_panel_qtr/"]`
+- **outputs**: `["data/processed/general_panel/sales/"]`
+
+**General Rental Panel**
+
+- **script_name**: `rental_panel_exp.R`
+- **purpose**: Creates comprehensive rental listing-level panel data including all listings (within and outside radius thresholds) with spill site relationship metadata for experimental analysis.
+- **inputs**: 
+  - `"data/processed/zoopla/zoopla_rentals.parquet"`
+  - `"data/processed/zoopla/spill_rental_lookup.parquet"`
+  - `"data/processed/agg_spill_stats/"`
+- **outputs**: `["data/processed/general_panel/rentals/"]`
