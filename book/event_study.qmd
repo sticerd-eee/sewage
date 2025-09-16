@@ -212,7 +212,7 @@ run_event_study <- function(
     group_var = "site_id",
     cluster_var = "site_id",
     overwrite = FALSE,
-    file_name = "did_results_site_qtr_{rad}.rds") {
+    file_name = "sales_did_results_site_qtr_{rad}.rds") {
   stopifnot(
     is.data.frame(param_grid),
     is.data.frame(data),
@@ -412,7 +412,7 @@ for (r in radii) {
     group_var = "site_id",
     cluster_var = "site_id",
     overwrite = TRUE,
-    file_name = "did_results_site_qtr_{rad}.rds"
+    file_name = "sales_did_results_site_qtr_{rad}.rds"
   )
 }
 ```
@@ -480,7 +480,7 @@ for (r in radii) {
     group_var = "site_id",
     cluster_var = "site_id",
     overwrite = TRUE,
-    file_name = "did_results_house_qtr_{rad}.rds"
+    file_name = "sales_did_results_house_qtr_{rad}.rds"
   )
 }
 ```
@@ -491,7 +491,7 @@ load_results <- function(radii = c(250, 500, 1000, 2000),
                          freqs = c("qtr", "mo"),
                          dir_path = here("output", "regs"),
                          quiet = FALSE,
-                         pattern = "*_did_results_site_{f}_{r}.rds") {
+                         pattern = "sales_did_results_site_{f}_{r}.rds") {
   safe_rds <- purrr::possibly(readRDS, otherwise = NULL)
   results <- list() # <- final nested list to be returned
 
@@ -590,7 +590,7 @@ results_qtr <- load_results(
   freqs = c("qtr", "mo"),
   dir_path = here("output", "regs"),
   quiet = TRUE,
-  pattern = "250507_did_results_site_{f}_{r}.rds"
+  pattern = "sales_did_results_site_{f}_{r}.rds"
 )
 
 results_house_qtr <- load_results(
@@ -598,7 +598,7 @@ results_house_qtr <- load_results(
   freqs = c("qtr"),
   dir_path = here("output", "regs"),
   quiet = TRUE,
-  pattern = "did_results_house_{f}_{r}.rds"
+  pattern = "sales_did_results_house_{f}_{r}.rds"
 )
 ```
 
@@ -1773,7 +1773,7 @@ run_event_study_sunab <- function(
     data,
     rad,
     overwrite = FALSE,
-    file_name = "sunab_results_{rad}.rds") {
+    file_name = "sales_sunab_results_{rad}.rds") {
   # Data validation
   stopifnot(
     is.data.frame(param_grid),
@@ -1783,7 +1783,7 @@ run_event_study_sunab <- function(
 
   # ---- 0. results directory/file setup ----------------------------------- #
   # Create directory for individual model files
-  res_dir <- here::here("book", "book_regs", glue::glue("sunab_models_rad_{rad}"))
+  res_dir <- here::here("book", "book_regs", glue::glue("sales_sunab_models_rad_{rad}"))
   fs::dir_create(res_dir)
 
   # Create/read index file to track which models are complete
@@ -1974,7 +1974,7 @@ purrr::imap(event_data_list_sample, ~ {
     data = .x,
     rad = rad_value,
     overwrite = TRUE,
-    file_name = glue::glue("sunab_results_{rad_value}.rds")
+    file_name = glue::glue("sales_sunab_results_{rad_value}.rds")
   )
 })
 ```
@@ -1986,7 +1986,7 @@ load_results_sunab <- function(radii = c(250, 500, 1000),
                                freqs = c("qtr", "mo"),
                                dir_path = here::here("output", "regs"),
                                quiet = FALSE,
-                               pattern = "sunab_models_rad_{r}") {
+                               pattern = "sales_sunab_models_rad_{r}") {
   results <- list()
 
   for (r in radii) {
@@ -2122,7 +2122,7 @@ results_sunab <- load_results_sunab(
   radii = c(250, 500, 1000),
   freqs = c("qtr"),
   quiet = FALSE,
-  pattern = "sunab_models_rad_{r}"
+  pattern = "sales_sunab_models_rad_{r}"
 )
 ```
 
