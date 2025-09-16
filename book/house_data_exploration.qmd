@@ -183,11 +183,15 @@ sampled_sites_sf <- st_transform(sampled_sites_sf, 4326)
 sampled_buffers <- st_transform(sampled_buffers, 4326)
 
 # London boundary
-london_boundary_sf <- ne_states(
-  country = "United Kingdom",
-  returnclass = "sf"
-) %>%
-  filter(region == "Greater London")
+shp_path <- here(
+  "data",
+  "raw",
+  "shapefiles",
+  "local_authorities_uk_buc",
+  "Local_Authority_Districts_(May_2025)_Boundaries_UK_BUC.shp"
+)
+london_boundary_sf <- st_read(shp_path) |>
+  filter(LAD25CD %in% sprintf("E090%05d", 1:33))
 
 
 # Generate interactive map
@@ -473,7 +477,7 @@ Each house sale is spatially matched to all spill sites within a 5km radius, all
 
 ### Summary Tables {#sec-05-03-02-summary-tables}
 
-```{r}
+```{r, trim_prices}
 # Calculate 5th and 95th house price percentiles
 house_price_data_trimmed <- house_price_data %>%
   filter(between(
@@ -650,7 +654,7 @@ reactable(
 
 #### By Spill Count {#sec-05-03-02-02-spill-count}
 
-```{r}
+```{r, spill_count_summary}
 # Define threshold
 threshold <- 2000
 treshold_label <- paste0(threshold / 1000, "km")
@@ -822,7 +826,7 @@ Below I plot the relationship between house prices and spill severity (spill cou
 
 For each relationship, I plot a linear regression line and a local regression line (non-parametric) to show potential linear and non-linear relationships.  I present these relationships using data aggregated over all years as well as data aggregated over the trailing 12-month period.
     
-```{r}
+```{r, bivariate_plots}
 #| eval: false
 
 # Sample data for plotting
@@ -981,17 +985,17 @@ For distance thresholds below 2km, the non-parametric fit shows a U-shaped patte
 ::: panel-tabset
 
 ##### Linear
-```{r}
+```{r, plot_spill_count_lm}
 knitr::include_graphics(here("book", "book_figs", "spill_count_lm.png"))
 ```
 
 ##### All Years - Linear and LOESS
-```{r}
+```{r, plot_spill_count_all}
 knitr::include_graphics(here("book", "book_figs", "spill_count_all.png"))
 ```
 
 ##### 12 Months - Linear and LOESS
-```{r}
+```{r, plot_spill_count_12mo}
 knitr::include_graphics(here("book", "book_figs", "spill_count_12mo.png"))
 ```
 
@@ -1004,17 +1008,17 @@ The relationship between spill duration and house price is comparable to the rel
 ::: panel-tabset
 
 ##### Linear
-```{r}
+```{r, plot_spill_duration_lm}
 knitr::include_graphics(here("book", "book_figs", "spill_duration_lm.png"))
 ```
 
 ##### All Years - Linear and LOESS
-```{r}
+```{r, plot_spill_duration_all}
 knitr::include_graphics(here("book", "book_figs", "spill_duration_all.png"))
 ```
 
 ##### 12 Months - Linear and LOESS
-```{r}
+```{r, plot_spill_duration_12mo}
 knitr::include_graphics(here("book", "book_figs", "spill_duration_12mo.png"))
 ```
 
@@ -1029,17 +1033,17 @@ For all thresholds, the non-parametric fit shows a U-shaped pattern, which is co
 ::: panel-tabset
 
 ##### Linear
-```{r}
+```{r, plot_distance_lm}
 knitr::include_graphics(here("book", "book_figs", "distance_lm.png"))
 ```
 
 ##### All Years - Linear and LOESS
-```{r}
+```{r, plot_distance_all}
 knitr::include_graphics(here("book", "book_figs", "distance_all.png"))
 ```
 
 ##### 12 Months - Linear and LOESS
-```{r}
+```{r, plot_distance_12mo}
 knitr::include_graphics(here("book", "book_figs", "distance_12mo.png"))
 ```
 
@@ -1052,12 +1056,12 @@ There's a negative cross-sectional linear relationship between inverse spill cou
 ::: panel-tabset
 
 ##### Linear
-```{r}
+```{r, plot_inverse_lm}
 knitr::include_graphics(here("book", "book_figs", "inverse_spill_count_lm.png"))
 ``` 
 
 ##### All Years - Linear and LOESS    
-```{r}
+```{r, plot_inverse_all}
 knitr::include_graphics(here(
   "book",
   "book_figs",
@@ -1066,7 +1070,7 @@ knitr::include_graphics(here(
 ```
 
 ##### 12 Months - Linear and LOESS
-```{r}
+```{r, plot_inverse_12mo}
 knitr::include_graphics(here(
   "book",
   "book_figs",

@@ -14,6 +14,7 @@ book:
       - spill_data_exploration.qmd
       - dry_spills.qmd
       - house_data_exploration.qmd
+      - zoopla_data_exploration.qmd
     - part: "Analysis"
       chapters:
       - event_study.qmd
@@ -32,4 +33,3 @@ format:
     css: styles.css
 
 editor: source
-

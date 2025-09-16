@@ -1656,7 +1656,7 @@
       "VignetteBuilder": "knitr",
       "Author": "Roger Bivand [aut, cre] (<https://orcid.org/0000-0003-2392-6140>), Bill Denney [ctb] (<https://orcid.org/0000-0002-5759-428X>), Richard Dunlap [ctb], Diego Hernangómez [ctb] (<https://orcid.org/0000-0001-8457-4658>), Hisaji Ono [ctb], Josiah Parry [ctb] (<https://orcid.org/0000-0001-9910-865X>), Matthieu Stigler [ctb] (<https://orcid.org/0000-0002-6802-4290>)",
       "Maintainer": "Roger Bivand <Roger.Bivand@nhh.no>",
-      "Repository": "RSPM"
+      "Repository": "CRAN"
     },
     "cli": {
       "Package": "cli",
@@ -3790,7 +3790,7 @@
       "NeedsCompilation": "no",
       "Author": "Kirill Müller [aut, cre] (<https://orcid.org/0000-0002-1416-3412>), Jennifer Bryan [ctb] (<https://orcid.org/0000-0002-6983-2759>)",
       "Maintainer": "Kirill Müller <krlmlr+r@mailbox.org>",
-      "Repository": "RSPM"
+      "Repository": "CRAN"
     },
     "highr": {
       "Package": "highr",
@@ -7014,15 +7014,14 @@
       ],
       "VignetteBuilder": "knitr",
       "RoxygenNote": "7.2.3",
+      "Author": "Michael Allen [aut, cre]",
+      "Maintainer": "Michael Allen <michael@velofrog.com>",
       "RemoteType": "github",
       "RemoteHost": "api.github.com",
       "RemoteRepo": "readxlsb",
       "RemoteUsername": "velofrog",
       "RemoteRef": "HEAD",
-      "RemoteSha": "644ef7aefd4b1342d6754db7bab3dc9310137da7",
-      "NeedsCompilation": "yes",
-      "Author": "Michael Allen [aut, cre]",
-      "Maintainer": "Michael Allen <michael@velofrog.com>"
+      "RemoteSha": "644ef7aefd4b1342d6754db7bab3dc9310137da7"
     },
     "reclin2": {
       "Package": "reclin2",
@@ -7412,7 +7411,7 @@
       "NeedsCompilation": "no",
       "Author": "Jason Becker [aut], Chung-hong Chan [aut, cre] (<https://orcid.org/0000-0002-6232-7530>), David Schoch [aut] (<https://orcid.org/0000-0003-2952-4812>), Geoffrey CH Chan [ctb], Thomas J. Leeper [aut] (<https://orcid.org/0000-0003-4097-6326>), Christopher Gandrud [ctb], Andrew MacDonald [ctb], Ista Zahn [ctb], Stanislaus Stadlmann [ctb], Ruaridh Williamson [ctb], Patrick Kennedy [ctb], Ryan Price [ctb], Trevor L Davis [ctb], Nathan Day [ctb], Bill Denney [ctb] (<https://orcid.org/0000-0002-5759-428X>), Alex Bokov [ctb] (<https://orcid.org/0000-0002-0511-9815>), Hugo Gruson [ctb] (<https://orcid.org/0000-0002-4094-1476>)",
       "Maintainer": "Chung-hong Chan <chainsawtiney@gmail.com>",
-      "Repository": "RSPM"
+      "Repository": "CRAN"
     },
     "rlang": {
       "Package": "rlang",
@@ -7708,7 +7707,7 @@
       "NeedsCompilation": "no",
       "Author": "Kirill Müller [aut, cre] (<https://orcid.org/0000-0002-1416-3412>)",
       "Maintainer": "Kirill Müller <kirill@cynkra.com>",
-      "Repository": "RSPM"
+      "Repository": "CRAN"
     },
     "rstudioapi": {
       "Package": "rstudioapi",
@@ -8334,7 +8333,7 @@
       "RoxygenNote": "7.3.2",
       "NeedsCompilation": "yes",
       "Author": "Mark van der Loo [aut, cre] (<https://orcid.org/0000-0002-9807-4686>), Jan van der Laan [ctb], R Core Team [ctb], Nick Logan [ctb], Chris Muir [ctb], Johannes Gruber [ctb], Brian Ripley [ctb]",
-      "Repository": "RSPM"
+      "Repository": "CRAN"
     },
     "stringi": {
       "Package": "stringi",
@@ -9413,7 +9412,7 @@
       "LazyData": "true",
       "NeedsCompilation": "yes",
       "Author": "Dewey Dunnington [aut, cre] (<https://orcid.org/0000-0002-9415-4582>), Edzer Pebesma [aut] (<https://orcid.org/0000-0001-8049-7069>), Anthony North [ctb]",
-      "Repository": "RSPM"
+      "Repository": "CRAN"
     },
     "writexl": {
       "Package": "writexl",

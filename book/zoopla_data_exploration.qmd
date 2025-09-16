@@ -1,0 +1,1005 @@
+---
+author: "Jacopo Olivieri"
+date: last-modified
+editor: source
+format: html
+number-sections: true
+number-depth: 4
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+  fig-width: 9
+  fig-asp: 0.618
+  fig-align: center
+---
+
+# Zoopla Rental Data Exploration {#sec-zoopla-exploration}
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Load required packages
+required_packages <- c(
+  "arrow",
+  "rmarkdown",
+  "rio",
+  "tidyverse",
+  "purrr",
+  "here",
+  "janitor",
+  "sf",
+  "sp",
+  "DescTools",
+  "modelsummary",
+  "tmap",
+  "leaflet",
+  "htmltools",
+  "viridis",
+  "data.table",
+  "reactable",
+  "htmlwidgets",
+  "reactablefmtr",
+  "logger",
+  "readxl"
+)
+
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+# Initialize logging
+log_path <- here::here("output", "log", "zoopla_data_exploration.log")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+
+# Ggplot theme
+theme_pref <- theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    plot.title = element_text(
+      face = "bold",
+      size = 12,
+      margin = ggplot2::margin(b = 10, unit = "pt")
+    ),
+    axis.title = element_text(face = "bold", size = 10),
+    axis.text = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(color = "gray95"),
+    panel.grid.major.y = element_line(color = "gray95"),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(size = 8),
+    plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
+  )
+```
+
+```{r, load_data}
+# Zoopla rentals
+zoopla_rentals <- import(
+  here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
+  trust = TRUE
+)
+
+# Aggregated spill data for rentals (cross section)
+dat_agg_all <- arrow::open_dataset(
+  here::here("data", "processed", "cross_section", "rentals", "all_years")
+) %>%
+  collect()
+
+dat_agg_12mo <- arrow::open_dataset(
+  here::here("data", "processed", "cross_section", "rentals", "prior_12mo")
+) %>%
+  collect()
+
+# Spill sites (for mapping; used in eval: false section)
+spill_sites <- import(
+  here::here("data", "processed", "unique_spill_sites.parquet"),
+  trust = TRUE
+)
+
+# Rental-to-spill lookup data (for mapping)
+spill_rental_lookup <- import(
+  here::here("data", "processed", "zoopla", "spill_rental_lookup.parquet"),
+  trust = TRUE
+)
+
+# Aggregated spill data by year (for spill metrics in mapping)
+dat_yr <- import(
+  here::here("data", "processed", "spill_aggregated", "agg_spill_yr.parquet"),
+  trust = TRUE
+)
+```
+
+## Data Description {#sec-01-zoopla-data-descr}
+
+I spatially merge Zoopla rental listings (2021–2023) to nearby sewage discharge sites within multiple distance thresholds (e.g., 250m, 500m, 1km, 2km, 5km). For each rental, I summarise spill severity (counts and duration) over either all years or the prior 12 months and compute distances to the matched sites. This enables cross-sectional analyses by distance threshold and spill severity.
+
+```{r, data_description_rentals}
+#| eval: false
+
+# Example map (requires a rental-to-site lookup with site_id and coordinates)
+# The following is a template mirroring the house data mapping.
+
+set.seed(1)
+
+# Select a few London rentals for illustration
+london_rentals <- zoopla_rentals %>%
+  filter(region == "London") %>%
+  filter(rental_id %in% c(422620, 450970, 118240))
+
+# Get corresponding spill sites using the lookup process (mirroring house data)
+sample_spill_sites <- spill_sites %>%
+  inner_join(
+    spill_rental_lookup %>%
+      filter(rental_id %in% london_rentals$rental_id, distance_km <= 5) %>%
+      distinct(site_id),
+    by = "site_id"
+  ) %>%
+  left_join(
+    select(dat_yr, -ngr),
+    by = join_by(water_company, site_id)
+  )
+
+# Convert rentals to sf (EPSG 27700: BNG)
+rentals_sf <- st_as_sf(
+  london_rentals,
+  coords = c("easting", "northing"),
+  crs = 27700
+)
+spill_sites_sf <- st_as_sf(
+  sample_spill_sites,
+  coords = c("easting", "northing"),
+  crs = 27700
+)
+
+buffers_5km <- st_buffer(rentals_sf, dist = 5000)
+
+# Transform to WGS84 for visualisation
+rentals_sf <- st_transform(rentals_sf, 4326)
+spill_sites_sf <- st_transform(spill_sites_sf, 4326)
+buffers_5km <- st_transform(buffers_5km, 4326)
+
+# London boundary
+shp_path <- here(
+  "data",
+  "raw",
+  "shapefiles",
+  "local_authorities_uk_buc",
+  "Local_Authority_Districts_(May_2025)_Boundaries_UK_BUC.shp"
+)
+london_boundary_sf <- st_read(shp_path) |>
+  filter(LAD25CD %in% sprintf("E090%05d", 1:33)) # Get only London boundaries
+
+tmap_mode("view")
+tm <- tm_shape(buffers_5km) +
+  tm_polygons(fill = "lightgreen", fill_alpha = 0.3, col_alpha = 0) +
+  tm_shape(spill_sites_sf) +
+  tm_bubbles(
+    size = "spill_hrs_yr",
+    fill = "spill_hrs_yr",
+    fill.scale = tm_scale_intervals(
+      values = "brewer.blues",
+      n = 4
+    ),
+    size.scale = tm_scale_continuous(
+      values.scale = 3
+    ),
+    size.legend = tm_legend_hide(),
+    fill.legend = tm_legend(
+      title = "Spill Duration"
+    )
+  ) +
+  tm_shape(rentals_sf) +
+  tm_symbols(
+    fill = "listing_price",
+    fill.scale = tm_scale_intervals(values = "brewer.reds"),
+    shape = 18,
+    size = 0.7,
+    fill_alpha = 0.9,
+    fill.legend = tm_legend(title = "Listing Price (£)")
+  ) +
+  tm_shape(london_boundary_sf) +
+  tm_borders(col = "blue4", lwd = 1) +
+  tm_title("Sample Rentals with Spill Sites and 5km Buffers") +
+  tm_layout(legend.outside = TRUE)
+
+# tmap_save(
+#   tm,
+#   filename = here::here("book", "book_figs", "zoopla_data_descr.html"),
+#   width = 800,
+#   height = 600
+# )
+```
+
+```{=html}
+<iframe src="book_figs/zoopla_data_descr.html" width="800" height="600" frameborder="0"></iframe>
+```
+
+## Rental Descriptive Statistics {#sec-02-zoopla-descriptives}
+
+Rental listing prices are positively skewed and closer to log-normal. There is heterogeneity across property types, number of bedrooms, and energy ratings.
+
+### Summary Table {#sec-02-01-zoopla-summary-table}
+
+```{css, table_css, echo = FALSE}
+/* Custom CSS for modelsummary tables */
+.table, th, td { font-size: 0.9em; }
+.table th { font-size: 0.95em !important; white-space: normal !important; padding: 0.25em 0.5em !important; }
+.table td { white-space: nowrap !important; padding: 0.25em 0.5em !important; }
+```
+
+::: panel-tabset
+
+#### Summary {#sec-02-01-01-summary}
+```{r, rentals_summary}
+datasummary_dat <- zoopla_rentals %>%
+  select(listing_price, year, property_type, bedrooms, epc_energy_rating) %>%
+  mutate(
+    property_type = recode_factor(
+      property_type,
+      "D" = "Detached",
+      "S" = "Semi-Detached",
+      "T" = "Terraced",
+      "F" = "Flats/Maisonettes",
+      "B" = "Bungalow"
+    )
+  ) %>%
+  rename(
+    `Property Type` = property_type,
+    `Bedrooms` = bedrooms,
+    `EPC Rating` = epc_energy_rating,
+    `Listing Price` = listing_price,
+    `Year` = year
+  )
+
+modelsummary::datasummary_skim(
+  datasummary_dat,
+  fmt = function(x) scales::number(x, accuracy = 0.01, big.mark = ",")
+)
+```
+
+#### Price Heterogeneity {#sec-02-01-02-price-heterogeneity}
+```{r, rentals_heterogeneity}
+datasummary_dat %>%
+  mutate(
+    Bedrooms = factor(
+      case_when(
+        Bedrooms == 1 ~ "1",
+        Bedrooms == 2 ~ "2",
+        Bedrooms == 3 ~ "3",
+        Bedrooms == 4 ~ "4",
+        Bedrooms >= 5 ~ ">=5",
+        TRUE ~ as.character(Bedrooms)
+      ),
+      levels = c("1", "2", "3", "4", ">=5")
+    )
+  ) %>%
+  modelsummary::datasummary(
+    `Listing Price` *
+      (`Property Type` + `Bedrooms`) +
+      Heading("Year", nearData = FALSE) * `Year` * Arguments(fmt = 2) ~
+      Mean + SD + Min + Median + Max,
+    data = .,
+    fmt = function(x) scales::number(x, accuracy = 1, big.mark = ",")
+  )
+```
+
+:::
+
+### Histogram {#sec-02-02-zoopla-histogram}
+
+::: panel-tabset
+
+#### Prices {#sec-02-02-01-prices}
+```{r, rentals_histogram}
+ggplot(zoopla_rentals, aes(x = listing_price)) +
+  geom_histogram(
+    bins = 30,
+    fill = viridis(1, option = "magma"),
+    alpha = 0.8,
+    col = "black"
+  ) +
+  labs(
+    title = "Zoopla Listing Prices 2021–2023",
+    x = "Listing Price (£)",
+    y = "Count"
+  ) +
+  theme_pref
+```
+
+#### Log Prices {#sec-02-02-02-log-prices}
+```{r, rentals_histogram_log}
+ggplot(zoopla_rentals, aes(x = log(listing_price))) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    bins = 100,
+    fill = viridis(1, option = "magma"),
+    alpha = 0.7,
+    col = "black"
+  ) +
+  stat_function(
+    fun = dnorm,
+    args = list(
+      mean = mean(log(zoopla_rentals$listing_price), na.rm = TRUE),
+      sd = sd(log(zoopla_rentals$listing_price), na.rm = TRUE)
+    ),
+    color = viridis(3, option = "magma")[2],
+    alpha = .7,
+    linewidth = .8
+  ) +
+  labs(
+    title = "Listing Prices (Log) with Normal Curve",
+    x = "log(Listing Price)",
+    y = "Density"
+  ) +
+  theme_pref
+```
+
+#### Log Prices Q-Q Plot {#sec-02-02-03-qq}
+```{r, rentals_qq_plot}
+ggplot(zoopla_rentals, aes(sample = log(listing_price))) +
+  stat_qq(color = viridis(1, option = "magma")) +
+  stat_qq_line(color = viridis(3, option = "magma")[2], linewidth = 1) +
+  labs(
+    title = "Q-Q Plot of log(Listing Price)",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  ) +
+  theme_pref
+```
+
+:::
+
+### Temporal Rental Distribution {#sec-02-03-zoopla-temporal}
+
+```{r, rentals_temporal}
+zoopla_dt <- as.data.table(zoopla_rentals)
+
+zoopla_dt[, month_num := ((month_id - 1) %% 12) + 1L]
+zoopla_dt[, month := factor(month.abb[month_num], levels = month.abb)]
+
+rent_monthly <- zoopla_dt[,
+  .(
+    avg_price = mean(listing_price, na.rm = TRUE),
+    count_listed = .N
+  ),
+  by = .(year, month)
+] %>%
+  as_tibble()
+rm(zoopla_dt)
+```
+
+::: panel-tabset
+
+#### Listing Prices {#sec-02-03-01-listing-prices}
+
+```{r, rentals_temporal_price}
+ggplot(rent_monthly, aes(x = month, y = avg_price, fill = factor(year))) +
+  geom_bar(
+    stat = "identity",
+    position = position_dodge(width = 0.9),
+    width = 0.8,
+    alpha = 0.9
+  ) +
+  scale_fill_viridis_d(option = "magma") +
+  labs(
+    title = "Average Monthly Listing Price (2021–2023)",
+    x = "Month",
+    y = "Average Listing Price (£)",
+    fill = "Year"
+  ) +
+  theme_minimal() +
+  theme_pref +
+  scale_y_continuous(
+    labels = scales::label_number(big.mark = ","),
+    expand = expansion(mult = c(0, 0.1))
+  )
+```
+
+#### Number of Listings {#sec-02-03-02-num-listings}
+```{r, rentals_temporal_count}
+ggplot(rent_monthly, aes(x = month, y = count_listed, fill = factor(year))) +
+  geom_bar(
+    stat = "identity",
+    position = position_dodge(width = 0.9),
+    width = 0.8,
+    alpha = 0.9
+  ) +
+  scale_fill_viridis_d(option = "magma") +
+  labs(
+    title = "Monthly Rental Listings Count (2021–2023)",
+    x = "Month",
+    y = "Number of Listings",
+    fill = "Year"
+  ) +
+  theme_minimal() +
+  scale_y_continuous(
+    labels = scales::label_number(big.mark = ","),
+    expand = expansion(mult = c(0, 0.1))
+  )
+```
+
+:::
+
+## Rentals and Sewage Spills: Descriptive Statistics {#sec-03-zoopla-spills}
+
+### Cross Section {#sec-03-01-zoopla-cross}
+
+I examine cross-sectional relationships between rental prices and sewage spills along three dimensions: listing price, spill severity (counts and duration), and distance to discharge sites.
+
+### Summary Tables {#sec-03-02-zoopla-summary-tables}
+
+```{r, rentals_trim}
+# Trim listing prices at the 5th and 95th percentiles
+zoopla_rentals_trimmed <- zoopla_rentals %>%
+  filter(between(
+    listing_price,
+    quantile(listing_price, 0.05, na.rm = TRUE),
+    quantile(listing_price, 0.95, na.rm = TRUE)
+  ))
+trimmed_rental_ids <- unique(zoopla_rentals_trimmed$rental_id)
+```
+
+::: panel-tabset
+
+#### By Distance {#sec-03-02-01-by-distance}
+
+```{r, rentals_spill_summary_by_distance}
+# Prepare aggregated datasets and align naming
+dat_agg_all2 <- dat_agg_all %>% mutate(listing_price = rent)
+
+dat_agg_all_trimmed <- dat_agg_all2 %>%
+  filter(rental_id %in% trimmed_rental_ids)
+
+rentals_within_5000 <- dat_agg_all_trimmed %>%
+  filter(radius == 5000) %>%
+  pull(rental_id) %>%
+  unique()
+
+# Summary stats for rentals beyond 5000m
+dat_above_5000 <- zoopla_rentals_trimmed %>%
+  filter(!(rental_id %in% rentals_within_5000)) %>%
+  summarise(
+    threshold_m = ">5000",
+    n_rentals = dplyr::n_distinct(rental_id),
+    n_spill_sites = 0,
+    mean_price = mean(listing_price, na.rm = TRUE),
+    median_price = median(listing_price, na.rm = TRUE),
+    sd_price = sd(listing_price, na.rm = TRUE),
+    min_price = min(listing_price, na.rm = TRUE),
+    max_price = max(listing_price, na.rm = TRUE)
+  )
+
+# Summary stats for rentals within thresholds
+dat_below_5000_prepared <- dat_agg_all_trimmed %>%
+  filter(!is.na(mean_distance)) %>%
+  mutate(
+    radius = as.character(radius),
+    inverse_spill_count = spill_count / mean_distance,
+    inverse_spill_hrs = spill_hrs / mean_distance,
+    log_price = log(listing_price)
+  )
+
+summary_table_below <- dat_below_5000_prepared %>%
+  group_by(radius) %>%
+  summarise(
+    threshold_m = first(radius),
+    mean_distance_m = mean(mean_distance, na.rm = TRUE),
+    n_rentals = dplyr::n_distinct(rental_id),
+    n_spill_sites = mean(n_spill_sites, na.rm = TRUE),
+    mean_price = mean(listing_price, na.rm = TRUE),
+    median_price = median(listing_price, na.rm = TRUE),
+    sd_price = sd(listing_price, na.rm = TRUE),
+    min_price = min(listing_price, na.rm = TRUE),
+    max_price = max(listing_price, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  select(-radius) %>%
+  arrange(mean_distance_m)
+
+summary_table <- bind_rows(summary_table_below, dat_above_5000)
+
+reactable(
+  summary_table,
+  columns = list(
+    threshold_m = colDef(
+      name = "Threshold (m)",
+      format = colFormat(digits = 0)
+    ),
+    mean_distance_m = colDef(
+      name = "Mean Dist. (m)",
+      format = colFormat(digits = 0)
+    ),
+    n_rentals = colDef(
+      name = "# Rentals",
+      format = colFormat(separators = TRUE)
+    ),
+    n_spill_sites = colDef(
+      name = "# Spill Sites",
+      format = colFormat(separators = TRUE, digits = 1)
+    ),
+    mean_price = colDef(
+      name = "Mean (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    median_price = colDef(
+      name = "Median (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    sd_price = colDef(
+      name = "SD (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    min_price = colDef(
+      name = "Min (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    max_price = colDef(
+      name = "Max (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    )
+  ),
+  columnGroups = list(
+    colGroup(name = "Observations", columns = c("n_rentals", "n_spill_sites")),
+    colGroup(
+      name = "Price Statistics",
+      columns = c(
+        "mean_price",
+        "median_price",
+        "sd_price",
+        "min_price",
+        "max_price"
+      )
+    )
+  ),
+  defaultColDef = colDef(
+    headerStyle = list(fontSize = "0.8em", whiteSpace = "wrap"),
+    style = list(fontSize = "0.75em"),
+    minWidth = 80
+  ),
+  resizable = TRUE,
+  filterable = FALSE,
+  defaultPageSize = 10,
+  compact = TRUE,
+  style = list(maxWidth = "100%", overflowX = "auto")
+)
+```
+
+#### By Spill Count {#sec-03-02-02-by-spill-count}
+
+```{r, rentals_spill_summary_by_count}
+threshold <- 2000
+treshold_label <- paste0(threshold / 1000, "km")
+
+spill_counts_base <- dat_agg_all_trimmed %>%
+  filter(radius == threshold)
+
+spill_counts_quantiles <- quantile(
+  filter(spill_counts_base, !is.na(mean_distance))$spill_count,
+  probs = seq(0, 1, 0.25),
+  na.rm = TRUE
+)
+
+spill_counts_summary_below <- spill_counts_base %>%
+  filter(!is.na(mean_distance)) %>%
+  mutate(
+    quartile = cut(
+      spill_count,
+      breaks = spill_counts_quantiles,
+      labels = c(
+        "1st quartile (0-25%)",
+        "2nd quartile (25-50%)",
+        "3rd quartile (50-75%)",
+        "4th quartile (75-100%)"
+      ),
+      include.lowest = TRUE,
+      right = TRUE
+    )
+  ) %>%
+  group_by(quartile) %>%
+  summarise(
+    spill_count_min = min(spill_count, na.rm = TRUE),
+    spill_count_max = max(spill_count, na.rm = TRUE),
+    spill_count_mean = mean(spill_count, na.rm = TRUE),
+    spill_count_median = median(spill_count, na.rm = TRUE),
+    n_rentals = n(),
+    n_spill_sites = mean(n_spill_sites, na.rm = TRUE),
+    mean_price = mean(listing_price, na.rm = TRUE),
+    median_price = median(listing_price, na.rm = TRUE),
+    sd_price = sd(listing_price, na.rm = TRUE),
+    min_price = min(listing_price, na.rm = TRUE),
+    max_price = max(listing_price, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+rentals_below_threshold_ids <- dat_agg_all_trimmed %>%
+  filter(radius == threshold) %>%
+  pull(rental_id) %>%
+  unique()
+
+spill_counts_summary_above <- zoopla_rentals_trimmed %>%
+  filter(!(rental_id %in% rentals_below_threshold_ids)) %>%
+  summarise(
+    quartile = paste0("Above ", treshold_label, " threshold"),
+    spill_count_min = 0,
+    spill_count_max = 0,
+    spill_count_mean = 0,
+    spill_count_median = 0,
+    n_rentals = dplyr::n_distinct(rental_id),
+    n_spill_sites = 0,
+    mean_price = mean(listing_price, na.rm = TRUE),
+    median_price = median(listing_price, na.rm = TRUE),
+    sd_price = sd(listing_price, na.rm = TRUE),
+    min_price = min(listing_price, na.rm = TRUE),
+    max_price = max(listing_price, na.rm = TRUE)
+  )
+
+spill_counts_summary <- bind_rows(
+  spill_counts_summary_below,
+  spill_counts_summary_above
+)
+
+reactable(
+  spill_counts_summary,
+  columns = list(
+    quartile = colDef(name = "Spill Count Quartile"),
+    spill_count_min = colDef(
+      name = "Min Count",
+      format = colFormat(digits = 0)
+    ),
+    spill_count_max = colDef(
+      name = "Max Count",
+      format = colFormat(digits = 0)
+    ),
+    spill_count_mean = colDef(
+      name = "Mean Count",
+      format = colFormat(digits = 1)
+    ),
+    spill_count_median = colDef(
+      name = "Median Count",
+      format = colFormat(digits = 1)
+    ),
+    n_rentals = colDef(
+      name = "# Rentals",
+      format = colFormat(separators = TRUE)
+    ),
+    n_spill_sites = colDef(
+      name = "# Spill Sites",
+      format = colFormat(separators = TRUE, digits = 1)
+    ),
+    mean_price = colDef(
+      name = "Mean (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    median_price = colDef(
+      name = "Median (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    sd_price = colDef(
+      name = "SD (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    min_price = colDef(
+      name = "Min (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    max_price = colDef(
+      name = "Max (£)",
+      format = colFormat(separators = TRUE, digits = 0)
+    )
+  ),
+  columnGroups = list(
+    colGroup(
+      name = "Spill Count Statistics",
+      columns = c(
+        "spill_count_min",
+        "spill_count_max",
+        "spill_count_mean",
+        "spill_count_median"
+      )
+    ),
+    colGroup(
+      name = "Observations",
+      columns = c("n_rentals", "n_spill_sites")
+    ),
+    colGroup(
+      name = "Price Statistics",
+      columns = c(
+        "mean_price",
+        "median_price",
+        "sd_price",
+        "min_price",
+        "max_price"
+      )
+    )
+  ),
+  defaultColDef = colDef(
+    headerStyle = list(fontSize = "0.8em", whiteSpace = "wrap"),
+    style = list(fontSize = "0.75em"),
+    minWidth = 80
+  ),
+  resizable = TRUE,
+  filterable = FALSE,
+  defaultPageSize = 10,
+  compact = TRUE,
+  style = list(maxWidth = "100%", overflowX = "auto")
+)
+```
+
+:::
+
+### Bivariate Plots {#sec-03-03-zoopla-bivariate}
+
+```{r, bivariate_plots}
+#| eval: false
+
+# Sample data for plotting
+set.seed(123)
+sample_size <- 300000
+sample_rentals <- unique(dat_agg_all_trimmed$rental_id) %>%
+  sample(size = sample_size)
+
+dat_agg_all_sample <- dat_agg_all %>%
+  filter(rental_id %in% sample_rentals)
+dat_agg_12mo_sample <- dat_agg_12mo %>%
+  filter(rental_id %in% sample_rentals)
+
+# Reshape data to long format
+radius_levels <- c(250, 500, 1000, 2000, 5000)
+plot_data <- bind_rows(
+  dat_agg_all_sample %>%
+    mutate(time_frame = "All Years", .before = 1),
+  dat_agg_12mo_sample %>%
+    mutate(time_frame = "12 Months", .before = 1)
+) %>%
+  filter(radius %in% radius_levels) %>%
+  mutate(
+    radius = factor(
+      radius,
+      levels = radius_levels,
+      labels = paste0(radius_levels, "m")
+    ),
+    inverse_spill_count = spill_count / mean_distance,
+    inverse_spill_hrs = spill_hrs / mean_distance,
+    log_price = log(rent),
+    listing_price = rent
+  )
+
+# Create plotting function
+create_cs_plot <- function(
+  x_var,
+  x_label,
+  y_var,
+  y_label,
+  method = c("lm", "loess"),
+  time = NULL,
+  title,
+  facet = TRUE
+) {
+  # Optionally filter data by time_frame
+  plot_df <- plot_data
+  if (!is.null(time)) {
+    plot_df <- plot_data %>% filter(time_frame == time)
+  }
+
+  # Base plot
+  p <- ggplot(
+    plot_df,
+    aes(y = .data[[y_var]], x = .data[[x_var]], color = radius)
+  ) +
+    scale_color_viridis_d(option = "plasma", end = 0.8) +
+    labs(
+      x = x_label,
+      y = y_label,
+      color = "Radius",
+      title = title
+    ) +
+    theme_pref +
+    theme(legend.position = "bottom")
+
+  # Add smoothing lines
+  if (length(method) == 1) {
+    p <- p + geom_smooth(method = method, se = TRUE, linewidth = 0.5)
+  } else {
+    p <- p +
+      geom_smooth(method = method[1], se = TRUE, linewidth = 0.5) +
+      geom_smooth(method = method[2], se = FALSE, linewidth = 0.5, linetype = 5)
+  }
+
+  # Add faceting if requested
+  if (facet) {
+    p <- p + facet_grid(rows = vars(time_frame))
+  }
+
+  return(p)
+}
+
+# Define plot specifications for each variable
+plot_specs <- list(
+  spill_count = list(
+    var = "spill_count",
+    label = "Spill Count",
+    title = "Spill Count Relationship"
+  ),
+  spill_hrs = list(
+    var = "spill_hrs",
+    label = "Spill Duration",
+    title = "Spill Duration Relationship"
+  ),
+  mean_distance = list(
+    var = "mean_distance",
+    label = "Mean Distance to Spill Site",
+    title = "Distance Relationship"
+  ),
+  inverse_spill_count = list(
+    var = "inverse_spill_count",
+    label = "Inverse Spill Count - Distance",
+    title = "Inverse Spill Count - Distance Relationship"
+  )
+)
+
+# Define plot variants: LM only, All Years, and 12 Months
+variants <- list(
+  lm = list(method = "lm", time = NULL, facet = TRUE),
+  all = list(method = c("lm", "loess"), time = "All Years", facet = FALSE),
+  `12mo` = list(method = c("lm", "loess"), time = "12 Months", facet = FALSE)
+)
+
+# Loop through each specification and variant to generate and save plots
+for (var_name in names(plot_specs)) {
+  spec <- plot_specs[[var_name]]
+
+  for (variant_name in names(variants)) {
+    v <- variants[[variant_name]]
+
+    # Create the plot using create_cs_plot
+    p <- create_cs_plot(
+      spec$var,
+      spec$label,
+      "listing_price",
+      "Listing Price (£)",
+      method = v$method,
+      time = v$time,
+      title = spec$title,
+      facet = v$facet
+    )
+
+    # Construct file name based on variable and variant
+    file_name <- paste0("rental_", var_name, "_", variant_name, ".png")
+
+    # Save the plot
+    ggsave(
+      filename = here("book", "book_figs", file_name),
+      plot = p,
+      width = 8,
+      height = 0.618 * 6,
+      dpi = 600
+    )
+  }
+}
+```
+
+#### Spill Count {#sec-03-03-01-spill-count}
+
+::: panel-tabset
+
+##### Linear
+```{r, plot_spill_count_lm}
+knitr::include_graphics(here("book", "book_figs", "rental_spill_count_lm.png"))
+```
+
+##### All Years - Linear and LOESS
+```{r, plot_spill_count_all}
+knitr::include_graphics(here("book", "book_figs", "rental_spill_count_all.png"))
+```
+
+##### 12 Months - Linear and LOESS
+```{r, plot_spill_count_12mo}
+knitr::include_graphics(here(
+  "book",
+  "book_figs",
+  "rental_spill_count_12mo.png"
+))
+```
+
+:::
+
+#### Spill Duration {#sec-03-03-02-spill-duration}
+
+::: panel-tabset
+
+##### Linear
+```{r, plot_spill_hrs_lm}
+knitr::include_graphics(here("book", "book_figs", "rental_spill_hrs_lm.png"))
+```
+
+##### All Years - Linear and LOESS
+```{r, plot_spill_hrs_all}
+knitr::include_graphics(here("book", "book_figs", "rental_spill_hrs_all.png"))
+```
+
+##### 12 Months - Linear and LOESS
+```{r, plot_spill_hrs_12mo}
+knitr::include_graphics(here("book", "book_figs", "rental_spill_hrs_12mo.png"))
+```
+
+:::
+
+#### Distance {#sec-03-03-03-distance}
+
+::: panel-tabset
+
+##### Linear
+```{r, plot_mean_distance_lm}
+knitr::include_graphics(here(
+  "book",
+  "book_figs",
+  "rental_mean_distance_lm.png"
+))
+```
+
+##### All Years - Linear and LOESS
+```{r, plot_mean_distance_all}
+knitr::include_graphics(here(
+  "book",
+  "book_figs",
+  "rental_mean_distance_all.png"
+))
+```
+
+##### 12 Months - Linear and LOESS
+```{r, plot_mean_distance_12mo}
+knitr::include_graphics(here(
+  "book",
+  "book_figs",
+  "rental_mean_distance_12mo.png"
+))
+```
+
+:::
+
+#### Inverse Spill Count - Distance {#sec-03-03-04-inverse}
+
+::: panel-tabset
+
+##### Linear
+```{r, plot_inverse_spill_count_lm}
+knitr::include_graphics(here(
+  "book",
+  "book_figs",
+  "rental_inverse_spill_count_lm.png"
+))
+```
+
+##### All Years - Linear and LOESS
+```{r, plot_inverse_spill_count_all}
+knitr::include_graphics(here(
+  "book",
+  "book_figs",
+  "rental_inverse_spill_count_all.png"
+))
+```
+
+##### 12 Months - Linear and LOESS
+```{r, plot_inverse_spill_count_12mo}
+knitr::include_graphics(here(
+  "book",
+  "book_figs",
+  "rental_inverse_spill_count_12mo.png"
+))
+```
+
+:::

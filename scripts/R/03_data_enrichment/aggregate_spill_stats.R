@@ -413,7 +413,6 @@ main <- function() {
   export_results(completed_data)
   
   logger::log_info("Processing completed successfully")
-  )
 }
 
 # Execute main function

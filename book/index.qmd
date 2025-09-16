@@ -16,6 +16,10 @@ execute:
 
 # Updates {#sec-index}
 
+## 16/09/2025 {.unnumbered}
+
+Added exploration of Zoopla rental data (Zoopla Rental Data Exploration, @sec-zoopla-exploration)
+
 ## 02/09/2025 {.unnumbered}
 
 Rainfall vs Dry Spills visualisations in Dry Spill Exploration (@sec-04-dry-spills).
