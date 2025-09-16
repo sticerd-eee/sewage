@@ -2,14 +2,14 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.7.34">
+<meta name="generator" content="quarto-1.8.24">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="Jacopo Olivieri">
 <meta name="dcterms.date" content="2025-07-18">
 
-<title>8&nbsp; Pipeline Overview – Sewage in Our Waters</title>
+<title>9&nbsp; Pipeline Overview – Sewage in Our Waters</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -36,14 +36,15 @@ ul.task-list li input[type="checkbox"] {
 <link href="../hedonic_regs.html" rel="prev">
 <script src="../site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/axe/axe-check.js" type="module"></script>
 <script src="../site_libs/quarto-html/popper.min.js"></script>
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-c8ad9e5dbd60b7b70b38521ab19b7da4.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dc55a5b9e770e841cd82e46aadbfb9b0.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-96c5540ededea34e36548507abb5b3a4.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-d5e7ad547044776d59bf9b59a51f66bb.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script src="../site_libs/quarto-contrib/glightbox/glightbox.min.js"></script>
 <link href="../site_libs/quarto-contrib/glightbox/glightbox.min.css" rel="stylesheet">
 <link href="../site_libs/quarto-contrib/glightbox/lightbox.css" rel="stylesheet">
@@ -93,7 +94,7 @@ ul.task-list li input[type="checkbox"] {
       <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
         <i class="bi bi-layout-text-sidebar-reverse"></i>
       </button>
-        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html">Data Cleaning</a></li><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></a></li></ol></nav>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html">Data Cleaning</a></li><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></a></li></ol></nav>
         <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
         </a>
       <button type="button" class="btn quarto-search-button" aria-label="Search" onclick="window.quartoOpenSearch();">
@@ -106,7 +107,9 @@ ul.task-list li input[type="checkbox"] {
 <div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article">
 <!-- sidebar -->
   <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal quarto-sidebar-collapse-item sidebar-navigation floating overflow-auto">
-    <div class="pt-lg-2 mt-2 text-left sidebar-header">
+    <div class="pt-lg-2 mt-2 text-left sidebar-header sidebar-header-stacked">
+      <a href="../index.html" class="sidebar-logo-link">
+      </a>
     <div class="sidebar-title mb-0 py-0">
       <a href="../">Sewage in Our Waters</a> 
     </div>
@@ -157,6 +160,12 @@ ul.task-list li input[type="checkbox"] {
  <span class="menu-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">House Data Exploration</span></span></a>
   </div>
 </li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../zoopla_data_exploration.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Zoopla Rental Data Exploration</span></span></a>
+  </div>
+</li>
       </ul>
   </li>
         <li class="sidebar-item sidebar-item-section">
@@ -171,13 +180,13 @@ ul.task-list li input[type="checkbox"] {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../event_study.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Event Study</span></span></a>
+ <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Event Study</span></span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../hedonic_regs.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span></a>
+ <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span></a>
   </div>
 </li>
       </ul>
@@ -194,13 +203,13 @@ ul.task-list li input[type="checkbox"] {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../data_clean_documentation/01_pipeline.html" class="sidebar-item-text sidebar-link active">
- <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span></a>
+ <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../data_clean_documentation/02_ingestion.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span></a>
+ <span class="menu-text"><span class="chapter-number">10</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span></a>
   </div>
 </li>
       </ul>
@@ -215,16 +224,16 @@ ul.task-list li input[type="checkbox"] {
     <h2 id="toc-title">Table of contents</h2>
    
   <ul>
-  <li><a href="#sec-01-01-organisation" id="toc-sec-01-01-organisation" class="nav-link active" data-scroll-target="#sec-01-01-organisation"><span class="header-section-number">8.1</span> Pipeline Organisation</a></li>
-  <li><a href="#sec-01-02-flowchart" id="toc-sec-01-02-flowchart" class="nav-link" data-scroll-target="#sec-01-02-flowchart"><span class="header-section-number">8.2</span> Flowchart</a></li>
-  <li><a href="#sec-01-03-script-overview" id="toc-sec-01-03-script-overview" class="nav-link" data-scroll-target="#sec-01-03-script-overview"><span class="header-section-number">8.3</span> Scripts Overview</a>
+  <li><a href="#sec-01-01-organisation" id="toc-sec-01-01-organisation" class="nav-link active" data-scroll-target="#sec-01-01-organisation"><span class="header-section-number">9.1</span> Pipeline Organisation</a></li>
+  <li><a href="#sec-01-02-flowchart" id="toc-sec-01-02-flowchart" class="nav-link" data-scroll-target="#sec-01-02-flowchart"><span class="header-section-number">9.2</span> Flowchart</a></li>
+  <li><a href="#sec-01-03-script-overview" id="toc-sec-01-03-script-overview" class="nav-link" data-scroll-target="#sec-01-03-script-overview"><span class="header-section-number">9.3</span> Scripts Overview</a>
   <ul class="collapse">
-  <li><a href="#sec-01-03-01-raw-data-ingestion" id="toc-sec-01-03-01-raw-data-ingestion" class="nav-link" data-scroll-target="#sec-01-03-01-raw-data-ingestion"><span class="header-section-number">8.3.1</span> Raw Data Ingestion Layer</a></li>
-  <li><a href="#sec-01-03-02-data-cleaning-standardisation" id="toc-sec-01-03-02-data-cleaning-standardisation" class="nav-link" data-scroll-target="#sec-01-03-02-data-cleaning-standardisation"><span class="header-section-number">8.3.2</span> Data Cleaning &amp; Standardisation Layer</a></li>
-  <li><a href="#sec-01-03-03-data-enrichment-aggregation" id="toc-sec-01-03-03-data-enrichment-aggregation" class="nav-link" data-scroll-target="#sec-01-03-03-data-enrichment-aggregation"><span class="header-section-number">8.3.3</span> Data Enrichment &amp; Aggregation Layer</a></li>
-  <li><a href="#sec-01-03-04-feature-engineering-spatial-processing" id="toc-sec-01-03-04-feature-engineering-spatial-processing" class="nav-link" data-scroll-target="#sec-01-03-04-feature-engineering-spatial-processing"><span class="header-section-number">8.3.4</span> Feature Engineering &amp; Spatial Processing Layer</a></li>
-  <li><a href="#sec-01-03-05-integration" id="toc-sec-01-03-05-integration" class="nav-link" data-scroll-target="#sec-01-03-05-integration"><span class="header-section-number">8.3.5</span> Integration Layer</a></li>
-  <li><a href="#sec-01-03-06-master-dataset-assembly" id="toc-sec-01-03-06-master-dataset-assembly" class="nav-link" data-scroll-target="#sec-01-03-06-master-dataset-assembly"><span class="header-section-number">8.3.6</span> Master Dataset Assembly Layer</a></li>
+  <li><a href="#sec-01-03-01-raw-data-ingestion" id="toc-sec-01-03-01-raw-data-ingestion" class="nav-link" data-scroll-target="#sec-01-03-01-raw-data-ingestion"><span class="header-section-number">9.3.1</span> Raw Data Ingestion Layer</a></li>
+  <li><a href="#sec-01-03-02-data-cleaning-standardisation" id="toc-sec-01-03-02-data-cleaning-standardisation" class="nav-link" data-scroll-target="#sec-01-03-02-data-cleaning-standardisation"><span class="header-section-number">9.3.2</span> Data Cleaning &amp; Standardisation Layer</a></li>
+  <li><a href="#sec-01-03-03-data-enrichment-aggregation" id="toc-sec-01-03-03-data-enrichment-aggregation" class="nav-link" data-scroll-target="#sec-01-03-03-data-enrichment-aggregation"><span class="header-section-number">9.3.3</span> Data Enrichment &amp; Aggregation Layer</a></li>
+  <li><a href="#sec-01-03-04-feature-engineering-spatial-processing" id="toc-sec-01-03-04-feature-engineering-spatial-processing" class="nav-link" data-scroll-target="#sec-01-03-04-feature-engineering-spatial-processing"><span class="header-section-number">9.3.4</span> Feature Engineering &amp; Spatial Processing Layer</a></li>
+  <li><a href="#sec-01-03-05-integration" id="toc-sec-01-03-05-integration" class="nav-link" data-scroll-target="#sec-01-03-05-integration"><span class="header-section-number">9.3.5</span> Integration Layer</a></li>
+  <li><a href="#sec-01-03-06-master-dataset-assembly" id="toc-sec-01-03-06-master-dataset-assembly" class="nav-link" data-scroll-target="#sec-01-03-06-master-dataset-assembly"><span class="header-section-number">9.3.6</span> Master Dataset Assembly Layer</a></li>
   </ul></li>
   </ul>
 </nav>
@@ -232,9 +241,9 @@ ul.task-list li input[type="checkbox"] {
 <!-- main -->
 <main class="content" id="quarto-document-content">
 
-<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html">Data Cleaning</a></li><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></a></li></ol></nav>
+<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html">Data Cleaning</a></li><li class="breadcrumb-item"><a href="../data_clean_documentation/01_pipeline.html"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></a></li></ol></nav>
 <div class="quarto-title">
-<h1 class="title"><span id="sec-01-data-pipeline" class="quarto-section-identifier"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span></h1>
+<h1 class="title"><span id="sec-01-data-pipeline" class="quarto-section-identifier"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span></h1>
 </div>
 
 
@@ -263,8 +272,8 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<section id="sec-01-01-organisation" class="level2" data-number="8.1">
-<h2 data-number="8.1" class="anchored" data-anchor-id="sec-01-01-organisation"><span class="header-section-number">8.1</span> Pipeline Organisation</h2>
+<section id="sec-01-01-organisation" class="level2" data-number="9.1">
+<h2 data-number="9.1" class="anchored" data-anchor-id="sec-01-01-organisation"><span class="header-section-number">9.1</span> Pipeline Organisation</h2>
 <p>The current data cleaning pipeline consists of 20 R scripts that process sewage discharge data, house price data, and spatial relationships to create datasets for analysis.</p>
 <p>The pipeline is structured across 6 layers:</p>
 <ol type="1">
@@ -276,21 +285,21 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Analysis Datasets Layer (<code>06_analysis_datasets/</code>)</strong>: This layer includes scripts that build the final analysis datasets. These scripts define the unit of observation (e.g.&nbsp;house-level, site-level), assign exposure variables, and output clean panels or cross-sections used directly in empirical estimation.</li>
 </ol>
 </section>
-<section id="sec-01-02-flowchart" class="level2" data-number="8.2">
-<h2 data-number="8.2" class="anchored" data-anchor-id="sec-01-02-flowchart"><span class="header-section-number">8.2</span> Flowchart</h2>
+<section id="sec-01-02-flowchart" class="level2" data-number="9.2">
+<h2 data-number="9.2" class="anchored" data-anchor-id="sec-01-02-flowchart"><span class="header-section-number">9.2</span> Flowchart</h2>
 <p>The flowchart below illustrates the data cleaning pipeline, showing how data flows through each layer and the dependencies between scripts.</p>
 <p><a href="../book_figs/pipeline_flowchart.svg" class="lightbox" data-gallery="quarto-lightbox-gallery-1"><img src="../book_figs/pipeline_flowchart.svg" class="img-fluid"></a></p>
 <div class="cell">
 <div class="cell-output-display">
-<div class="grViz html-widget html-fill-item" id="htmlwidget-b141d960d8056db7d742" style="width:100%;height:401px;"></div>
-<script type="application/json" data-for="htmlwidget-b141d960d8056db7d742">{"x":{"diagram":"\ndigraph DataPipeline {\n\n  // --- Global Graph Settings ---\n  graph [\n    rankdir=\"TB\",\n    splines=ortho,\n    nodesep=0.8,\n    ranksep=1.5,\n    fontname=\"Inter, -apple-system, sans-serif\",\n    fontsize=14,\n    bgcolor=\"#fafaf9\",\n    label=\"Data Processing Pipeline\",\n    labelloc=\"t\",\n    fontcolor=\"#1e1b4b\"\n  ];\n\n  // --- Default Node and Edge Styles ---\n  node [\n    fontname=\"Inter, -apple-system, sans-serif\",\n    fontsize=13,\n    shape=box,\n    style=\"filled,rounded\"\n  ];\n  edge [\n    color=\"#6b7280\",\n    penwidth=2\n  ];\n\n  // --- Subgraph Definitions (Layers) ---\n  subgraph cluster_ING {\n    label = \"01 Ingestion Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#f3f4f6\"; color=\"#6b7280\"; fontcolor=\"#111827\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S01 [label=\"edm_individ_data_standardisation_2021-2023.R\\nStandardises raw EDM data files from UK water companies\"];\n    S04 [label=\"fetch_edm_api_data_2024_onwards.R\\nDownloads EDM data from ArcGIS API endpoints for 2024+\"];\n  }\n\n  subgraph cluster_CLN {\n    label = \"02 Cleaning & Standardisation Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#eff6ff\"; color=\"#3b82f6\"; fontcolor=\"#1e3a8a\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S02 [label=\"convert_individ_raw_data_to_rdata_2021-2023.R\\nConverts raw EDM data files to standardised Parquet format\"];\n    S03 [label=\"combine_individ_edm_data_2021-2023.R\\nCombines individual water company Parquet files into single dataset\"];\n    S05 [label=\"process_edm_api_json_to_parquet_2024_onwards.R\\nProcesses raw API JSON data into standardised Parquet files\"];\n    S06 [label=\"combine_api_edm_data_2024_onwards.R\\nCombines individual water company API Parquet files\"];\n    S08 [label=\"combine_annual_return_data.R\\nCleans and combines annual sewage spill return data\"];\n    S11 [label=\"clean_consented_discharges_database.R\\nCleans Environment Agency\\\"s consented discharges database\"];\n    S14 [label=\"clean_lr_house_price_data.R\\nCleans and combines HM Land Registry property sales data\"];\n  }\n  \n  subgraph cluster_INT {\n    label = \"05 Integration Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#fffbeb\"; color=\"#f97316\"; fontcolor=\"#7c2d12\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S07 [label=\"combine_2021-2023_and_api_edm_data.R\\nHarmonises and combines 2021-2023 EDM data with API 2024+ data\"];\n    S10 [label=\"merge_individ_annual_location.R\\nMerges location data from annual datasets with individual spill data\"];\n  }\n  \n  subgraph cluster_ENR {\n    label = \"03 Enrichment & Aggregation Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#f0fdf4\"; color=\"#22c55e\"; fontcolor=\"#14532d\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S09 [label=\"create_annual_return_lookup.R\\nBuilds cross-year lookup table linking same spill sites\"];\n    S12 [label=\"aggregate_spill_stats.R\\nAggregates individual sewage overflow spills into statistics\"];\n    S13 [label=\"create_unique_spill_sites.R\\nCreates unique spill sites dataset by cleaning location data\"];\n  }\n\n  subgraph cluster_FEA {\n    label = \"04 Feature Engineering; Spatial Processing Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#fef2f2\"; color=\"#ef4444\"; fontcolor=\"#7f1d1d\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S15 [label=\"10km_site_house_sale_match.R\\nPerforms spatial matching between house sales and spill sites\"];\n    S17 [label=\"compute_spill_stats.R\\nCalculates site-level spill statistics and treatment indicators\"];\n  }\n\n  subgraph cluster_MAS {\n    label = \"06 Final Dataset Assembly Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#faf5ff\"; color=\"#a855f7\"; fontcolor=\"#581c87\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S16 [label=\"cross_section_db.R\\nCreates cross-sectional databases aggregating spill data\"];\n    S18 [label=\"site_panel.R\\nCreates site-level panel data by aggregating house price statistics\"];\n    S19 [label=\"house_panel_within_radius.R\\nCreates house panel data for houses within specified radius thresholds\"];\n    S20 [label=\"house_panel_exp.R\\nCreates comprehensive house panel data including all houses\"];\n  }\n\n  // --- External and Data Node Definitions ---\n  node [shape=cylinder, style=\"filled,rounded\", rx=8, ry=8];\n\n  node [fillcolor=\"#d1fae5\", color=\"#10b981\", penwidth=2.5, fontcolor=\"#064e3b\"];\n  EXT1 [label=< <B>data/raw/edm_data/EDM*.zip<\/B><BR/>Raw EDM data archives from UK water companies >];\n  EXT2 [label=< <B>scripts/config/api_config.R<\/B><BR/>API configuration for data fetching >];\n  EXT3 [label=< <B>data/raw/edm_data/<BR/>YYYY_annual_return_edm.xlsx<\/B><BR/>Annual return data from water companies >];\n  EXT4 [label=< <B>data/raw/ea_consents/consents_all.csv<\/B><BR/>Environment Agency consented discharges database >];\n  EXT5 [label=< <B>data/raw/lr_house_price/pp-YYYY.csv<\/B><BR/>HM Land Registry property sales data >];\n\n  node [fillcolor=\"#fef3c7\", color=\"#f59e0b\", penwidth=1.5, fontcolor=\"#78350f\"];\n  D01 [label=\"data/raw/edm_data/\\nYYYY_company_name_edm.*\\nStandardised EDM files from zip extraction\"];\n  D02 [label=\"data/processed/edm_data_2021_2023/*.parquet\\nIndividual company EDM data in Parquet format\"];\n  D03 [label=\"data/processed/combined_edm_data.parquet\\nCombined EDM data for 2021-2023\"];\n  D04 [label=\"data/raw/edm_data/raw_api_responses/*.json.gz\\nRaw API JSON responses from ArcGIS endpoints\"];\n  D05 [label=\"data/processed/edm_api_data/*.parquet\\nProcessed API data in Parquet format\"];\n  D06 [label=\"data/processed/edm_api_data/combined_api_data.parquet\\nCombined API data for 2024+\"];\n  D07 [label=\"data/processed/combined_edm_data.parquet\\nAll EDM data combined (2021-2024+)\"];\n  D08 [label=\"data/processed/annual_return_edm.parquet\\nProcessed annual return data\"];\n  D09 [label=\"data/processed/annual_return_lookup.parquet\\nAnnual return lookup table\"];\n  D10 [label=\"data/processed/matched_events_annual_data.parquet\\nMatched events with annual data\"];\n  D11 [label=\"data/processed/consent_discharges_db.csv\\nCleaned EA consented discharges database\"];\n  D12 [label=\"data/processed/spill_aggregated/agg_spill_*.parquet\\nAggregated spill statistics (monthly/quarterly/yearly)\"];\n  D13 [label=\"data/processed/unique_spill_sites.parquet\\nUnique spill sites dataset with location data\"];\n  D14 [label=\"data/processed/house_price.parquet\\nCleaned house price data with postcode coordinates\"];\n  D15 [label=\"data/processed/spill_house_lookup.parquet\\nSpatial lookup between spills and houses within 10km\"];\n  D16 [label=\"output/log/edm_api_download_log.csv\\nDownload log for API data fetching\"];\n  D17 [label=\"data/processed/agg_spill_stats/\\nComputed spill statistics with treatment indicators\"];\n\n  node [fillcolor=\"#fce7f3\", color=\"#ec4899\", penwidth=3, fontcolor=\"#831843\"];\n  F01 [label=< <B>data/processed/agg_*_cross_section/<\/B><BR/>Cross-sectional databases >];\n  F02 [label=< <B>data/processed/dat_panel_site_level/<\/B><BR/>Site-level panel data >];\n  F03 [label=< <B>data/processed/houses_within_radius_panel/<\/B><BR/>House panel data within radius >];\n  F04 [label=< <B>data/processed/general_house_panel_qtr/<\/B><BR/>General house panel data >];\n\n  // --- Edge Definitions (Connections) ---\n  EXT1 -> S01; EXT2 -> S04; EXT3 -> S08; EXT4 -> S11; EXT5 -> S14;\n  S01 -> D01 -> S02 -> D02 -> S03 -> D03;\n  S04 -> D04 -> S05 -> D05 -> S06 -> D06;\n  {D03, D06} -> S07 -> D07;\n  S08 -> D08 -> {S09, S10};\n  S09 -> D09;\n  {D07, D08, D09} -> S10 -> D10;\n  S11 -> D11;\n  D10 -> {S12, S13};\n  S12 -> D12 -> S17 -> D17;\n  S13 -> D13;\n  S14 -> D14;\n  {D13, D14} -> S15 -> D15;\n  {D12, D14, D15} -> S16 -> F01;\n  {D14, D15} -> S18 -> F02;\n  {D14, D15} -> S19 -> F03;\n  {D14, D15, D17} -> S20 -> F04;\n\n  edge [style=dashed, color=\"#9ca3af\", penwidth=1.5, constraint=false];\n  S04 -> D16;\n  S10 -> D11;\n  S10 -> D09;\n}\n","config":{"engine":"dot","options":null}},"evals":[],"jsHooks":[]}</script>
+<div class="grViz html-widget html-fill-item" id="htmlwidget-578e233db158e3a391c4" style="width:100%;height:401px;"></div>
+<script type="application/json" data-for="htmlwidget-578e233db158e3a391c4">{"x":{"diagram":"\ndigraph DataPipeline {\n\n  // --- Global Graph Settings ---\n  graph [\n    rankdir=\"TB\",\n    splines=ortho,\n    nodesep=0.8,\n    ranksep=1.5,\n    fontname=\"Inter, -apple-system, sans-serif\",\n    fontsize=14,\n    bgcolor=\"#fafaf9\",\n    label=\"Data Processing Pipeline\",\n    labelloc=\"t\",\n    fontcolor=\"#1e1b4b\"\n  ];\n\n  // --- Default Node and Edge Styles ---\n  node [\n    fontname=\"Inter, -apple-system, sans-serif\",\n    fontsize=13,\n    shape=box,\n    style=\"filled,rounded\"\n  ];\n  edge [\n    color=\"#6b7280\",\n    penwidth=2\n  ];\n\n  // --- Subgraph Definitions (Layers) ---\n  subgraph cluster_ING {\n    label = \"01 Ingestion Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#f3f4f6\"; color=\"#6b7280\"; fontcolor=\"#111827\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S01 [label=\"edm_individ_data_standardisation_2021-2023.R\\nStandardises raw EDM data files from UK water companies\"];\n    S04 [label=\"fetch_edm_api_data_2024_onwards.R\\nDownloads EDM data from ArcGIS API endpoints for 2024+\"];\n  }\n\n  subgraph cluster_CLN {\n    label = \"02 Cleaning & Standardisation Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#eff6ff\"; color=\"#3b82f6\"; fontcolor=\"#1e3a8a\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S02 [label=\"convert_individ_raw_data_to_rdata_2021-2023.R\\nConverts raw EDM data files to standardised Parquet format\"];\n    S03 [label=\"combine_individ_edm_data_2021-2023.R\\nCombines individual water company Parquet files into single dataset\"];\n    S05 [label=\"process_edm_api_json_to_parquet_2024_onwards.R\\nProcesses raw API JSON data into standardised Parquet files\"];\n    S06 [label=\"combine_api_edm_data_2024_onwards.R\\nCombines individual water company API Parquet files\"];\n    S08 [label=\"combine_annual_return_data.R\\nCleans and combines annual sewage spill return data\"];\n    S11 [label=\"clean_consented_discharges_database.R\\nCleans Environment Agency\\\"s consented discharges database\"];\n    S14 [label=\"clean_lr_house_price_data.R\\nCleans and combines HM Land Registry property sales data\"];\n  }\n  \n  subgraph cluster_INT {\n    label = \"05 Integration Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#fffbeb\"; color=\"#f97316\"; fontcolor=\"#7c2d12\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S07 [label=\"combine_2021-2023_and_api_edm_data.R\\nHarmonises and combines 2021-2023 EDM data with API 2024+ data\"];\n    S10 [label=\"merge_individ_annual_location.R\\nMerges location data from annual datasets with individual spill data\"];\n  }\n  \n  subgraph cluster_ENR {\n    label = \"03 Enrichment & Aggregation Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#f0fdf4\"; color=\"#22c55e\"; fontcolor=\"#14532d\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S09 [label=\"create_annual_return_lookup.R\\nBuilds cross-year lookup table linking same spill sites\"];\n    S12 [label=\"aggregate_spill_stats.R\\nAggregates individual sewage overflow spills into statistics\"];\n    S13 [label=\"create_unique_spill_sites.R\\nCreates unique spill sites dataset by cleaning location data\"];\n  }\n\n  subgraph cluster_FEA {\n    label = \"04 Feature Engineering; Spatial Processing Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#fef2f2\"; color=\"#ef4444\"; fontcolor=\"#7f1d1d\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S15 [label=\"10km_site_house_sale_match.R\\nPerforms spatial matching between house sales and spill sites\"];\n    S17 [label=\"compute_spill_stats.R\\nCalculates site-level spill statistics and treatment indicators\"];\n  }\n\n  subgraph cluster_MAS {\n    label = \"06 Final Dataset Assembly Layer\";\n    style=\"filled,rounded\"; fillcolor=\"#faf5ff\"; color=\"#a855f7\"; fontcolor=\"#581c87\"; penwidth=2;\n    node [style=\"filled,rounded\", rx=6, ry=6, fillcolor=\"#e0e7ff\", color=\"#6366f1\", penwidth=2, fontcolor=\"#312e81\"];\n    S16 [label=\"cross_section_sales_db.R\\nCreates cross-sectional databases aggregating spill data (sales)\"];\n    S18 [label=\"site_panel.R\\nCreates site-level panel data by aggregating house price statistics\"];\n    S19 [label=\"house_panel_within_radius.R\\nCreates house panel data for houses within specified radius thresholds\"];\n    S20 [label=\"house_panel_exp.R\\nCreates comprehensive house panel data including all houses\"];\n  }\n\n  // --- External and Data Node Definitions ---\n  node [shape=cylinder, style=\"filled,rounded\", rx=8, ry=8];\n\n  node [fillcolor=\"#d1fae5\", color=\"#10b981\", penwidth=2.5, fontcolor=\"#064e3b\"];\n  EXT1 [label=< <B>data/raw/edm_data/EDM*.zip<\/B><BR/>Raw EDM data archives from UK water companies >];\n  EXT2 [label=< <B>scripts/config/api_config.R<\/B><BR/>API configuration for data fetching >];\n  EXT3 [label=< <B>data/raw/edm_data/<BR/>YYYY_annual_return_edm.xlsx<\/B><BR/>Annual return data from water companies >];\n  EXT4 [label=< <B>data/raw/ea_consents/consents_all.csv<\/B><BR/>Environment Agency consented discharges database >];\n  EXT5 [label=< <B>data/raw/lr_house_price/pp-YYYY.csv<\/B><BR/>HM Land Registry property sales data >];\n\n  node [fillcolor=\"#fef3c7\", color=\"#f59e0b\", penwidth=1.5, fontcolor=\"#78350f\"];\n  D01 [label=\"data/raw/edm_data/\\nYYYY_company_name_edm.*\\nStandardised EDM files from zip extraction\"];\n  D02 [label=\"data/processed/edm_data_2021_2023/*.parquet\\nIndividual company EDM data in Parquet format\"];\n  D03 [label=\"data/processed/combined_edm_data.parquet\\nCombined EDM data for 2021-2023\"];\n  D04 [label=\"data/raw/edm_data/raw_api_responses/*.json.gz\\nRaw API JSON responses from ArcGIS endpoints\"];\n  D05 [label=\"data/processed/edm_api_data/*.parquet\\nProcessed API data in Parquet format\"];\n  D06 [label=\"data/processed/edm_api_data/combined_api_data.parquet\\nCombined API data for 2024+\"];\n  D07 [label=\"data/processed/combined_edm_data.parquet\\nAll EDM data combined (2021-2024+)\"];\n  D08 [label=\"data/processed/annual_return_edm.parquet\\nProcessed annual return data\"];\n  D09 [label=\"data/processed/annual_return_lookup.parquet\\nAnnual return lookup table\"];\n  D10 [label=\"data/processed/matched_events_annual_data.parquet\\nMatched events with annual data\"];\n  D11 [label=\"data/processed/consent_discharges_db.csv\\nCleaned EA consented discharges database\"];\n  D12 [label=\"data/processed/spill_aggregated/agg_spill_*.parquet\\nAggregated spill statistics (monthly/quarterly/yearly)\"];\n  D13 [label=\"data/processed/unique_spill_sites.parquet\\nUnique spill sites dataset with location data\"];\n  D14 [label=\"data/processed/house_price.parquet\\nCleaned house price data with postcode coordinates\"];\n  D15 [label=\"data/processed/spill_house_lookup.parquet\\nSpatial lookup between spills and houses within 10km\"];\n  D16 [label=\"output/log/edm_api_download_log.csv\\nDownload log for API data fetching\"];\n  D17 [label=\"data/processed/agg_spill_stats/\\nComputed spill statistics with treatment indicators\"];\n\n  node [fillcolor=\"#fce7f3\", color=\"#ec4899\", penwidth=3, fontcolor=\"#831843\"];\n  F01 [label=< <B>data/processed/agg_*_cross_section/<\/B><BR/>Cross-sectional databases >];\n  F02 [label=< <B>data/processed/dat_panel_site_level/<\/B><BR/>Site-level panel data >];\n  F03 [label=< <B>data/processed/houses_within_radius_panel/<\/B><BR/>House panel data within radius >];\n  F04 [label=< <B>data/processed/general_house_panel_qtr/<\/B><BR/>General house panel data >];\n\n  // --- Edge Definitions (Connections) ---\n  EXT1 -> S01; EXT2 -> S04; EXT3 -> S08; EXT4 -> S11; EXT5 -> S14;\n  S01 -> D01 -> S02 -> D02 -> S03 -> D03;\n  S04 -> D04 -> S05 -> D05 -> S06 -> D06;\n  {D03, D06} -> S07 -> D07;\n  S08 -> D08 -> {S09, S10};\n  S09 -> D09;\n  {D07, D08, D09} -> S10 -> D10;\n  S11 -> D11;\n  D10 -> {S12, S13};\n  S12 -> D12 -> S17 -> D17;\n  S13 -> D13;\n  S14 -> D14;\n  {D13, D14} -> S15 -> D15;\n  {D12, D14, D15} -> S16 -> F01;\n  {D14, D15} -> S18 -> F02;\n  {D14, D15} -> S19 -> F03;\n  {D14, D15, D17} -> S20 -> F04;\n\n  edge [style=dashed, color=\"#9ca3af\", penwidth=1.5, constraint=false];\n  S04 -> D16;\n  S10 -> D11;\n  S10 -> D09;\n}\n","config":{"engine":"dot","options":null}},"evals":[],"jsHooks":[]}</script>
 </div>
 </div>
 </section>
-<section id="sec-01-03-script-overview" class="level2" data-number="8.3">
-<h2 data-number="8.3" class="anchored" data-anchor-id="sec-01-03-script-overview"><span class="header-section-number">8.3</span> Scripts Overview</h2>
-<section id="sec-01-03-01-raw-data-ingestion" class="level3" data-number="8.3.1">
-<h3 data-number="8.3.1" class="anchored" data-anchor-id="sec-01-03-01-raw-data-ingestion"><span class="header-section-number">8.3.1</span> Raw Data Ingestion Layer</h3>
+<section id="sec-01-03-script-overview" class="level2" data-number="9.3">
+<h2 data-number="9.3" class="anchored" data-anchor-id="sec-01-03-script-overview"><span class="header-section-number">9.3</span> Scripts Overview</h2>
+<section id="sec-01-03-01-raw-data-ingestion" class="level3" data-number="9.3.1">
+<h3 data-number="9.3.1" class="anchored" data-anchor-id="sec-01-03-01-raw-data-ingestion"><span class="header-section-number">9.3.1</span> Raw Data Ingestion Layer</h3>
 <p><strong>EDM Data Standardisation (2021-2023)</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>edm_individ_data_standardisation_2021-2023.R</code></li>
@@ -310,8 +319,8 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 </ul>
 </section>
-<section id="sec-01-03-02-data-cleaning-standardisation" class="level3" data-number="8.3.2">
-<h3 data-number="8.3.2" class="anchored" data-anchor-id="sec-01-03-02-data-cleaning-standardisation"><span class="header-section-number">8.3.2</span> Data Cleaning &amp; Standardisation Layer</h3>
+<section id="sec-01-03-02-data-cleaning-standardisation" class="level3" data-number="9.3.2">
+<h3 data-number="9.3.2" class="anchored" data-anchor-id="sec-01-03-02-data-cleaning-standardisation"><span class="header-section-number">9.3.2</span> Data Cleaning &amp; Standardisation Layer</h3>
 <p><strong>Raw Data Conversion</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>convert_individ_raw_data_to_rdata_2021-2023.R</code></li>
@@ -370,8 +379,8 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>outputs</strong>: <code>["data/processed/house_price.parquet"]</code></li>
 </ul>
 </section>
-<section id="sec-01-03-03-data-enrichment-aggregation" class="level3" data-number="8.3.3">
-<h3 data-number="8.3.3" class="anchored" data-anchor-id="sec-01-03-03-data-enrichment-aggregation"><span class="header-section-number">8.3.3</span> Data Enrichment &amp; Aggregation Layer</h3>
+<section id="sec-01-03-03-data-enrichment-aggregation" class="level3" data-number="9.3.3">
+<h3 data-number="9.3.3" class="anchored" data-anchor-id="sec-01-03-03-data-enrichment-aggregation"><span class="header-section-number">9.3.3</span> Data Enrichment &amp; Aggregation Layer</h3>
 <p><strong>Annual Return Lookup Creation</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>create_annual_return_lookup.R</code></li>
@@ -408,8 +417,8 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 </ul>
 </section>
-<section id="sec-01-03-04-feature-engineering-spatial-processing" class="level3" data-number="8.3.4">
-<h3 data-number="8.3.4" class="anchored" data-anchor-id="sec-01-03-04-feature-engineering-spatial-processing"><span class="header-section-number">8.3.4</span> Feature Engineering &amp; Spatial Processing Layer</h3>
+<section id="sec-01-03-04-feature-engineering-spatial-processing" class="level3" data-number="9.3.4">
+<h3 data-number="9.3.4" class="anchored" data-anchor-id="sec-01-03-04-feature-engineering-spatial-processing"><span class="header-section-number">9.3.4</span> Feature Engineering &amp; Spatial Processing Layer</h3>
 <p><strong>Spatial Matching</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>10km_site_house_sale_match.R</code></li>
@@ -433,8 +442,8 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>outputs</strong>: <code>["data/processed/agg_spill_stats/"]</code></li>
 </ul>
 </section>
-<section id="sec-01-03-05-integration" class="level3" data-number="8.3.5">
-<h3 data-number="8.3.5" class="anchored" data-anchor-id="sec-01-03-05-integration"><span class="header-section-number">8.3.5</span> Integration Layer</h3>
+<section id="sec-01-03-05-integration" class="level3" data-number="9.3.5">
+<h3 data-number="9.3.5" class="anchored" data-anchor-id="sec-01-03-05-integration"><span class="header-section-number">9.3.5</span> Integration Layer</h3>
 <p><strong>Historical and API Data Integration</strong></p>
 <ul>
 <li><strong>script_name</strong>: <code>combine_2021-2023_and_api_edm_data.R</code></li>
@@ -465,11 +474,11 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 </ul>
 </section>
-<section id="sec-01-03-06-master-dataset-assembly" class="level3" data-number="8.3.6">
-<h3 data-number="8.3.6" class="anchored" data-anchor-id="sec-01-03-06-master-dataset-assembly"><span class="header-section-number">8.3.6</span> Master Dataset Assembly Layer</h3>
-<p><strong>Cross-Sectional Database Creation</strong></p>
+<section id="sec-01-03-06-master-dataset-assembly" class="level3" data-number="9.3.6">
+<h3 data-number="9.3.6" class="anchored" data-anchor-id="sec-01-03-06-master-dataset-assembly"><span class="header-section-number">9.3.6</span> Master Dataset Assembly Layer</h3>
+<p><strong>Cross-Sectional Database Creation (Sales)</strong></p>
 <ul>
-<li><strong>script_name</strong>: <code>cross_section_db.R</code></li>
+<li><strong>script_name</strong>: <code>cross_section_sales_db.R</code></li>
 <li><strong>purpose</strong>: Creates cross-sectional databases aggregating spill data: one for all years and one for 12 months prior to house sales, partitioned by radius thresholds.</li>
 <li><strong>inputs</strong>:
 <ul>
@@ -479,8 +488,24 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong>outputs</strong>:
 <ul>
-<li><code>"data/processed/agg_all_yrs_cross_section/"</code></li>
-<li><code>"data/processed/agg_12mo_cross_section/"</code></li>
+<li><code>"data/processed/cross_section/sales/all_years/"</code></li>
+<li><code>"data/processed/cross_section/sales/prior_12mo/"</code></li>
+</ul></li>
+</ul>
+<p><strong>Cross-Sectional Database Creation (Rentals)</strong></p>
+<ul>
+<li><strong>script_name</strong>: <code>cross_section_rental_db.R</code></li>
+<li><strong>purpose</strong>: Creates cross-sectional rental datasets: all years and 12 months prior to <code>rented_est</code>, partitioned by radius thresholds.</li>
+<li><strong>inputs</strong>:
+<ul>
+<li><code>"data/processed/zoopla/zoopla_rentals.parquet"</code></li>
+<li><code>"data/processed/zoopla/spill_rental_lookup.parquet"</code></li>
+<li><code>"data/processed/spill_aggregated/agg_spill_mo.parquet"</code></li>
+</ul></li>
+<li><strong>outputs</strong>:
+<ul>
+<li><code>"data/processed/cross_section/rentals/all_years/"</code></li>
+<li><code>"data/processed/cross_section/rentals/prior_12mo/"</code></li>
 </ul></li>
 </ul>
 <p><strong>Site-Level Panel Data</strong></p>
@@ -574,13 +599,14 @@ ul.task-list li input[type="checkbox"] {
       e.clearSelection();
     }
     const getTextToCopy = function(trigger) {
-        const codeEl = trigger.previousElementSibling.cloneNode(true);
-        for (const childEl of codeEl.children) {
-          if (isCodeAnnotation(childEl)) {
-            childEl.remove();
-          }
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
         }
-        return codeEl.innerText;
+      }
+      return codeEl.innerText;
     }
     const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
       text: getTextToCopy
@@ -925,12 +951,12 @@ ul.task-list li input[type="checkbox"] {
 <nav class="page-navigation">
   <div class="nav-page nav-page-previous">
       <a href="../hedonic_regs.html" class="pagination-link" aria-label="Hedonics Regressions">
-        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span>
+        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span>
       </a>          
   </div>
   <div class="nav-page nav-page-next">
       <a href="../data_clean_documentation/02_ingestion.html" class="pagination-link" aria-label="Ingestion Layer">
-        <span class="nav-page-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span> <i class="bi bi-arrow-right-short"></i>
+        <span class="nav-page-text"><span class="chapter-number">10</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span> <i class="bi bi-arrow-right-short"></i>
       </a>
   </div>
 </nav>

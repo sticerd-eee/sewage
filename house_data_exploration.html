@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.7.34">
+<meta name="generator" content="quarto-1.8.24">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -32,18 +32,19 @@ ul.task-list li input[type="checkbox"] {
 <script src="site_libs/quarto-search/fuse.min.js"></script>
 <script src="site_libs/quarto-search/quarto-search.js"></script>
 <meta name="quarto:offset" content="./">
-<link href="./event_study.html" rel="next">
+<link href="./zoopla_data_exploration.html" rel="next">
 <link href="./dry_spills.html" rel="prev">
 <script src="site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="site_libs/quarto-html/axe/axe-check.js" type="module"></script>
 <script src="site_libs/quarto-html/popper.min.js"></script>
 <script src="site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="site_libs/quarto-html/anchor.min.js"></script>
 <link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="site_libs/quarto-html/quarto-syntax-highlighting-c8ad9e5dbd60b7b70b38521ab19b7da4.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-dc55a5b9e770e841cd82e46aadbfb9b0.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-96c5540ededea34e36548507abb5b3a4.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-d5e7ad547044776d59bf9b59a51f66bb.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "sidebar",
   "copy-button": false,
@@ -106,7 +107,9 @@ ul.task-list li input[type="checkbox"] {
 <div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article">
 <!-- sidebar -->
   <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal quarto-sidebar-collapse-item sidebar-navigation floating overflow-auto">
-    <div class="pt-lg-2 mt-2 text-left sidebar-header">
+    <div class="pt-lg-2 mt-2 text-left sidebar-header sidebar-header-stacked">
+      <a href="./index.html" class="sidebar-logo-link">
+      </a>
     <div class="sidebar-title mb-0 py-0">
       <a href="./">Sewage in Our Waters</a> 
     </div>
@@ -157,6 +160,12 @@ ul.task-list li input[type="checkbox"] {
  <span class="menu-text"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">House Data Exploration</span></span></a>
   </div>
 </li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./zoopla_data_exploration.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Zoopla Rental Data Exploration</span></span></a>
+  </div>
+</li>
       </ul>
   </li>
         <li class="sidebar-item sidebar-item-section">
@@ -171,13 +180,13 @@ ul.task-list li input[type="checkbox"] {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="./event_study.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Event Study</span></span></a>
+ <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Event Study</span></span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="./hedonic_regs.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">7</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span></a>
+ <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Hedonics Regressions</span></span></a>
   </div>
 </li>
       </ul>
@@ -194,13 +203,13 @@ ul.task-list li input[type="checkbox"] {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="./data_clean_documentation/01_pipeline.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span></a>
+ <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Pipeline Overview</span></span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="./data_clean_documentation/02_ingestion.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span></a>
+ <span class="menu-text"><span class="chapter-number">10</span>&nbsp; <span class="chapter-title">Ingestion Layer</span></span></a>
   </div>
 </li>
       </ul>
@@ -297,7 +306,7 @@ ul.task-list li input[type="checkbox"] {
 </style>
 </div>
 <div class="tabset-margin-container"></div><div class="panel-tabset">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-1-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-1" role="tab" aria-controls="tabset-1-1" aria-selected="true" aria-current="page">Summary</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-2" role="tab" aria-controls="tabset-1-2" aria-selected="false">Price Heterogeneity</a></li></ul>
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-1-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-1" role="tab" aria-controls="tabset-1-1" aria-selected="true" href="">Summary</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-2" role="tab" aria-controls="tabset-1-2" aria-selected="false" href="">Price Heterogeneity</a></li></ul>
 <div class="tab-content">
 <div id="tabset-1-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-1-1-tab">
 <div class="cell">
@@ -306,8 +315,8 @@ ul.task-list li input[type="checkbox"] {
 
     <script>
 
-      function styleCell_hzuxx2rvp9mtsp458k6b(i, j, css_id) {
-          var table = document.getElementById("tinytable_hzuxx2rvp9mtsp458k6b");
+      function styleCell_btofa6std9fu09c0ect6(i, j, css_id) {
+          var table = document.getElementById("tinytable_btofa6std9fu09c0ect6");
           var cell = table.querySelector(`[data-row="${i}"][data-col="${j}"]`);
           if (cell) {
               console.log(`Styling cell at (${i}, ${j}) with class ${css_id}`);
@@ -316,21 +325,8 @@ ul.task-list li input[type="checkbox"] {
               console.warn(`Cell at (${i}, ${j}) not found.`);
           }
       }
-      function insertSpanRow(i, colspan, content) {
-        var table = document.getElementById('tinytable_hzuxx2rvp9mtsp458k6b');
-        // Find the row with data-row attribute matching i
-        var targetRow = table.querySelector(`tr [data-row="${i}"]`).closest('tr');
-        var newRow = table.insertRow(targetRow.rowIndex);
-        var newCell = newRow.insertCell(0);
-        newCell.setAttribute("colspan", colspan);
-        newCell.setAttribute("data-col", "0");
-        newCell.setAttribute("data-row", i - 1);
-        // newCell.innerText = content;
-        // this may be unsafe, but innerText does not interpret <br>
-        newCell.innerHTML = content;
-      }
-      function spanCell_hzuxx2rvp9mtsp458k6b(i, j, rowspan, colspan) {
-        var table = document.getElementById("tinytable_hzuxx2rvp9mtsp458k6b");
+      function spanCell_btofa6std9fu09c0ect6(i, j, rowspan, colspan) {
+        var table = document.getElementById("tinytable_btofa6std9fu09c0ect6");
         const targetCell = table.querySelector(`[data-row="${i}"][data-col="${j}"]`);
         if (!targetCell) {
           console.warn(`Cell at (${i}, ${j}) not found.`);
@@ -361,15 +357,15 @@ ul.task-list li input[type="checkbox"] {
       window.addEventListener('load', function () {
           var cellsToStyle = [
             // tinytable style arrays after
-          { positions: [ { i: '12', j: 0 }, { i: '12', j: 3 }, { i: '12', j: 2 }, { i: '12', j: 1 }, { i: '12', j: 4 }, { i: '12', j: 7 }, { i: '12', j: 6 }, { i: '12', j: 5 }, { i: '12', j: 8 },  ], css_id: 'tinytable_css_3t54lb9z0pblv6ptc327',}, 
-          { positions: [ { i: '3', j: 0 }, { i: '3', j: 3 }, { i: '3', j: 2 }, { i: '3', j: 1 }, { i: '3', j: 4 }, { i: '3', j: 7 }, { i: '3', j: 6 }, { i: '3', j: 5 }, { i: '3', j: 8 },  ], css_id: 'tinytable_css_d1xlka1aqpb4k176nuig',}, 
-          { positions: [ { i: '0', j: 0 }, { i: '0', j: 3 }, { i: '0', j: 2 }, { i: '0', j: 1 }, { i: '0', j: 4 }, { i: '0', j: 7 }, { i: '0', j: 6 }, { i: '0', j: 5 }, { i: '0', j: 8 },  ], css_id: 'tinytable_css_ixyx88qdds4jtgq00fpu',}, 
+          { positions: [ { i: '12', j: 0 }, { i: '12', j: 3 }, { i: '12', j: 2 }, { i: '12', j: 1 }, { i: '12', j: 4 }, { i: '12', j: 7 }, { i: '12', j: 6 }, { i: '12', j: 5 }, { i: '12', j: 8 },  ], css_id: 'tinytable_css_j8sl998asatpwn4ppgq4',}, 
+          { positions: [ { i: '3', j: 0 }, { i: '3', j: 3 }, { i: '3', j: 2 }, { i: '3', j: 1 }, { i: '3', j: 4 }, { i: '3', j: 7 }, { i: '3', j: 6 }, { i: '3', j: 5 }, { i: '3', j: 8 },  ], css_id: 'tinytable_css_wmul51sza14fjwinpmi7',}, 
+          { positions: [ { i: '0', j: 0 }, { i: '0', j: 3 }, { i: '0', j: 2 }, { i: '0', j: 1 }, { i: '0', j: 4 }, { i: '0', j: 7 }, { i: '0', j: 6 }, { i: '0', j: 5 }, { i: '0', j: 8 },  ], css_id: 'tinytable_css_6zjesgkr9k5cqlevdms9',}, 
           ];
 
           // Loop over the arrays to style the cells
           cellsToStyle.forEach(function (group) {
               group.positions.forEach(function (cell) {
-                  styleCell_hzuxx2rvp9mtsp458k6b(cell.i, cell.j, group.css_id);
+                  styleCell_btofa6std9fu09c0ect6(cell.i, cell.j, group.css_id);
               });
           });
       });
@@ -377,12 +373,12 @@ ul.task-list li input[type="checkbox"] {
 
     <style>
       /* tinytable css entries after */
-      .table td.tinytable_css_3t54lb9z0pblv6ptc327, .table th.tinytable_css_3t54lb9z0pblv6ptc327 { border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_d1xlka1aqpb4k176nuig, .table th.tinytable_css_d1xlka1aqpb4k176nuig { border-top: solid black 0.1em; }
-      .table td.tinytable_css_ixyx88qdds4jtgq00fpu, .table th.tinytable_css_ixyx88qdds4jtgq00fpu { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_j8sl998asatpwn4ppgq4, .table th.tinytable_css_j8sl998asatpwn4ppgq4 { border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_wmul51sza14fjwinpmi7, .table th.tinytable_css_wmul51sza14fjwinpmi7 { border-top: solid black 0.1em; }
+      .table td.tinytable_css_6zjesgkr9k5cqlevdms9, .table th.tinytable_css_6zjesgkr9k5cqlevdms9 { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
     </style>
     <div class="container">
-      <table class="table table-borderless" id="tinytable_hzuxx2rvp9mtsp458k6b" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
+      <table class="table table-borderless" id="tinytable_btofa6std9fu09c0ect6" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
         <thead>
         
               <tr>
@@ -408,7 +404,7 @@ ul.task-list li input[type="checkbox"] {
                   <td data-row="1" data-col="5">1.00</td>
                   <td data-row="1" data-col="6">275,000.00</td>
                   <td data-row="1" data-col="7">900,000,000.00</td>
-                  <td data-row="1" data-col="8"><img src="./tinytable_assets/idgwtwnmylj0avojbpwatg.png" style="height: 1em;"></td>
+                  <td data-row="1" data-col="8"><img src="./tinytable_assets/id1zwjjgqtncvq1k5o4w3r.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td data-row="2" data-col="0">Year Sold</td>
@@ -419,117 +415,117 @@ ul.task-list li input[type="checkbox"] {
                   <td data-row="2" data-col="5">2,021.00</td>
                   <td data-row="2" data-col="6">2,022.00</td>
                   <td data-row="2" data-col="7">2,023.00</td>
-                  <td data-row="2" data-col="8"><img src="./tinytable_assets/idam8isdq3jt3bdu95e6v5.png" style="height: 1em;"></td>
+                  <td data-row="2" data-col="8"><img src="./tinytable_assets/idryua7plwlayxt2hl2vde.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td data-row="3" data-col="0"></td>
                   <td data-row="3" data-col="1"></td>
                   <td data-row="3" data-col="2">N</td>
                   <td data-row="3" data-col="3">%</td>
-                  <td data-row="3" data-col="4"></td>
-                  <td data-row="3" data-col="5"></td>
-                  <td data-row="3" data-col="6"></td>
-                  <td data-row="3" data-col="7"></td>
-                  <td data-row="3" data-col="8"></td>
+                  <td data-row="3" data-col="4"> </td>
+                  <td data-row="3" data-col="5"> </td>
+                  <td data-row="3" data-col="6"> </td>
+                  <td data-row="3" data-col="7"> </td>
+                  <td data-row="3" data-col="8"> </td>
                 </tr>
                 <tr>
                   <td data-row="4" data-col="0">Property Type</td>
                   <td data-row="4" data-col="1">Detached</td>
                   <td data-row="4" data-col="2">733978</td>
                   <td data-row="4" data-col="3">23.11</td>
-                  <td data-row="4" data-col="4"></td>
-                  <td data-row="4" data-col="5"></td>
-                  <td data-row="4" data-col="6"></td>
-                  <td data-row="4" data-col="7"></td>
-                  <td data-row="4" data-col="8"></td>
+                  <td data-row="4" data-col="4"> </td>
+                  <td data-row="4" data-col="5"> </td>
+                  <td data-row="4" data-col="6"> </td>
+                  <td data-row="4" data-col="7"> </td>
+                  <td data-row="4" data-col="8"> </td>
                 </tr>
                 <tr>
                   <td data-row="5" data-col="0"></td>
                   <td data-row="5" data-col="1">Flats/Maisonettes</td>
                   <td data-row="5" data-col="2">574292</td>
                   <td data-row="5" data-col="3">18.08</td>
-                  <td data-row="5" data-col="4"></td>
-                  <td data-row="5" data-col="5"></td>
-                  <td data-row="5" data-col="6"></td>
-                  <td data-row="5" data-col="7"></td>
-                  <td data-row="5" data-col="8"></td>
+                  <td data-row="5" data-col="4"> </td>
+                  <td data-row="5" data-col="5"> </td>
+                  <td data-row="5" data-col="6"> </td>
+                  <td data-row="5" data-col="7"> </td>
+                  <td data-row="5" data-col="8"> </td>
                 </tr>
                 <tr>
                   <td data-row="6" data-col="0"></td>
                   <td data-row="6" data-col="1">Other</td>
                   <td data-row="6" data-col="2">175511</td>
                   <td data-row="6" data-col="3">5.53</td>
-                  <td data-row="6" data-col="4"></td>
-                  <td data-row="6" data-col="5"></td>
-                  <td data-row="6" data-col="6"></td>
-                  <td data-row="6" data-col="7"></td>
-                  <td data-row="6" data-col="8"></td>
+                  <td data-row="6" data-col="4"> </td>
+                  <td data-row="6" data-col="5"> </td>
+                  <td data-row="6" data-col="6"> </td>
+                  <td data-row="6" data-col="7"> </td>
+                  <td data-row="6" data-col="8"> </td>
                 </tr>
                 <tr>
                   <td data-row="7" data-col="0"></td>
                   <td data-row="7" data-col="1">Semi-Detached</td>
                   <td data-row="7" data-col="2">833365</td>
                   <td data-row="7" data-col="3">26.24</td>
-                  <td data-row="7" data-col="4"></td>
-                  <td data-row="7" data-col="5"></td>
-                  <td data-row="7" data-col="6"></td>
-                  <td data-row="7" data-col="7"></td>
-                  <td data-row="7" data-col="8"></td>
+                  <td data-row="7" data-col="4"> </td>
+                  <td data-row="7" data-col="5"> </td>
+                  <td data-row="7" data-col="6"> </td>
+                  <td data-row="7" data-col="7"> </td>
+                  <td data-row="7" data-col="8"> </td>
                 </tr>
                 <tr>
                   <td data-row="8" data-col="0"></td>
                   <td data-row="8" data-col="1">Terraced</td>
                   <td data-row="8" data-col="2">858805</td>
                   <td data-row="8" data-col="3">27.04</td>
-                  <td data-row="8" data-col="4"></td>
-                  <td data-row="8" data-col="5"></td>
-                  <td data-row="8" data-col="6"></td>
-                  <td data-row="8" data-col="7"></td>
-                  <td data-row="8" data-col="8"></td>
+                  <td data-row="8" data-col="4"> </td>
+                  <td data-row="8" data-col="5"> </td>
+                  <td data-row="8" data-col="6"> </td>
+                  <td data-row="8" data-col="7"> </td>
+                  <td data-row="8" data-col="8"> </td>
                 </tr>
                 <tr>
                   <td data-row="9" data-col="0">Old/New</td>
                   <td data-row="9" data-col="1">Established Residential</td>
                   <td data-row="9" data-col="2">2825957</td>
                   <td data-row="9" data-col="3">88.98</td>
-                  <td data-row="9" data-col="4"></td>
-                  <td data-row="9" data-col="5"></td>
-                  <td data-row="9" data-col="6"></td>
-                  <td data-row="9" data-col="7"></td>
-                  <td data-row="9" data-col="8"></td>
+                  <td data-row="9" data-col="4"> </td>
+                  <td data-row="9" data-col="5"> </td>
+                  <td data-row="9" data-col="6"> </td>
+                  <td data-row="9" data-col="7"> </td>
+                  <td data-row="9" data-col="8"> </td>
                 </tr>
                 <tr>
                   <td data-row="10" data-col="0"></td>
                   <td data-row="10" data-col="1">Newly Built</td>
                   <td data-row="10" data-col="2">349994</td>
                   <td data-row="10" data-col="3">11.02</td>
-                  <td data-row="10" data-col="4"></td>
-                  <td data-row="10" data-col="5"></td>
-                  <td data-row="10" data-col="6"></td>
-                  <td data-row="10" data-col="7"></td>
-                  <td data-row="10" data-col="8"></td>
+                  <td data-row="10" data-col="4"> </td>
+                  <td data-row="10" data-col="5"> </td>
+                  <td data-row="10" data-col="6"> </td>
+                  <td data-row="10" data-col="7"> </td>
+                  <td data-row="10" data-col="8"> </td>
                 </tr>
                 <tr>
                   <td data-row="11" data-col="0">Tenure</td>
                   <td data-row="11" data-col="1">Freehold</td>
                   <td data-row="11" data-col="2">2429919</td>
                   <td data-row="11" data-col="3">76.51</td>
-                  <td data-row="11" data-col="4"></td>
-                  <td data-row="11" data-col="5"></td>
-                  <td data-row="11" data-col="6"></td>
-                  <td data-row="11" data-col="7"></td>
-                  <td data-row="11" data-col="8"></td>
+                  <td data-row="11" data-col="4"> </td>
+                  <td data-row="11" data-col="5"> </td>
+                  <td data-row="11" data-col="6"> </td>
+                  <td data-row="11" data-col="7"> </td>
+                  <td data-row="11" data-col="8"> </td>
                 </tr>
                 <tr>
                   <td data-row="12" data-col="0"></td>
                   <td data-row="12" data-col="1">Leasehold</td>
                   <td data-row="12" data-col="2">746032</td>
                   <td data-row="12" data-col="3">23.49</td>
-                  <td data-row="12" data-col="4"></td>
-                  <td data-row="12" data-col="5"></td>
-                  <td data-row="12" data-col="6"></td>
-                  <td data-row="12" data-col="7"></td>
-                  <td data-row="12" data-col="8"></td>
+                  <td data-row="12" data-col="4"> </td>
+                  <td data-row="12" data-col="5"> </td>
+                  <td data-row="12" data-col="6"> </td>
+                  <td data-row="12" data-col="7"> </td>
+                  <td data-row="12" data-col="8"> </td>
                 </tr>
         </tbody>
       </table>
@@ -545,8 +541,8 @@ ul.task-list li input[type="checkbox"] {
 
     <script>
 
-      function styleCell_ociotq8x884aljv8z8nt(i, j, css_id) {
-          var table = document.getElementById("tinytable_ociotq8x884aljv8z8nt");
+      function styleCell_ai4lsce2wm47y3pj4k7r(i, j, css_id) {
+          var table = document.getElementById("tinytable_ai4lsce2wm47y3pj4k7r");
           var cell = table.querySelector(`[data-row="${i}"][data-col="${j}"]`);
           if (cell) {
               console.log(`Styling cell at (${i}, ${j}) with class ${css_id}`);
@@ -555,21 +551,8 @@ ul.task-list li input[type="checkbox"] {
               console.warn(`Cell at (${i}, ${j}) not found.`);
           }
       }
-      function insertSpanRow(i, colspan, content) {
-        var table = document.getElementById('tinytable_ociotq8x884aljv8z8nt');
-        // Find the row with data-row attribute matching i
-        var targetRow = table.querySelector(`tr [data-row="${i}"]`).closest('tr');
-        var newRow = table.insertRow(targetRow.rowIndex);
-        var newCell = newRow.insertCell(0);
-        newCell.setAttribute("colspan", colspan);
-        newCell.setAttribute("data-col", "0");
-        newCell.setAttribute("data-row", i - 1);
-        // newCell.innerText = content;
-        // this may be unsafe, but innerText does not interpret <br>
-        newCell.innerHTML = content;
-      }
-      function spanCell_ociotq8x884aljv8z8nt(i, j, rowspan, colspan) {
-        var table = document.getElementById("tinytable_ociotq8x884aljv8z8nt");
+      function spanCell_ai4lsce2wm47y3pj4k7r(i, j, rowspan, colspan) {
+        var table = document.getElementById("tinytable_ai4lsce2wm47y3pj4k7r");
         const targetCell = table.querySelector(`[data-row="${i}"][data-col="${j}"]`);
         if (!targetCell) {
           console.warn(`Cell at (${i}, ${j}) not found.`);
@@ -600,18 +583,18 @@ ul.task-list li input[type="checkbox"] {
       window.addEventListener('load', function () {
           var cellsToStyle = [
             // tinytable style arrays after
-          { positions: [ { i: '10', j: 6 }, { i: '10', j: 5 }, { i: '10', j: 4 }, { i: '10', j: 3 }, { i: '10', j: 7 },  ], css_id: 'tinytable_css_osp8fhrvub7xwfdwck89',}, 
-          { positions: [ { i: '2', j: 3 }, { i: '4', j: 3 }, { i: '6', j: 3 }, { i: '8', j: 3 }, { i: '1', j: 3 }, { i: '1', j: 5 }, { i: '3', j: 3 }, { i: '1', j: 4 }, { i: '2', j: 4 }, { i: '3', j: 4 }, { i: '4', j: 4 }, { i: '5', j: 4 }, { i: '6', j: 4 }, { i: '5', j: 3 }, { i: '8', j: 4 }, { i: '7', j: 3 }, { i: '1', j: 6 }, { i: '9', j: 3 }, { i: '3', j: 6 }, { i: '2', j: 5 }, { i: '3', j: 5 }, { i: '4', j: 5 }, { i: '5', j: 5 }, { i: '6', j: 5 }, { i: '7', j: 5 }, { i: '8', j: 5 }, { i: '7', j: 4 }, { i: '1', j: 7 }, { i: '9', j: 4 }, { i: '3', j: 7 }, { i: '2', j: 6 }, { i: '5', j: 7 }, { i: '4', j: 6 }, { i: '5', j: 6 }, { i: '6', j: 6 }, { i: '7', j: 6 }, { i: '8', j: 6 }, { i: '9', j: 6 }, { i: '7', j: 7 }, { i: '9', j: 5 }, { i: '9', j: 7 }, { i: '2', j: 7 }, { i: '4', j: 7 }, { i: '6', j: 7 }, { i: '8', j: 7 },  ], css_id: 'tinytable_css_cu3irx1dbx3ls4mkgius',}, 
-          { positions: [ { i: '0', j: 3 }, { i: '0', j: 7 }, { i: '0', j: 6 }, { i: '0', j: 5 }, { i: '0', j: 4 },  ], css_id: 'tinytable_css_0qpkul2z67za90ncsn8y',}, 
-          { positions: [ { i: '10', j: 1 }, { i: '10', j: 0 }, { i: '10', j: 2 },  ], css_id: 'tinytable_css_xgi1f47ys0gwd5ox9int',}, 
-          { positions: [ { i: '2', j: 0 }, { i: '4', j: 0 }, { i: '1', j: 0 }, { i: '6', j: 0 }, { i: '3', j: 0 }, { i: '8', j: 0 }, { i: '5', j: 0 }, { i: '1', j: 2 }, { i: '7', j: 0 }, { i: '1', j: 1 }, { i: '2', j: 1 }, { i: '3', j: 1 }, { i: '4', j: 1 }, { i: '5', j: 1 }, { i: '6', j: 1 }, { i: '7', j: 1 }, { i: '8', j: 1 }, { i: '9', j: 1 }, { i: '3', j: 2 }, { i: '9', j: 0 }, { i: '5', j: 2 }, { i: '2', j: 2 }, { i: '7', j: 2 }, { i: '4', j: 2 }, { i: '9', j: 2 }, { i: '6', j: 2 }, { i: '8', j: 2 },  ], css_id: 'tinytable_css_27bwcpenw85jsrzz5tqt',}, 
-          { positions: [ { i: '0', j: 0 }, { i: '0', j: 2 }, { i: '0', j: 1 },  ], css_id: 'tinytable_css_uho2gkjwvsk5u1uytfry',}, 
+          { positions: [ { i: '10', j: 6 }, { i: '10', j: 5 }, { i: '10', j: 4 }, { i: '10', j: 3 }, { i: '10', j: 7 },  ], css_id: 'tinytable_css_443x8kw5lxsryif5vqss',}, 
+          { positions: [ { i: '2', j: 3 }, { i: '4', j: 3 }, { i: '6', j: 3 }, { i: '8', j: 3 }, { i: '1', j: 3 }, { i: '1', j: 5 }, { i: '3', j: 3 }, { i: '1', j: 4 }, { i: '2', j: 4 }, { i: '3', j: 4 }, { i: '4', j: 4 }, { i: '5', j: 4 }, { i: '6', j: 4 }, { i: '5', j: 3 }, { i: '8', j: 4 }, { i: '7', j: 3 }, { i: '1', j: 6 }, { i: '9', j: 3 }, { i: '3', j: 6 }, { i: '2', j: 5 }, { i: '3', j: 5 }, { i: '4', j: 5 }, { i: '5', j: 5 }, { i: '6', j: 5 }, { i: '7', j: 5 }, { i: '8', j: 5 }, { i: '7', j: 4 }, { i: '1', j: 7 }, { i: '9', j: 4 }, { i: '3', j: 7 }, { i: '2', j: 6 }, { i: '5', j: 7 }, { i: '4', j: 6 }, { i: '5', j: 6 }, { i: '6', j: 6 }, { i: '7', j: 6 }, { i: '8', j: 6 }, { i: '9', j: 6 }, { i: '7', j: 7 }, { i: '9', j: 5 }, { i: '9', j: 7 }, { i: '2', j: 7 }, { i: '4', j: 7 }, { i: '6', j: 7 }, { i: '8', j: 7 },  ], css_id: 'tinytable_css_dh35q88rv9fe5ijqbdx7',}, 
+          { positions: [ { i: '0', j: 3 }, { i: '0', j: 7 }, { i: '0', j: 6 }, { i: '0', j: 5 }, { i: '0', j: 4 },  ], css_id: 'tinytable_css_honjslcpddggn35j7xm4',}, 
+          { positions: [ { i: '10', j: 1 }, { i: '10', j: 0 }, { i: '10', j: 2 },  ], css_id: 'tinytable_css_6n03hkdebzjvobwkxntg',}, 
+          { positions: [ { i: '2', j: 0 }, { i: '4', j: 0 }, { i: '1', j: 0 }, { i: '6', j: 0 }, { i: '3', j: 0 }, { i: '8', j: 0 }, { i: '5', j: 0 }, { i: '1', j: 2 }, { i: '7', j: 0 }, { i: '1', j: 1 }, { i: '2', j: 1 }, { i: '3', j: 1 }, { i: '4', j: 1 }, { i: '5', j: 1 }, { i: '6', j: 1 }, { i: '7', j: 1 }, { i: '8', j: 1 }, { i: '9', j: 1 }, { i: '3', j: 2 }, { i: '9', j: 0 }, { i: '5', j: 2 }, { i: '2', j: 2 }, { i: '7', j: 2 }, { i: '4', j: 2 }, { i: '9', j: 2 }, { i: '6', j: 2 }, { i: '8', j: 2 },  ], css_id: 'tinytable_css_dweve3t14em7ll2tha6l',}, 
+          { positions: [ { i: '0', j: 0 }, { i: '0', j: 2 }, { i: '0', j: 1 },  ], css_id: 'tinytable_css_lh1zvpag8bgvdh3rrku7',}, 
           ];
 
           // Loop over the arrays to style the cells
           cellsToStyle.forEach(function (group) {
               group.positions.forEach(function (cell) {
-                  styleCell_ociotq8x884aljv8z8nt(cell.i, cell.j, group.css_id);
+                  styleCell_ai4lsce2wm47y3pj4k7r(cell.i, cell.j, group.css_id);
               });
           });
       });
@@ -619,15 +602,15 @@ ul.task-list li input[type="checkbox"] {
 
     <style>
       /* tinytable css entries after */
-      .table td.tinytable_css_osp8fhrvub7xwfdwck89, .table th.tinytable_css_osp8fhrvub7xwfdwck89 { text-align: right; border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_cu3irx1dbx3ls4mkgius, .table th.tinytable_css_cu3irx1dbx3ls4mkgius { text-align: right; }
-      .table td.tinytable_css_0qpkul2z67za90ncsn8y, .table th.tinytable_css_0qpkul2z67za90ncsn8y { text-align: right; border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
-      .table td.tinytable_css_xgi1f47ys0gwd5ox9int, .table th.tinytable_css_xgi1f47ys0gwd5ox9int { text-align: left; border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_27bwcpenw85jsrzz5tqt, .table th.tinytable_css_27bwcpenw85jsrzz5tqt { text-align: left; }
-      .table td.tinytable_css_uho2gkjwvsk5u1uytfry, .table th.tinytable_css_uho2gkjwvsk5u1uytfry { text-align: left; border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_443x8kw5lxsryif5vqss, .table th.tinytable_css_443x8kw5lxsryif5vqss { text-align: right; border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_dh35q88rv9fe5ijqbdx7, .table th.tinytable_css_dh35q88rv9fe5ijqbdx7 { text-align: right; }
+      .table td.tinytable_css_honjslcpddggn35j7xm4, .table th.tinytable_css_honjslcpddggn35j7xm4 { text-align: right; border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_6n03hkdebzjvobwkxntg, .table th.tinytable_css_6n03hkdebzjvobwkxntg { text-align: left; border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_dweve3t14em7ll2tha6l, .table th.tinytable_css_dweve3t14em7ll2tha6l { text-align: left; }
+      .table td.tinytable_css_lh1zvpag8bgvdh3rrku7, .table th.tinytable_css_lh1zvpag8bgvdh3rrku7 { text-align: left; border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
     </style>
     <div class="container">
-      <table class="table table-borderless" id="tinytable_ociotq8x884aljv8z8nt" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
+      <table class="table table-borderless" id="tinytable_ai4lsce2wm47y3pj4k7r" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
         <thead>
         
               <tr>
@@ -756,7 +739,7 @@ ul.task-list li input[type="checkbox"] {
 <section id="sec-05-02-02-histogram" class="level3" data-number="5.2.2">
 <h3 data-number="5.2.2" class="anchored" data-anchor-id="sec-05-02-02-histogram"><span class="header-section-number">5.2.2</span> Histogram</h3>
 <div class="tabset-margin-container"></div><div class="panel-tabset">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-2-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-1" role="tab" aria-controls="tabset-2-1" aria-selected="true">Prices</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-2-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-2" role="tab" aria-controls="tabset-2-2" aria-selected="false">Log Prices</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-2-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-3" role="tab" aria-controls="tabset-2-3" aria-selected="false">Log Prices Q-Q Plot</a></li></ul>
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-2-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-1" role="tab" aria-controls="tabset-2-1" aria-selected="true" href="">Prices</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-2-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-2" role="tab" aria-controls="tabset-2-2" aria-selected="false" href="">Log Prices</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-2-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-3" role="tab" aria-controls="tabset-2-3" aria-selected="false" href="">Log Prices Q-Q Plot</a></li></ul>
 <div class="tab-content">
 <div id="tabset-2-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-2-1-tab">
 <div class="cell">
@@ -798,7 +781,7 @@ ul.task-list li input[type="checkbox"] {
 <h3 data-number="5.2.3" class="anchored" data-anchor-id="sec-05-02-03-temporal-distribution"><span class="header-section-number">5.2.3</span> Temporal House Sale Distribution</h3>
 <p>House sales appear to be uniform over 2021-2023 in terms of both average sale price and volume of sales. There are a few exceptions in 2021, possibly due to the Covid-19 pandemic (but I have not looked further into this).</p>
 <div class="tabset-margin-container"></div><div class="panel-tabset">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-3-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-1" role="tab" aria-controls="tabset-3-1" aria-selected="true">Price of Sales</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-3-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-2" role="tab" aria-controls="tabset-3-2" aria-selected="false">Number of Sales</a></li></ul>
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-3-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-1" role="tab" aria-controls="tabset-3-1" aria-selected="true" href="">Price of Sales</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-3-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-2" role="tab" aria-controls="tabset-3-2" aria-selected="false" href="">Number of Sales</a></li></ul>
 <div class="tab-content">
 <div id="tabset-3-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-3-1-tab">
 <div class="cell">
@@ -844,21 +827,21 @@ ul.task-list li input[type="checkbox"] {
 <li>Spill counts are positively skewed (as we also saw in <a href="#sec-05-02-02-histogram" class="quarto-xref"><span>Section 5.2.2</span></a>)</li>
 </ul>
 <div class="tabset-margin-container"></div><div class="panel-tabset">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-4-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-4-1" role="tab" aria-controls="tabset-4-1" aria-selected="true">By Distance</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-4-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-4-2" role="tab" aria-controls="tabset-4-2" aria-selected="false">By Spill Count</a></li></ul>
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-4-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-4-1" role="tab" aria-controls="tabset-4-1" aria-selected="true" href="">By Distance</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-4-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-4-2" role="tab" aria-controls="tabset-4-2" aria-selected="false" href="">By Spill Count</a></li></ul>
 <div class="tab-content">
 <div id="tabset-4-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-4-1-tab">
 <div class="cell">
 <div class="cell-output-display">
-<div class="reactable html-widget html-fill-item" id="htmlwidget-e5d706fcd8dc43a654b1" style="width:auto;height:auto;"></div>
-<script type="application/json" data-for="htmlwidget-e5d706fcd8dc43a654b1">{"x":{"tag":{"name":"Reactable","attribs":{"data":{"threshold_m":["250","500","1000","2000","5000",">5000"],"mean_distance_m":[173.762030332009,341.116688499471,664.927319299865,1283.52576424561,3087.74574473184,"NA"],"n_houses":[154827,511716,1239588,2063591,2650208,140772],"n_spill_sites":[1.5420372415664,1.97646936972859,3.10724773069715,6.41956424504629,22.8594363159358,0],"mean_price":[272106.431817448,276469.404208584,284512.403811589,298373.494399811,314826.702036218,238126.607279857],"median_price":[233000,237000,245000,260000,275000,200000],"sd_price":[152405.039175924,154590.462124739,157603.369869842,162230.591505829,168335.956007942,133464.771559611],"min_price":[85000,85000,85000,85000,85000,85000],"max_price":[875000,875000,875000,875000,875000,875000]},"columns":[{"id":"threshold_m","name":"Threshold (m)","type":"character","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"mean_distance_m","name":"Mean Dist. (m)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"n_houses","name":"# Houses","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"separators":true},"aggregated":{"separators":true}}},{"id":"n_spill_sites","name":"# Spill Sites","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1,"separators":true},"aggregated":{"digits":1,"separators":true}}},{"id":"mean_price","name":"Mean (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"median_price","name":"Median (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"sd_price","name":"SD (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"min_price","name":"Min (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"max_price","name":"Max (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}}],"columnGroups":[{"name":"Observations","columns":["n_houses","n_spill_sites"]},{"name":"Price Statistics","columns":["mean_price","median_price","sd_price","min_price","max_price"]}],"resizable":true,"defaultPageSize":10,"compact":true,"style":{"maxWidth":"100%","overflowX":"auto"},"dataKey":"b31dd38b012435e80d25310c0e0a8350"},"children":[]},"class":"reactR_markup"},"evals":[],"jsHooks":[]}</script>
+<div class="reactable html-widget html-fill-item" id="htmlwidget-68c7f795fd2fdf67a7ae" style="width:auto;height:auto;"></div>
+<script type="application/json" data-for="htmlwidget-68c7f795fd2fdf67a7ae">{"x":{"tag":{"name":"Reactable","attribs":{"data":{"threshold_m":["250","500","1000","2000","5000",">5000"],"mean_distance_m":[173.762030332009,341.116688499471,664.927319299865,1283.52576424561,3087.74574473184,"NA"],"n_houses":[154827,511716,1239588,2063591,2650208,140772],"n_spill_sites":[1.5420372415664,1.97646936972859,3.10724773069784,6.41956424504761,22.8594363159374,0],"mean_price":[272106.431817448,276469.404208584,284512.403811589,298373.494399811,314826.702036218,238126.607279857],"median_price":[233000,237000,245000,260000,275000,200000],"sd_price":[152405.039175924,154590.462124741,157603.36986984,162230.591505812,168335.956007941,133464.771559611],"min_price":[85000,85000,85000,85000,85000,85000],"max_price":[875000,875000,875000,875000,875000,875000]},"columns":[{"id":"threshold_m","name":"Threshold (m)","type":"character","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"mean_distance_m","name":"Mean Dist. (m)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"n_houses","name":"# Houses","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"separators":true},"aggregated":{"separators":true}}},{"id":"n_spill_sites","name":"# Spill Sites","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1,"separators":true},"aggregated":{"digits":1,"separators":true}}},{"id":"mean_price","name":"Mean (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"median_price","name":"Median (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"sd_price","name":"SD (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"min_price","name":"Min (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"max_price","name":"Max (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}}],"columnGroups":[{"name":"Observations","columns":["n_houses","n_spill_sites"]},{"name":"Price Statistics","columns":["mean_price","median_price","sd_price","min_price","max_price"]}],"resizable":true,"defaultPageSize":10,"compact":true,"style":{"maxWidth":"100%","overflowX":"auto"},"dataKey":"fe1306cdde2a19a4c5ccc981db45f59f"},"children":[]},"class":"reactR_markup"},"evals":[],"jsHooks":[]}</script>
 </div>
 </div>
 </div>
 <div id="tabset-4-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-4-2-tab">
 <div class="cell">
 <div class="cell-output-display">
-<div class="reactable html-widget html-fill-item" id="htmlwidget-a198df92e37fa4008c2a" style="width:auto;height:auto;"></div>
-<script type="application/json" data-for="htmlwidget-a198df92e37fa4008c2a">{"x":{"tag":{"name":"Reactable","attribs":{"data":{"quartile":["1st quartile (0-25%)","2nd quartile (25-50%)","3rd quartile (50-75%)","4th quartile (75-100%)","Above 2km threshold"],"spill_count_min":[0,323,809,1730,0],"spill_count_max":[322,808,1729,17777,0],"spill_count_mean":[135.80551206127,554.889315085486,1195.44040827562,3404.95723690287,0],"spill_count_median":[127,556,1159,2778,0],"n_houses":[516032,515933,515828,515798,800678],"n_spill_sites":[1.73665005270988,3.18388240333526,5.66867638049879,15.0920631720169,0],"mean_price":[339447.74577158,316988.642597004,285157.382767124,251877.46900337,350744.277874501],"median_price":[305000,280000,245000,212500,320000],"sd_price":[168913.739204117,163153.401041103,157343.648448556,144897.462956381,177643.634807449],"min_price":[85000,85000,85000,85000,85000],"max_price":[875000,875000,875000,875000,875000]},"columns":[{"id":"quartile","name":"Spill Count Quartile","type":"character","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"}},{"id":"spill_count_min","name":"Min Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"spill_count_max","name":"Max Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"spill_count_mean","name":"Mean Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1},"aggregated":{"digits":1}}},{"id":"spill_count_median","name":"Median Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1},"aggregated":{"digits":1}}},{"id":"n_houses","name":"# Houses","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"separators":true},"aggregated":{"separators":true}}},{"id":"n_spill_sites","name":"# Spill Sites","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1,"separators":true},"aggregated":{"digits":1,"separators":true}}},{"id":"mean_price","name":"Mean (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"median_price","name":"Median (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"sd_price","name":"SD (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"min_price","name":"Min (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"max_price","name":"Max (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}}],"columnGroups":[{"name":"Spill Count Statistics","columns":["spill_count_min","spill_count_max","spill_count_mean","spill_count_median"]},{"name":"Observations","columns":["n_houses","n_spill_sites"]},{"name":"Price Statistics","columns":["mean_price","median_price","sd_price","min_price","max_price"]}],"resizable":true,"defaultPageSize":10,"compact":true,"style":{"maxWidth":"100%","overflowX":"auto"},"dataKey":"fed6f121d43c7f879e130cf84442426a"},"children":[]},"class":"reactR_markup"},"evals":[],"jsHooks":[]}</script>
+<div class="reactable html-widget html-fill-item" id="htmlwidget-91e641d777988efcce83" style="width:auto;height:auto;"></div>
+<script type="application/json" data-for="htmlwidget-91e641d777988efcce83">{"x":{"tag":{"name":"Reactable","attribs":{"data":{"quartile":["1st quartile (0-25%)","2nd quartile (25-50%)","3rd quartile (50-75%)","4th quartile (75-100%)","Above 2km threshold"],"spill_count_min":[0,323,809,1730,0],"spill_count_max":[322,808,1729,17777,0],"spill_count_mean":[135.805512061269,554.889315085486,1195.44040827562,3404.95723690286,0],"spill_count_median":[127,556,1159,2778,0],"n_houses":[516032,515933,515828,515798,800678],"n_spill_sites":[1.73665005270991,3.18388240333535,5.668676380499,15.0920631720168,0],"mean_price":[339447.74577158,316988.642597004,285157.382767124,251877.46900337,350744.277874501],"median_price":[305000,280000,245000,212500,320000],"sd_price":[168913.739204115,163153.401041103,157343.648448554,144897.462956372,177643.634807449],"min_price":[85000,85000,85000,85000,85000],"max_price":[875000,875000,875000,875000,875000]},"columns":[{"id":"quartile","name":"Spill Count Quartile","type":"character","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"}},{"id":"spill_count_min","name":"Min Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"spill_count_max","name":"Max Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"spill_count_mean","name":"Mean Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1},"aggregated":{"digits":1}}},{"id":"spill_count_median","name":"Median Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1},"aggregated":{"digits":1}}},{"id":"n_houses","name":"# Houses","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"separators":true},"aggregated":{"separators":true}}},{"id":"n_spill_sites","name":"# Spill Sites","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1,"separators":true},"aggregated":{"digits":1,"separators":true}}},{"id":"mean_price","name":"Mean (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"median_price","name":"Median (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"sd_price","name":"SD (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"min_price","name":"Min (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"max_price","name":"Max (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}}],"columnGroups":[{"name":"Spill Count Statistics","columns":["spill_count_min","spill_count_max","spill_count_mean","spill_count_median"]},{"name":"Observations","columns":["n_houses","n_spill_sites"]},{"name":"Price Statistics","columns":["mean_price","median_price","sd_price","min_price","max_price"]}],"resizable":true,"defaultPageSize":10,"compact":true,"style":{"maxWidth":"100%","overflowX":"auto"},"dataKey":"f4860fef49ff724f4d5e930b7670824a"},"children":[]},"class":"reactR_markup"},"evals":[],"jsHooks":[]}</script>
 </div>
 </div>
 </div>
@@ -874,7 +857,7 @@ ul.task-list li input[type="checkbox"] {
 <p>There’s a negative cross-sectional linear relationship between spill count and house price. The negative correlation is stronger both for (i) the trailing 12 months compared to the full time period and (ii) smaller distance thresholds.</p>
 <p>For distance thresholds below 2km, the non-parametric fit shows a U-shaped pattern, likely due to a few properties with both high spill counts and high prices. However, as the distance threshold increases, the curvature of the U-shape flattens. I have to look further into this, but this may be driven by water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also <a href="#sec-05-03-03-03-distance" class="quarto-xref"><span>Section 5.3.3.3</span></a>).</p>
 <div class="tabset-margin-container"></div><div class="panel-tabset">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-5-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-1" role="tab" aria-controls="tabset-5-1" aria-selected="true">Linear</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-2" role="tab" aria-controls="tabset-5-2" aria-selected="false">All Years - Linear and LOESS</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-3" role="tab" aria-controls="tabset-5-3" aria-selected="false">12 Months - Linear and LOESS</a></li></ul>
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-5-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-1" role="tab" aria-controls="tabset-5-1" aria-selected="true" href="">Linear</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-2" role="tab" aria-controls="tabset-5-2" aria-selected="false" href="">All Years - Linear and LOESS</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-3" role="tab" aria-controls="tabset-5-3" aria-selected="false" href="">12 Months - Linear and LOESS</a></li></ul>
 <div class="tab-content">
 <div id="tabset-5-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-5-1-tab">
 <div class="cell">
@@ -916,7 +899,7 @@ ul.task-list li input[type="checkbox"] {
 <h4 data-number="5.3.3.2" class="anchored" data-anchor-id="sec-05-03-03-02-spill-duration"><span class="header-section-number">5.3.3.2</span> Spill Duration</h4>
 <p>The relationship between spill duration and house price is comparable to the relationship between spill count and house price. The confidence intervals are larger, suggesting greater statistical uncertainty. It seems plausible that there is greater variation in spill duration since duration records are influenced by extreme events or measurement errors that affect how long a spill lasts, whereas the 12/24 count method aggregates events more discretely.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a></p>
 <div class="tabset-margin-container"></div><div class="panel-tabset">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-6-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-1" role="tab" aria-controls="tabset-6-1" aria-selected="true">Linear</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-6-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-2" role="tab" aria-controls="tabset-6-2" aria-selected="false">All Years - Linear and LOESS</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-6-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-3" role="tab" aria-controls="tabset-6-3" aria-selected="false">12 Months - Linear and LOESS</a></li></ul>
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-6-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-1" role="tab" aria-controls="tabset-6-1" aria-selected="true" href="">Linear</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-6-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-2" role="tab" aria-controls="tabset-6-2" aria-selected="false" href="">All Years - Linear and LOESS</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-6-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-3" role="tab" aria-controls="tabset-6-3" aria-selected="false" href="">12 Months - Linear and LOESS</a></li></ul>
 <div class="tab-content">
 <div id="tabset-6-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-6-1-tab">
 <div class="cell">
@@ -959,7 +942,7 @@ ul.task-list li input[type="checkbox"] {
 <p>There’s a negative cross-sectional linear relationship between distance to the nearest spill site (within thresholds) and house price for tresholds below 1km, and slight positive relationship for larger thresholds. There are no apparent differences between the trailing 12 months and the full time period.</p>
 <p>For all thresholds, the non-parametric fit shows a U-shaped pattern, which is consinstent with the story of water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also <a href="#sec-05-03-03-01-spill-count" class="quarto-xref"><span>Section 5.3.3.1</span></a>).</p>
 <div class="tabset-margin-container"></div><div class="panel-tabset">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-7-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-1" role="tab" aria-controls="tabset-7-1" aria-selected="true">Linear</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-7-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-2" role="tab" aria-controls="tabset-7-2" aria-selected="false">All Years - Linear and LOESS</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-7-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-3" role="tab" aria-controls="tabset-7-3" aria-selected="false">12 Months - Linear and LOESS</a></li></ul>
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-7-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-1" role="tab" aria-controls="tabset-7-1" aria-selected="true" href="">Linear</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-7-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-2" role="tab" aria-controls="tabset-7-2" aria-selected="false" href="">All Years - Linear and LOESS</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-7-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-3" role="tab" aria-controls="tabset-7-3" aria-selected="false" href="">12 Months - Linear and LOESS</a></li></ul>
 <div class="tab-content">
 <div id="tabset-7-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-7-1-tab">
 <div class="cell">
@@ -1001,7 +984,7 @@ ul.task-list li input[type="checkbox"] {
 <h4 data-number="5.3.3.4" class="anchored" data-anchor-id="sec-05-03-03-04-inverse"><span class="header-section-number">5.3.3.4</span> Inverse Spill Count - Distance</h4>
 <p>There’s a negative cross-sectional linear relationship between inverse spill count and house price. The negative correlation is stronger both for (i) the trailing 12 months compared to the full time period and (ii) the larger distance thresholds. Additionally, the non-parametric fit shows a U-shaped pattern. Both of these observations are consistent with the story of water company-owned properties, which could have higher prices and be exposed to more spills since they located closer to the spill sites (see also <a href="#sec-05-03-03-01-spill-count" class="quarto-xref"><span>Section 5.3.3.1</span></a> and <a href="#sec-05-03-03-03-distance" class="quarto-xref"><span>Section 5.3.3.3</span></a>).</p>
 <div class="tabset-margin-container"></div><div class="panel-tabset">
-<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-8-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-1" role="tab" aria-controls="tabset-8-1" aria-selected="true">Linear</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-8-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-2" role="tab" aria-controls="tabset-8-2" aria-selected="false">All Years - Linear and LOESS</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-8-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-3" role="tab" aria-controls="tabset-8-3" aria-selected="false">12 Months - Linear and LOESS</a></li></ul>
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-8-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-1" role="tab" aria-controls="tabset-8-1" aria-selected="true" href="">Linear</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-8-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-2" role="tab" aria-controls="tabset-8-2" aria-selected="false" href="">All Years - Linear and LOESS</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-8-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-3" role="tab" aria-controls="tabset-8-3" aria-selected="false" href="">12 Months - Linear and LOESS</a></li></ul>
 <div class="tab-content">
 <div id="tabset-8-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-8-1-tab">
 <div class="cell">
@@ -1102,13 +1085,14 @@ ul.task-list li input[type="checkbox"] {
       e.clearSelection();
     }
     const getTextToCopy = function(trigger) {
-        const codeEl = trigger.previousElementSibling.cloneNode(true);
-        for (const childEl of codeEl.children) {
-          if (isCodeAnnotation(childEl)) {
-            childEl.remove();
-          }
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
         }
-        return codeEl.innerText;
+      }
+      return codeEl.innerText;
     }
     const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
       text: getTextToCopy
@@ -1457,8 +1441,8 @@ ul.task-list li input[type="checkbox"] {
       </a>          
   </div>
   <div class="nav-page nav-page-next">
-      <a href="./event_study.html" class="pagination-link" aria-label="Event Study">
-        <span class="nav-page-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Event Study</span></span> <i class="bi bi-arrow-right-short"></i>
+      <a href="./zoopla_data_exploration.html" class="pagination-link" aria-label="Zoopla Rental Data Exploration">
+        <span class="nav-page-text"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Zoopla Rental Data Exploration</span></span> <i class="bi bi-arrow-right-short"></i>
       </a>
   </div>
 </nav>
