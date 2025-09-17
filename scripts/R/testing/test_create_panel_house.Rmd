@@ -34,16 +34,14 @@ install_if_missing(required_packages)
 ```{r}
 # Define file paths
 path_house <- here::here("data", "processed", "general_house_panel_qtr")
-path_spill <- here::here("data", "processed", "agg_spill_stats")
+path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
 path_house_controls <- here::here("data", "processed", "house_price.parquet")
 
 # Load house panel data
 house_panel <- arrow::open_dataset(path_house)
 
 # Load quarterly spill stats, filter to quarterly data
-spill_qtr <- open_dataset(path_spill) %>%
-  filter(period_type == "quarterly") %>%
-  collect() %>%
+spill_qtr <- import(path_spill, trust = TRUE) %>%
   select(-contains("month"), -contains("_mo")) %>%
   as.data.table()
 

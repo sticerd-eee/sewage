@@ -97,7 +97,7 @@ load_data_to_db <- function(con) {
     logger::log_info("Loading monthly spill data")
     dat_mo <- import(
       file.path(
-        CONFIG$processed_dir, "spill_aggregated", "agg_spill_mo.parquet"
+        CONFIG$processed_dir, "agg_spill_stats", "agg_spill_mo.parquet"
       ),
       trust = TRUE
     )
@@ -115,7 +115,7 @@ load_data_to_db <- function(con) {
     logger::log_info("Loading quarterly spill data")
     dat_qtr <- import(
       file.path(
-        CONFIG$processed_dir, "spill_aggregated", "agg_spill_qtr.parquet"
+        CONFIG$processed_dir, "agg_spill_stats", "agg_spill_qtr.parquet"
       ),
       trust = TRUE
     )
@@ -389,7 +389,8 @@ main <- function(refresh_db = FALSE) {
 # check they are the same
 file_path_mo_og <- here::here("data", "processed", "dat_panel_site_mo")
 file_path_qtr_og <- here::here("data", "processed", "dat_panel_site_qtr")
-file_path_new <- here::here("data", "processed", "agg_spill_stats")
+file_path_new_mo <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_mo.parquet")
+file_path_new_qtr <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
 
 data_mo_og <- open_dataset(file_path_mo_og) %>%
   filter(radius == 2000) %>%
@@ -397,12 +398,8 @@ data_mo_og <- open_dataset(file_path_mo_og) %>%
 data_qtr_og <- open_dataset(file_path_qtr_og) %>%
   filter(radius == 2000) %>%
   collect()
-date_new_mo <- open_dataset(file_path_new) %>%
-  filter(period_type == "monthly") %>%
-  collect()
-data_new_qtr <- open_dataset(file_path_new) %>%
-  filter(period_type == "quarterly") %>%
-  collect()
+date_new_mo <- import(file_path_new_mo, trust = TRUE)
+data_new_qtr <- import(file_path_new_qtr, trust = TRUE)
 
 data_mo_og <- data_mo_og %>%
   select(site_id, month_id, year, contains("spill")) %>%

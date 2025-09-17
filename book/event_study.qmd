@@ -393,7 +393,7 @@ plan(multisession, workers = 3)
 ## Data paths
 path_house <- here::here("data", "processed", "houses_within_radius_panel")
 path_site <- here::here("data", "processed", "dat_panel_site_level")
-path_spill <- here::here("data", "processed", "agg_spill_stats")
+path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
 path_house_controls <- here::here("data", "processed", "house_price.parquet")
 
 # House panel data
@@ -405,9 +405,7 @@ site_qtr <- open_dataset(path_site) %>%
   filter(period_type == "quarterly") %>%
   select(-contains("month"))
 # Spill statistics
-spill_qtr <- open_dataset(path_spill) %>%
-  filter(period_type == "quarterly") %>%
-  collect() %>%
+spill_qtr <- import(path_spill, trust = TRUE) %>%
   select(-contains("month"), -contains("_mo"))
 # House controls
 house_controls <- open_dataset(path_house_controls) %>%
@@ -1630,16 +1628,14 @@ The regressions estimate changes in house prices over time within the same locat
 
 # Define file paths
 path_house <- here::here("data", "processed", "general_house_panel_qtr")
-path_spill <- here::here("data", "processed", "agg_spill_stats")
+path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
 path_house_controls <- here::here("data", "processed", "house_price.parquet")
 
 # Load house panel data
 house_panel <- arrow::open_dataset(path_house)
 
 # Load quarterly spill stats, filter to quarterly data
-spill_qtr <- open_dataset(path_spill) %>%
-  filter(period_type == "quarterly") %>%
-  collect() %>%
+spill_qtr <- import(path_spill, trust = TRUE) %>%
   select(-contains("month"), -contains("_mo")) %>%
   as.data.table()
 
@@ -3278,7 +3274,7 @@ plan(multisession, workers = 3)
 ## Data paths
 path_rental <- here::here("data", "processed", "within_radius_panel", "rentals")
 path_site <- here::here("data", "processed", "dat_panel_site", "rentals")
-path_spill <- here::here("data", "processed", "agg_spill_stats")
+path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
 path_rental_controls <- here::here(
   "data",
   "processed",
@@ -3295,9 +3291,7 @@ site_qtr <- open_dataset(path_site) %>%
   filter(period_type == "quarterly") %>%
   select(-contains("month"))
 # Spill statistics
-spill_qtr <- open_dataset(path_spill) %>%
-  filter(period_type == "quarterly") %>%
-  collect() %>%
+spill_qtr <- import(path_spill, trust = TRUE) %>%
   select(-contains("month"), -contains("_mo"))
 # Rental controls snapshot (not used directly here)
 rental_controls <- open_dataset(path_rental_controls) %>%
@@ -4198,7 +4192,7 @@ plot_reg_chaisemartin(
 
 # Define file paths
 path_rental_panel <- here::here("data", "processed", "general_panel", "rentals")
-path_spill <- here::here("data", "processed", "agg_spill_stats")
+path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
 path_rental_controls <- here::here(
   "data",
   "processed",
@@ -4210,9 +4204,7 @@ path_rental_controls <- here::here(
 rental_panel <- arrow::open_dataset(path_rental_panel)
 
 # Load quarterly spill stats, filter to quarterly data
-spill_qtr <- open_dataset(path_spill) %>%
-  filter(period_type == "quarterly") %>%
-  collect() %>%
+spill_qtr <- import(path_spill, trust = TRUE) %>%
   select(-contains("month"), -contains("_mo")) %>%
   as.data.table()
 

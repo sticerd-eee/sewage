@@ -121,11 +121,10 @@ load_data_to_db <- function(con) {
   # Quarterly spill statistics
   if (!"spill_statistics_qtr" %in% existing_tables) {
     logger::log_info("Loading spill statistics data")
-    spill_qtr <- open_dataset(
-      file.path(CONFIG$processed_dir, "agg_spill_stats")
+    spill_qtr <- import(
+      file.path(CONFIG$processed_dir, "agg_spill_stats", "agg_spill_stats_qtr.parquet"),
+      trust = TRUE
     ) %>%
-      filter(period_type == "quarterly") %>%
-      collect() %>%
       select(-contains("month"), -contains("_mo"))
     copy_to(con, spill_qtr, "spill_statistics_qtr", temporary = FALSE)
     rm(spill_qtr)

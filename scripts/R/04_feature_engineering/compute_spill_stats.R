@@ -35,7 +35,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "17_compute_spill_stats.log")
+  log_path <- here::here("output", "log", "compute_spill_stats.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
   log_appender(appender_file(log_path))
   log_layout(layout_glue_colors)
@@ -90,7 +90,7 @@ load_data_to_db <- function(con) {
     logger::log_info("Loading monthly spill data")
     dat_mo <- import(
       file.path(
-        CONFIG$processed_dir, "spill_aggregated", "agg_spill_mo.parquet"
+        CONFIG$processed_dir, "agg_spill_stats", "agg_spill_mo.parquet"
       ),
       trust = TRUE
     )
@@ -108,7 +108,7 @@ load_data_to_db <- function(con) {
     logger::log_info("Loading quarterly spill data")
     dat_qtr <- import(
       file.path(
-        CONFIG$processed_dir, "spill_aggregated", "agg_spill_qtr.parquet"
+        CONFIG$processed_dir, "agg_spill_stats", "agg_spill_qtr.parquet"
       ),
       trust = TRUE
     )
@@ -298,19 +298,22 @@ calculate_period_spill_stats <- function(con, period_type) {
   return(final_stats)
 }
 
-#' Export combined spill statistics dataset to partitioned parquet format
+#' Export spill statistics as separate parquet files
 #' @param monthly_stats Tibble/Lazy Tibble of monthly stats
 #' @param quarterly_stats Tibble/Lazy Tibble of quarterly stats
 #' @return NULL
 export_spill_data <- function(monthly_stats, quarterly_stats) {
-  # Combine data for export
-  log_info("Combining monthly and quarterly spill statistics")
-  combined_stats <- union_all(monthly_stats, quarterly_stats) %>%
+  # Ensure base directory exists
+  log_info("Exporting spill statistics as separate parquet files")
+  output_dir <- CONFIG$output_dir
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+  # Prepare monthly data
+  log_info("Preparing monthly spill statistics")
+  monthly_data <- monthly_stats %>%
     select(
       # Identifiers
-      site_id, spill_date,
-      any_of(c("month_id", "qtr_id", "month", "quarter", "year")),
-      period_type,
+      site_id, spill_date, month_id, month, year,
       # Base metrics
       spill_count, spill_hrs,
       # Log metrics
@@ -322,41 +325,62 @@ export_spill_data <- function(monthly_stats, quarterly_stats) {
       # Site counts per period
       starts_with("n_sites_")
     ) %>%
-    arrange(site_id, spill_date)
+    arrange(site_id, spill_date) %>%
+    collect()
 
-  # Ensure base directory exists
-  log_info("Exporting spill statistics to partitioned parquet")
-  output_dir <- CONFIG$output_dir
-  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  # Prepare quarterly data
+  log_info("Preparing quarterly spill statistics")
+  quarterly_data <- quarterly_stats %>%
+    select(
+      # Identifiers
+      site_id, spill_date, qtr_id, quarter, year,
+      # Base metrics
+      spill_count, spill_hrs,
+      # Log metrics
+      log_spill_count, log_spill_hrs,
+      # Threshold values
+      starts_with("thr_"),
+      # Indicator flags
+      starts_with("d_"),
+      # Site counts per period
+      starts_with("n_sites_")
+    ) %>%
+    arrange(site_id, spill_date) %>%
+    collect()
 
-  # Convert combined data to Arrow
-  log_info("Converting data to Arrow format")
-  arrow_data <- combined_stats %>%
-    arrow::to_arrow()
-
-  # Write dataset with partitioning by period_type
-  log_info("Writing partitioned dataset to: {output_dir}")
+  # Write monthly data
+  monthly_path <- file.path(output_dir, "agg_spill_stats_mo.parquet")
+  log_info("Writing monthly data to: {monthly_path}")
   tryCatch(
     {
-      arrow::write_dataset(
-        dataset = arrow_data,
-        path = output_dir,
-        partitioning = "period_type",
-        format = "parquet",
-        existing_data_behavior = "overwrite"
-      )
+      arrow::write_parquet(monthly_data, monthly_path)
+      log_info("Monthly data: {nrow(monthly_data)} records, {ncol(monthly_data)} columns")
     },
     error = function(e) {
-      log_error("Failed to write partitioned dataset: {e$message}")
+      log_error("Failed to write monthly data: {e$message}")
+      stop(e)
+    }
+  )
+
+  # Write quarterly data
+  quarterly_path <- file.path(output_dir, "agg_spill_stats_qtr.parquet")
+  log_info("Writing quarterly data to: {quarterly_path}")
+  tryCatch(
+    {
+      arrow::write_parquet(quarterly_data, quarterly_path)
+      log_info("Quarterly data: {nrow(quarterly_data)} records, {ncol(quarterly_data)} columns")
+    },
+    error = function(e) {
+      log_error("Failed to write quarterly data: {e$message}")
       stop(e)
     }
   )
 
   # Clean up
-  rm(arrow_data, combined_stats)
+  rm(monthly_data, quarterly_data)
   gc(full = TRUE)
 
-  log_info("Finished exporting partitioned spill statistics to: {output_dir}")
+  log_info("Finished exporting spill statistics to separate files")
 }
 
 # Main Execution

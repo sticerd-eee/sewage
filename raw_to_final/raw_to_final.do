@@ -126,7 +126,7 @@ pq use "data/processed/matched_events_annual_data/site_metadata.parquet", clear
 ****************************************************
 
 * script 12 transforms detailed timestamped spill data from individual site spill events into time-aggregated spill statistics at multiple levels (year, quarter, month) for each site and water company. for events spannign multiple months, different month intervals are created, uses 12/24hr counting rule -- counts each spill event, merging spills closer than 12 hours into one event and adjusting for longer durations. fills missing observations with zero counts/durations to keep the time series complete
-pq use "data/processed/spill_aggregated/agg_spill_mo.parquet", clear
+pq use "data/processed/agg_spill_stats/agg_spill_mo.parquet", clear
 * 14,500 site_id 3 years at monthly aggregation
 * 12,992 ngr
 * has 14500*3*12 = 522,000 obs
@@ -167,7 +167,7 @@ pq use "data/processed/cross_section/sales/prior_12mo/radius=250/part-0.parquet"
 * thr_p50_spill_count_mo / thr_p50_spill_count_qtr: Median spill count for the period type.
 * For yearly and all-time, similar variables exist but with suffixes _yr and _all.
 * d_p50_spill_count_mo: 1 if spill count exceeds median monthly threshold, else 0.
-pq use "data/processed/agg_spill_stats/period_type=monthly/part-0.parquet", clear
+pq use "data/processed/agg_spill_stats/agg_spill_stats_mo.parquet", clear
 * 14,500 site_id at monthly frequency 
 * 522,000 obs = 14500*3*12
 * 451,694 spill_count spill_hrs 
@@ -233,7 +233,7 @@ pq use "data/final/dat_panel_house/dat_panel_house_250.parquet", clear
 ****************************************************
 
 * script 12 transforms detailed timestamped spill data from individual site spill events into time-aggregated spill statistics at multiple levels (year, quarter, month) for each site and water company. for events spannign multiple months, different month intervals are created, uses 12/24hr counting rule -- counts each spill event, merging spills closer than 12 hours into one event and adjusting for longer durations. fills missing observations with zero counts/durations to keep the time series complete
-pq use "data/processed/spill_aggregated/agg_spill_mo.parquet", clear
+pq use "data/processed/agg_spill_stats/agg_spill_mo.parquet", clear
 * 14,500 site_id 3 years at monthly aggregation
 * 12,992 ngr
 * has 14500*3*12 = 522,000 obs
