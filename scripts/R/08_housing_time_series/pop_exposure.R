@@ -13,7 +13,7 @@ suppressPackageStartupMessages(library(rnrfa))
 # User inputs
 # -----------------
 # Spill data (monthly aggregates)
-agg_base <- "/Users/odran/Dropbox/sewage/data/processed/spill_aggregated"
+agg_base <- "/Users/odran/Dropbox/sewage/data/processed/agg_spill_stats"
 p_all_mo <- file.path(agg_base, "agg_spill_mo.parquet")
 p_dry_mo <- file.path(agg_base, "agg_spill_dry_mo.parquet")
 

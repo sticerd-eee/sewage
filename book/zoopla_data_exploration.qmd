@@ -118,7 +118,7 @@ spill_rental_lookup <- import(
 
 # Aggregated spill data by year (for spill metrics in mapping)
 dat_yr <- import(
-  here::here("data", "processed", "spill_aggregated", "agg_spill_yr.parquet"),
+  here::here("data", "processed", "agg_spill_stats", "agg_spill_yr.parquet"),
   trust = TRUE
 )
 ```

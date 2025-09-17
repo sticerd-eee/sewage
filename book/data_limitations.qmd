@@ -70,10 +70,10 @@ site_metadata <- import(
   paste(output_dir, "site_metadata.parquet", sep = "/"), trust = TRUE
 )
 agg_yr <- import(
-  here::here("data", "processed", "spill_aggregated", "agg_spill_yr.parquet"),
+  here::here("data", "processed", "agg_spill_stats", "agg_spill_yr.parquet"),
 )
 agg_mo <- import(
-  here::here("data", "processed", "spill_aggregated", "agg_spill_mo.parquet"),
+  here::here("data", "processed", "agg_spill_stats", "agg_spill_mo.parquet"),
 )
 ```
 

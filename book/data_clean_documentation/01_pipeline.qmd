@@ -177,7 +177,7 @@ digraph DataPipeline {
   D09 [label='data/processed/annual_return_lookup.parquet\\nAnnual return lookup table'];
   D10 [label='data/processed/matched_events_annual_data.parquet\\nMatched events with annual data'];
   D11 [label='data/processed/consent_discharges_db.csv\\nCleaned EA consented discharges database'];
-  D12 [label='data/processed/spill_aggregated/agg_spill_*.parquet\\nAggregated spill statistics (monthly/quarterly/yearly)'];
+  D12 [label='data/processed/agg_spill_stats/agg_spill_*.parquet\\nAggregated spill statistics (monthly/quarterly/yearly)'];
   D13 [label='data/processed/unique_spill_sites.parquet\\nUnique spill sites dataset with location data'];
   D14 [label='data/processed/house_price.parquet\\nCleaned house price data with postcode coordinates'];
   D15 [label='data/processed/spill_house_lookup.parquet\\nSpatial lookup between spills and houses within 10km'];
@@ -319,9 +319,9 @@ digraph DataPipeline {
 - **purpose**: Aggregates individual sewage overflow spills into monthly, quarterly, and yearly statistics using the 12/24 hour counting method.
 - **inputs**: `["data/processed/matched_events_annual_data/matched_events_annual_data.parquet"]`
 - **outputs**: 
-  - `"data/processed/spill_aggregated/agg_spill_yr.parquet"`
-  - `"data/processed/spill_aggregated/agg_spill_mo.parquet"`
-  - `"data/processed/spill_aggregated/agg_spill_qtr.parquet"`
+  - `"data/processed/agg_spill_stats/agg_spill_yr.parquet"`
+  - `"data/processed/agg_spill_stats/agg_spill_mo.parquet"`
+  - `"data/processed/agg_spill_stats/agg_spill_qtr.parquet"`
 
 **Unique Spill Sites Creation**
 
@@ -348,8 +348,8 @@ digraph DataPipeline {
 - **script_name**: `compute_spill_stats.R`
 - **purpose**: Calculates site-level spill statistics including cross-site thresholds and treatment indicators for monthly and quarterly periods.
 - **inputs**: 
-  - `"data/processed/spill_aggregated/agg_spill_mo.parquet"`
-  - `"data/processed/spill_aggregated/agg_spill_qtr.parquet"`
+  - `"data/processed/agg_spill_stats/agg_spill_mo.parquet"`
+  - `"data/processed/agg_spill_stats/agg_spill_qtr.parquet"`
 - **outputs**: `["data/processed/agg_spill_stats/"]`
 
 ### Integration Layer {#sec-01-03-05-integration}
@@ -386,7 +386,7 @@ digraph DataPipeline {
 - **inputs**: 
   - `"data/processed/house_price.parquet"`
   - `"data/processed/spill_house_lookup.parquet"`
-  - `"data/processed/spill_aggregated/agg_spill_mo.parquet"`
+  - `"data/processed/agg_spill_stats/agg_spill_mo.parquet"`
 - **outputs**: 
   - `"data/processed/cross_section/sales/all_years/"`
   - `"data/processed/cross_section/sales/prior_12mo/"`
@@ -398,7 +398,7 @@ digraph DataPipeline {
 - **inputs**: 
   - `"data/processed/zoopla/zoopla_rentals.parquet"`
   - `"data/processed/zoopla/spill_rental_lookup.parquet"`
-  - `"data/processed/spill_aggregated/agg_spill_mo.parquet"`
+  - `"data/processed/agg_spill_stats/agg_spill_mo.parquet"`
 - **outputs**: 
   - `"data/processed/cross_section/rentals/all_years/"`
   - `"data/processed/cross_section/rentals/prior_12mo/"`

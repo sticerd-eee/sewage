@@ -5,7 +5,7 @@ suppressPackageStartupMessages({
 if (!requireNamespace("rnrfa", quietly = TRUE)) install.packages("rnrfa")
 suppressPackageStartupMessages(library(rnrfa))
 
-agg_base <- "/Users/odran/Dropbox/sewage/data/processed/spill_aggregated"
+agg_base <- "/Users/odran/Dropbox/sewage/data/processed/agg_spill_stats"
 p_dry_mo <- file.path(agg_base, "agg_spill_dry_mo.parquet")
 
 # 1) Read monthly dry table (for site IDs + NGR fields)

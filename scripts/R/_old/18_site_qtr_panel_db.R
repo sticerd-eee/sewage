@@ -118,7 +118,7 @@ load_data_to_db <- function(con) {
     logger::log_info("Loading quarterly spill data")
     dat_qtr <- import(
       file.path(
-        CONFIG$processed_dir, "spill_aggregated", "agg_spill_qtr.parquet"),
+        CONFIG$processed_dir, "agg_spill_stats", "agg_spill_qtr.parquet"),
       trust = TRUE
     )
     

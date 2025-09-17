@@ -113,10 +113,10 @@ theme_pref <- theme_minimal() +
 ```{r load-data}
 # Aggregated spill data
 dat_yr <- import(
-  here::here("data", "processed", "spill_aggregated", "agg_spill_yr.parquet"),
+  here::here("data", "processed", "agg_spill_stats", "agg_spill_yr.parquet"),
 )
 dat_mo <- import(
-  here::here("data", "processed", "spill_aggregated", "agg_spill_mo.parquet"),
+  here::here("data", "processed", "agg_spill_stats", "agg_spill_mo.parquet"),
 )
 
 # Spill sites

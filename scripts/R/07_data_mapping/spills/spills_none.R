@@ -1,6 +1,6 @@
 # =================== CONFIG ===================
 years_of_interest <- 2021:2024
-parquet_path <- "/Users/odran/Dropbox/sewage/data/processed/spill_aggregated/agg_spill_mo.parquet"
+parquet_path <- "/Users/odran/Dropbox/sewage/data/processed/agg_spill_stats/agg_spill_mo.parquet"
 out_dir <- "/Users/odran/Dropbox/sewage/data/processed/never_spilled_sites"
 
 # ================= LIBRARIES ==================

@@ -238,11 +238,11 @@ Scripts for aggregating raw data into statistics, creating lookup tables, and en
     - **Output:** Filtered dry spills dataset with rainfall classifications saved to `data/processed/rainfall/dry_spills.parquet`.
 
 **`aggregate_dry_spill_stats.R`**  
-    - **Input:** Dry spills dataset with rainfall metrics (`data/processed/rainfall/dry_spills.parquet`) and existing spill aggregation files (`data/processed/spill_aggregated/agg_spill_{yr|mo|qtr}.parquet`).
+    - **Input:** Dry spills dataset with rainfall metrics (`data/processed/rainfall/dry_spills.parquet`) and existing spill aggregation files (`data/processed/agg_spill_stats/agg_spill_{yr|mo|qtr}.parquet`).
     - Aggregates dry spill events into temporal statistics (yearly, monthly, quarterly) for each of the six rainfall indicators independently.
     - Creates standardised column naming convention and integrates dry spill metrics with existing aggregation datasets.
     - Implements zero imputation for periods with no dry spills and maintains compatibility with general spill analysis workflows.
-    - **Output:** Integrated aggregation datasets with dry spill statistics saved to `data/processed/spill_aggregated/agg_spill_dry_{yr|mo|qtr}.parquet`.
+    - **Output:** Integrated aggregation datasets with dry spill statistics saved to `data/processed/agg_spill_stats/agg_spill_dry_{yr|mo|qtr}.parquet`.
 
 #### 04_feature_engineering/ - Feature Engineering & Spatial Processing Layer
 
