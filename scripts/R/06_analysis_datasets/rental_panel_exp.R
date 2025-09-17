@@ -167,52 +167,64 @@ create_rental_panel_for_radius <- function(prepared_tables, radius_m, con) {
   spill_lookup_tbl <- prepared_tables$spill_lookup_tbl
   spill_qtr_tbl <- prepared_tables$spill_qtr_tbl
 
-  # 1. Rentals within the current radius and associated metadata
+  # 1. Get unique rental-site pairs within radius
   log_info("Filtering rentals within {radius_m}m radius")
-  rentals_in_radius_tbl <- spill_lookup_tbl %>%
+  rental_site_pairs <- spill_lookup_tbl %>%
     filter(distance_m <= .env$radius_m) %>%
-    inner_join(rental_tbl, by = "rental_id") %>%
-    select(site_id, rental_id, qtr_id, distance_m) %>%
-    mutate(
-      qtr_id_transfer = qtr_id,
-      within_radius = TRUE
-    )
+    select(rental_id, site_id, distance_m) %>%
+    distinct()
 
-  # 2. Rentals outside the radius tagged with metadata
-  rentals_outside_radius_tbl <- rental_tbl %>%
-    anti_join(select(rentals_in_radius_tbl, rental_id), by = "rental_id") %>%
+  # 2. Get rental listings and create transfer quarter indicator
+  rental_listings <- rental_tbl %>%
     select(rental_id, qtr_id) %>%
+    rename(qtr_id_transfer = qtr_id)
+
+  # 3. Get all unique quarters from the data
+  all_quarters <- rental_tbl %>%
+    select(qtr_id) %>%
+    distinct()
+
+  # 4. Create complete panel for rentals within radius
+  log_info("Building quarterly rental panel for radius {radius_m}m")
+  rentals_in_radius_tbl_complete <- rental_site_pairs %>%
+    # Cross join with all quarters to create rental-site-quarter panel
+    cross_join(all_quarters) %>%
+    # Add transfer quarter information
+    left_join(rental_listings, by = "rental_id") %>%
+    # Add within_radius flag
+    mutate(within_radius = TRUE) %>%
+    # Add spill statistics
+    left_join(spill_qtr_tbl, by = c("site_id", "qtr_id"))
+
+  # 5. Handle rentals outside radius
+  rentals_outside_radius_tbl <- rental_tbl %>%
+    anti_join(
+      rental_site_pairs %>% select(rental_id) %>% distinct(),
+      by = "rental_id"
+    ) %>%
     mutate(
       qtr_id_transfer = qtr_id,
       within_radius = FALSE,
-      distance_m = NA
+      distance_m = NA,
+      site_id = NA,
+      spill_count = NA,
+      spill_hrs = NA
     )
 
-  # 3. Complete panel data for rentals within the radius
-  log_info("Building quarterly rental panel for radius {radius_m}m")
-  rentals_in_radius_tbl_complete <- rentals_in_radius_tbl %>%
-    select(rental_id, qtr_id) %>%
-    complete(rental_id, qtr_id) %>%
-    left_join(
-      rentals_in_radius_tbl %>%
-        select(rental_id, site_id, qtr_id_transfer, distance_m, within_radius) %>%
-        distinct(),
-      by = "rental_id"
-    ) %>%
-    left_join(spill_qtr_tbl, by = c("site_id", "qtr_id"))
-
-  # 4. Combine panels, add metadata, and order columns
+  # 6. Combine and finalise
   panel <- union_all(rentals_in_radius_tbl_complete, rentals_outside_radius_tbl) %>%
     mutate(radius = as.integer(.env$radius_m)) %>%
     select(
       rental_id, site_id,
       qtr_id, qtr_id_transfer,
-      distance_m, radius, within_radius
+      distance_m, radius, within_radius,
+      spill_count, spill_hrs
     ) %>%
     arrange(rental_id, site_id, qtr_id)
 
-  # 5. Clean up intermediate data for the radius
-  rm(rentals_in_radius_tbl, rentals_outside_radius_tbl)
+  # Clean up
+  rm(rental_site_pairs, rental_listings, all_quarters,
+     rentals_in_radius_tbl_complete, rentals_outside_radius_tbl)
   gc(full = TRUE)
 
   return(panel)

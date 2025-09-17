@@ -1,0 +1,139 @@
+```{r setup}
+# Load packages
+initialise_environment <- function() {
+  required_packages <- c("arrow", "here", "rio", "dplyr")
+  invisible(lapply(required_packages, library, character.only = TRUE))
+}
+initialise_environment()
+
+# Define file paths
+
+## House Prices
+path_sales <- here::here("data", "processed", "house_price.parquet")
+path_rent <- here::here("data", "processed", "zoopla", "zoopla_rentals.parquet")
+
+## Sewage Spills
+
+### Aggregated Sewage Spills
+path_spill_qtr <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_dry_qtr.parquet"
+)
+path_spill_mo <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_dry_mo.parquet"
+)
+
+### Aggregated Sewage Spill Statistics
+path_spill_stats_qtr <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_stats_qtr.parquet"
+)
+path_spill_stats_mo <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_stats_mo.parquet"
+)
+
+## Panel Data
+
+### General
+path_general_panel_rental <- here::here(
+  "data",
+  "processed",
+  "general_panel",
+  "rentals"
+)
+path_general_panel_sales <- here::here(
+  "data",
+  "processed",
+  "general_panel",
+  "sales"
+)
+
+### Within Radius
+path_within_panel_rental <- here::here(
+  "data",
+  "processed",
+  "within_radius_panel",
+  "rentals"
+)
+path_within_panel_sales <- here::here(
+  "data",
+  "processed",
+  "within_radius_panel",
+  "sales"
+)
+```
+
+```{r load-data-general}
+# General Panel Data Load
+
+## Define radius
+rad <- 250L # 500, 1000
+
+## Load sales data
+gen_panel_sales <- arrow::open_dataset(path_general_panel_sales) |>
+  filter(radius == rad) |>
+  collect()
+sales <- import(path_sales, trust = TRUE)
+
+## Load rent data
+gen_panel_rent <- arrow::open_dataset(path_general_panel_rental) |>
+  filter(radius == rad) |>
+  collect()
+rent <- import(path_rent, trust = TRUE)
+
+## Load sewage spills
+spills <- import(path_spill_qtr, trust = TRUE)
+
+## Assemble sales data
+dat_sales <- gen_panel_sales |>
+  left_join(sales, by = join_by(house_id, qtr_id)) |>
+  left_join(spills, by = join_by(site_id, qtr_id, year))
+
+## Assemble rent data
+dat_rent <- gen_panel_rent |>
+  left_join(rent, by = join_by(rental_id, qtr_id)) |>
+  left_join(spills, by = join_by(site_id, qtr_id, year))
+```
+
+```{r load-data-within}
+# Within Panel Data Load
+
+## Define radius and time-period
+rad <- 250L # 500, 1000
+period <- "quarterly" #monthly
+
+## Load sales data
+within_panel_sales <- arrow::open_dataset(path_within_panel_sales) |>
+  filter(radius == rad, period_type == period) |>
+  collect()
+sales <- import(path_sales, trust = TRUE)
+
+## Load rent data
+within_panel_rent <- arrow::open_dataset(path_within_panel_rental) |>
+  filter(radius == rad, period_type == period) |>
+  collect()
+rent <- import(path_rent, trust = TRUE)
+
+## Load sewage spills
+spills <- import(path_spill_qtr, trust = TRUE)
+
+## Assemble sales data
+dat_sales_within <- within_panel_sales |>
+  left_join(sales, by = join_by(house_id, month_id, qtr_id, year, price)) |>
+  left_join(spills, by = join_by(site_id, qtr_id, quarter, year))
+
+## Assemble rent data
+dat_rent_within <- within_panel_rent |>
+  left_join(rent, by = join_by(rental_id, month_id, qtr_id, year)) |>
+  left_join(spills, by = join_by(site_id, qtr_id, quarter, year))
+```

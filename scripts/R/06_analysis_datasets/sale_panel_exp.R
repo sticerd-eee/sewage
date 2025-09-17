@@ -175,61 +175,66 @@ create_house_panel_for_radius <- function(prepared_tables, radius_m, con) {
   spill_lookup_tbl <- prepared_tables$spill_lookup_tbl
   spill_qtr_tbl <- prepared_tables$spill_qtr_tbl
 
-  # 1. Filter houses within the current radius and join with house price data
+  # 1. Get unique house-site pairs within radius
   log_info("Filtering sites within {radius_m}m radius")
-  houses_in_radius_tbl <- spill_lookup_tbl %>%
+  house_site_pairs <- spill_lookup_tbl %>%
     filter(distance_m <= .env$radius_m) %>%
-    inner_join(house_tbl, by = "house_id") %>%
-    select(site_id, house_id, qtr_id, distance_m) %>%
-    mutate(
-      qtr_id_transfer = qtr_id,
-      within_radius = TRUE
-    )
+    select(house_id, site_id, distance_m) %>%
+    distinct()
 
-  # 2. Filter houses outside the current radius and add metadata
-  houses_outside_radius_tbl <- house_tbl %>%
-    anti_join(select(houses_in_radius_tbl, house_id), by = "house_id") %>%
+  # 2. Get house sales and create transfer quarter indicator
+  house_sales <- house_tbl %>%
     select(house_id, qtr_id) %>%
+    rename(qtr_id_transfer = qtr_id)
+
+  # 3. Get all unique quarters from the data
+  all_quarters <- house_tbl %>%
+    select(qtr_id) %>%
+    distinct()
+
+  # 4. Create complete panel for houses within radius
+  log_info("Building quarterly panel for radius {radius_m}m")
+  houses_in_radius_tbl_complete <- house_site_pairs %>%
+    # Cross join with all quarters to create house-site-quarter panel
+    cross_join(all_quarters) %>%
+    # Add transfer quarter information
+    left_join(house_sales, by = "house_id") %>%
+    # Add within_radius flag
+    mutate(within_radius = TRUE) %>%
+    # Add spill statistics
+    left_join(spill_qtr_tbl, by = c("site_id", "qtr_id"))
+
+  # 5. Handle houses outside radius
+  houses_outside_radius_tbl <- house_tbl %>%
+    anti_join(
+      house_site_pairs %>% select(house_id) %>% distinct(),
+      by = "house_id"
+    ) %>%
     mutate(
       qtr_id_transfer = qtr_id,
       within_radius = FALSE,
-      distance_m = NA
+      distance_m = NA,
+      site_id = NA,
+      spill_count = NA,
+      spill_hrs = NA
     )
 
-  # 3. Complete panel data for houses within the radius
-  log_info("Building quarterly panel for radius {radius_m}m")
-  houses_in_radius_tbl_complete <- houses_in_radius_tbl %>%
-    select(house_id, qtr_id) %>%
-    complete(house_id, qtr_id) %>%
-    left_join(
-      houses_in_radius_tbl %>%
-        select(
-          house_id, site_id, qtr_id_transfer, distance_m, within_radius) %>%
-        distinct(),
-      by = "house_id"
-    ) %>%
-    left_join(spill_qtr_tbl, by = c("site_id", "qtr_id"))
-
-  # 4. Combine, order variables, and sort
+  # 6. Combine and finalise
   panel <- union_all(houses_in_radius_tbl_complete, houses_outside_radius_tbl) %>%
-    # Add metadata
     mutate(radius = as.integer(.env$radius_m)) %>%
-    # order columns and sort
     select(
-      # identifiers
       house_id, site_id,
-      # date
       qtr_id, qtr_id_transfer,
-      # metadata
-      distance_m, radius, within_radius
+      distance_m, radius, within_radius,
+      spill_count, spill_hrs
     ) %>%
     arrange(house_id, site_id, qtr_id)
 
-  # 5. Clean up intermediate data for the radius
-  rm(houses_in_radius_tbl, houses_outside_radius_tbl)
+  # Clean up
+  rm(house_site_pairs, house_sales, all_quarters,
+     houses_in_radius_tbl_complete, houses_outside_radius_tbl)
   gc(full = TRUE)
 
-  # 6. Return datasets for this radius
   return(panel)
 }
 
