@@ -260,10 +260,11 @@ Scripts for spatial analysis, distance calculations, and feature engineering. Sc
     - Calculates exact distances and counts discharge outlets within radius for each rental.
     - **Output:** Spatial lookup table with rental–site pairs and distances saved to `data/processed/zoopla/spill_rental_lookup.parquet`.
 
-**`compute_spill_stats.R`**  
-    - **Input:** Combined spill data with location information.
-    - Computes comprehensive spill statistics and implements refined counting methodologies.
-    - **Output:** Enhanced spill statistics for analysis preparation.
+**`compute_spill_stats.R`**
+    - **Input:** Dry spill aggregation files (`agg_spill_dry_mo.parquet`, `agg_spill_dry_qtr.parquet`).
+    - Computes spill statistics including dry weather spill metrics, cross-site thresholds, and treatment indicators for monthly and quarterly periods.
+    - Calculates period-specific, yearly, and all-time thresholds for both total spills and dry spills with binary indicator creation.
+    - **Output:** Enhanced spill statistics with dry weather indicators saved to `agg_spill_stats_mo.parquet` and `agg_spill_stats_qtr.parquet`.
 
 #### 05_data_integration/ - Integration Layer
 
@@ -298,8 +299,7 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
 
 **`sale_panel_exp.R`**  
     - **Input:** House-level panel data from sale panel scripts.
-    - Creates final analysis-ready datasets for event study and hedonic regressions.
-    - Implements multiple treatment definitions and temporal aggregations.
+    - Creates panel datasets linking house sale transactions to nearby sewage spill sites across different radii. The datasets can be joined with the house_price data (for house price data), and spill statistics data.
     - **Output:** Final analysis datasets saved to `data/final/dat_event/` and `data/final/dat_hedonic/`.
 
 **`house_panel_within_radius.R`**  
@@ -316,8 +316,7 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
 
 **`rental_panel_exp.R`**  
     - **Input:** Zoopla rental listings (`zoopla_rentals.parquet`), rental–spill lookup (`spill_rental_lookup.parquet`), and quarterly spill statistics.
-    - Creates comprehensive rental listing-level panel data including all rentals (within and outside radius thresholds) with spill site relationship metadata.
-    - Mirrors the sale panel export logic to support general rental analyses.
+    - Creates panel datasets linking rental transactions to nearby sewage spill sites across different radii. The datasets can be joined with the zoopla_rentals data, and spill statistics data.
     - **Output:** Partitioned by `radius` under `data/processed/general_panel/rentals/`.
 
 **`site_panel_sales.R`**  

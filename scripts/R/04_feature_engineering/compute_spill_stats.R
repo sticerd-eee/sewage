@@ -90,13 +90,22 @@ load_data_to_db <- function(con) {
     logger::log_info("Loading monthly spill data")
     dat_mo <- import(
       file.path(
-        CONFIG$processed_dir, "agg_spill_stats", "agg_spill_mo.parquet"
+        CONFIG$processed_dir, "agg_spill_stats", "agg_spill_dry_mo.parquet"
       ),
       trust = TRUE
     )
 
     dat_mo <- dat_mo %>%
-      select(water_company, site_id, year, month, spill_count_mo, spill_hrs_mo) %>%
+      select(
+        water_company,
+        site_id,
+        year,
+        month,
+        spill_count_mo,
+        spill_hrs_mo,
+        dry_spill_count_mo_r1_d01_weak,
+        dry_spill_hrs_mo_r1_d01_weak
+      ) %>%
       arrange(site_id, year, month)
     copy_to(con, dat_mo, "dat_mo", temporary = FALSE)
     rm(dat_mo)
@@ -108,13 +117,22 @@ load_data_to_db <- function(con) {
     logger::log_info("Loading quarterly spill data")
     dat_qtr <- import(
       file.path(
-        CONFIG$processed_dir, "agg_spill_stats", "agg_spill_qtr.parquet"
+        CONFIG$processed_dir, "agg_spill_stats", "agg_spill_dry_qtr.parquet"
       ),
       trust = TRUE
     )
 
     dat_qtr <- dat_qtr %>%
-      select(water_company, site_id, year, quarter, spill_count_qt, spill_hrs_qt) %>%
+      select(
+        water_company,
+        site_id,
+        year,
+        quarter,
+        spill_count_qt,
+        spill_hrs_qt,
+        dry_spill_count_qt_r1_d01_weak,
+        dry_spill_hrs_qt_r1_d01_weak
+      ) %>%
       arrange(site_id, year, quarter)
 
     copy_to(con, dat_qtr, "dat_qtr", temporary = FALSE)
@@ -133,13 +151,18 @@ calculate_period_spill_stats <- function(con, period_type) {
   # Monthly aggregation
   if (period_type == "monthly") {
     spill_tbl <- tbl(con, "dat_mo") %>%
-      rename(spill_count = spill_count_mo, spill_hrs = spill_hrs_mo) %>%
+      rename(
+        spill_count = spill_count_mo,
+        spill_hrs = spill_hrs_mo,
+        dry_spill_count = dry_spill_count_mo_r1_d01_weak,
+        dry_spill_hrs = dry_spill_hrs_mo_r1_d01_weak
+      ) %>%
       mutate(
         year = as.integer(year),
         month = as.integer(month),
         spill_date = as.Date(paste0(year, "-", month, "-1"))
       ) %>%
-      select(site_id, spill_date, year, month, spill_count, spill_hrs)
+      select(site_id, spill_date, year, month, spill_count, spill_hrs, dry_spill_count, dry_spill_hrs)
 
     period_suffix <- "mo"
     time_id_col <- "month_id"
@@ -149,7 +172,12 @@ calculate_period_spill_stats <- function(con, period_type) {
   # Quarterly Aggregation
   else if (period_type == "quarterly") {
     spill_tbl <- tbl(con, "dat_qtr") %>%
-      rename(spill_count = spill_count_qt, spill_hrs = spill_hrs_qt) %>%
+      rename(
+        spill_count = spill_count_qt,
+        spill_hrs = spill_hrs_qt,
+        dry_spill_count = dry_spill_count_qt_r1_d01_weak,
+        dry_spill_hrs = dry_spill_hrs_qt_r1_d01_weak
+      ) %>%
       mutate(
         year = as.integer(year),
         quarter = as.integer(quarter),
@@ -160,7 +188,7 @@ calculate_period_spill_stats <- function(con, period_type) {
           quarter == 4 ~ as.Date(paste0(year, "-10-01"))
         )
       ) %>%
-      select(site_id, spill_date, year, quarter, spill_count, spill_hrs)
+      select(site_id, spill_date, year, quarter, spill_count, spill_hrs, dry_spill_count, dry_spill_hrs)
 
     period_suffix <- "qtr"
     time_id_col <- "qtr_id"
@@ -178,7 +206,7 @@ calculate_period_spill_stats <- function(con, period_type) {
   period_thresholds <- metrics_base %>%
     group_by(spill_date) %>%
     summarise(
-      across(c(spill_count, spill_hrs),
+      across(c(spill_count, spill_hrs, dry_spill_count, dry_spill_hrs),
         list(
           p50 = ~ median(., na.rm = TRUE),
           p75 = ~ quantile(., probs = 0.75, na.rm = TRUE),
@@ -198,7 +226,7 @@ calculate_period_spill_stats <- function(con, period_type) {
   yearly_thresholds <- metrics_base %>%
     group_by(year) %>%
     summarise(
-      across(c(spill_count, spill_hrs),
+      across(c(spill_count, spill_hrs, dry_spill_count, dry_spill_hrs),
         list(
           p50 = ~ median(., na.rm = TRUE),
           p75 = ~ quantile(., probs = 0.75, na.rm = TRUE),
@@ -217,7 +245,7 @@ calculate_period_spill_stats <- function(con, period_type) {
   log_info("Calculating all-time thresholds")
   all_time_thresholds <- metrics_base %>%
     summarise(
-      across(c(spill_count, spill_hrs),
+      across(c(spill_count, spill_hrs, dry_spill_count, dry_spill_hrs),
         list(
           p50 = ~ median(., na.rm = TRUE),
           p75 = ~ quantile(., probs = 0.75, na.rm = TRUE),
@@ -240,6 +268,8 @@ calculate_period_spill_stats <- function(con, period_type) {
     mutate(
       log_spill_count = log(1 + spill_count),
       log_spill_hrs = log(1 + spill_hrs),
+      log_dry_spill_count = log(1 + dry_spill_count),
+      log_dry_spill_hrs = log(1 + dry_spill_hrs),
       !!time_id_col := !!time_id_expr,
       period_type = !!period_type
     ) %>%
@@ -316,8 +346,10 @@ export_spill_data <- function(monthly_stats, quarterly_stats) {
       site_id, spill_date, month_id, month, year,
       # Base metrics
       spill_count, spill_hrs,
+      dry_spill_count, dry_spill_hrs,
       # Log metrics
       log_spill_count, log_spill_hrs,
+      log_dry_spill_count, log_dry_spill_hrs,
       # Threshold values
       starts_with("thr_"),
       # Indicator flags
@@ -336,8 +368,10 @@ export_spill_data <- function(monthly_stats, quarterly_stats) {
       site_id, spill_date, qtr_id, quarter, year,
       # Base metrics
       spill_count, spill_hrs,
+      dry_spill_count, dry_spill_hrs,
       # Log metrics
       log_spill_count, log_spill_hrs,
+      log_dry_spill_count, log_dry_spill_hrs,
       # Threshold values
       starts_with("thr_"),
       # Indicator flags

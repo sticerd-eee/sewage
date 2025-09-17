@@ -346,11 +346,13 @@ digraph DataPipeline {
 **Spill Statistics Computing**
 
 - **script_name**: `compute_spill_stats.R`
-- **purpose**: Calculates site-level spill statistics including cross-site thresholds and treatment indicators for monthly and quarterly periods.
-- **inputs**: 
-  - `"data/processed/agg_spill_stats/agg_spill_mo.parquet"`
-  - `"data/processed/agg_spill_stats/agg_spill_qtr.parquet"`
-- **outputs**: `["data/processed/agg_spill_stats/"]`
+- **purpose**: Calculates site-level spill statistics including dry weather spill metrics, cross-site thresholds, and treatment indicators for monthly and quarterly periods. Computes period-specific, yearly, and all-time thresholds for both total spills and dry spills with binary indicator creation.
+- **inputs**:
+  - `"data/processed/agg_spill_stats/agg_spill_dry_mo.parquet"`
+  - `"data/processed/agg_spill_stats/agg_spill_dry_qtr.parquet"`
+- **outputs**:
+  - `"data/processed/agg_spill_stats/agg_spill_stats_mo.parquet"`
+  - `"data/processed/agg_spill_stats/agg_spill_stats_qtr.parquet"`
 
 ### Integration Layer {#sec-01-03-05-integration}
 
@@ -442,7 +444,8 @@ digraph DataPipeline {
 **General House Panel**
 
 - **script_name**: `sale_panel_exp.R`
-- **purpose**: Creates comprehensive house sale-level panel data including all houses (within and outside radius thresholds) with spill site relationship metadata for experimental analysis.
+- **purpose**: Creates panel datasets linking house sale transactions to nearby sewage spill sites across different radii. The datasets can be joined with the house_price data (for house price data), and spill statistics data.
+
 - **inputs**: 
   - `"data/processed/house_price.parquet"`
   - `"data/processed/spill_house_lookup.parquet"`
@@ -452,7 +455,7 @@ digraph DataPipeline {
 **General Rental Panel**
 
 - **script_name**: `rental_panel_exp.R`
-- **purpose**: Creates comprehensive rental listing-level panel data including all listings (within and outside radius thresholds) with spill site relationship metadata for experimental analysis.
+- **purpose**: Creates panel datasets linking rental transactions to nearby sewage spill sites across different radii. The datasets can be joined with the zoopla_rentals data, and spill statistics data.
 - **inputs**: 
   - `"data/processed/zoopla/zoopla_rentals.parquet"`
   - `"data/processed/zoopla/spill_rental_lookup.parquet"`
