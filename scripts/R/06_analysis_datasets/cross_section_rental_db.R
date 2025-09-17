@@ -59,7 +59,7 @@ CONFIG <- list(
   # Input paths specific to rentals
   rentals_path = here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
   rental_lookup_path = here::here("data", "processed", "zoopla", "spill_rental_lookup.parquet"),
-  monthly_spill_path = here::here("data", "processed", "spill_aggregated", "agg_spill_mo.parquet")
+  monthly_spill_path = here::here("data", "processed", "agg_spill_stats", "agg_spill_mo.parquet")
 )
 
 # Database Functions

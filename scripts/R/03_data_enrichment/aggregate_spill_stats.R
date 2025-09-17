@@ -64,8 +64,9 @@ CONFIG <- list(
   data_path_annual = here::here(
     "data", "processed", "annual_return_edm.parquet"
   ),
-  output_dir = here::here("data", "processed", "spill_aggregated"),
-  years = 2021:2023
+  output_dir = here::here("data", "processed", "agg_spill_stats"),
+  years = 2021:2023,
+  base_year = 2021
 )
 
 # Functions
@@ -112,18 +113,21 @@ aggregate_spills <- function(data) {
   prepared_data <- prepare_spill_data(data)
   dt_yearly  <- prepared_data$yearly
   dt_monthly <- prepared_data$monthly
-  
-  # Combinations to ensure zero‑row outputs are created where needed
+  dt_monthly[, month_id := (year - CONFIG$base_year) * 12 + month]
+  dt_monthly[, qtr_id := (year - CONFIG$base_year) * 4 + quarter]
+
+  # Combinations to ensure zero-row outputs are created where needed
   yearly_combinations <- expand_grid(
     water_company = unique(dt_yearly$water_company),
     year          = CONFIG$years
   )
-  
+
   monthly_combinations <- expand_grid(
     water_company = unique(dt_monthly$water_company),
     year          = CONFIG$years,
     month         = 1:12
-  )
+  ) %>%
+    mutate(month_id = (year - CONFIG$base_year) * 12 + month)
   
   # ---- Yearly ----------------------------------------------------
   yearly_result <- map2(
@@ -161,18 +165,20 @@ aggregate_spills <- function(data) {
     list(
       monthly_combinations$water_company,
       monthly_combinations$year,
-      monthly_combinations$month
+      monthly_combinations$month,
+      monthly_combinations$month_id
     ),
-    ~ {
+    function(wc, yr, mo, mid) {
       current_data <- dt_monthly[
-        water_company == ..1 & year == ..2 & month == ..3
+        water_company == wc & year == yr & month == mo
       ]
       
       if (nrow(current_data) == 0) {
         return(data.table(
-          water_company   = ..1,
-          year            = ..2,
-          month           = ..3,
+          water_company   = wc,
+          year            = yr,
+          month           = mo,
+          month_id        = mid,
           site_id         = NA_character_,
           spill_count_mo  = 0L,
           spill_hrs_mo    = 0L
@@ -184,31 +190,34 @@ aggregate_spills <- function(data) {
                      spill_count_mo = count_spills(start_time, end_time),
                      spill_hrs_mo   = calculate_spill_hours(start_time, end_time)
                    ),
-                   by = .(water_company, site_id, year, month)
+                   by = .(water_company, site_id, year, month, month_id)
       ]
     }
   )
-  
+
   # ---- Quarterly -------------------------------------------------
   quarterly_combinations <- expand_grid(
     water_company = unique(dt_monthly$water_company),
     year          = CONFIG$years,
     quarter       = 1:4
-  )
+  ) %>%
+    mutate(qtr_id = (year - CONFIG$base_year) * 4 + quarter)
   
   quarterly_result <- pmap(
     list(
       quarterly_combinations$water_company,
       quarterly_combinations$year,
-      quarterly_combinations$quarter
+      quarterly_combinations$quarter,
+      quarterly_combinations$qtr_id
     ),
-    function(wc, yr, qt) {
+    function(wc, yr, qt, qid) {
       cur <- dt_monthly[water_company == wc & year == yr & quarter == qt]
       if (nrow(cur) == 0) {
         return(data.table(
           water_company   = wc,
           year            = yr,
           quarter         = qt,
+          qtr_id          = qid,
           site_id         = NA_character_,
           spill_count_qt  = 0L,
           spill_hrs_qt    = 0
@@ -219,7 +228,7 @@ aggregate_spills <- function(data) {
             spill_count_qt = count_spills(start_time, end_time),
             spill_hrs_qt   = calculate_spill_hours(start_time, end_time)
           ),
-          by = .(water_company, site_id, year, quarter)
+          by = .(water_company, site_id, year, quarter, qtr_id)
       ]
     }
   )
@@ -310,7 +319,8 @@ complete_data_observations <- function(
     ungroup() %>%    
     mutate(
       spill_count_mo = if_else(is.na(spill_count_mo), spill_count_ea, spill_count_mo),
-      spill_hrs_mo   = if_else(is.na(spill_hrs_mo),   spill_hrs_ea,   spill_hrs_mo)
+      spill_hrs_mo   = if_else(is.na(spill_hrs_mo),   spill_hrs_ea,   spill_hrs_mo),
+      month_id       = dplyr::coalesce(month_id, (year - CONFIG$base_year) * 12 + month)
     )
   
   
@@ -340,7 +350,8 @@ complete_data_observations <- function(
     ungroup() %>%    
     mutate(
       spill_count_qt = if_else(is.na(spill_count_qt), spill_count_ea, spill_count_qt),
-      spill_hrs_qt   = if_else(is.na(spill_hrs_qt),   spill_hrs_ea,   spill_hrs_qt)
+      spill_hrs_qt   = if_else(is.na(spill_hrs_qt),   spill_hrs_ea,   spill_hrs_qt),
+      qtr_id         = dplyr::coalesce(qtr_id, (year - CONFIG$base_year) * 4 + quarter)
     )
   
   list(
