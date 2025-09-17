@@ -302,8 +302,8 @@ ul.task-list li input[type="checkbox"] {
 
     <script>
 
-      function styleCell_ego3857e4ss3mvblhm5l(i, j, css_id) {
-          var table = document.getElementById("tinytable_ego3857e4ss3mvblhm5l");
+      function styleCell_3r9iqba8xvq76mpsv028(i, j, css_id) {
+          var table = document.getElementById("tinytable_3r9iqba8xvq76mpsv028");
           var cell = table.querySelector(`[data-row="${i}"][data-col="${j}"]`);
           if (cell) {
               console.log(`Styling cell at (${i}, ${j}) with class ${css_id}`);
@@ -312,8 +312,8 @@ ul.task-list li input[type="checkbox"] {
               console.warn(`Cell at (${i}, ${j}) not found.`);
           }
       }
-      function spanCell_ego3857e4ss3mvblhm5l(i, j, rowspan, colspan) {
-        var table = document.getElementById("tinytable_ego3857e4ss3mvblhm5l");
+      function spanCell_3r9iqba8xvq76mpsv028(i, j, rowspan, colspan) {
+        var table = document.getElementById("tinytable_3r9iqba8xvq76mpsv028");
         const targetCell = table.querySelector(`[data-row="${i}"][data-col="${j}"]`);
         if (!targetCell) {
           console.warn(`Cell at (${i}, ${j}) not found.`);
@@ -344,15 +344,15 @@ ul.task-list li input[type="checkbox"] {
       window.addEventListener('load', function () {
           var cellsToStyle = [
             // tinytable style arrays after
-          { positions: [ { i: '17', j: 0 }, { i: '17', j: 3 }, { i: '17', j: 2 }, { i: '17', j: 1 }, { i: '17', j: 4 }, { i: '17', j: 7 }, { i: '17', j: 6 }, { i: '17', j: 5 }, { i: '17', j: 8 },  ], css_id: 'tinytable_css_cdnurt2trewqngz8crbr',}, 
-          { positions: [ { i: '4', j: 0 }, { i: '4', j: 3 }, { i: '4', j: 2 }, { i: '4', j: 1 }, { i: '4', j: 4 }, { i: '4', j: 7 }, { i: '4', j: 6 }, { i: '4', j: 5 }, { i: '4', j: 8 },  ], css_id: 'tinytable_css_jtboa01u7lzbry7no0sc',}, 
-          { positions: [ { i: '0', j: 0 }, { i: '0', j: 3 }, { i: '0', j: 2 }, { i: '0', j: 1 }, { i: '0', j: 4 }, { i: '0', j: 7 }, { i: '0', j: 6 }, { i: '0', j: 5 }, { i: '0', j: 8 },  ], css_id: 'tinytable_css_gl9obu68vv3u7e3ll6tp',}, 
+          { positions: [ { i: '17', j: 0 }, { i: '17', j: 3 }, { i: '17', j: 2 }, { i: '17', j: 1 }, { i: '17', j: 4 }, { i: '17', j: 7 }, { i: '17', j: 6 }, { i: '17', j: 5 }, { i: '17', j: 8 },  ], css_id: 'tinytable_css_xug9cmab6nx4ppgncme5',}, 
+          { positions: [ { i: '4', j: 0 }, { i: '4', j: 3 }, { i: '4', j: 2 }, { i: '4', j: 1 }, { i: '4', j: 4 }, { i: '4', j: 7 }, { i: '4', j: 6 }, { i: '4', j: 5 }, { i: '4', j: 8 },  ], css_id: 'tinytable_css_k0z4j09h7i2cs60g5p23',}, 
+          { positions: [ { i: '0', j: 0 }, { i: '0', j: 3 }, { i: '0', j: 2 }, { i: '0', j: 1 }, { i: '0', j: 4 }, { i: '0', j: 7 }, { i: '0', j: 6 }, { i: '0', j: 5 }, { i: '0', j: 8 },  ], css_id: 'tinytable_css_h9yfzd1cp51sxe17y1gr',}, 
           ];
 
           // Loop over the arrays to style the cells
           cellsToStyle.forEach(function (group) {
               group.positions.forEach(function (cell) {
-                  styleCell_ego3857e4ss3mvblhm5l(cell.i, cell.j, group.css_id);
+                  styleCell_3r9iqba8xvq76mpsv028(cell.i, cell.j, group.css_id);
               });
           });
       });
@@ -360,12 +360,12 @@ ul.task-list li input[type="checkbox"] {
 
     <style>
       /* tinytable css entries after */
-      .table td.tinytable_css_cdnurt2trewqngz8crbr, .table th.tinytable_css_cdnurt2trewqngz8crbr { border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_jtboa01u7lzbry7no0sc, .table th.tinytable_css_jtboa01u7lzbry7no0sc { border-top: solid black 0.1em; }
-      .table td.tinytable_css_gl9obu68vv3u7e3ll6tp, .table th.tinytable_css_gl9obu68vv3u7e3ll6tp { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_xug9cmab6nx4ppgncme5, .table th.tinytable_css_xug9cmab6nx4ppgncme5 { border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_k0z4j09h7i2cs60g5p23, .table th.tinytable_css_k0z4j09h7i2cs60g5p23 { border-top: solid black 0.1em; }
+      .table td.tinytable_css_h9yfzd1cp51sxe17y1gr, .table th.tinytable_css_h9yfzd1cp51sxe17y1gr { border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
     </style>
     <div class="container">
-      <table class="table table-borderless" id="tinytable_ego3857e4ss3mvblhm5l" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
+      <table class="table table-borderless" id="tinytable_3r9iqba8xvq76mpsv028" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
         <thead>
         
               <tr>
@@ -391,7 +391,7 @@ ul.task-list li input[type="checkbox"] {
                   <td data-row="1" data-col="5">1.00</td>
                   <td data-row="1" data-col="6">254.00</td>
                   <td data-row="1" data-col="7">40,966,454.00</td>
-                  <td data-row="1" data-col="8"><img src="./tinytable_assets/idrw9dhs644x49n4bysw74.png" style="height: 1em;"></td>
+                  <td data-row="1" data-col="8"><img src="./tinytable_assets/idc42fuyc3wkwq5vdof819.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td data-row="2" data-col="0">Year</td>
@@ -402,7 +402,7 @@ ul.task-list li input[type="checkbox"] {
                   <td data-row="2" data-col="5">2,021.00</td>
                   <td data-row="2" data-col="6">2,022.00</td>
                   <td data-row="2" data-col="7">2,023.00</td>
-                  <td data-row="2" data-col="8"><img src="./tinytable_assets/id0105a7fgx34vpol8y363.png" style="height: 1em;"></td>
+                  <td data-row="2" data-col="8"><img src="./tinytable_assets/id07zn1g759x84jt8fx6pg.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td data-row="3" data-col="0">Bedrooms</td>
@@ -413,7 +413,7 @@ ul.task-list li input[type="checkbox"] {
                   <td data-row="3" data-col="5">1.00</td>
                   <td data-row="3" data-col="6">2.00</td>
                   <td data-row="3" data-col="7">255.00</td>
-                  <td data-row="3" data-col="8"><img src="./tinytable_assets/idagdjivwey39xs9savesk.png" style="height: 1em;"></td>
+                  <td data-row="3" data-col="8"><img src="./tinytable_assets/idvv48gqskuvdwsz6zvhj9.png" style="height: 1em;"></td>
                 </tr>
                 <tr>
                   <td data-row="4" data-col="0"></td>
@@ -583,8 +583,8 @@ ul.task-list li input[type="checkbox"] {
 
     <script>
 
-      function styleCell_29vw8xqjptginvw5g734(i, j, css_id) {
-          var table = document.getElementById("tinytable_29vw8xqjptginvw5g734");
+      function styleCell_r1lg4pwvqgestbffxa1r(i, j, css_id) {
+          var table = document.getElementById("tinytable_r1lg4pwvqgestbffxa1r");
           var cell = table.querySelector(`[data-row="${i}"][data-col="${j}"]`);
           if (cell) {
               console.log(`Styling cell at (${i}, ${j}) with class ${css_id}`);
@@ -593,8 +593,8 @@ ul.task-list li input[type="checkbox"] {
               console.warn(`Cell at (${i}, ${j}) not found.`);
           }
       }
-      function spanCell_29vw8xqjptginvw5g734(i, j, rowspan, colspan) {
-        var table = document.getElementById("tinytable_29vw8xqjptginvw5g734");
+      function spanCell_r1lg4pwvqgestbffxa1r(i, j, rowspan, colspan) {
+        var table = document.getElementById("tinytable_r1lg4pwvqgestbffxa1r");
         const targetCell = table.querySelector(`[data-row="${i}"][data-col="${j}"]`);
         if (!targetCell) {
           console.warn(`Cell at (${i}, ${j}) not found.`);
@@ -625,18 +625,18 @@ ul.task-list li input[type="checkbox"] {
       window.addEventListener('load', function () {
           var cellsToStyle = [
             // tinytable style arrays after
-          { positions: [ { i: '11', j: 6 }, { i: '11', j: 5 }, { i: '11', j: 4 }, { i: '11', j: 3 }, { i: '11', j: 7 },  ], css_id: 'tinytable_css_qoi2fgw5smdkx9iq7wnl',}, 
-          { positions: [ { i: '1', j: 3 }, { i: '2', j: 3 }, { i: '3', j: 3 }, { i: '4', j: 3 }, { i: '5', j: 3 }, { i: '6', j: 3 }, { i: '7', j: 3 }, { i: '8', j: 3 }, { i: '1', j: 4 }, { i: '2', j: 4 }, { i: '3', j: 4 }, { i: '4', j: 4 }, { i: '5', j: 4 }, { i: '6', j: 4 }, { i: '7', j: 4 }, { i: '8', j: 4 }, { i: '9', j: 4 }, { i: '9', j: 3 }, { i: '10', j: 3 }, { i: '1', j: 6 }, { i: '1', j: 5 }, { i: '2', j: 5 }, { i: '3', j: 5 }, { i: '4', j: 5 }, { i: '5', j: 5 }, { i: '6', j: 5 }, { i: '7', j: 5 }, { i: '8', j: 5 }, { i: '9', j: 5 }, { i: '10', j: 5 }, { i: '10', j: 4 }, { i: '1', j: 7 }, { i: '2', j: 7 }, { i: '2', j: 6 }, { i: '3', j: 6 }, { i: '4', j: 6 }, { i: '5', j: 6 }, { i: '6', j: 6 }, { i: '7', j: 6 }, { i: '8', j: 6 }, { i: '9', j: 6 }, { i: '10', j: 6 }, { i: '3', j: 7 }, { i: '4', j: 7 }, { i: '5', j: 7 }, { i: '6', j: 7 }, { i: '7', j: 7 }, { i: '8', j: 7 }, { i: '9', j: 7 }, { i: '10', j: 7 },  ], css_id: 'tinytable_css_qm6yw6dzr5p18wsqipp6',}, 
-          { positions: [ { i: '0', j: 3 }, { i: '0', j: 7 }, { i: '0', j: 6 }, { i: '0', j: 5 }, { i: '0', j: 4 },  ], css_id: 'tinytable_css_7icf987qla1qbwt02ahc',}, 
-          { positions: [ { i: '11', j: 1 }, { i: '11', j: 0 }, { i: '11', j: 2 },  ], css_id: 'tinytable_css_6hw7flu0ygvgt35g7a08',}, 
-          { positions: [ { i: '1', j: 0 }, { i: '2', j: 0 }, { i: '5', j: 0 }, { i: '6', j: 0 }, { i: '3', j: 0 }, { i: '4', j: 0 }, { i: '9', j: 0 }, { i: '10', j: 0 }, { i: '7', j: 0 }, { i: '8', j: 0 }, { i: '1', j: 1 }, { i: '2', j: 1 }, { i: '3', j: 1 }, { i: '4', j: 1 }, { i: '5', j: 1 }, { i: '6', j: 1 }, { i: '7', j: 1 }, { i: '8', j: 1 }, { i: '9', j: 1 }, { i: '10', j: 1 }, { i: '3', j: 2 }, { i: '4', j: 2 }, { i: '1', j: 2 }, { i: '2', j: 2 }, { i: '7', j: 2 }, { i: '8', j: 2 }, { i: '5', j: 2 }, { i: '6', j: 2 }, { i: '9', j: 2 }, { i: '10', j: 2 },  ], css_id: 'tinytable_css_k4tzwlq6504gy2z3y0dp',}, 
-          { positions: [ { i: '0', j: 0 }, { i: '0', j: 2 }, { i: '0', j: 1 },  ], css_id: 'tinytable_css_ql1bo1pexpm824f4rmrg',}, 
+          { positions: [ { i: '11', j: 6 }, { i: '11', j: 5 }, { i: '11', j: 4 }, { i: '11', j: 3 }, { i: '11', j: 7 },  ], css_id: 'tinytable_css_tfskiqp1jh69pvezexky',}, 
+          { positions: [ { i: '1', j: 3 }, { i: '2', j: 3 }, { i: '3', j: 3 }, { i: '4', j: 3 }, { i: '5', j: 3 }, { i: '6', j: 3 }, { i: '7', j: 3 }, { i: '8', j: 3 }, { i: '1', j: 4 }, { i: '2', j: 4 }, { i: '3', j: 4 }, { i: '4', j: 4 }, { i: '5', j: 4 }, { i: '6', j: 4 }, { i: '7', j: 4 }, { i: '8', j: 4 }, { i: '9', j: 4 }, { i: '9', j: 3 }, { i: '10', j: 3 }, { i: '1', j: 6 }, { i: '1', j: 5 }, { i: '2', j: 5 }, { i: '3', j: 5 }, { i: '4', j: 5 }, { i: '5', j: 5 }, { i: '6', j: 5 }, { i: '7', j: 5 }, { i: '8', j: 5 }, { i: '9', j: 5 }, { i: '10', j: 5 }, { i: '10', j: 4 }, { i: '1', j: 7 }, { i: '2', j: 7 }, { i: '2', j: 6 }, { i: '3', j: 6 }, { i: '4', j: 6 }, { i: '5', j: 6 }, { i: '6', j: 6 }, { i: '7', j: 6 }, { i: '8', j: 6 }, { i: '9', j: 6 }, { i: '10', j: 6 }, { i: '3', j: 7 }, { i: '4', j: 7 }, { i: '5', j: 7 }, { i: '6', j: 7 }, { i: '7', j: 7 }, { i: '8', j: 7 }, { i: '9', j: 7 }, { i: '10', j: 7 },  ], css_id: 'tinytable_css_xtw1uan1pi85w3p0lsm3',}, 
+          { positions: [ { i: '0', j: 3 }, { i: '0', j: 7 }, { i: '0', j: 6 }, { i: '0', j: 5 }, { i: '0', j: 4 },  ], css_id: 'tinytable_css_e0rw0c790jknau72uf0g',}, 
+          { positions: [ { i: '11', j: 1 }, { i: '11', j: 0 }, { i: '11', j: 2 },  ], css_id: 'tinytable_css_ffd2z4xk1arduxpbhc9k',}, 
+          { positions: [ { i: '1', j: 0 }, { i: '2', j: 0 }, { i: '5', j: 0 }, { i: '6', j: 0 }, { i: '3', j: 0 }, { i: '4', j: 0 }, { i: '9', j: 0 }, { i: '10', j: 0 }, { i: '7', j: 0 }, { i: '8', j: 0 }, { i: '1', j: 1 }, { i: '2', j: 1 }, { i: '3', j: 1 }, { i: '4', j: 1 }, { i: '5', j: 1 }, { i: '6', j: 1 }, { i: '7', j: 1 }, { i: '8', j: 1 }, { i: '9', j: 1 }, { i: '10', j: 1 }, { i: '3', j: 2 }, { i: '4', j: 2 }, { i: '1', j: 2 }, { i: '2', j: 2 }, { i: '7', j: 2 }, { i: '8', j: 2 }, { i: '5', j: 2 }, { i: '6', j: 2 }, { i: '9', j: 2 }, { i: '10', j: 2 },  ], css_id: 'tinytable_css_kz4dz6hpruuq0vf1unax',}, 
+          { positions: [ { i: '0', j: 0 }, { i: '0', j: 2 }, { i: '0', j: 1 },  ], css_id: 'tinytable_css_7rov5tu1crcjewsj0ceb',}, 
           ];
 
           // Loop over the arrays to style the cells
           cellsToStyle.forEach(function (group) {
               group.positions.forEach(function (cell) {
-                  styleCell_29vw8xqjptginvw5g734(cell.i, cell.j, group.css_id);
+                  styleCell_r1lg4pwvqgestbffxa1r(cell.i, cell.j, group.css_id);
               });
           });
       });
@@ -644,15 +644,15 @@ ul.task-list li input[type="checkbox"] {
 
     <style>
       /* tinytable css entries after */
-      .table td.tinytable_css_qoi2fgw5smdkx9iq7wnl, .table th.tinytable_css_qoi2fgw5smdkx9iq7wnl { text-align: right; border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_qm6yw6dzr5p18wsqipp6, .table th.tinytable_css_qm6yw6dzr5p18wsqipp6 { text-align: right; }
-      .table td.tinytable_css_7icf987qla1qbwt02ahc, .table th.tinytable_css_7icf987qla1qbwt02ahc { text-align: right; border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
-      .table td.tinytable_css_6hw7flu0ygvgt35g7a08, .table th.tinytable_css_6hw7flu0ygvgt35g7a08 { text-align: left; border-bottom: solid #d3d8dc 0.1em; }
-      .table td.tinytable_css_k4tzwlq6504gy2z3y0dp, .table th.tinytable_css_k4tzwlq6504gy2z3y0dp { text-align: left; }
-      .table td.tinytable_css_ql1bo1pexpm824f4rmrg, .table th.tinytable_css_ql1bo1pexpm824f4rmrg { text-align: left; border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_tfskiqp1jh69pvezexky, .table th.tinytable_css_tfskiqp1jh69pvezexky { text-align: right; border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_xtw1uan1pi85w3p0lsm3, .table th.tinytable_css_xtw1uan1pi85w3p0lsm3 { text-align: right; }
+      .table td.tinytable_css_e0rw0c790jknau72uf0g, .table th.tinytable_css_e0rw0c790jknau72uf0g { text-align: right; border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
+      .table td.tinytable_css_ffd2z4xk1arduxpbhc9k, .table th.tinytable_css_ffd2z4xk1arduxpbhc9k { text-align: left; border-bottom: solid #d3d8dc 0.1em; }
+      .table td.tinytable_css_kz4dz6hpruuq0vf1unax, .table th.tinytable_css_kz4dz6hpruuq0vf1unax { text-align: left; }
+      .table td.tinytable_css_7rov5tu1crcjewsj0ceb, .table th.tinytable_css_7rov5tu1crcjewsj0ceb { text-align: left; border-top: solid #d3d8dc 0.1em; border-bottom: solid #d3d8dc 0.05em; }
     </style>
     <div class="container">
-      <table class="table table-borderless" id="tinytable_29vw8xqjptginvw5g734" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
+      <table class="table table-borderless" id="tinytable_r1lg4pwvqgestbffxa1r" style="width: auto; margin-left: auto; margin-right: auto;" data-quarto-disable-processing="true">
         <thead>
         
               <tr>
@@ -874,16 +874,16 @@ ul.task-list li input[type="checkbox"] {
 <div id="tabset-4-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-4-1-tab">
 <div class="cell">
 <div class="cell-output-display">
-<div class="reactable html-widget html-fill-item" id="htmlwidget-b4096c3bec7d61be7640" style="width:auto;height:auto;"></div>
-<script type="application/json" data-for="htmlwidget-b4096c3bec7d61be7640">{"x":{"tag":{"name":"Reactable","attribs":{"data":{"threshold_m":["250","500","1000","2000","5000",">5000"],"mean_distance_m":[173.389222685694,342.072276116251,671.02752727357,1309.56995075789,3114.29886612443,"NA"],"n_rentals":[73933,232978,553503,932810,1246889,63339],"n_spill_sites":[1.73807366128784,2.28032689781868,3.67612280331021,7.69921634630338,25.7804696328823,0],"mean_price":[250.464569272177,255.315656413913,266.712756751081,279.854806445047,293.975884781982,261.652062710173],"median_price":[208,208,219,231,264,225],"sd_price":[120.312097327713,123.894469624475,129.879764129837,133.028593808997,136.375469212666,118.221346021173],"min_price":[121,121,121,121,121,121],"max_price":[738,738,738,738,738,738]},"columns":[{"id":"threshold_m","name":"Threshold (m)","type":"character","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"mean_distance_m","name":"Mean Dist. (m)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"n_rentals","name":"# Rentals","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"separators":true},"aggregated":{"separators":true}}},{"id":"n_spill_sites","name":"# Spill Sites","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1,"separators":true},"aggregated":{"digits":1,"separators":true}}},{"id":"mean_price","name":"Mean (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"median_price","name":"Median (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"sd_price","name":"SD (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"min_price","name":"Min (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"max_price","name":"Max (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}}],"columnGroups":[{"name":"Observations","columns":["n_rentals","n_spill_sites"]},{"name":"Price Statistics","columns":["mean_price","median_price","sd_price","min_price","max_price"]}],"resizable":true,"defaultPageSize":10,"compact":true,"style":{"maxWidth":"100%","overflowX":"auto"},"dataKey":"2d203ad7f0f91bf9ddbdab89ddae0dd5"},"children":[]},"class":"reactR_markup"},"evals":[],"jsHooks":[]}</script>
+<div class="reactable html-widget html-fill-item" id="htmlwidget-4a59b6bbc96ea5e80a33" style="width:auto;height:auto;"></div>
+<script type="application/json" data-for="htmlwidget-4a59b6bbc96ea5e80a33">{"x":{"tag":{"name":"Reactable","attribs":{"data":{"threshold_m":["250","500","1000","2000","5000",">5000"],"mean_distance_m":[173.389222685694,342.072276116251,671.02752727357,1309.56995075789,3114.29886612443,"NA"],"n_rentals":[73933,232978,553503,932810,1246889,63339],"n_spill_sites":[1.73807366128784,2.28032689781868,3.67612280331021,7.69921634630338,25.7804696328823,0],"mean_price":[250.464569272177,255.315656413913,266.712756751081,279.854806445047,293.975884781982,261.652062710173],"median_price":[208,208,219,231,264,225],"sd_price":[120.312097327713,123.894469624475,129.879764129837,133.028593808997,136.375469212666,118.221346021173],"min_price":[121,121,121,121,121,121],"max_price":[738,738,738,738,738,738]},"columns":[{"id":"threshold_m","name":"Threshold (m)","type":"character","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"mean_distance_m","name":"Mean Dist. (m)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"n_rentals","name":"# Rentals","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"separators":true},"aggregated":{"separators":true}}},{"id":"n_spill_sites","name":"# Spill Sites","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1,"separators":true},"aggregated":{"digits":1,"separators":true}}},{"id":"mean_price","name":"Mean (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"median_price","name":"Median (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"sd_price","name":"SD (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"min_price","name":"Min (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"max_price","name":"Max (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}}],"columnGroups":[{"name":"Observations","columns":["n_rentals","n_spill_sites"]},{"name":"Price Statistics","columns":["mean_price","median_price","sd_price","min_price","max_price"]}],"resizable":true,"defaultPageSize":10,"compact":true,"style":{"maxWidth":"100%","overflowX":"auto"},"dataKey":"2d203ad7f0f91bf9ddbdab89ddae0dd5"},"children":[]},"class":"reactR_markup"},"evals":[],"jsHooks":[]}</script>
 </div>
 </div>
 </div>
 <div id="tabset-4-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-4-2-tab">
 <div class="cell">
 <div class="cell-output-display">
-<div class="reactable html-widget html-fill-item" id="htmlwidget-851b56f127d06a16bc40" style="width:auto;height:auto;"></div>
-<script type="application/json" data-for="htmlwidget-851b56f127d06a16bc40">{"x":{"tag":{"name":"Reactable","attribs":{"data":{"quartile":["1st quartile (0-25%)","2nd quartile (25-50%)","3rd quartile (50-75%)","4th quartile (75-100%)","Above 2km threshold"],"spill_count_min":[0,283,819,1925,0],"spill_count_max":[282,818,1924,17777,0],"spill_count_mean":[101.474845358191,530.299297577009,1275.14218137959,3815.93684860798,0],"spill_count_median":[79,531,1230,3133,0],"n_rentals":[234251,232481,232981,233097,63339],"n_spill_sites":[1.77273095952632,3.73107049608342,6.80973555783502,18.5017396191315,0],"mean_price":[307.776056452269,285.710965627286,270.701065752123,255.103828020096,261.652062710173],"median_price":[288,254,219,207,225],"sd_price":[129.620863261751,128.071421893718,136.065118006016,132.500837860134,118.221346021173],"min_price":[121,121,121,121,121],"max_price":[738,738,738,738,738]},"columns":[{"id":"quartile","name":"Spill Count Quartile","type":"character","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"}},{"id":"spill_count_min","name":"Min Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"spill_count_max","name":"Max Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"spill_count_mean","name":"Mean Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1},"aggregated":{"digits":1}}},{"id":"spill_count_median","name":"Median Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1},"aggregated":{"digits":1}}},{"id":"n_rentals","name":"# Rentals","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"separators":true},"aggregated":{"separators":true}}},{"id":"n_spill_sites","name":"# Spill Sites","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1,"separators":true},"aggregated":{"digits":1,"separators":true}}},{"id":"mean_price","name":"Mean (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"median_price","name":"Median (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"sd_price","name":"SD (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"min_price","name":"Min (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"max_price","name":"Max (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}}],"columnGroups":[{"name":"Spill Count Statistics","columns":["spill_count_min","spill_count_max","spill_count_mean","spill_count_median"]},{"name":"Observations","columns":["n_rentals","n_spill_sites"]},{"name":"Price Statistics","columns":["mean_price","median_price","sd_price","min_price","max_price"]}],"resizable":true,"defaultPageSize":10,"compact":true,"style":{"maxWidth":"100%","overflowX":"auto"},"dataKey":"0d07d761ad41ffbc04f952ff10a2cbbe"},"children":[]},"class":"reactR_markup"},"evals":[],"jsHooks":[]}</script>
+<div class="reactable html-widget html-fill-item" id="htmlwidget-748da5a1f3c6a51f7c36" style="width:auto;height:auto;"></div>
+<script type="application/json" data-for="htmlwidget-748da5a1f3c6a51f7c36">{"x":{"tag":{"name":"Reactable","attribs":{"data":{"quartile":["1st quartile (0-25%)","2nd quartile (25-50%)","3rd quartile (50-75%)","4th quartile (75-100%)","Above 2km threshold"],"spill_count_min":[0,283,819,1925,0],"spill_count_max":[282,818,1924,17777,0],"spill_count_mean":[101.474845358191,530.299297577009,1275.14218137959,3815.93684860798,0],"spill_count_median":[79,531,1230,3133,0],"n_rentals":[234251,232481,232981,233097,63339],"n_spill_sites":[1.77273095952632,3.73107049608342,6.80973555783502,18.5017396191315,0],"mean_price":[307.776056452269,285.710965627286,270.701065752123,255.103828020096,261.652062710173],"median_price":[288,254,219,207,225],"sd_price":[129.620863261751,128.071421893718,136.065118006016,132.500837860134,118.221346021173],"min_price":[121,121,121,121,121],"max_price":[738,738,738,738,738]},"columns":[{"id":"quartile","name":"Spill Count Quartile","type":"character","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"}},{"id":"spill_count_min","name":"Min Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"spill_count_max","name":"Max Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0},"aggregated":{"digits":0}}},{"id":"spill_count_mean","name":"Mean Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1},"aggregated":{"digits":1}}},{"id":"spill_count_median","name":"Median Count","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1},"aggregated":{"digits":1}}},{"id":"n_rentals","name":"# Rentals","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"separators":true},"aggregated":{"separators":true}}},{"id":"n_spill_sites","name":"# Spill Sites","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":1,"separators":true},"aggregated":{"digits":1,"separators":true}}},{"id":"mean_price","name":"Mean (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"median_price","name":"Median (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"sd_price","name":"SD (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"min_price","name":"Min (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}},{"id":"max_price","name":"Max (£)","type":"numeric","minWidth":80,"style":{"fontSize":"0.75em"},"headerStyle":{"fontSize":"0.8em","whiteSpace":"wrap"},"format":{"cell":{"digits":0,"separators":true},"aggregated":{"digits":0,"separators":true}}}],"columnGroups":[{"name":"Spill Count Statistics","columns":["spill_count_min","spill_count_max","spill_count_mean","spill_count_median"]},{"name":"Observations","columns":["n_rentals","n_spill_sites"]},{"name":"Price Statistics","columns":["mean_price","median_price","sd_price","min_price","max_price"]}],"resizable":true,"defaultPageSize":10,"compact":true,"style":{"maxWidth":"100%","overflowX":"auto"},"dataKey":"0d07d761ad41ffbc04f952ff10a2cbbe"},"children":[]},"class":"reactR_markup"},"evals":[],"jsHooks":[]}</script>
 </div>
 </div>
 </div>
