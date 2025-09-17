@@ -108,6 +108,9 @@ prepare_spill_data <- function(data) {
   dt_monthly <- split_monthly_records(dt)
   dt_monthly[, month := data.table::month(start_time)]
   dt_monthly[, quarter := ceiling(month/3)] 
+  base_year <- 2021
+  dt_monthly[, month_id := (year - base_year) * 12 + month]
+  dt_monthly[, qtr_id := (year - base_year) * 4 + quarter]
   
   return(list(
     yearly = dt_yearly,

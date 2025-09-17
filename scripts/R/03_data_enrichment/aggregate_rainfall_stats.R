@@ -70,6 +70,7 @@ CONFIG <- list(
   # Temporal range for aggregation - covers main study period for spill analysis
   start_date = as.Date("2021-01-01"),  # Start of comprehensive data availability
   end_date = as.Date("2023-12-31"),    # End of current study period
+  base_year = 2021,
   
   # Memory management settings - optimised for large site-day grid processing
   sites_per_chunk = 500,  # Processes ~500 sites × 1,095 days = 547K records per chunk (prevents 16GB memory limit)
@@ -316,6 +317,11 @@ add_temporal_periods <- function(rainfall_indicators) {
     month = lubridate::month(date),    # Monthly aggregation grouping 
     quarter = lubridate::quarter(date) # Quarterly aggregation grouping
   )]
+  base_year <- CONFIG$base_year
+  rainfall_indicators[, `:=`(
+    month_id = (year - base_year) * 12 + month,
+    qtr_id   = (year - base_year) * 4 + quarter
+  )]
   
   return(rainfall_indicators)
 }
@@ -346,7 +352,7 @@ aggregate_monthly <- function(rainfall_indicators) {
   monthly_agg <- rainfall_indicators[, .(
     rainfall_r1_mo = sum(rainfall_r1, na.rm = TRUE),
     rainfall_r9_mo = sum(rainfall_r9, na.rm = TRUE)
-  ), by = .(site_id, water_company, year, month)]
+  ), by = .(site_id, water_company, year, month, month_id)]
   
   logger::log_info("Created monthly aggregation: {nrow(monthly_agg)} site-month combinations")
   
@@ -362,7 +368,7 @@ aggregate_quarterly <- function(rainfall_indicators) {
   quarterly_agg <- rainfall_indicators[, .(
     rainfall_r1_qt = sum(rainfall_r1, na.rm = TRUE),
     rainfall_r9_qt = sum(rainfall_r9, na.rm = TRUE)
-  ), by = .(site_id, water_company, year, quarter)]
+  ), by = .(site_id, water_company, year, quarter, qtr_id)]
   
   logger::log_info("Created quarterly aggregation: {nrow(quarterly_agg)} site-quarter combinations")
   
