@@ -1,0 +1,2739 @@
+---
+author: "Jacopo Olivieri"
+date: 2024-04-01
+editor: source
+format: html
+number-sections: true
+number-depth: 4
+execute: 
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+  fig-width: 9
+  fig-asp: 0.618 
+  fig-align: center
+---
+
+# Rental Event Study {#sec-06-event-study}
+
+```{r setup, include=FALSE}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+# Load required packages
+required_packages <- c(
+  "rmarkdown",
+  "rio",
+  "tidyverse",
+  "purrr",
+  "here",
+  "janitor",
+  "viridis",
+  "data.table",
+  "DIDmultiplegtDYN",
+  "arrow",
+  "furrr",
+  "glue"
+)
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+
+# Initialize logging
+log_path <- here::here("output", "log", "rental_event_study")
+if (!dir.exists(dirname(log_path))) {
+  dir.create(dirname(log_path), recursive = TRUE)
+}
+logger::log_appender(logger::appender_file(log_path))
+logger::log_layout(logger::layout_glue_colors)
+
+# Ggplot theme
+theme_pref <- theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    plot.title = element_text(
+      face = "bold",
+      size = 12,
+      margin = ggplot2::margin(b = 10, unit = "pt")
+    ),
+    axis.title = element_text(face = "bold", size = 10),
+    axis.text = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(color = "gray95"),
+    panel.grid.major.y = element_line(color = "gray95"),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(size = 8),
+    plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
+  )
+```
+
+
+## Setting {#sec-06-01-setting}
+
+## Site-Level Event Study Regressions Within Spill Buffers {#sec-06-02-basic-event-study-regressions}
+
+```{r}
+#| eval: false
+#| include: false
+
+# ---------- Function to run event study ----------
+
+# Build model name (helper function)
+build_model_name <- function(
+  outcome,
+  treatment_threshold,
+  time_agg,
+  normalized,
+  same_switchers,
+  treatment_type,
+  controls = NULL
+) {
+  # Set binary (bin) or continuous
+  base <- "model_"
+  base <- ifelse(
+    treatment_threshold == "cont",
+    paste0(base, "cont"),
+    paste0(base, "bin")
+  )
+
+  # Set spill statistic
+  base <- ifelse(grepl("log_", outcome), paste0(base, "_logp"), base)
+  base <- ifelse(grepl("_w$", outcome), paste0(base, "_w"), base)
+  tt <- ifelse(grepl("spill_count", treatment_type), "sc", "sh")
+
+  # Set model name
+  base <- paste(base, tt, treatment_threshold, time_agg, sep = "_")
+
+  # Set model parameters
+  if (same_switchers) {
+    base <- paste0(base, "_sw")
+  }
+  if (normalized) {
+    base <- paste0(base, "_norm")
+  }
+
+  # Set controls
+  if (!is.null(controls) && length(controls)) {
+    ctrl_suffix <- paste(controls, collapse = "_")
+    base <- paste(base, ctrl_suffix, sep = "_")
+  }
+
+  return(base)
+}
+
+# Build model description (helper function)
+build_description <- function(
+  outcome,
+  treatment_threshold,
+  time_agg,
+  treatment_type,
+  normalized,
+  same_switchers,
+  controls = NULL
+) {
+  # Labels
+  outcome_lbl <- dplyr::case_when(
+    outcome == "rent_median_w" ~ "Weighted Rent Median",
+    outcome == "log_rent_median_w" ~ "Weighted Log Rent Median",
+    outcome == "rent_median" ~ "Rent Median",
+    outcome == "log_rent_median" ~ "Log Rent Median",
+    outcome == "price_listing" ~ "Listing Price",
+    outcome == "log_price_listing" ~ "Log Listing Price",
+    TRUE ~ outcome
+  )
+
+  threshold_lbl <- dplyr::case_when(
+    treatment_threshold == "mean" ~ "Mean",
+    treatment_threshold == "p50" ~ "P50",
+    treatment_threshold == "p75" ~ "P75",
+    treatment_threshold == "p90" ~ "P90",
+    treatment_threshold == "max" ~ "Max",
+    treatment_threshold == "cont" ~ "Continuous",
+    TRUE ~ stringr::str_to_title(treatment_threshold)
+  )
+
+  time_lbl <- dplyr::case_when(
+    time_agg == "mo" ~ "Monthly",
+    time_agg == "qtr" ~ "Quarterly",
+    time_agg == "yr" ~ "Yearly",
+    TRUE ~ time_agg
+  )
+  time_lbl <- ifelse(threshold_lbl == "Continuous", "", time_lbl)
+
+  treat_lbl <- dplyr::case_when(
+    grepl("spill_count", treatment_type) & treatment_threshold != "cont" ~
+      "Spill Count",
+    grepl("spill_hrs", treatment_type) & treatment_threshold != "cont" ~
+      "Spill Hours",
+    grepl("spill_count", treatment_type) & treatment_threshold == "cont" ~
+      "Log Spill Count",
+    grepl("spill_hrs", treatment_type) & treatment_threshold == "cont" ~
+      "Log Spill Hours",
+    TRUE ~ NA_character_
+  )
+
+  norm_lbl <- ifelse(normalized, "Norm", "No Norm")
+  sw_lbl <- ifelse(same_switchers, "Same Switchers", "All Switchers")
+
+  ctrl_lbl <- if (is.null(controls) || length(controls) == 0) {
+    ""
+  } else {
+    paste0("; Controls: ", paste(controls, collapse = ", "))
+  }
+
+  # Compose
+  glue::glue(
+    "{outcome_lbl} ~ {time_lbl} {threshold_lbl} {treat_lbl} ",
+    "({norm_lbl}, {sw_lbl}{ctrl_lbl})"
+  ) %>%
+    as.character()
+}
+
+# ---- main function --------------------------------------------------------- #
+
+run_event_study <- function(
+  param_grid,
+  data,
+  rad,
+  time_var = c("month_id", "qtr_id"),
+  group_var = "site_id",
+  cluster_var = "site_id",
+  overwrite = FALSE,
+  file_name = "rentals_did_results_site_qtr_{rad}.rds"
+) {
+  stopifnot(
+    is.data.frame(param_grid),
+    is.data.frame(data),
+    is.logical(overwrite),
+    length(rad) == 1
+  )
+
+  # ---- 0. results file ----------------------------------------------------- #
+  res_path <- here::here(
+    "book",
+    "book_regs",
+    glue::glue(file_name)
+  )
+  fs::dir_create(fs::path_dir(res_path))
+
+  existing <- if (!overwrite && fs::file_exists(res_path)) {
+    readRDS(res_path)
+  } else {
+    list()
+  }
+
+  # ---- 1. decide what we still need to run --------------------------------- #
+  param_grid <- tibble::as_tibble(param_grid) %>%
+    dplyr::mutate(
+      model_name = purrr::pmap_chr(
+        list(
+          outcome,
+          treatment_threshold,
+          time_agg,
+          normalized,
+          same_switchers,
+          treatment_type,
+          controls
+        ),
+        build_model_name
+      )
+    )
+
+  existing_names <- if (length(existing)) names(existing) else character(0)
+
+  todo <- dplyr::anti_join(
+    param_grid,
+    tibble::tibble(model_name = existing_names),
+    by = "model_name"
+  )
+
+  if (nrow(todo) == 0) {
+    message("No new models to run for radius ", rad, ".")
+    return(invisible(existing))
+  }
+  message("Estimating ", nrow(todo), " models for radius ", rad, "...")
+
+  # ---- 2. run the models (parallel) --------------------------------------- #
+  furrr::future_map(
+    todo$model_name,
+    function(mn) {
+      # Get model iteration
+      p <- dplyr::filter(todo, model_name == mn) %>%
+        dplyr::slice(1)
+
+      # Define treatment variable
+      treatment_var <- paste0(
+        "d_",
+        p$treatment_threshold,
+        "_",
+        p$treatment_type,
+        "_",
+        p$time_agg
+      )
+      treatment_var <- ifelse(
+        p$treatment_threshold == "cont",
+        p$treatment_type,
+        gsub("log_spill", "spill", treatment_var)
+      )
+
+      desc <- build_description(
+        p$outcome,
+        p$treatment_threshold,
+        p$time_agg,
+        p$treatment_type,
+        p$normalized,
+        p$same_switchers,
+        unlist(p$controls)
+      )
+
+      message(" • ", mn, " …")
+
+      res <- DIDmultiplegtDYN::did_multiplegt_dyn(
+        df = data,
+        outcome = p$outcome,
+        group = group_var,
+        time = time_var,
+        treatment = treatment_var,
+        effects = 6,
+        placebo = 2,
+        cluster = cluster_var,
+        normalized = p$normalized,
+        same_switchers = p$same_switchers,
+        controls = unlist(p$controls),
+        graph_off = TRUE
+      )
+
+      attr(res, "description") <- desc
+      # return a named list so purrr::flatten will keep names
+      rlist <- list(res)
+      names(rlist) <- mn
+      rlist
+    },
+    .options = furrr::furrr_options(seed = TRUE),
+    .progress = TRUE
+  ) %>%
+    purrr::flatten() -> new_results
+
+  # ---- 3. merge + save ----------------------------------------------------- #
+  final <- c(existing, new_results)
+  saveRDS(final, res_path)
+  message("Results saved → ", res_path)
+
+  invisible(final)
+}
+```
+
+
+```{r}
+#| eval: false
+#| include: false
+
+param_grid_bin <- expand.grid(
+  outcome = c("log_rent_median", "log_rent_median_w"),
+  treatment_threshold = c("mean", "p50", "p75", "p90"),
+  time_agg = c("qtr", "yr"),
+  treatment_type = c("spill_count", "spill_hrs"),
+  normalized = c(TRUE),
+  same_switchers = c(TRUE),
+  stringsAsFactors = FALSE,
+  controls = list(NULL)
+)
+param_grid_cont <- expand.grid(
+  outcome = c("log_rent_median", "log_rent_median_w"),
+  treatment_threshold = c("cont"),
+  time_agg = c("qtr"),
+  treatment_type = c("log_spill_count", "log_spill_hrs"),
+  normalized = c(TRUE),
+  same_switchers = c(TRUE),
+  stringsAsFactors = FALSE,
+  controls = list(NULL)
+)
+param_grid <- bind_rows(param_grid_bin, param_grid_cont)
+
+# Radii to loop over
+radii <- c(250, 500, 1000)
+
+# Parallel processing
+plan(multisession, workers = 3)
+
+# Load data
+## Data paths
+path_rental <- here::here("data", "processed", "within_radius_panel", "rentals")
+path_site <- here::here("data", "processed", "dat_panel_site", "rentals")
+path_spill <- here::here("data", "processed", "agg_spill_stats")
+path_rental_controls <- here::here(
+  "data",
+  "processed",
+  "zoopla",
+  "zoopla_rentals.parquet"
+)
+
+# Rental panel data
+rental_qtr <- open_dataset(path_rental) %>%
+  filter(period_type == "quarterly") %>%
+  select(-contains("month"))
+# Aggregate site level panel data
+site_qtr <- open_dataset(path_site) %>%
+  filter(period_type == "quarterly") %>%
+  select(-contains("month"))
+# Spill statistics
+spill_qtr <- open_dataset(path_spill) %>%
+  filter(period_type == "quarterly") %>%
+  collect() %>%
+  select(-contains("month"), -contains("_mo"))
+# Rental controls snapshot (not used directly here)
+rental_controls <- open_dataset(path_rental_controls) %>%
+  collect() %>%
+  select(
+    rental_id,
+    listing_price,
+    property_type,
+    quality,
+    country,
+    nhs_ha,
+    region,
+    lsoa,
+    msoa,
+    admin_county,
+    admin_ward
+  )
+
+for (r in radii) {
+  message("Loading and preparing data for radius: ", r)
+
+  # Site level panel data
+  site_dat <- site_qtr %>%
+    filter(radius == r) %>%
+    collect()
+
+  # Form panel data
+  panel_site <- left_join(
+    site_dat,
+    spill_qtr,
+    by = join_by(site_id, qtr_id, quarter, year, period_type)
+  )
+
+  message("Starting regressions for radius: ", r)
+  run_event_study(
+    param_grid = param_grid,
+    data = panel_site,
+    rad = r,
+    time_var = "qtr_id",
+    group_var = "site_id",
+    cluster_var = "site_id",
+    overwrite = TRUE,
+    file_name = "rentals_did_results_site_qtr_{rad}.rds"
+  )
+}
+```
+
+
+```{r}
+#| eval: false
+#| include: false
+
+# Create parameter grid
+param_grid_bin <- expand.grid(
+  outcome = c("log_price_listing"),
+  treatment_threshold = c("mean", "p50", "p75", "p90"),
+  time_agg = c("qtr", "yr"),
+  treatment_type = c("spill_count", "spill_hrs"),
+  normalized = c(TRUE),
+  same_switchers = c(TRUE),
+  stringsAsFactors = FALSE,
+  controls = list(NULL, c("property_type"))
+)
+param_grid_cont <- expand.grid(
+  outcome = c("log_price_listing"),
+  treatment_threshold = c("cont"),
+  time_agg = c("qtr"),
+  treatment_type = c("log_spill_count", "log_spill_hrs"),
+  normalized = c(TRUE),
+  same_switchers = c(TRUE),
+  stringsAsFactors = FALSE,
+  controls = list(NULL, c("property_type"))
+)
+param_grid <- bind_rows(param_grid_bin, param_grid_cont)
+
+# Radii to loop over
+radii <- c(250, 500, 1000)
+
+# Parallel processing
+plan(multisession, workers = 3)
+
+for (r in radii) {
+  message("Loading and preparing data for radius: ", r)
+
+  # Site level panel data
+  rental_dat <- rental_qtr %>%
+    filter(radius == r) %>%
+    collect() %>%
+    rename(
+      price_listing = price,
+      log_price_listing = log_price
+    )
+
+  # Form panel data
+  panel_rental <- left_join(
+    rental_dat,
+    spill_qtr,
+    by = join_by(site_id, qtr_id, quarter, year, period_type)
+  ) %>%
+    left_join(rental_controls, by = join_by(rental_id)) %>%
+    mutate(
+      property_type = factor(property_type)
+    )
+
+  message("Starting regressions for radius: ", r)
+  run_event_study(
+    param_grid = param_grid,
+    data = panel_rental,
+    rad = r,
+    time_var = "qtr_id",
+    group_var = "site_id",
+    cluster_var = "site_id",
+    overwrite = TRUE,
+    file_name = "rentals_did_results_house_qtr_{rad}.rds"
+  )
+}
+```
+
+```{r}
+# Load results
+load_results <- function(
+  radii = c(250, 500, 1000),
+  freqs = c("qtr", "mo"),
+  dir_path = here("output", "regs"),
+  quiet = FALSE,
+  pattern = "rentals_did_results_site_{f}_{r}.rds"
+) {
+  safe_rds <- purrr::possibly(readRDS, otherwise = NULL)
+  results <- list() # <- final nested list to be returned
+
+  for (r in radii) {
+    r_chr <- as.character(r)
+
+    for (f in freqs) {
+      pattern_eval <- glue::glue(pattern, .envir = rlang::env(f = f, r = r))
+      file <- Sys.glob(file.path(dir_path, pattern_eval))[1]
+
+      # no file found → skip
+      if (is.na(file) || is.null(file) || file == "") {
+        next
+      }
+
+      obj <- safe_rds(file)
+      if (is.null(obj)) {
+        next
+      } # corrupted file → skip
+
+      # initialise slots if necessary
+      if (is.null(results[[r_chr]])) {
+        results[[r_chr]] <- list()
+      }
+
+      results[[r_chr]][[f]] <- obj # store
+      if (!quiet) message("✓ loaded ", f, " ", r, ": ", basename(file))
+    }
+  }
+
+  return(results)
+}
+
+
+# Make regression plot
+plot_reg_chaisemartin <- function(
+  data,
+  radius,
+  model,
+  freq = c("qtr", "mo"),
+  use_desc = TRUE
+) {
+  freq <- match.arg(freq)
+  r <- as.character(radius)
+
+  stopifnot(r %in% names(data))
+  stopifnot(freq %in% names(data[[r]]))
+
+  mod <- data[[r]][[freq]][[model]]
+  if (is.null(mod)) {
+    stop(
+      "Model '",
+      model,
+      "' not found for radius ",
+      r,
+      " and freq '",
+      freq,
+      "'."
+    )
+  }
+
+  if (is.null(mod$plot)) {
+    stop("Model '", model, "' has no plot element.")
+  }
+
+  # ------------------------------------------------------------------------
+  # Data wrangling
+  df <- mod$plot$data %>%
+    mutate(
+      group = factor(
+        ifelse(Time <= 0, "Pre", "Post"),
+        levels = c("Pre", "Post")
+      )
+    )
+
+  subtitle <- if (use_desc && !is.null(attr(mod, "description"))) {
+    attr(mod, "description")
+  } else {
+    model
+  }
+  formula_caption <- paste0(
+    "Regression specification: ",
+    mod$args$outcome,
+    " ~ ",
+    mod$args$group,
+    " + ",
+    mod$args$time,
+    " + ",
+    mod$args$treatment
+  )
+
+  ggplot(df, aes(x = Time, y = Estimate, colour = group)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_errorbar(aes(ymin = LB.CI, ymax = UB.CI), width = 0.2) +
+    geom_point(aes(color = group), size = 1.2) +
+    scale_color_manual(
+      values = c(
+        "Pre" = viridis(1, option = "magma"),
+        "Post" = viridis(3, option = "magma")[2]
+      ),
+      breaks = c("Pre", "Post")
+    ) +
+    theme_minimal() +
+    labs(
+      x = "Time",
+      y = "Estimate",
+      subtitle = subtitle,
+      caption = formula_caption
+    ) +
+    theme_pref +
+    theme(plot.caption = element_text(hjust = 0))
+}
+
+results_qtr <- load_results(
+  radii = c(250, 500, 1000),
+  freqs = c("qtr", "mo"),
+  dir_path = here("output", "regs"),
+  quiet = TRUE,
+  pattern = "rentals_did_results_site_{f}_{r}.rds"
+)
+
+results_rental_qtr <- load_results(
+  radii = c(250, 500, 1000),
+  freqs = c("qtr"),
+  dir_path = here("output", "regs"),
+  quiet = TRUE,
+  pattern = "rentals_did_results_house_{f}_{r}.rds"
+)
+```
+
+### Binary Treatment - Average Spill Count {#sec-06-02-01-binary-average}
+
+::: {.panel-tabset group="threshold-site"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-site-250m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sc_mean_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sc_mean_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sh_mean_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sh_mean_yr_sw_norm"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-site-500m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sc_mean_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sc_mean_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sh_mean_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sh_mean_yr_sw_norm"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-site-1000m"}  
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sc_mean_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sc_mean_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sh_mean_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sh_mean_yr_sw_norm"
+)
+```
+
+:::
+
+:::
+
+### Binary Treatment - Median Spill Count {#sec-06-02-02-binary-median}
+
+::: {.panel-tabset group="threshold-site"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-site-250m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p50_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p50_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p50_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p50_yr_sw_norm"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-site-500m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p50_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p50_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}  
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p50_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p50_yr_sw_norm"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-site-1000m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p50_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p50_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p50_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p50_yr_sw_norm"
+)
+```
+
+:::
+
+:::
+
+### Binary Treatment - 75th Percentile Spill Count {#sec-06-02-03-binary-p75}
+
+::: {.panel-tabset group="threshold-site"}  
+
+#### 250m
+
+::: {.panel-tabset group="radius-site-250m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p75_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}  
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p75_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}  
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p75_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}  
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p75_yr_sw_norm"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-site-500m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p75_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p75_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p75_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p75_yr_sw_norm"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-site-1000m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p75_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p75_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p75_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p75_yr_sw_norm"
+)
+```
+
+:::
+
+:::
+
+### Binary Treatment - 90th Percentile Spill Count {#sec-06-02-04-binary-p90}
+
+::: {.panel-tabset group="threshold-site"}    
+
+#### 250m
+
+::: {.panel-tabset group="radius-site-250m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p90_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p90_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p90_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p90_yr_sw_norm"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-site-500m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p90_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p90_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p90_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p90_yr_sw_norm"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-site-1000m"}
+
+##### Count Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p90_qtr_sw_norm"
+)
+```
+
+##### Count Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sc_p90_yr_sw_norm"
+)
+```
+
+##### Duration Qt
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p90_qtr_sw_norm"
+)
+```
+
+##### Duration Yr
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_bin_logp_sh_p90_yr_sw_norm"
+)
+```
+
+:::
+
+:::
+
+### Continuous Treatment - Average Spill Count {#sec-06-02-04-continuous-treatment}
+
+::: {.panel-tabset group="continuous-site"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-site-250m-cont"}
+
+##### Count
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_cont_logp_sc_cont_qtr_sw_norm"
+)
+```
+
+##### Duration
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 250,
+  freq = "qtr",
+  model = "model_cont_logp_sh_cont_qtr_sw_norm"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-site-500m-cont"}
+
+##### Count
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_cont_logp_sc_cont_qtr_sw_norm"
+)
+```
+
+##### Duration
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 500,
+  freq = "qtr",
+  model = "model_cont_logp_sh_cont_qtr_sw_norm"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-site-1000m-cont"}
+
+##### Count
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_cont_logp_sc_cont_qtr_sw_norm"
+)
+```
+
+##### Duration
+
+```{r}
+plot_reg_chaisemartin(
+  data = results_qtr,
+  radius = 1000,
+  freq = "qtr",
+  model = "model_cont_logp_sh_cont_qtr_sw_norm"
+)
+```
+
+:::
+
+:::
+
+## Rental-Level Event Study Regressions Within Admin Boundaries {#sec-06-03-rental-event-study}
+
+```{r}
+#| eval: false
+# Load Data
+
+# Define file paths
+path_rental_panel <- here::here("data", "processed", "general_panel", "rentals")
+path_spill <- here::here("data", "processed", "agg_spill_stats")
+path_rental_controls <- here::here(
+  "data",
+  "processed",
+  "zoopla",
+  "zoopla_rentals.parquet"
+)
+
+# Load rental panel data
+rental_panel <- arrow::open_dataset(path_rental_panel)
+
+# Load quarterly spill stats, filter to quarterly data
+spill_qtr <- open_dataset(path_spill) %>%
+  filter(period_type == "quarterly") %>%
+  collect() %>%
+  select(-contains("month"), -contains("_mo")) %>%
+  as.data.table()
+
+# Load rental controls, removing redundant columns
+rental_controls <- open_dataset(path_rental_controls) %>%
+  collect() %>%
+  transmute(
+    rental_id,
+    price_listing = listing_price,
+    log_price_listing = log(listing_price),
+    property_type,
+    bedrooms,
+    bathrooms,
+    receptions,
+    quality,
+    country,
+    nhs_ha,
+    region,
+    lsoa,
+    msoa,
+    admin_county,
+    admin_ward
+  ) %>%
+  as.data.table()
+```
+
+
+```{r}
+#| eval: false
+# Create Event Data
+
+# Create event data for each radius
+radii <- c(1000L)
+event_data_list <- purrr::map(
+  radii,
+  function(rad) {
+    # 1. Load data for radius and add spill statistics
+    panel_dt_ext <- rental_panel %>%
+      filter(radius == rad) %>%
+      collect() %>%
+      as.data.table()
+
+    # 2. Calculate spill summaries
+    # For rentals within radius, merge with spill data
+    rental_qtr_in_sum <- merge(
+      panel_dt_ext[within_radius == TRUE],
+      spill_qtr[, .(site_id, qtr_id, spill_count, spill_hrs)],
+      by = c("site_id", "qtr_id")
+    )[,
+      .(
+        qtr_id_transfer = first(qtr_id_transfer),
+        spill_count = sum(spill_count, na.rm = TRUE),
+        spill_hrs = sum(spill_hrs, na.rm = TRUE),
+        min_dist_m = min(distance_m, na.rm = TRUE),
+        avg_dist_m = mean(distance_m, na.rm = TRUE),
+        n_spill_sites = uniqueN(site_id),
+        within_radius = TRUE,
+        radius = rad
+      ),
+      by = .(rental_id, qtr_id)
+    ]
+
+    # For rentals outside radius, create zero-spill records
+    rental_qtr_out_sum <- panel_dt_ext[
+      within_radius == FALSE,
+      .(
+        qtr_id_transfer = first(qtr_id_transfer),
+        spill_count = 0,
+        spill_hrs = 0,
+        min_dist_m = NA,
+        avg_dist_m = NA,
+        n_spill_sites = 0,
+        within_radius = FALSE,
+        radius = rad
+      ),
+      by = .(rental_id, qtr_id)
+    ]
+
+    # Combine and sort data
+    rental_qtr_sum <- rbind(rental_qtr_in_sum, rental_qtr_out_sum)
+    setorder(rental_qtr_sum, rental_id, qtr_id)
+
+    ## 3. Create treatment indicators
+
+    # Extract threshold column names
+    thr_col_names <- grep("^thr_.*_all$", names(spill_qtr), value = TRUE)
+    # Create threshold lookup
+    thr <- unique(spill_qtr[, c("qtr_id", thr_col_names), with = FALSE])
+    setorder(thr, qtr_id)
+
+    # Join rentals with thresholds
+    treat_cand <- merge(
+      rental_qtr_in_sum,
+      thr,
+      by = "qtr_id",
+      all.x = TRUE
+    )
+
+    # Separate threshold columns by type
+    count_thr <- grep("_spill_count_", thr_col_names, value = TRUE)
+    hrs_thr <- grep("_spill_hrs_", thr_col_names, value = TRUE)
+
+    # Create count threshold indicators
+    treat_cand[,
+      paste0("d_", count_thr) := lapply(.SD, \(x) as.integer(spill_count > x)),
+      .SDcols = count_thr
+    ]
+
+    # Create hours threshold indicators
+    treat_cand[,
+      paste0("d_", hrs_thr) := lapply(.SD, \(x) as.integer(spill_hrs > x)),
+      .SDcols = hrs_thr
+    ]
+
+    # 4. First-treated indicators
+
+    # Get all treatment columns
+    treat_cols <- grep("^d_", names(treat_cand), value = TRUE)
+
+    # Find first treatment quarter for each rental-threshold combination
+    treat_long <- melt(
+      treat_cand,
+      id.vars = c("rental_id", "qtr_id"),
+      measure.vars = treat_cols,
+      variable.name = "threshold",
+      value.name = "treated",
+      variable.factor = FALSE
+    )[
+      treated == 1L, # Keep only treated observations
+      .(first_qtr = min(qtr_id)), # Find earliest treatment quarter
+      by = .(rental_id, threshold)
+    ]
+
+    # Convert to wide format
+    treat_wide <- dcast(
+      treat_long,
+      rental_id ~ threshold,
+      value.var = "first_qtr",
+      fill = NA_integer_ # NA for never treated rentals
+    )
+
+    # Rename threshold columns
+    setnames(
+      treat_wide,
+      old = grep("^d_thr_", names(treat_wide), value = TRUE),
+      new = sub(
+        "^d_thr_",
+        "first_t_",
+        grep("^d_thr_", names(treat_wide), value = TRUE)
+      )
+    )
+
+    # 5. Finalise data
+
+    # Join treatment data with rental data
+    event_data <- treat_wide[
+      rental_qtr_sum[qtr_id_transfer == qtr_id],
+      on = "rental_id",
+      nomatch = NA
+    ][
+      # Join with rental controls
+      rental_controls,
+      on = "rental_id",
+      nomatch = NA
+    ][,
+      .(
+        # IDs, time, and price
+        rental_id,
+        qtr_id,
+        qtr_id_transfer,
+        price_listing,
+        log_price_listing,
+        # Spill data
+        spill_count,
+        spill_hrs,
+        # Treatment quarters
+        first_t_mean_spill_count_all,
+        first_t_mean_spill_hrs_all,
+        first_t_p50_spill_count_all,
+        first_t_p50_spill_hrs_all,
+        first_t_p75_spill_count_all,
+        first_t_p75_spill_hrs_all,
+        first_t_p90_spill_count_all,
+        first_t_p90_spill_hrs_all,
+        first_t_max_spill_count_all,
+        first_t_max_spill_hrs_all,
+        # Spatial data
+        min_dist_m,
+        avg_dist_m,
+        n_spill_sites,
+        within_radius,
+        radius,
+        # Property characteristics
+        property_type,
+        bedrooms,
+        bathrooms,
+        receptions,
+        quality,
+        country,
+        nhs_ha,
+        region,
+        lsoa,
+        msoa,
+        admin_county,
+        admin_ward
+      )
+    ]
+
+    # Convert categorical columns to factors using purrr::map
+    categorical_cols <- c(
+      "property_type",
+      "quality",
+      "country",
+      "nhs_ha",
+      "region",
+      "lsoa",
+      "msoa",
+      "admin_county",
+      "admin_ward"
+    )
+
+    event_data[,
+      (categorical_cols) := purrr::map(.SD, as.factor),
+      .SDcols = categorical_cols
+    ]
+
+    # Set quarter treated to above max quarter for never treated rentals
+    event_data[,
+      names(.SD) := purrr::map(.SD, ~ ifelse(is.na(.), 999999L, .)),
+      .SDcols = patterns("^first_t_")
+    ]
+
+    # Clean up local variables
+    rm(
+      rental_qtr_in_sum,
+      rental_qtr_out_sum,
+      treat_cand,
+      treat_long,
+      treat_wide,
+      rental_qtr_sum,
+      panel_dt_ext
+    )
+    gc()
+
+    return(event_data)
+  }
+) %>%
+  purrr::set_names(paste0("rad_", radii))
+```
+
+
+```{r}
+#| eval: false
+# Define Functions to Run Event Study Regressions
+
+# Helper: build model name
+build_model_name <- function(
+  outcome,
+  treatment_threshold,
+  treatment_type,
+  thr_time_agg,
+  time_agg,
+  time_fe,
+  space_fe,
+  cluster_var,
+  controls = NULL
+) {
+  # Set binary (bin) or continuous
+  base <- ifelse(
+    treatment_threshold == "cont",
+    "cont",
+    "bin"
+  )
+
+  # Set outcome
+  base <- ifelse(grepl("log_price", outcome), paste0(base, "_logp"), base)
+  base <- ifelse(
+    outcome %in% c("price", "price_listing"),
+    paste0(base, "_p"),
+    base
+  )
+
+  # Set treatment
+  tt <- ifelse(treatment_type == "spill_count", "sc", "sh")
+  base <- paste(base, tt, treatment_threshold, sep = "_")
+
+  # Set time aggregation
+  base <- paste0(base, "_", thr_time_agg)
+
+  # Set FE unit
+  base <- paste0(base, "_fe_", time_fe, "-", space_fe)
+
+  # Set controls
+  if (!is.null(controls) && length(controls)) {
+    ctrl_suffix <- paste(controls, collapse = "_")
+    base <- paste(base, ctrl_suffix, sep = "_")
+  }
+
+  # Clean up
+  janitor::make_clean_names(base)
+}
+
+# Helper: Build Model Description
+build_description <- function(
+  outcome,
+  treatment_threshold,
+  treatment_type,
+  time_agg,
+  thr_time_agg,
+  time_fe,
+  space_fe,
+  cluster_var,
+  controls = NULL
+) {
+  # Outcome
+  outcome_lbl <- dplyr::case_when(
+    grepl("log_price_listing", outcome) ~ "Log Listing Price",
+    grepl("price_listing", outcome) ~ "Listing Price",
+    grepl("log_price", outcome) ~ "Log Price",
+    grepl("price", outcome) ~ "Price",
+    TRUE ~ outcome
+  )
+
+  # Threshold
+  threshold_lbl <- dplyr::case_when(
+    treatment_threshold == "mean" ~ "Mean",
+    treatment_threshold == "p50" ~ "P50",
+    treatment_threshold == "p75" ~ "P75",
+    treatment_threshold == "p90" ~ "P90",
+    treatment_threshold == "max" ~ "Max",
+    treatment_threshold == "cont" ~ "Continuous",
+    TRUE ~ stringr::str_to_title(treatment_threshold)
+  )
+
+  # Time aggregation
+  time_lbl <- dplyr::case_when(
+    grepl("mo", time_agg) ~ "Monthly",
+    grepl("qtr", time_agg) ~ "Quarterly",
+    grepl("yr", time_agg) ~ "Yearly",
+    TRUE ~ time_agg
+  )
+  time_lbl <- ifelse(threshold_lbl == "Continuous", "", time_lbl)
+
+  # Treatment
+  treat_lbl <- dplyr::case_when(
+    grepl("spill_count", treatment_type) & treatment_threshold != "cont" ~
+      "Spill Count",
+    grepl("spill_hrs", treatment_type) & treatment_threshold != "cont" ~
+      "Spill Hours",
+    grepl("spill_count", treatment_type) & treatment_threshold == "cont" ~
+      "Log Spill Count",
+    grepl("spill_hrs", treatment_type) & treatment_threshold == "cont" ~
+      "Log Spill Hours",
+    TRUE ~ NA_character_
+  )
+
+  # Fixed effects
+  time_fe_lbl <- dplyr::case_when(
+    time_fe == "mo" ~ "Monthly FE",
+    time_fe == "qtr" ~ "Quarterly FE",
+    time_fe == "yr" ~ "Yearly FE",
+    TRUE ~ "No time FE"
+  )
+  space_fe_lbl <- dplyr::case_when(
+    space_fe == "lsoa" ~ "LSOA FE",
+    space_fe == "msoa" ~ "MSOA FE",
+    space_fe == "admin_ward" ~ "Admin Ward FE",
+    space_fe == "admin_county" ~ "Admin County FE",
+    space_fe == "county" ~ "County FE",
+    space_fe == "region" ~ "Region FE",
+    space_fe == "country" ~ "Country FE",
+    space_fe == "nhs_ha" ~ "NHS HA FE",
+    TRUE ~ "No location FE"
+  )
+
+  # Controls
+  ctrl_lbl <- if (is.null(controls) || length(controls) == 0) {
+    "No controls"
+  } else {
+    paste(controls, collapse = ", ")
+  }
+
+  # Compose
+  glue::glue(
+    "Outcome: {outcome_lbl}; Treatment: {treat_lbl}; Aggregation: {time_lbl};
+    FE: {time_fe_lbl} + {space_fe_lbl}; Controls: {ctrl_lbl}"
+  ) %>%
+    as.character()
+}
+
+# Main function ------------------------------------------------------
+run_event_study_sunab <- function(
+  param_grid,
+  data,
+  rad,
+  overwrite = FALSE,
+  file_name = "rentals_sunab_results_{rad}.rds"
+) {
+  # Data validation
+  stopifnot(
+    is.data.frame(param_grid),
+    is.data.frame(data),
+    length(rad) == 1
+  )
+
+  # ---- 0. results directory/file setup ----------------------------------- #
+  # Create directory for individual model files
+  res_dir <- here::here(
+    "book",
+    "book_regs",
+    glue::glue("rentals_sunab_models_rad_{rad}")
+  )
+  fs::dir_create(res_dir)
+
+  # Create/read index file to track which models are complete
+  index_path <- file.path(res_dir, "model_index.rds")
+  if (!overwrite && fs::file_exists(index_path)) {
+    model_index <- readRDS(index_path)
+  } else {
+    model_index <- tibble::tibble(
+      model_name = character(),
+      completed = logical(),
+      file_path = character()
+    )
+  }
+  existing_names <- model_index$model_name
+
+  # ---- 1. identify the models still to run ------------------------------- #
+  param_grid <- tibble::as_tibble(param_grid) %>%
+    dplyr::mutate(
+      model_name = purrr::pmap_chr(
+        list(
+          outcome,
+          treatment_threshold,
+          treatment_type,
+          thr_time_agg,
+          time_agg,
+          time_fe,
+          space_fe,
+          cluster_var,
+          controls
+        ),
+        build_model_name
+      )
+    )
+
+  todo <- dplyr::anti_join(
+    param_grid,
+    tibble::tibble(model_name = existing_names),
+    by = "model_name"
+  )
+
+  if (nrow(todo) == 0) {
+    cli::cli_alert_info("No new models to run for radius {rad}.")
+    return(invisible(model_index))
+  }
+  cli::cli_alert_info("Estimating {nrow(todo)} models for radius {rad} …")
+
+  # ---- 2. run the models one by one, saving each individually ------------- #
+  for (i in 1:nrow(todo)) {
+    mn <- todo$model_name[i]
+    cli::cli_alert(" • {i}/{nrow(todo)}: {mn}")
+
+    # Get model iteration
+    p <- todo[i, ]
+
+    # Define treatment variable
+    treatment_var <- paste0(
+      "first_t_",
+      p$treatment_threshold,
+      "_",
+      p$treatment_type,
+      "_",
+      p$thr_time_agg
+    )
+
+    # Build formula -------------------------------------------------
+    rhs_terms <- c(
+      paste0("sunab(", treatment_var, ", ", p$time_agg, ")"),
+      unlist(p$controls)
+    ) %>%
+      purrr::compact()
+
+    fml <- as.formula(
+      paste0(
+        p$outcome,
+        " ~ ",
+        paste(rhs_terms, collapse = " + "),
+        " | ",
+        p$space_fe,
+        " + ",
+        p$time_fe
+      )
+    )
+    cl_fml <- as.formula(paste0(" ~ ", p$cluster_var, " + ", p$time_fe))
+
+    # Build description
+    desc <- build_description(
+      p$outcome,
+      p$treatment_threshold,
+      p$treatment_type,
+      p$time_agg,
+      p$thr_time_agg,
+      p$time_fe,
+      p$space_fe,
+      p$cluster_var,
+      unlist(p$controls)
+    )
+
+    # Run the model
+    res <- tryCatch(
+      {
+        fixest::feols(
+          fml = fml,
+          data = data,
+          vcov = cl_fml
+        )
+      },
+      error = function(e) {
+        cli::cli_alert_danger("Error fitting model {mn}: {e$message}")
+        return(NULL)
+      }
+    )
+
+    # Skip if model failed
+    if (is.null(res)) {
+      next
+    }
+
+    # Only save the plotting data
+    res <- ggfixest::iplot_data(
+      res,
+      .ci_level = 0.95
+    )
+
+    # Build specification for ggplot
+    controls <- if (is.null(p$controls) || length(p$controls) == 0) {
+      ""
+    } else {
+      paste0(
+        "+ ",
+        paste(unlist(p$controls), collapse = " + ")
+      )
+    }
+
+    spec <- glue::glue(
+      "{p$outcome} ~ {p$time_fe} + {p$space_fe} + {treatment_var} {controls}"
+    )
+
+    attr(res, "description") <- desc
+    attr(res, "spec") <- spec
+
+    # Save to individual file
+    model_file <- file.path(res_dir, paste0(mn, ".rds"))
+    saveRDS(res, model_file)
+
+    # Update index
+    model_index <- model_index %>%
+      dplyr::add_row(
+        model_name = mn,
+        completed = TRUE,
+        file_path = model_file
+      )
+    saveRDS(model_index, index_path)
+
+    # Clean up memory
+    rm(res, fml, cl_fml, desc, spec, treatment_var, rhs_terms, controls)
+    gc(verbose = FALSE)
+  }
+
+  cli::cli_alert_success("All models saved in → {res_dir}")
+  invisible(model_index)
+}
+```
+
+
+```{r}
+#| eval: false
+# Run Event Study Regressions
+
+param_grid <- expand.grid(
+  outcome = c("log_price_listing"),
+  treatment_threshold = c("mean", "p50", "p75", "p90"),
+  treatment_type = c("spill_count", "spill_hrs"),
+  thr_time_agg = "all",
+  time_agg = "qtr_id",
+  time_fe = "qtr_id",
+  space_fe = "lsoa",
+  cluster_var = "lsoa",
+  controls = I(list(
+    NULL,
+    c("property_type")
+  ))
+)
+
+event_data_list_sample <- purrr::map(1:length(event_data_list), function(i) {
+  event_data_list[[i]] %>%
+    slice_sample(prop = 0.10)
+}) %>%
+  purrr::set_names(paste0("rad_", radii))
+
+purrr::imap(
+  event_data_list,
+  ~ {
+    rad_value <- as.numeric(gsub("rad_", "", .y))
+    run_event_study_sunab(
+      param_grid = param_grid,
+      data = .x,
+      rad = rad_value,
+      overwrite = TRUE,
+      file_name = glue::glue("rentals_sunab_results_{rad_value}.rds")
+    )
+  }
+)
+```
+
+
+```{r}
+# Define Function to Load Results
+load_results_sunab <- function(
+  radii = c(250, 500, 1000),
+  freqs = c("qtr", "mo"),
+  dir_path = here::here("output", "regs"),
+  quiet = FALSE,
+  pattern = "rentals_sunab_models_rad_{r}"
+) {
+  results <- list()
+
+  for (r in radii) {
+    r_chr <- as.character(r)
+
+    # Initialize radius slot if needed
+    if (is.null(results[[r_chr]])) {
+      results[[r_chr]] <- list()
+    }
+
+    for (f in freqs) {
+      # Create path to model index file
+      model_dir_pattern <- glue::glue(
+        pattern,
+        .envir = rlang::env(r = r, f = f)
+      )
+      model_dir <- file.path(dir_path, model_dir_pattern)
+      index_path <- file.path(model_dir, "model_index.rds")
+
+      # Skip if no index file exists
+      if (!file.exists(index_path)) {
+        if (!quiet) {
+          cli::cli_alert_warning(
+            "No model index found for radius {r}, freq {f}"
+          )
+        }
+        next
+      }
+
+      # Read model index
+      model_index <- readRDS(index_path)
+
+      # Initialize frequency slot
+      results[[r_chr]][[f]] <- list()
+
+      # Load each model into the structure
+      model_count <- 0
+      for (mn in model_index$model_name) {
+        model_path <- file.path(model_dir, paste0(mn, ".rds"))
+        if (file.exists(model_path)) {
+          results[[r_chr]][[f]][[mn]] <- readRDS(model_path)
+          model_count <- model_count + 1
+        }
+      }
+
+      if (!quiet) {
+        cli::cli_alert_success(
+          "Loaded {model_count} models for radius {r}, freq {f}"
+        )
+      }
+    }
+  }
+
+  return(results)
+}
+```
+
+
+```{r}
+# Define Function to Plot Sunab Regressions
+plot_reg_sunab <- function(
+  data,
+  radius,
+  model,
+  freq = c("qtr", "mo"),
+  use_desc = TRUE
+) {
+  freq <- match.arg(freq)
+  r <- as.character(radius)
+
+  stopifnot(r %in% names(data))
+  stopifnot(freq %in% names(data[[r]]))
+
+  mod <- data[[r]][[freq]][[model]]
+  if (is.null(mod)) {
+    stop(
+      "Model '",
+      model,
+      "' not found for radius ",
+      r,
+      " and freq '",
+      freq,
+      "'."
+    )
+  }
+
+  # ------------------------------------------------------------------------
+  # Data Wrangling
+  subtitle <- if (use_desc && !is.null(attr(mod, "description"))) {
+    attr(mod, "description")
+  } else {
+    model
+  }
+  spec <- if (use_desc && !is.null(attr(mod, "spec"))) {
+    attr(mod, "spec")
+  } else {
+    ""
+  }
+
+  # Plot
+  mod %>%
+    mutate(
+      estimate_names = estimate_names + 1,
+      group = factor(
+        ifelse(estimate_names <= 0, "Pre", "Post"),
+        levels = c("Pre", "Post")
+      )
+    ) %>%
+    filter(
+      estimate_names <= 8,
+      estimate_names >= -4,
+      ci_level == .95
+    ) %>%
+    ggplot(aes(x = estimate_names, y = estimate, color = group)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2) +
+    geom_point(size = 1.2) +
+    # geom_line(aes(group = 1), linewidth = 0.25) +
+    scale_color_manual(
+      values = c(
+        "Pre" = viridis(1, option = "magma"),
+        "Post" = viridis(3, option = "magma")[2]
+      ),
+      breaks = c("Pre", "Post")
+    ) +
+    theme_minimal() +
+    labs(
+      x = "Time",
+      y = "Estimate",
+      title = "",
+      subtitle = subtitle,
+      caption = spec
+    ) +
+    theme_pref +
+    theme(plot.caption = element_text(hjust = 0))
+}
+```
+
+```{r}
+results_sunab <- load_results_sunab(
+  radii = c(250, 500, 1000),
+  freqs = c("qtr"),
+  quiet = FALSE,
+  pattern = "rentals_sunab_models_rad_{r}"
+)
+```
+
+### Binary Treatment - Average Spill Count {#sec-06-03-01-binary-average}
+
+::: {.panel-tabset group="threshold-rental"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-rental-250m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-rental-500m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-rental-1000m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_mean_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_mean_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+:::
+
+### Binary Treatment - Median Spill Count {#sec-06-03-02-binary-median}
+
+::: {.panel-tabset group="threshold-rental"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-rental-250m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-rental-500m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-rental-1000m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p50_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p50_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+:::
+
+### Binary Treatment - 75th Percentile Spill Count {#sec-06-03-03-binary-p75}
+
+::: {.panel-tabset group="threshold-rental"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-rental-250m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-rental-500m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-rental-1000m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p75_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p75_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+:::
+
+### Binary Treatment - 90th Percentile Spill Count {#sec-06-03-04-binary-p90}
+
+::: {.panel-tabset group="threshold-rental"}
+
+#### 250m
+
+::: {.panel-tabset group="radius-rental-250m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 250,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+#### 500m
+
+::: {.panel-tabset group="radius-rental-500m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 500,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+#### 1000m
+
+::: {.panel-tabset group="radius-rental-1000m"}
+
+##### Count (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Count (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sc_p90_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+##### Duration (NC)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa"
+)
+```
+
+##### Duration (C)
+
+```{r}
+plot_reg_sunab(
+  data = results_sunab,
+  radius = 1000,
+  model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa_property_type"
+)
+```
+
+:::
+
+:::

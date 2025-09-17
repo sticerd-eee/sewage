@@ -1,0 +1,17 @@
+```{r}
+# Define file paths
+
+## House Prices
+path_rental_panel <- here::here("data", "processed", "general_panel", "rentals")
+path_rental_panel <- here::here("data", "processed", "general_panel", "rentals")
+
+## Sewage Spills
+path_spill <- here::here("data", "processed", "agg_spill_stats")
+path_rental_controls <- here::here(
+  "data",
+  "processed",
+  "zoopla",
+  "zoopla_rentals.parquet"
+)
+```
+
