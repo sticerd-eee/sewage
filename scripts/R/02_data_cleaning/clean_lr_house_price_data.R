@@ -160,7 +160,6 @@ clean_data <- function(df, year) {
 
   df %>%
     mutate(
-      year = year,                                           # Source year tag
       postcode = str_remove_all(postcode, fixed(" ")),     # Normalise for joins
       date_of_transfer = ymd_hm(date_of_transfer),           # Parse timestamp
       qtr_id = (lubridate::year(date_of_transfer) - base_year) * 4 +
@@ -201,7 +200,7 @@ export_data <- function(df) {
 #' Main execution function
 #' @param refresh_postcodes Boolean indicating whether to refresh postcode data
 #' @return NULL
-main <- function(refresh_postcodes = TRUE) {
+main <- function(refresh_postcodes = FALSE) {
   # Setup
   initialise_environment()
   setup_logging()

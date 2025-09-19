@@ -39,7 +39,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "16_cross_section_rental_db.log")
+  log_path <- here::here("output", "log", "cross_section_rental.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
   logger::log_appender(logger::appender_file(log_path))
@@ -55,7 +55,7 @@ CONFIG <- list(
   processed_dir = here::here("data", "processed"),
   db_path = here::here("data", "duckdb.duckdb"),
   radius_thresholds = c(5000, 2000, 1000, 500, 250),
-  min_year = 2022,
+  base_year = 2021,
   # Input paths specific to rentals
   rentals_path = here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
   rental_lookup_path = here::here("data", "processed", "zoopla", "spill_rental_lookup.parquet"),
@@ -119,8 +119,8 @@ load_data_to_db <- function(con) {
     logger::log_info("Loading monthly spill data")
     dat_mo <- import(CONFIG$monthly_spill_path, trust = TRUE)
     dat_mo <- dat_mo %>%
-      select(water_company, site_id, year, month, spill_count_mo, spill_hrs_mo) %>%
-      arrange(site_id, year, month)
+      select(water_company, site_id, month_id, spill_count_mo, spill_hrs_mo) %>%
+      arrange(site_id, month_id)
     copy_to(con, dat_mo, "dat_mo", temporary = FALSE)
     rm(dat_mo)
     logger::log_info("Monthly spill data loaded")
@@ -139,13 +139,14 @@ prepare_data <- function(con) {
   dat_mo_tbl <- tbl(con, "dat_mo")
 
   # Prepare rental data
+  base_year <- CONFIG$base_year
   rental_tbl <- rental_tbl %>%
     select(rental_id, listing_price, rented_est) %>%
     rename(rent = listing_price, rented_date = rented_est) %>%
     mutate(
-      rented_date = as.Date(rented_date),
-      rented_date_12mo = sql("DATE_TRUNC('month', rented_date - INTERVAL '12 months')")
-    )
+      rented_month_id = (year(rented_date) - base_year) * 12 + month(rented_date)
+    ) %>%
+    select(rental_id, rent, rented_month_id)
 
   # Prepare spill lookup data
   spill_lookup_tbl <- spill_lookup_tbl %>%
@@ -153,12 +154,7 @@ prepare_data <- function(con) {
 
   # Prepare monthly spill data
   dat_mo_tbl <- dat_mo_tbl %>%
-    mutate(
-      year = as.integer(year),
-      month = as.integer(month),
-      spill_date = as.Date(paste0(year, "-", month, "-1"))
-    ) %>%
-    select(site_id, spill_date, spill_count_mo, spill_hrs_mo)
+    select(site_id, month_id, spill_count_mo, spill_hrs_mo)
 
   # Merge data
   rental_spill_data_tbl <- rental_tbl %>%
@@ -278,9 +274,9 @@ create_prior_12mo_db <- function(prepared_data, con) {
   # 1. Spill statistics for the trailing 12 months
   dat_agg_12mo <- rental_spill_data_tbl %>%
     filter(
-      lubridate::year(rented_date) >= CONFIG$min_year,
-      spill_date >= rented_date_12mo,
-      spill_date <= rented_date
+      rented_month_id >= 13,  # January 2022 onwards (month_id = 13)
+      month_id >= (rented_month_id - 11),  # 11 months before rental
+      month_id <= rented_month_id  # Up to and including rental month
     ) %>%
     cross_join(radius_tbl, copy = TRUE) %>%
     group_by(rental_id, radius) %>%
@@ -330,9 +326,9 @@ create_prior_12mo_db <- function(prepared_data, con) {
   # 2. Mean distance: unique rental-site pairs, then aggregate
   agg_12mo_distances <- rental_spill_data_tbl %>%
     filter(
-      year(rented_date) >= CONFIG$min_year,
-      spill_date >= rented_date_12mo,
-      spill_date <= rented_date
+      rented_month_id >= 13,  
+      month_id >= (rented_month_id - 11),
+      month_id <= rented_month_id
     ) %>%
     distinct(rental_id, site_id, distance_m) %>%
     cross_join(radius_tbl, copy = TRUE) %>%

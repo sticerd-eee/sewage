@@ -36,8 +36,15 @@ distances_m <- c(50, 100, 250, 500, 1000)
 # Load & classify sites (2021–2023)
 # -----------------
 stopifnot(file.exists(p_all_mo), file.exists(p_dry_mo))
-all_mo <- read_parquet(p_all_mo) |> as_tibble() |> mutate(site_id = as.integer(site_id))
-dry_mo <- read_parquet(p_dry_mo) |> as_tibble() |> mutate(site_id = as.integer(site_id))
+base_year <- 2021L
+all_mo <- read_parquet(p_all_mo) |> as_tibble() |> mutate(
+  site_id = as.integer(site_id),
+  year = base_year + floor((month_id - 1L) / 12)
+)
+dry_mo <- read_parquet(p_dry_mo) |> as_tibble() |> mutate(
+  site_id = as.integer(site_id),
+  year = base_year + floor((month_id - 1L) / 12)
+)
 stopifnot(dry_metric %in% names(dry_mo))
 
 all_win <- all_mo |> filter(year >= year_min, year <= year_max)

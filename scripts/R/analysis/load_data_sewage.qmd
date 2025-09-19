@@ -73,7 +73,7 @@ path_within_panel_sales <- here::here(
 )
 ```
 
-```{r load-data-general}
+```{r load-data-general-sales}
 # General Panel Data Load
 
 ## Define radius
@@ -85,6 +85,21 @@ gen_panel_sales <- arrow::open_dataset(path_general_panel_sales) |>
   collect()
 sales <- import(path_sales, trust = TRUE)
 
+## Load sewage spills
+spills <- import(path_spill_qtr, trust = TRUE)
+
+## Assemble sales data
+dat_sales <- gen_panel_sales |>
+  left_join(sales, by = join_by(house_id, qtr_id)) |>
+  left_join(spills, by = join_by(site_id, qtr_id))
+```
+
+```{r load-data-general-rent}
+# General Panel Data Load
+
+## Define radius
+rad <- 250L # 500, 1000
+
 ## Load rent data
 gen_panel_rent <- arrow::open_dataset(path_general_panel_rental) |>
   filter(radius == rad) |>
@@ -94,18 +109,13 @@ rent <- import(path_rent, trust = TRUE)
 ## Load sewage spills
 spills <- import(path_spill_qtr, trust = TRUE)
 
-## Assemble sales data
-dat_sales <- gen_panel_sales |>
-  left_join(sales, by = join_by(house_id, qtr_id)) |>
-  left_join(spills, by = join_by(site_id, qtr_id, year))
-
 ## Assemble rent data
 dat_rent <- gen_panel_rent |>
   left_join(rent, by = join_by(rental_id, qtr_id)) |>
-  left_join(spills, by = join_by(site_id, qtr_id, year))
+  left_join(spills, by = join_by(site_id, qtr_id))
 ```
 
-```{r load-data-within}
+```{r load-data-within-sales}
 # Within Panel Data Load
 
 ## Define radius and time-period
@@ -118,6 +128,22 @@ within_panel_sales <- arrow::open_dataset(path_within_panel_sales) |>
   collect()
 sales <- import(path_sales, trust = TRUE)
 
+## Load sewage spills
+spills <- import(path_spill_qtr, trust = TRUE)
+
+## Assemble sales data
+dat_sales_within <- within_panel_sales |>
+  left_join(sales, by = join_by(house_id, month_id, qtr_id)) |>
+  left_join(spills, by = join_by(site_id, qtr_id))
+```
+
+```{r load-data-within-rent}
+# Within Panel Data Load
+
+## Define radius and time-period
+rad <- 250L # 500, 1000
+period <- "quarterly" #monthly
+
 ## Load rent data
 within_panel_rent <- arrow::open_dataset(path_within_panel_rental) |>
   filter(radius == rad, period_type == period) |>
@@ -127,13 +153,8 @@ rent <- import(path_rent, trust = TRUE)
 ## Load sewage spills
 spills <- import(path_spill_qtr, trust = TRUE)
 
-## Assemble sales data
-dat_sales_within <- within_panel_sales |>
-  left_join(sales, by = join_by(house_id, month_id, qtr_id, year, price)) |>
-  left_join(spills, by = join_by(site_id, qtr_id, quarter, year))
-
 ## Assemble rent data
 dat_rent_within <- within_panel_rent |>
-  left_join(rent, by = join_by(rental_id, month_id, qtr_id, year)) |>
-  left_join(spills, by = join_by(site_id, qtr_id, quarter, year))
+  left_join(rent, by = join_by(rental_id, month_id, qtr_id)) |>
+  left_join(spills, by = join_by(site_id, qtr_id))
 ```

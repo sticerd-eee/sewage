@@ -104,7 +104,6 @@ house_controls <- open_dataset(path_house_controls) %>%
     -postcode,
     -saon,
     -locality,
-    -year,
     -easting,
     -northing,
     -longitude,

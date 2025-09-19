@@ -391,8 +391,8 @@ plan(multisession, workers = 3)
 
 # Load data
 ## Data paths
-path_house <- here::here("data", "processed", "houses_within_radius_panel")
-path_site <- here::here("data", "processed", "dat_panel_site_level")
+path_house <- here::here("data", "processed", "within_radius_panel", "sales")
+path_site <- here::here("data", "processed", "dat_panel_site", "sales")
 path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
 path_house_controls <- here::here("data", "processed", "house_price.parquet")
 
@@ -417,7 +417,6 @@ house_controls <- open_dataset(path_house_controls) %>%
     -postcode,
     -saon,
     -locality,
-    -year,
     -easting,
     -northing,
     -longitude,
@@ -436,7 +435,7 @@ for (r in radii) {
   panel_site <- left_join(
     site_dat,
     spill_qtr,
-    by = join_by(site_id, qtr_id, quarter, year, period_type)
+    by = join_by(site_id, qtr_id)
   )
 
   message("Starting regressions for radius: ", r)
@@ -482,7 +481,7 @@ param_grid_cont <- expand.grid(
 param_grid <- bind_rows(param_grid_bin, param_grid_cont)
 
 # Radii to loop over
-radii <- c(250, 500, 1000, 2000)
+radii <- c(250, 500, 1000)
 
 # Parallel processing
 plan(multisession, workers = 3)
@@ -499,7 +498,7 @@ for (r in radii) {
   panel_house <- left_join(
     house_dat,
     spill_qtr,
-    by = join_by(site_id, qtr_id, quarter, year, period_type)
+    by = join_by(site_id, qtr_id)
   ) %>%
     left_join(house_controls, by = join_by(house_id)) %>%
     mutate(
@@ -1627,7 +1626,7 @@ The regressions estimate changes in house prices over time within the same locat
 # Load Data
 
 # Define file paths
-path_house <- here::here("data", "processed", "general_house_panel_qtr")
+path_house <- here::here("data", "processed", "general_panel", "sales")
 path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
 path_house_controls <- here::here("data", "processed", "house_price.parquet")
 
@@ -1648,7 +1647,6 @@ house_controls <- open_dataset(path_house_controls) %>%
     -postcode,
     -saon,
     -locality,
-    -year,
     -easting,
     -northing,
     -longitude,
@@ -1663,13 +1661,14 @@ house_controls <- open_dataset(path_house_controls) %>%
 # Create Event Data
 
 # Create event data for each radius
-radii <- c(1000L)
+radii <- c(250L, 500L)
 event_data_list <- purrr::map(
   radii,
   function(rad) {
     # 1. Load data for radius and add spill statistics
     panel_dt_ext <- house_panel %>%
       filter(radius == rad) %>%
+      filter(!is.na(site_id)) %>% 
       collect() %>%
       as.data.table()
 
@@ -3322,7 +3321,7 @@ for (r in radii) {
   panel_site <- left_join(
     site_dat,
     spill_qtr,
-    by = join_by(site_id, qtr_id, quarter, year, period_type)
+    by = join_by(site_id, qtr_id)
   )
 
   message("Starting regressions for radius: ", r)
@@ -3389,7 +3388,7 @@ for (r in radii) {
   panel_rental <- left_join(
     rental_dat,
     spill_qtr,
-    by = join_by(site_id, qtr_id, quarter, year, period_type)
+    by = join_by(site_id, qtr_id)
   ) %>%
     left_join(rental_controls, by = join_by(rental_id)) %>%
     mutate(
@@ -4242,8 +4241,9 @@ event_data_list <- purrr::map(
   radii,
   function(rad) {
     # 1. Load data for radius and add spill statistics
-    panel_dt_ext <- rental_panel %>%
+    panel_dt_ext <- house_panel %>%
       filter(radius == rad) %>%
+      filter(!is.na(site_id)) %>% 
       collect() %>%
       as.data.table()
 

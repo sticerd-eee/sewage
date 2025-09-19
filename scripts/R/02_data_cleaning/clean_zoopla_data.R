@@ -168,9 +168,8 @@ clean_zoopla_data <- function(df) {
     ) |>
     # LR‑aligned time IDs from rented_est
     mutate(
-      year = lubridate::year(rented_est),
-      qtr_id = (year - CONFIG$base_year) * 4 + lubridate::quarter(rented_est),
-      month_id = (year - CONFIG$base_year) * 12 + lubridate::month(rented_est)
+      qtr_id = (lubridate::year(rented_est) - CONFIG$base_year) * 4 + lubridate::quarter(rented_est),
+      month_id = (lubridate::year(rented_est) - CONFIG$base_year) * 12 + lubridate::month(rented_est)
     ) |>
     # Map property types to codes (keep bungalows as "B")
     mutate(

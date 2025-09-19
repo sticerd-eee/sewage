@@ -99,14 +99,13 @@ load_data_to_db <- function(con) {
       select(
         water_company,
         site_id,
-        year,
-        month,
+        month_id,
         spill_count_mo,
         spill_hrs_mo,
         dry_spill_count_mo_r1_d01_weak,
         dry_spill_hrs_mo_r1_d01_weak
       ) %>%
-      arrange(site_id, year, month)
+      arrange(site_id, month_id)
     copy_to(con, dat_mo, "dat_mo", temporary = FALSE)
     rm(dat_mo)
     logger::log_info("Monthly spill data loaded")
@@ -126,14 +125,13 @@ load_data_to_db <- function(con) {
       select(
         water_company,
         site_id,
-        year,
-        quarter,
+        qtr_id,
         spill_count_qt,
         spill_hrs_qt,
         dry_spill_count_qt_r1_d01_weak,
         dry_spill_hrs_qt_r1_d01_weak
       ) %>%
-      arrange(site_id, year, quarter)
+      arrange(site_id, qtr_id)
 
     copy_to(con, dat_qtr, "dat_qtr", temporary = FALSE)
     rm(dat_qtr)
@@ -158,15 +156,12 @@ calculate_period_spill_stats <- function(con, period_type) {
         dry_spill_hrs = dry_spill_hrs_mo_r1_d01_weak
       ) %>%
       mutate(
-        year = as.integer(year),
-        month = as.integer(month),
-        spill_date = as.Date(paste0(year, "-", month, "-1"))
+        year = (month_id - 1) %/% 12 + 1,
+        spill_date = month_id
       ) %>%
-      select(site_id, spill_date, year, month, spill_count, spill_hrs, dry_spill_count, dry_spill_hrs)
+      select(site_id, month_id, spill_date, year, spill_count, spill_hrs, dry_spill_count, dry_spill_hrs)
 
     period_suffix <- "mo"
-    time_id_col <- "month_id"
-    time_id_expr <- sql("(year - 2021) * 12 + month")
   }
 
   # Quarterly Aggregation
@@ -179,20 +174,12 @@ calculate_period_spill_stats <- function(con, period_type) {
         dry_spill_hrs = dry_spill_hrs_qt_r1_d01_weak
       ) %>%
       mutate(
-        year = as.integer(year),
-        quarter = as.integer(quarter),
-        spill_date = case_when(
-          quarter == 1 ~ as.Date(paste0(year, "-01-01")),
-          quarter == 2 ~ as.Date(paste0(year, "-04-01")),
-          quarter == 3 ~ as.Date(paste0(year, "-07-01")),
-          quarter == 4 ~ as.Date(paste0(year, "-10-01"))
-        )
+        year = (qtr_id - 1) %/% 4 + 1,
+        spill_date = qtr_id,
       ) %>%
-      select(site_id, spill_date, year, quarter, spill_count, spill_hrs, dry_spill_count, dry_spill_hrs)
+      select(site_id, qtr_id, spill_date, year, spill_count, spill_hrs, dry_spill_count, dry_spill_hrs)
 
     period_suffix <- "qtr"
-    time_id_col <- "qtr_id"
-    time_id_expr <- sql("(year - 2021) * 4 + quarter") # Using 2021 as base year
   } else {
     stop("Invalid period_type specified. Must be 'monthly' or 'quarterly'.")
   }
@@ -270,7 +257,6 @@ calculate_period_spill_stats <- function(con, period_type) {
       log_spill_hrs = log(1 + spill_hrs),
       log_dry_spill_count = log(1 + dry_spill_count),
       log_dry_spill_hrs = log(1 + dry_spill_hrs),
-      !!time_id_col := !!time_id_expr,
       period_type = !!period_type
     ) %>%
     # Create binary indicators
@@ -343,7 +329,7 @@ export_spill_data <- function(monthly_stats, quarterly_stats) {
   monthly_data <- monthly_stats %>%
     select(
       # Identifiers
-      site_id, spill_date, month_id, month, year,
+      site_id, month_id, 
       # Base metrics
       spill_count, spill_hrs,
       dry_spill_count, dry_spill_hrs,
@@ -357,7 +343,7 @@ export_spill_data <- function(monthly_stats, quarterly_stats) {
       # Site counts per period
       starts_with("n_sites_")
     ) %>%
-    arrange(site_id, spill_date) %>%
+    arrange(site_id, month_id) %>%
     collect()
 
   # Prepare quarterly data
@@ -365,7 +351,7 @@ export_spill_data <- function(monthly_stats, quarterly_stats) {
   quarterly_data <- quarterly_stats %>%
     select(
       # Identifiers
-      site_id, spill_date, qtr_id, quarter, year,
+      site_id, qtr_id,
       # Base metrics
       spill_count, spill_hrs,
       dry_spill_count, dry_spill_hrs,
@@ -379,7 +365,7 @@ export_spill_data <- function(monthly_stats, quarterly_stats) {
       # Site counts per period
       starts_with("n_sites_")
     ) %>%
-    arrange(site_id, spill_date) %>%
+    arrange(site_id, qtr_id) %>%
     collect()
 
   # Write monthly data
@@ -424,43 +410,36 @@ export_spill_data <- function(monthly_stats, quarterly_stats) {
 #' @param refresh_db Boolean indicating whether to refresh the database tables
 #' @return NULL
 main <- function(refresh_db = FALSE) {
-  tryCatch({
-    initialise_environment()
-    setup_logging()
-    con <- connect_to_db()
-    on.exit({
-      log_info("Disconnecting from database")
-      dbDisconnect(con, shutdown = TRUE)
-    })
 
-    if (refresh_db) {
-      logger::log_info("Refresh requested – reloading data")
-      tables <- DBI::dbListTables(con)
-      for (table in c("dat_mo", "dat_qtr")) {
-        if (table %in% tables) {
-          logger::log_info("Dropping table: {table}")
-          DBI::dbRemoveTable(con, table)
-        }
+  initialise_environment()
+  setup_logging()
+  con <- connect_to_db()
+  on.exit({
+    log_info("Disconnecting from database")
+    dbDisconnect(con, shutdown = TRUE)
+  })
+
+  if (refresh_db) {
+    logger::log_info("Refresh requested – reloading data")
+    tables <- DBI::dbListTables(con)
+    for (table in c("dat_mo", "dat_qtr")) {
+      if (table %in% tables) {
+        logger::log_info("Dropping table: {table}")
+        DBI::dbRemoveTable(con, table)
       }
     }
+  }
 
-    load_data_to_db(con)
+  load_data_to_db(con)
 
-    # Calculate stats for both periods
-    monthly_stats <- calculate_period_spill_stats(con, "monthly")
-    quarterly_stats <- calculate_period_spill_stats(con, "quarterly")
+  # Calculate stats for both periods
+  monthly_stats <- calculate_period_spill_stats(con, "monthly")
+  quarterly_stats <- calculate_period_spill_stats(con, "quarterly")
 
-    # Export the combined dataset
-    export_spill_data(monthly_stats, quarterly_stats)
+  # Export the combined dataset
+  export_spill_data(monthly_stats, quarterly_stats)
 
-    log_info("Spill statistics aggregation completed successfully")
-  }, error = function(e) {
-    log_error("Fatal error: {e$message}")
-    log_error(traceback())
-    stop(e)
-  }, finally = {
-    log_info("Script finished at {Sys.time()}")
-  })
+  log_info("Spill statistics aggregation completed successfully")
 }
 
 # Execute when sourced/run directly

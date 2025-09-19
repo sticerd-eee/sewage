@@ -1129,7 +1129,7 @@ interactive_plot_hrs
 ```{r prepare-dry-rain}
 dat_mo_rain <- left_join(
   dat_mo, rainfall_mo, 
-  by = join_by(site_id, water_company, year, month)
+  by = join_by(site_id, water_company, month_id)
 )
 
 # Build reusable site-month dataset with rainfall and dry spill metrics
@@ -1410,6 +1410,8 @@ Dry spills also show seasonality. Monthly totals tend to be higher in the wetter
 dat_mo_dry_clean <- dat_mo %>%
   dplyr::filter(dry_spill_hrs_mo_r1_d01_weak >= 0) %>%
   dplyr::mutate(
+    month = (month_id - 1) %% 12 + 1,
+    year = (month_id - 1) %/% 12 + 2021,
     month = factor(month, levels = 1:12, labels = month.abb),
     year = factor(year)
   ) %>%

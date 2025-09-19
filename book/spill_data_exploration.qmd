@@ -767,6 +767,8 @@ Sewage Spills are seasonal, peaking between October and February, which aligns w
 dat_mo_clean <- dat_mo %>%
   filter(spill_hrs_mo >= 0) %>%
   mutate(
+    month = (month_id - 1) %% 12 + 1,
+    year = (month_id - 1) %/% 12 + 2021,
     month = factor(month, levels = 1:12, labels = month.abb),
     year = factor(year)
   ) %>%

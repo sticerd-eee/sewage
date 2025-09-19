@@ -246,7 +246,15 @@ Rental listing prices are positively skewed and closer to log-normal. There is h
 #### Summary {#sec-02-01-01-summary}
 ```{r, rentals_summary}
 datasummary_dat <- zoopla_rentals %>%
-  select(listing_price, year, property_type, bedrooms, epc_energy_rating) %>%
+  select(
+    listing_price,
+    property_type,
+    bedrooms,
+    epc_energy_rating,
+    rented_est
+  ) %>%
+  mutate(year = year(rented_est)) %>%
+  select(-rented_est) %>%
   mutate(
     property_type = recode_factor(
       property_type,
@@ -369,6 +377,7 @@ ggplot(zoopla_rentals, aes(sample = log(listing_price))) +
 zoopla_dt <- as.data.table(zoopla_rentals)
 
 zoopla_dt[, month_num := ((month_id - 1) %% 12) + 1L]
+zoopla_dt[, year := (month_id - 1) %/% 12 + 2021]
 zoopla_dt[, month := factor(month.abb[month_num], levels = month.abb)]
 
 rent_monthly <- zoopla_dt[,

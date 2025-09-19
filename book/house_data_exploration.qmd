@@ -122,10 +122,6 @@ spill_lookup <- import(
   here("data", "processed", "spill_house_lookup.parquet"),
   trust = TRUE
 )
-
-# DuckDB connection
-# con <- DBI::dbConnect(duckdb::duckdb(), dbdir = here("data", "duckdb.duckdb"))
-# DBI::dbDisconnect(con, shutdown=TRUE)
 ```
 
 ## Data Description {#sec-05-01-data-descr}
@@ -281,7 +277,9 @@ House prices are strongly positively skewed approximate a log-normal distributio
 #### Summary
 ```{r, house_price_summary}
 datasummary_dat <- house_price_data %>%
-  select(price, year, property_type, old_new, duration) %>%
+  select(price, property_type, old_new, duration, date_of_transfer) %>%
+  mutate(year = year(date_of_transfer)) %>%
+  select(-date_of_transfer) %>%
   mutate(
     property_type = recode_factor(
       property_type,

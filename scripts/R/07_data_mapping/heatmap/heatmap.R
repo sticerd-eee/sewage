@@ -41,8 +41,19 @@ msoa <- msoa |>
 
 # --- Read monthly aggregated data ---
 stopifnot(file.exists(p_all_mo), file.exists(p_dry_mo))
-all_mo <- read_parquet(p_all_mo) |> as_tibble() |> mutate(site_id = as.integer(site_id))
-dry_mo <- read_parquet(p_dry_mo) |> as_tibble() |> mutate(site_id = as.integer(site_id))
+base_year <- 2021L
+all_mo <- read_parquet(p_all_mo) |>
+  as_tibble() |>
+  mutate(
+    site_id = as.integer(site_id),
+    year = base_year + floor((month_id - 1L) / 12)
+  )
+dry_mo <- read_parquet(p_dry_mo) |>
+  as_tibble() |>
+  mutate(
+    site_id = as.integer(site_id),
+    year = base_year + floor((month_id - 1L) / 12)
+  )
 stopifnot(dry_metric %in% names(dry_mo))
 
 # --- Window filter (combine months across years) ---

@@ -80,7 +80,7 @@ ngr_to_easting_northing <- function(ngr_vec) {
 # ================ LOAD DATA ===================
 df <- arrow::read_parquet(parquet_path)
 
-required_cols <- c("site_id", "water_company", "year", "month", "spill_count_mo",
+required_cols <- c("site_id", "water_company", "month_id", "spill_count_mo",
                    "ngr", "ngr_og", "site_name_ea", "site_name_wa_sc",
                    "permit_reference_ea", "permit_reference_wa_sc",
                    "asset_type", "wfd_waterbody_id_cycle_2", "receiving_water_name")
@@ -88,6 +88,13 @@ missing_cols <- setdiff(required_cols, names(df))
 if (length(missing_cols) > 0) {
   stop("Missing required columns in parquet: ", paste(missing_cols, collapse = ", "))
 }
+
+base_year <- 2021L
+df <- df %>%
+  mutate(
+    year = base_year + floor((month_id - 1L) / 12L),
+    month = ((month_id - 1L) %% 12L) + 1L
+  )
 
 dfw <- df %>% filter(year %in% years_of_interest)
 if (nrow(dfw) == 0) stop("No rows in selected years: ", paste(years_of_interest, collapse = ", "))

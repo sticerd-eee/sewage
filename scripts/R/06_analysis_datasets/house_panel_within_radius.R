@@ -177,12 +177,9 @@ create_house_panel_for_radius <- function(prepared_tables, radius_m, con) {
     complete(site_id, date) %>%
     # add metadata
     mutate(
-      month = lubridate::month(date),
-      year = lubridate::year(date),
       period_type = "monthly",
       month_id = (lubridate::year(date) - base_year) * 12 + lubridate::month(date),
-      radius = as.integer(radius_m),
-      log_price = log(price)
+      radius = as.integer(radius_m)
     )
 
   # 3. Quarterly closest house
@@ -193,12 +190,9 @@ create_house_panel_for_radius <- function(prepared_tables, radius_m, con) {
     # complete panel data
     complete(site_id, date) %>%
     mutate(
-      quarter = lubridate::quarter(date),
-      year = lubridate::year(date),
       period_type = "quarterly",
       qtr_id = (lubridate::year(date) - base_year) * 4 + lubridate::quarter(date),
-      radius = as.integer(radius_m),
-      log_price = log(price)
+      radius = as.integer(radius_m)
     )
 
   # 4. Combine, order variables, and sort
@@ -207,10 +201,8 @@ create_house_panel_for_radius <- function(prepared_tables, radius_m, con) {
     select(
       # identifiers
       site_id, house_id,
-      # date
-      month_id, month, qtr_id, quarter, year,
-      # outcome
-      price, log_price,
+      # date ids
+      month_id, qtr_id,
       # metadata
       distance_m, radius, period_type,
     ) %>%

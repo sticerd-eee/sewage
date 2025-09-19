@@ -175,12 +175,12 @@ aggregate_indicator_spills <- function(indicator, spills_dt) {
     ),
     monthly = list(
       data = prepared_data$monthly,
-      grouping = c("water_company", "site_id", "year", "month", "month_id"),
+      grouping = c("water_company", "site_id", "month_id"),
       period = "mo"
     ),
     quarterly = list(
       data = prepared_data$monthly,  # Uses monthly data with quarter column
-      grouping = c("water_company", "site_id", "year", "quarter", "qtr_id"),
+      grouping = c("water_company", "site_id", "qtr_id"),
       period = "qt"
     )
   )
@@ -224,8 +224,8 @@ aggregate_all_indicators <- function(spills_dt) {
       # Define join keys based on temporal period
       by_cols <- switch(period,
         yearly = c("water_company", "site_id", "year"),
-        monthly = c("water_company", "site_id", "year", "month", "month_id"),
-        quarterly = c("water_company", "site_id", "year", "quarter", "qtr_id")
+        monthly = c("water_company", "site_id", "month_id"),
+        quarterly = c("water_company", "site_id", "qtr_id")
       )
       
       # Merge using data.table for consistency and performance

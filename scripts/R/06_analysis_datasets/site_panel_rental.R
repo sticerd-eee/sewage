@@ -171,7 +171,7 @@ create_rental_panel_for_radius <- function(prepared_tables, radius_m) {
     select(
       site_id, rental_id,
       rent_date_mo, rent_date_qtr,
-      year, month, quarter,
+      month, quarter,
       listing_price, distance_m
     )
 
@@ -187,7 +187,7 @@ create_rental_panel_for_radius <- function(prepared_tables, radius_m) {
   # Monthly aggregation
   log_info("Aggregating monthly rental prices for radius {radius_m}m")
   monthly_unweighted_agg <- rentals_in_radius_tbl %>%
-    group_by(site_id, rent_date_mo, year, month) %>%
+    group_by(site_id, rent_date_mo, month) %>%
     summarise(
       rent_median = median(listing_price, na.rm = TRUE),
       rent_mean = mean(listing_price, na.rm = TRUE),
@@ -213,7 +213,7 @@ create_rental_panel_for_radius <- function(prepared_tables, radius_m) {
   # Quarterly aggregation
   log_info("Aggregating quarterly rental prices for radius {radius_m}m")
   quarterly_unweighted_agg <- rentals_in_radius_tbl %>%
-    group_by(site_id, rent_date_qtr, year, quarter) %>%
+    group_by(site_id, rent_date_qtr, quarter) %>%
     summarise(
       rent_median = median(listing_price, na.rm = TRUE),
       rent_mean = mean(listing_price, na.rm = TRUE),
@@ -309,7 +309,7 @@ create_rental_panel_for_radius <- function(prepared_tables, radius_m) {
 
   final_cols <- c(
     "site_id", "date", "period_type", "radius",
-    "year", "month", "quarter", "month_id", "qtr_id",
+    "month", "quarter", "month_id", "qtr_id",
     "n_rentals", "mean_distance",
     "rent_median", "log_rent_median",
     "rent_mean", "log_rent_mean",

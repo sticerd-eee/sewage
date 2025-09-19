@@ -321,7 +321,8 @@ complete_data_observations <- function(
       spill_count_mo = if_else(is.na(spill_count_mo), spill_count_ea, spill_count_mo),
       spill_hrs_mo   = if_else(is.na(spill_hrs_mo),   spill_hrs_ea,   spill_hrs_mo),
       month_id       = dplyr::coalesce(month_id, (year - CONFIG$base_year) * 12 + month)
-    )
+    ) %>%
+    select(-any_of(c("year", "month")))
   
   
   # Quarterly 
@@ -352,7 +353,8 @@ complete_data_observations <- function(
       spill_count_qt = if_else(is.na(spill_count_qt), spill_count_ea, spill_count_qt),
       spill_hrs_qt   = if_else(is.na(spill_hrs_qt),   spill_hrs_ea,   spill_hrs_qt),
       qtr_id         = dplyr::coalesce(qtr_id, (year - CONFIG$base_year) * 4 + quarter)
-    )
+    ) %>%
+    select(-any_of(c("year", "quarter")))
   
   list(
     yearly    = completed_yearly,

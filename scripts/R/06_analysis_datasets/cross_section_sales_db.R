@@ -39,7 +39,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "16_cross_section_sales_db")
+  log_path <- here::here("output", "log", "cross_section_sales_db.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
   logger::log_appender(logger::appender_file(log_path))
@@ -55,7 +55,7 @@ CONFIG <- list(
   processed_dir = here::here("data", "processed"),
   db_path = here::here("data", "duckdb.duckdb"),
   radius_thresholds = c(5000, 2000, 1000, 500, 250),
-  min_year = 2022
+  base_year = 2021
 )
 
 # Database Functions
@@ -125,8 +125,8 @@ load_data_to_db <- function(con) {
       trust = TRUE)
     
     dat_mo <- dat_mo %>%
-      select(water_company, site_id, year, month, spill_count_mo, spill_hrs_mo) %>%
-      arrange(site_id, year, month)
+      select(water_company, site_id, month_id, spill_count_mo, spill_hrs_mo) %>%
+      arrange(site_id, month_id)
     copy_to(con, dat_mo, "dat_mo", temporary = FALSE)
     rm(dat_mo)
     logger::log_info("Monthly spill data loaded")
@@ -145,13 +145,13 @@ prepare_data <- function(con) {
   dat_mo_tbl <- tbl(con, "dat_mo")
 
   # Prepare house price data
+  base_year <- CONFIG$base_year
   house_tbl <- house_tbl %>%
     select(house_id, price, date_of_transfer) %>%
-    rename(transfer_date = date_of_transfer) %>%
     mutate(
-      transfer_date = as.Date(transfer_date),
-      transfer_date_12mo = sql("DATE_TRUNC('month', transfer_date - INTERVAL '12 months')")
-    )
+      transfer_month_id = (year(date_of_transfer) - base_year) * 12 + month(date_of_transfer)
+    ) %>%
+    select(house_id, price, transfer_month_id) 
 
   # Prepare spill lookup data
   spill_lookup_tbl <- spill_lookup_tbl %>%
@@ -159,12 +159,7 @@ prepare_data <- function(con) {
 
   # Prepare monthly spill data
   dat_mo_tbl <- dat_mo_tbl %>%
-    mutate(
-      year = as.integer(year),
-      month = as.integer(month),
-      spill_date = as.Date(paste0(year, "-", month, "-1"))
-    ) %>%
-    select(site_id, spill_date, spill_count_mo, spill_hrs_mo)
+    select(site_id, month_id, spill_count_mo, spill_hrs_mo)
 
   # Merge data
   house_spill_data_tbl <- house_tbl %>%
@@ -284,9 +279,9 @@ create_prior_12mo_db <- function(prepared_data, con) {
   # 1. Spill statistics for the trailing 12 months
   dat_agg_12mo <- house_spill_data_tbl %>%
     filter(
-      lubridate::year(transfer_date) >= CONFIG$min_year,
-      spill_date >= transfer_date_12mo,
-      spill_date <= transfer_date
+      transfer_month_id >= 13, # January 2022 onwards (month_id = 13)
+      month_id >= (transfer_month_id - 11),  # 11 months before transfer
+      month_id <= transfer_month_id  # Up to and including transfer month
     ) %>%
     cross_join(radius_tbl, copy = TRUE) %>%
     group_by(house_id, radius) %>%
@@ -336,9 +331,9 @@ create_prior_12mo_db <- function(prepared_data, con) {
   # 2. Mean distance: first get unique house-site pairs, then aggregate
   agg_12mo_distances <- house_spill_data_tbl %>%
     filter(
-      year(transfer_date) >= CONFIG$min_year,
-      spill_date >= transfer_date_12mo,
-      spill_date <= transfer_date
+      transfer_month_id >= 13,  
+      month_id >= (transfer_month_id - 11),
+      month_id <= transfer_month_id
     ) %>%
     distinct(house_id, site_id, distance_m) %>%
     cross_join(radius_tbl, copy = TRUE) %>%
@@ -408,50 +403,42 @@ export_data <- function(all_years_data, prior_12mo_data) {
 #' @param refresh_db Boolean indicating whether to refresh the database
 #' @return NULL
 main <- function(refresh_db = FALSE) {
-  tryCatch({
-    # Setup
-    initialise_environment()
-    setup_logging()
+  
+  initialise_environment()
+  setup_logging()
 
-    # Connect to database
-    con <- connect_to_db()
+  # Connect to database
+  con <- connect_to_db()
 
-    # Clean up on exit
-    on.exit({
-      logger::log_info("Disconnecting from database")
-      DBI::dbDisconnect(con, shutdown = FALSE)
-    })
+  # Clean up on exit
+  on.exit({
+    logger::log_info("Disconnecting from database")
+    DBI::dbDisconnect(con, shutdown = FALSE)
+  })
 
-    # Load data to database if needed or if refresh requested
-    if (refresh_db) {
-      logger::log_info("Refresh requested, reloading all data")
-      tables <- DBI::dbListTables(con)
-      for (table in c("house_price_data", "spill_lookup", "dat_mo")) {
-        if (table %in% tables) {
-          logger::log_info("Dropping table: {table}")
-          DBI::dbRemoveTable(con, table)
-        }
+  # Load data to database if needed or if refresh requested
+  if (refresh_db) {
+    logger::log_info("Refresh requested, reloading all data")
+    tables <- DBI::dbListTables(con)
+    for (table in c("house_price_data", "spill_lookup", "dat_mo")) {
+      if (table %in% tables) {
+        logger::log_info("Dropping table: {table}")
+        DBI::dbRemoveTable(con, table)
       }
     }
-    load_data_to_db(con)
+  }
+  load_data_to_db(con)
 
-    # Prepare data
-    prepared_data <- prepare_data(con)
+  # Prepare data
+  prepared_data <- prepare_data(con)
 
-    # Create cross-sectional databases
-    all_years_data <- create_all_years_db(prepared_data, con)
-    prior_12mo_data <- create_prior_12mo_db(prepared_data, con)
+  # Create cross-sectional databases
+  all_years_data <- create_all_years_db(prepared_data, con)
+  prior_12mo_data <- create_prior_12mo_db(prepared_data, con)
 
-    # Export data
-    export_data(all_years_data, prior_12mo_data)
-
-    logger::log_info("Cross-sectional database creation completed successfully")
-  }, error = function(e) {
-    logger::log_error("Fatal error: {e$message}")
-    stop(e)
-  }, finally = {
-    logger::log_info("Script finished at {Sys.time()}")
-  })
+  # Export data
+  export_data(all_years_data, prior_12mo_data)
+  logger::log_info("Cross-sectional database creation completed successfully")
 }
 
 # Execute main function if script is run directly

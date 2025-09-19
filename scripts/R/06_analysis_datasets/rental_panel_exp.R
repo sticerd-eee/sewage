@@ -119,18 +119,6 @@ load_data_to_db <- function(con) {
     logger::log_info("Rental spill lookup data loaded")
   }
 
-  # Quarterly spill statistics
-  if (!"spill_statistics_qtr" %in% existing_tables) {
-    logger::log_info("Loading spill statistics data")
-    spill_qtr <- import(
-      file.path(CONFIG$processed_dir, "agg_spill_stats", "agg_spill_stats_qtr.parquet"),
-      trust = TRUE
-    ) %>%
-      select(-contains("month"), -contains("_mo"))
-    copy_to(con, spill_qtr, "spill_statistics_qtr", temporary = FALSE)
-    rm(spill_qtr)
-    logger::log_info("Spill statistics data loaded")
-  }
 }
 
 #' Prepare base rental, lookup, and quarterly spill statistics tables
@@ -145,13 +133,9 @@ prepare_tables <- function(con) {
   spill_lookup_tbl <- tbl(con, "rental_spill_lookup") %>%
     select(rental_id, site_id, distance_m)
 
-  spill_qtr_tbl <- tbl(con, "spill_statistics_qtr") %>%
-    select(site_id, qtr_id, spill_count, spill_hrs)
-
   return(list(
     rental_tbl = rental_tbl,
-    spill_lookup_tbl = spill_lookup_tbl,
-    spill_qtr_tbl = spill_qtr_tbl
+    spill_lookup_tbl = spill_lookup_tbl
   ))
 }
 
@@ -165,7 +149,6 @@ create_rental_panel_for_radius <- function(prepared_tables, radius_m, con) {
 
   rental_tbl <- prepared_tables$rental_tbl
   spill_lookup_tbl <- prepared_tables$spill_lookup_tbl
-  spill_qtr_tbl <- prepared_tables$spill_qtr_tbl
 
   # 1. Get unique rental-site pairs within radius
   log_info("Filtering rentals within {radius_m}m radius")
@@ -192,9 +175,7 @@ create_rental_panel_for_radius <- function(prepared_tables, radius_m, con) {
     # Add transfer quarter information
     left_join(rental_listings, by = "rental_id") %>%
     # Add within_radius flag
-    mutate(within_radius = TRUE) %>%
-    # Add spill statistics
-    left_join(spill_qtr_tbl, by = c("site_id", "qtr_id"))
+    mutate(within_radius = TRUE)
 
   # 5. Handle rentals outside radius
   rentals_outside_radius_tbl <- rental_tbl %>%
@@ -206,9 +187,7 @@ create_rental_panel_for_radius <- function(prepared_tables, radius_m, con) {
       qtr_id_transfer = qtr_id,
       within_radius = FALSE,
       distance_m = NA,
-      site_id = NA,
-      spill_count = NA,
-      spill_hrs = NA
+      site_id = NA
     )
 
   # 6. Combine and finalise
@@ -217,8 +196,7 @@ create_rental_panel_for_radius <- function(prepared_tables, radius_m, con) {
     select(
       rental_id, site_id,
       qtr_id, qtr_id_transfer,
-      distance_m, radius, within_radius,
-      spill_count, spill_hrs
+      distance_m, radius, within_radius
     ) %>%
     arrange(rental_id, site_id, qtr_id)
 
@@ -289,7 +267,7 @@ main <- function(refresh_db = FALSE) {
       log_info("Refresh requested – reloading data")
       tables <- DBI::dbListTables(con)
       for (table in c(
-        "rental_data", "rental_spill_lookup", "spill_statistics_qtr"
+        "rental_data", "rental_spill_lookup"
       )) {
         if (table %in% tables) {
           logger::log_info("Dropping table: {table}")
