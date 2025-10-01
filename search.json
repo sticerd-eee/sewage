@@ -472,6 +472,17 @@
     ]
   },
   {
+    "objectID": "zoopla_data_exploration.html#sec-04-repeated-rentals",
+    "href": "zoopla_data_exploration.html#sec-04-repeated-rentals",
+    "title": "6  Zoopla Rental Data Exploration",
+    "section": "6.4 Repeated Rentals",
+    "text": "6.4 Repeated Rentals\nI examine properties with repeat rentals to check if we have enough observations to use fixed effects à la Palmquist, 1982. The table below shows, for each rental count, the number and share of properties with that many rentals, as well as the proportion of those rentals that occur within 250m, 500m, and 1000m of spill sites.",
+    "crumbs": [
+      "Data Exploration",
+      "<span class='chapter-number'>6</span>  <span class='chapter-title'>Zoopla Rental Data Exploration</span>"
+    ]
+  },
+  {
     "objectID": "event_study.html",
     "href": "event_study.html",
     "title": "7  Event Study",
