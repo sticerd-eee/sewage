@@ -59,10 +59,7 @@ SHOW_PATHS_FOR_N  <- 8           # 0 to disable; drawn in class colors
 SEED_FOR_SAMPLING <- 42
 MIN_EACH_BOTH     <- 3           # require at least this many upstream & downstream
 TOP_K_CANDIDATES  <- 1000        # how many (site,quarter) to scan for matches
-NUM_IMAGES        <- 4           # target number of images (set 3..5)
-
-# Enforce 3..5 range gently
-NUM_IMAGES <- max(3, min(5, as.integer(NUM_IMAGES)))
+NUM_IMAGES        <- 10           # target number of images (set 3..5)
 
 # Colors
 COL_RIVER       <- "#1f77b4"  # blue
@@ -283,46 +280,108 @@ has_both_counts <- function(sub, g, g_rev, river_max_m) {
   c(up = ifelse(is.null(up), 0L, up), down = ifelse(is.null(down), 0L, down))
 }
 
-find_combos_with_both <- function(df2, min_each, top_k, g, g_rev, river_max_m, want_k) {
+find_combos_with_both <- function(df2, min_each, top_k, g, g_rev, river_max_m, want_k,
+                                  one_per_site = TRUE) {
   out <- list()
+  tried_keys <- character(0)
+  used_sites <- integer(0)
+
   # if user specified a combo, try to include it first
-  tried <- character(0)
   if (!is.null(SITE_ID) && !is.null(QUARTER)) {
-    sub <- df2 %>% filter(site_id == SITE_ID, qtr_id == QUARTER)
+    sub <- df2 %>% dplyr::filter(site_id == SITE_ID, qtr_id == QUARTER)
     if (nrow(sub)) {
       cnt <- has_both_counts(sub, g, g_rev, river_max_m)
       if (cnt["up"] >= min_each && cnt["down"] >= min_each) {
-        out[[length(out)+1]] <- list(site_id = SITE_ID, qtr_id = QUARTER)
-        tried <- paste(SITE_ID, QUARTER, sep = "_")
+        out[[length(out) + 1]] <- list(site_id = SITE_ID, qtr_id = QUARTER)
+        tried_keys <- c(tried_keys, paste(SITE_ID, QUARTER, sep = "_"))
+        if (one_per_site) used_sites <- c(used_sites, SITE_ID)
       }
     }
   }
+
   cands <- df2 %>%
-    count(site_id, qtr_id, name = "n_pairs") %>%
-    arrange(desc(n_pairs)) %>%
-    slice_head(n = top_k)
+    dplyr::count(site_id, qtr_id, name = "n_pairs") %>%
+    dplyr::arrange(dplyr::desc(n_pairs)) %>%
+    dplyr::slice_head(n = top_k)
 
   for (i in seq_len(nrow(cands))) {
     sid <- cands$site_id[i]; qtr <- cands$qtr_id[i]
     key <- paste(sid, qtr, sep = "_")
-    if (key %in% tried) next
-    sub <- df2 %>% filter(site_id == sid, qtr_id == qtr)
+    if (key %in% tried_keys) next
+    if (one_per_site && sid %in% used_sites) next
+
+    sub <- df2 %>% dplyr::filter(site_id == sid, qtr_id == qtr)
     cnt <- has_both_counts(sub, g, g_rev, river_max_m)
     if (cnt["up"] >= min_each && cnt["down"] >= min_each) {
-      out[[length(out)+1]] <- list(site_id = sid, qtr_id = qtr)
+      out[[length(out) + 1]] <- list(site_id = sid, qtr_id = qtr)
+      tried_keys <- c(tried_keys, key)
+      if (one_per_site) used_sites <- c(used_sites, sid)
       if (length(out) >= want_k) break
     }
   }
-  if (!length(out)) stop("Could not find any SITE × QUARTER with both upstream_of_site and downstream_of_site. Try increasing RADIUS or RIVER_MAX_M, or lowering MIN_EACH_BOTH.")
+
+  if (!length(out)) {
+    stop("Could not find any SITE × QUARTER with both classes. ",
+         "Try increasing RADIUS or RIVER_MAX_M, or lowering MIN_EACH_BOTH.")
+  }
   out
 }
+
+find_combos_with_both <- function(df2, min_each, top_k, g, g_rev, river_max_m, want_k,
+                                  one_per_site = TRUE) {
+  out <- list()
+  tried_keys <- character(0)
+  used_sites <- integer(0)
+
+  # if user specified a combo, try to include it first
+  if (!is.null(SITE_ID) && !is.null(QUARTER)) {
+    sub <- df2 %>% dplyr::filter(site_id == SITE_ID, qtr_id == QUARTER)
+    if (nrow(sub)) {
+      cnt <- has_both_counts(sub, g, g_rev, river_max_m)
+      if (cnt["up"] >= min_each && cnt["down"] >= min_each) {
+        out[[length(out) + 1]] <- list(site_id = SITE_ID, qtr_id = QUARTER)
+        tried_keys <- c(tried_keys, paste(SITE_ID, QUARTER, sep = "_"))
+        if (one_per_site) used_sites <- c(used_sites, SITE_ID)
+      }
+    }
+  }
+
+  cands <- df2 %>%
+    dplyr::count(site_id, qtr_id, name = "n_pairs") %>%
+    dplyr::arrange(dplyr::desc(n_pairs)) %>%
+    dplyr::slice_head(n = top_k)
+
+  for (i in seq_len(nrow(cands))) {
+    sid <- cands$site_id[i]; qtr <- cands$qtr_id[i]
+    key <- paste(sid, qtr, sep = "_")
+    if (key %in% tried_keys) next
+    if (one_per_site && sid %in% used_sites) next
+
+    sub <- df2 %>% dplyr::filter(site_id == sid, qtr_id == qtr)
+    cnt <- has_both_counts(sub, g, g_rev, river_max_m)
+    if (cnt["up"] >= min_each && cnt["down"] >= min_each) {
+      out[[length(out) + 1]] <- list(site_id = sid, qtr_id = qtr)
+      tried_keys <- c(tried_keys, key)
+      if (one_per_site) used_sites <- c(used_sites, sid)
+      if (length(out) >= want_k) break
+    }
+  }
+
+  if (!length(out)) {
+    stop("Could not find any SITE × QUARTER with both classes. ",
+         "Try increasing RADIUS or RIVER_MAX_M, or lowering MIN_EACH_BOTH.")
+  }
+  out
+}
+
 
 combos <- find_combos_with_both(df2,
                                 min_each = MIN_EACH_BOTH,
                                 top_k = TOP_K_CANDIDATES,
                                 g = G$g, g_rev = G$g_rev,
                                 river_max_m = RIVER_MAX_M,
-                                want_k = NUM_IMAGES)
+                                want_k = NUM_IMAGES,
+                                one_per_site = TRUE)
 
 message(sprintf("Generating %d map(s) with both classes...", length(combos)))
 

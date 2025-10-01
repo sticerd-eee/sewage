@@ -45,7 +45,8 @@ required_packages <- c(
   "htmlwidgets",
   "reactablefmtr",
   "logger",
-  "readxl"
+  "readxl",
+  "DIDmultiplegtDYN"
 )
 
 install_if_missing <- function(packages) {
@@ -1012,3 +1013,80 @@ knitr::include_graphics(here(
 ```
 
 :::
+
+## Repeated Rentals {#sec-04-repeated-rentals}
+
+I examine properties with repeat rentals to check if we have enough observations to use fixed effects à la Palmquist, 1982. The table below shows, for each rental count, the number and share of properties with that many rentals, as well as the proportion of those rentals that occur within 250m, 500m, and 1000m of spill sites.
+
+```{r, repeated_rentals_table}
+# Import summary table
+path_sum_repeat <- here::here(
+  "data",
+  "processed",
+  "repeated_transactions",
+  "repeated_rentals_summary.parquet"
+)
+repeat_rental_summary <- import(path_sum_repeat, trust = TRUE) |>
+  filter(rental_count <= 9)
+
+
+# Display the table
+reactable(
+  repeat_rental_summary,
+  columns = list(
+    rental_count = colDef(
+      name = "Rental Count",
+      format = colFormat(digits = 0)
+    ),
+    n_properties = colDef(
+      name = "# Properties",
+      format = colFormat(separators = TRUE)
+    ),
+    share_properties = colDef(
+      name = "Share of Properties",
+      format = colFormat(percent = TRUE, digits = 2)
+    ),
+    share_within_250m = colDef(
+      name = "Within 250m",
+      format = colFormat(percent = TRUE, digits = 2)
+    ),
+    share_within_500m = colDef(
+      name = "Within 500m",
+      format = colFormat(percent = TRUE, digits = 2)
+    ),
+    share_within_1000m = colDef(
+      name = "Within 1000m",
+      format = colFormat(percent = TRUE, digits = 2)
+    ),
+    share_outside_1000m = colDef(
+      name = "Outside 1000m",
+      format = colFormat(percent = TRUE, digits = 2)
+    )
+  ),
+  columnGroups = list(
+    colGroup(
+      name = "Property Distribution",
+      columns = c("n_properties", "share_properties")
+    ),
+    colGroup(
+      name = "Share of Rentals Near Spill Sites",
+      columns = c(
+        "share_within_250m",
+        "share_within_500m",
+        "share_within_1000m",
+        "share_outside_1000m"
+      )
+    )
+  ),
+  defaultColDef = colDef(
+    headerStyle = list(fontSize = "0.8em", whiteSpace = "wrap"),
+    style = list(fontSize = "0.75em"),
+    minWidth = 80
+  ),
+  resizable = TRUE,
+  filterable = FALSE,
+  defaultPageSize = 10,
+  compact = TRUE,
+  style = list(maxWidth = "100%", overflowX = "auto")
+)
+```

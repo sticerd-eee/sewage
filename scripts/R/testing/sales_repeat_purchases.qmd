@@ -141,28 +141,75 @@ output_path <- here::here(
 arrow::write_parquet(all_sales_output, output_path)
 ```
 
-## Exact Repeat Coverage
+## Summary Table
 
 ```{r}
-sale_count_summary_dt <- sales_dt[!is.na(simple_key), .N, by = simple_key][,
-  .(sale_count = N),
-  by = simple_key
+# clear memory
+rm(list = ls())
+gc(full = TRUE)
+
+# Load data
+## House - site lookup
+spill_lookup <- open_dataset(
+  here("data", "processed", "spill_house_lookup.parquet")
+) |>
+  group_by(house_id) |>
+  summarise(distance_m = min(distance_m, na.rm = TRUE)) |>
+  collect() |>
+  as.data.table()
+
+## Repeated sales
+sales_dt <- import(
+  here("data", "processed", "repeated_transactions", "repeated_sales.parquet"),
+  trust = TRUE
+) |>
+  as.data.table()
+
+spill_lookup[,
+  `:=`(
+    within_250m = distance_m <= 250,
+    within_500m = distance_m <= 500,
+    within_1000m = distance_m <= 1000,
+    outside_1000m = distance_m > 1000
+  )
 ]
 
-
-total_properties <- nrow(sale_count_summary_dt)
-
-repeat_summary_exact <- sale_count_summary_dt[,
+# Repeat purchase summary
+repeat_purchase_summary <- sales_dt[
+  spill_lookup,
+  on = "house_id",
+  nomatch = NA
+][,
+  .(
+    sale_count = .N,
+    within_250m = any(within_250m, na.rm = TRUE),
+    within_500m = any(within_500m, na.rm = TRUE),
+    within_1000m = any(within_1000m, na.rm = TRUE),
+    outside_1000m = any(outside_1000m, na.rm = TRUE) # Added this
+  ),
+  by = repeat_id
+][,
   .(
     n_properties = .N,
-    share_properties = .N / total_properties
+    share_within_250m = mean(within_250m, na.rm = TRUE),
+    share_within_500m = mean(within_500m, na.rm = TRUE),
+    share_within_1000m = mean(within_1000m, na.rm = TRUE),
+    share_outside_1000m = mean(outside_1000m, na.rm = TRUE) # Added this
   ),
   by = sale_count
-][order(sale_count)]
+][,
+  share_properties := n_properties / sum(n_properties)
+][
+  order(sale_count)
+] %>%
+  as_tibble()
 
-repeat_summary_exact <- as_tibble(repeat_summary_exact)
-
-repeat_summary_exact
+# Export to parquet
+output_path_sum <- here::here(
+  "data",
+  "processed",
+  "repeated_transactions",
+  "repeated_sales_summary.parquet"
+)
+arrow::write_parquet(repeat_purchase_summary, output_path_sum)
 ```
-
-

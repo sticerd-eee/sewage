@@ -393,7 +393,12 @@ plan(multisession, workers = 3)
 ## Data paths
 path_house <- here::here("data", "processed", "within_radius_panel", "sales")
 path_site <- here::here("data", "processed", "dat_panel_site", "sales")
-path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
+path_spill <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_stats_qtr.parquet"
+)
 path_house_controls <- here::here("data", "processed", "house_price.parquet")
 
 # House panel data
@@ -1627,7 +1632,12 @@ The regressions estimate changes in house prices over time within the same locat
 
 # Define file paths
 path_house <- here::here("data", "processed", "general_panel", "sales")
-path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
+path_spill <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_stats_qtr.parquet"
+)
 path_house_controls <- here::here("data", "processed", "house_price.parquet")
 
 # Load house panel data
@@ -1668,7 +1678,7 @@ event_data_list <- purrr::map(
     # 1. Load data for radius and add spill statistics
     panel_dt_ext <- house_panel %>%
       filter(radius == rad) %>%
-      filter(!is.na(site_id)) %>% 
+      filter(!is.na(site_id)) %>%
       collect() %>%
       as.data.table()
 
@@ -3273,7 +3283,12 @@ plan(multisession, workers = 3)
 ## Data paths
 path_rental <- here::here("data", "processed", "within_radius_panel", "rentals")
 path_site <- here::here("data", "processed", "dat_panel_site", "rentals")
-path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
+path_spill <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_stats_qtr.parquet"
+)
 path_rental_controls <- here::here(
   "data",
   "processed",
@@ -4191,7 +4206,12 @@ plot_reg_chaisemartin(
 
 # Define file paths
 path_rental_panel <- here::here("data", "processed", "general_panel", "rentals")
-path_spill <- here::here("data", "processed", "agg_spill_stats", "agg_spill_stats_qtr.parquet")
+path_spill <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_stats_qtr.parquet"
+)
 path_rental_controls <- here::here(
   "data",
   "processed",
@@ -4243,7 +4263,7 @@ event_data_list <- purrr::map(
     # 1. Load data for radius and add spill statistics
     panel_dt_ext <- house_panel %>%
       filter(radius == rad) %>%
-      filter(!is.na(site_id)) %>% 
+      filter(!is.na(site_id)) %>%
       collect() %>%
       as.data.table()
 
@@ -5453,7 +5473,7 @@ plot_reg_sunab(
 ```{r plot-rental-sunab-1000m-duration-nc-p90}
 plot_reg_sunab(
   data = results_sunab,
-  radius = 1000,
+  radius = 1000,o
   model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa"
 )
 ```

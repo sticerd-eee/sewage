@@ -68,6 +68,8 @@ CONFIG <- list(
   # Column renaming map: old_name = new_name
   column_name_mapping = c(
     "zp.Address1" = "address_line_01",      # First line of address
+    "zp.Address2" = "address_line_02",      # Second line of address
+    "zp.Address3" = "address_line_03",      # Third line of address
     "zp.Postcode" = "postcode",             # Full postcode (spaces removed later)
     "zp.PropertyType" = "property_type",     # Zoopla property type
     "zp.Bedrooms" = "bedrooms",             # Listed bedrooms
@@ -105,9 +107,9 @@ load_data <- function(file_path = CONFIG$input_dir) {
 
   # Import separately for file-specific tidying
   logger::log_info("Reading files: {paste(basename(files), collapse = ' + ')}")
-  df_2014_2022 <- rio::import(files[[1]]) |> 
+  df_2014_2022 <- rio::import(files[[1]]) %>% 
     select(-cdrc.File)
-  df_2023 <- rio::import(files[[2]]) |> 
+  df_2023 <- rio::import(files[[2]]) %>% 
     select(-V1, -cdrc.File)
 
   # Combine and return
@@ -146,18 +148,18 @@ export_zoopla_data <- function(
 #' @param df Tibble returned by `load_data()`
 #' @return Cleaned tibble
 clean_zoopla_data <- function(df) {
-  df |>
+  df %>%
     # Filter to study years by either rented or latest_to_rent
     filter(
       lubridate::year(`zp.LatestToRent`) %in% CONFIG$years |
         lubridate::year(`zp.Rented`) %in% CONFIG$years
-    ) |>
+    ) %>%
     # Drop address lines (postcode retained, optionally keep Address1)
     {if (CONFIG$keep_address_line_1) {
-      select(., -matches("zp\\.Address[2-9]"))  # Keep Address1, remove others
+      select(., -matches("zp\\.Address[4-9]"))  # Keep Address1, remove others
     } else {
       select(., -contains("zp.Address"))         # Remove all address fields
-    }} |>
+    }} %>%
     # Standardise names using CONFIG map
     rename_with(
       ~ if_else(
@@ -165,19 +167,19 @@ clean_zoopla_data <- function(df) {
         CONFIG$column_name_mapping[.x],
         .x
       )
-    ) |>
+    ) %>%
     # Drop observations without price data
-    filter(!is.na(listing_price)) |> 
+    filter(!is.na(listing_price)) %>% 
     # Postcode normalisation; prefer rented date, else latest_to_rent
     mutate(
       postcode = stringr::str_remove_all(postcode, stringr::fixed(" ")),
       rented_est = dplyr::coalesce(rented, latest_to_rent)
-    ) |>
+    ) %>%
     # LR‑aligned time IDs from rented_est
     mutate(
       qtr_id = (lubridate::year(rented_est) - CONFIG$base_year) * 4 + lubridate::quarter(rented_est),
       month_id = (lubridate::year(rented_est) - CONFIG$base_year) * 12 + lubridate::month(rented_est)
-    ) |>
+    ) %>%
     # Map property types to codes (keep bungalows as "B")
     mutate(
       property_type = stringr::str_to_upper(stringr::str_trim(property_type)),

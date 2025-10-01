@@ -1,0 +1,247 @@
+## Setup
+
+```{r}
+initialise_environment <- function() {
+  required_packages <- c(
+    "arrow",
+    "here",
+    "rio",
+    "dplyr",
+    "stringr",
+    "tidyr",
+    "reclin2",
+    "data.table",
+    "igraph"
+  )
+  invisible(lapply(required_packages, library, character.only = TRUE))
+}
+initialise_environment()
+```
+
+## Load Data
+
+```{r}
+path_rent <- here::here("data", "processed", "zoopla", "zoopla_rentals.parquet")
+rent_og <- import(path_rent)
+```
+
+## Light Address Normalisation
+
+```{r}
+clean_basic <- function(x) {
+  x %>%
+    str_to_upper() %>%
+    str_replace_all("\\s+", " ") %>%
+    str_squish() %>%
+    na_if("")
+}
+
+normalise_postcode <- function(x) {
+  x %>%
+    str_to_upper() %>%
+    str_replace_all("\\s+", "") %>%
+    na_if("")
+}
+
+```
+
+## Prepare Clean Data
+
+```{r}
+rent_dt <- as.data.table(rent_og)
+
+rent_dt[, `:=`(
+  rented_est = as.IDate(rented_est),
+  listing_price = as.numeric(listing_price),
+  postcode_clean = normalise_postcode(postcode),
+  address_line_01_clean = clean_basic(address_line_01),
+  address_line_02_clean = clean_basic(address_line_02),
+  address_line_03_clean = clean_basic(address_line_03)
+)]
+
+rent_dt[,
+  simple_key := {
+    if_else(
+      !is.na(postcode_clean) & !is.na(address_line_01_clean),
+      paste(postcode_clean, address_line_01_clean, address_line_02_clean, address_line_03_clean, sep = "|"),
+      NA_character_
+    )
+  }
+]
+
+rent_dt[grepl("^(NA\\|)*NA$", simple_key), simple_key := NA_character_]
+```
+
+### Exact Repeat Transactions (Baseline)
+
+```{r}
+setorder(rent_dt, simple_key, rented_est, rental_id)
+
+rent_dt[
+  !is.na(simple_key),
+  `:=`(
+    rental_sequence = seq_len(.N),
+    rental_count = .N,
+    lag_date = shift(rented_est),
+    lag_price = shift(listing_price)
+  ),
+  by = simple_key
+]
+
+rent_dt[
+  !is.na(simple_key),
+  `:=`(
+    holding_period_days = as.numeric(rented_est - lag_date),
+    price_change = listing_price - lag_price,
+    pct_change = data.table::fifelse(
+      !is.na(lag_price) & lag_price > 0,
+      listing_price / lag_price - 1,
+      NA_real_
+    )
+  )
+]
+
+repeat_rentals_exact <- rent_dt[!is.na(simple_key) & rental_count > 1]
+repeat_rentals_exact <- as_tibble(repeat_rentals_exact)
+```
+
+## Diagnostics: Exact Repeat Coverage
+
+```{r}
+rental_count_summary_dt <- rent_dt[!is.na(simple_key), .N, by = simple_key][,
+  .(rental_count = N),
+  by = simple_key
+]
+
+
+total_properties <- nrow(rental_count_summary_dt)
+
+repeat_summary_exact <- rental_count_summary_dt[,
+  .(
+    n_properties = .N,
+    share_properties = .N / total_properties
+  ),
+  by = rental_count
+][order(rental_count)]
+
+repeat_summary_exact <- as_tibble(repeat_summary_exact)
+
+repeat_summary_exact
+```
+
+## Export Rental Data (Repeated and Single)
+
+```{r}
+# Prepare repeated rentals (rental_count > 1)
+repeated_rentals_output <- repeat_rentals_exact %>%
+  group_by(simple_key) %>%
+  mutate(
+    repeat_id = cur_group_id(),
+    group_size = n()
+  ) %>%
+  ungroup() %>%
+  arrange(desc(group_size)) %>%
+  select(rental_id, repeat_id)
+
+# Prepare single rentals (rental_count == 1)
+max_repeat_id <- max(repeated_rentals_output$repeat_id)
+single_rentals_output <- rent_dt[!is.na(simple_key) & rental_count == 1] %>%
+  as_tibble() %>%
+  mutate(repeat_id = max_repeat_id + row_number()) %>%
+  select(rental_id, repeat_id)
+
+# Combine both into single output
+all_rentals_output <- bind_rows(repeated_rentals_output, single_rentals_output)
+
+# Create output directory if it doesn't exist
+output_dir <- here::here("data", "processed", "repeated_transactions")
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
+# Export to parquet
+output_path <- here::here(
+  "data",
+  "processed",
+  "repeated_transactions",
+  "repeated_rentals.parquet"
+)
+arrow::write_parquet(all_rentals_output, output_path)
+```
+
+## Summary Table
+
+```{r}
+# clear memory
+rm(list = ls())
+gc(full = TRUE)
+
+## House - site lookup
+spill_lookup <- open_dataset(
+  here("data", "processed", "zoopla", "spill_rental_lookup.parquet")
+) |>
+  group_by(rental_id) |>
+  summarise(distance_m = min(distance_m, na.rm = TRUE)) |>
+  collect() |>
+  as.data.table()
+
+## Repeated rentals
+rentals_dt <- import(
+  here(
+    "data",
+    "processed",
+    "repeated_transactions",
+    "repeated_rentals.parquet"
+  ),
+  trust = TRUE
+) |>
+  as.data.table()
+
+spill_lookup[,
+  `:=`(
+    within_250m = distance_m <= 250,
+    within_500m = distance_m <= 500,
+    within_1000m = distance_m <= 1000,
+    outside_1000m = distance_m > 1000
+  )
+]
+
+# Repeat rental summary
+repeat_rental_summary <- rentals_dt[
+  spill_lookup,
+  on = "rental_id",
+  nomatch = NA
+][,
+  .(
+    rental_count = .N,
+    within_250m = any(within_250m, na.rm = TRUE),
+    within_500m = any(within_500m, na.rm = TRUE),
+    within_1000m = any(within_1000m, na.rm = TRUE),
+    outside_1000m = any(outside_1000m, na.rm = TRUE)
+  ),
+  by = repeat_id
+][,
+  .(
+    n_properties = .N,
+    share_within_250m = mean(within_250m, na.rm = TRUE),
+    share_within_500m = mean(within_500m, na.rm = TRUE),
+    share_within_1000m = mean(within_1000m, na.rm = TRUE),
+    share_outside_1000m = mean(outside_1000m, na.rm = TRUE)
+  ),
+  by = rental_count
+][,
+  share_properties := n_properties / sum(n_properties)
+][
+  order(rental_count)
+] %>%
+  as_tibble()
+
+# Export to parquet
+output_path_sum <- here::here(
+  "data",
+  "processed",
+  "repeated_transactions",
+  "repeated_rentals_summary.parquet"
+)
+arrow::write_parquet(repeat_rental_summary, output_path_sum)
+```
