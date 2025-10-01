@@ -1,0 +1,168 @@
+## Setup
+
+```{r}
+initialise_environment <- function() {
+  required_packages <- c(
+    "arrow",
+    "here",
+    "rio",
+    "dplyr",
+    "stringr",
+    "tidyr",
+    "reclin2",
+    "data.table",
+    "igraph"
+  )
+  invisible(lapply(required_packages, library, character.only = TRUE))
+}
+initialise_environment()
+```
+
+## Load Data
+
+```{r}
+path_sales <- here::here("data", "processed", "house_price.parquet")
+sales_og <- import(path_sales)
+```
+
+## Address Normalisation
+
+```{r}
+clean_basic <- function(x) {
+  x %>%
+    str_to_upper() %>%
+    str_replace_all("\\s+", " ") %>%
+    str_squish() %>%
+    na_if("")
+}
+
+normalise_postcode <- function(x) {
+  x %>%
+    str_to_upper() %>%
+    str_replace_all("\\s+", "") %>%
+    na_if("")
+}
+
+```
+
+## Prepare Clean Data
+
+```{r}
+sales_dt <- as.data.table(sales_og)
+
+sales_dt[, `:=`(
+  date_of_transfer = as.IDate(date_of_transfer),
+  price = as.numeric(price),
+  postcode_clean = normalise_postcode(postcode),
+  paon_clean = clean_basic(paon),
+  saon_clean = clean_basic(saon),
+  street_clean = clean_basic(street)
+)]
+
+sales_dt[,
+  simple_key := {
+    if_else(
+      !is.na(postcode_clean) & !is.na(paon_clean),
+      paste(postcode_clean, paon_clean, saon_clean, street_clean, sep = "|"),
+      NA_character_
+    )
+  }
+]
+
+sales_dt[grepl("^(NA\\|)*NA$", simple_key), simple_key := NA_character_]
+```
+
+## Exact Repeat Transactions
+
+```{r}
+setorder(sales_dt, simple_key, date_of_transfer, transaction_id)
+
+sales_dt[
+  !is.na(simple_key),
+  `:=`(
+    sale_sequence = seq_len(.N),
+    sale_count = .N,
+    lag_date = shift(date_of_transfer),
+    lag_price = shift(price)
+  ),
+  by = simple_key
+]
+
+sales_dt[
+  !is.na(simple_key),
+  `:=`(
+    holding_period_days = as.numeric(date_of_transfer - lag_date),
+    price_change = price - lag_price,
+    pct_change = data.table::fifelse(
+      !is.na(lag_price) & lag_price > 0,
+      price / lag_price - 1,
+      NA_real_
+    )
+  )
+]
+
+repeat_sales_exact <- sales_dt[!is.na(simple_key) & sale_count > 1]
+repeat_sales_exact <- as_tibble(repeat_sales_exact)
+```
+
+## Export Sales Data (Repeated and Single)
+
+```{r}
+# Prepare repeated sales (sale_count > 1)
+repeated_sales_output <- repeat_sales_exact %>%
+  group_by(simple_key) %>%
+  mutate(repeat_id = cur_group_id()) %>%
+  ungroup() %>%
+  select(house_id, repeat_id)
+
+# Prepare single sales (sale_count == 1)
+max_repeat_id <- max(repeated_sales_output$repeat_id)
+single_sales_output <- sales_dt[!is.na(simple_key) & sale_count == 1] %>%
+  as_tibble() %>%
+  mutate(repeat_id = max_repeat_id + row_number()) %>%
+  select(house_id, repeat_id)
+
+# Combine both into single output
+all_sales_output <- bind_rows(repeated_sales_output, single_sales_output)
+
+# Create output directory if it doesn't exist
+output_dir <- here::here("data", "processed", "repeated_transactions")
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
+# Export to parquet
+output_path <- here::here(
+  "data",
+  "processed",
+  "repeated_transactions",
+  "repeated_sales.parquet"
+)
+arrow::write_parquet(all_sales_output, output_path)
+```
+
+## Exact Repeat Coverage
+
+```{r}
+sale_count_summary_dt <- sales_dt[!is.na(simple_key), .N, by = simple_key][,
+  .(sale_count = N),
+  by = simple_key
+]
+
+
+total_properties <- nrow(sale_count_summary_dt)
+
+repeat_summary_exact <- sale_count_summary_dt[,
+  .(
+    n_properties = .N,
+    share_properties = .N / total_properties
+  ),
+  by = sale_count
+][order(sale_count)]
+
+repeat_summary_exact <- as_tibble(repeat_summary_exact)
+
+repeat_summary_exact
+```
+
+

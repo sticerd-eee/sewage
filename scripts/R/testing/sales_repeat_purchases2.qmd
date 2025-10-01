@@ -1,0 +1,412 @@
+## Setup
+
+```{r}
+initialise_environment <- function() {
+  required_packages <- c(
+    "arrow",
+    "here",
+    "rio",
+    "dplyr",
+    "stringr",
+    "tidyr",
+    "reclin2",
+    "data.table",
+    "igraph"
+  )
+  invisible(lapply(required_packages, library, character.only = TRUE))
+}
+initialise_environment()
+```
+
+## Load Data
+
+```{r}
+path_sales <- here::here("data", "processed", "house_price.parquet")
+sales_og <- import(path_sales)
+```
+
+## Sales
+
+### Address Normalisation
+
+```{r}
+clean_basic <- function(x) {
+  x %>%
+    str_to_upper() %>%
+    str_replace_all("\\s+", " ") %>%
+    str_squish() %>%
+    na_if("")
+}
+
+normalise_postcode <- function(x) {
+  x %>%
+    str_to_upper() %>%
+    str_replace_all("\\s+", "") %>%
+    na_if("")
+}
+
+```
+
+### Prepare Clean Data
+
+```{r}
+rent_dt <- as.data.table(sales_og)
+
+rent_dt[, `:=`(
+  date_of_transfer = as.IDate(date_of_transfer),
+  price = as.numeric(price),
+  postcode_clean = normalise_postcode(postcode),
+  paon_clean = clean_basic(paon),
+  saon_clean = clean_basic(saon),
+  street_clean = clean_basic(street)
+)]
+
+rent_dt[,
+  simple_key := {
+    if_else(
+      !is.na(postcode_clean) & !is.na(paon_clean),
+      paste(postcode_clean, paon_clean, saon_clean, street_clean, sep = "|"),
+      NA_character_
+    )
+  }
+]
+
+rent_dt[grepl("^(NA\\|)*NA$", simple_key), simple_key := NA_character_]
+```
+
+### Exact Repeat Transactions
+
+```{r}
+setorder(rent_dt, simple_key, date_of_transfer, transaction_id)
+
+rent_dt[
+  !is.na(simple_key),
+  `:=`(
+    sale_sequence = seq_len(.N),
+    sale_count = .N,
+    lag_date = shift(date_of_transfer),
+    lag_price = shift(price)
+  ),
+  by = simple_key
+]
+
+rent_dt[
+  !is.na(simple_key),
+  `:=`(
+    holding_period_days = as.numeric(date_of_transfer - lag_date),
+    price_change = price - lag_price,
+    pct_change = data.table::fifelse(
+      !is.na(lag_price) & lag_price > 0,
+      price / lag_price - 1,
+      NA_real_
+    )
+  )
+]
+
+repeat_sales_exact <- rent_dt[!is.na(simple_key) & sale_count > 1]
+repeat_sales_exact <- as_tibble(repeat_sales_exact)
+```
+
+### Exact Repeat Coverage
+
+```{r}
+sale_count_summary_dt <- rent_dt[!is.na(simple_key), .N, by = simple_key][,
+  .(sale_count = N),
+  by = simple_key
+]
+
+
+total_properties <- nrow(sale_count_summary_dt)
+
+repeat_summary_exact <- sale_count_summary_dt[,
+  .(
+    n_properties = .N,
+    share_properties = .N / total_properties
+  ),
+  by = sale_count
+][order(sale_count)]
+
+repeat_summary_exact <- as_tibble(repeat_summary_exact)
+
+repeat_summary_exact
+```
+
+
+### Sales: Fuzzy Matching
+
+#### Prepare for reclin2 Matching
+
+```{r}
+rent_dt[,
+  group_exact := fifelse(!is.na(simple_key), .GRP, NA_integer_),
+  by = simple_key
+]
+
+sales_linkage_dt <- rent_dt[, .(
+  house_id,
+  transaction_id,
+  date_of_transfer,
+  price,
+  postcode_clean,
+  paon_clean,
+  saon_clean,
+  street_clean,
+  property_type,
+  old_new,
+  duration,
+  longitude,
+  latitude,
+  simple_key,
+  group_exact
+)]
+
+text_fields <- c("paon_clean", "saon_clean", "street_clean")
+sales_linkage_dt[,
+  (text_fields) := lapply(.SD, function(x) fifelse(is.na(x), "", x)),
+  .SDcols = text_fields
+]
+```
+
+#### Candidate Pairs via reclin2
+
+```{r}
+pairs <- pair_blocking(
+  sales_linkage_dt,
+  on = "postcode_clean",
+  deduplication = TRUE
+)
+
+# candidate pairs
+reclin2::compare_pairs(
+  pairs,
+  on = c("paon_clean", "saon_clean", "street_clean"),
+  default_comparator = reclin2::cmp_jarowinkler(0.9),
+  inplace = TRUE
+)
+```
+
+#### Score Pairs
+
+```{r}
+# Estimate match probabilities using EM algorithm
+model <- reclin2::problink_em(
+  ~ paon_clean + saon_clean + street_clean,
+  data = pairs
+)
+
+# Classify pairs as matches/non-matches based on probabilities
+pairs <- predict(model, pairs, type = "mpost", add = TRUE)
+```
+
+#### Select pairs
+
+```{r}
+# Select pairs based on weights/probabilities
+threshold_weight <- 0.75
+selection_var <- "ntom"
+
+setorder(pairs, -mpost, .x, .y)
+
+pairs_selected <- reclin2::select_greedy(
+  pairs = pairs,
+  variable = selection_var,
+  score = "mpost",
+  threshold = threshold_weight,
+  n = 10L,
+  m = 10L
+)
+```
+
+#### Link data
+
+```{r}
+# Create the linked dataset using selected pairs
+linked_data_set <- reclin2::link(
+  pairs_selected,
+  selection = selection_var,
+  keep_from_pairs = c(".x", ".y", "mpost", selection_var)
+)
+
+linked_data_set[,
+  match_exact := fifelse(
+    !is.na(simple_key.x) & !is.na(simple_key.y) & simple_key.x == simple_key.y,
+    1L,
+    0L
+  )
+]
+
+# Reorder columns so .x and .y variables are next to each other
+x_cols <- names(linked_data_set)[grepl("\\.x$", names(linked_data_set))]
+y_cols <- names(linked_data_set)[grepl("\\.y$", names(linked_data_set))]
+other_cols <- names(linked_data_set)[
+  !grepl("\\.(x|y)$", names(linked_data_set))
+]
+
+# Create pairs of x and y columns
+base_names <- unique(gsub("\\.x$", "", x_cols))
+paired_cols <- c()
+for (base in base_names) {
+  x_col <- paste0(base, ".x")
+  y_col <- paste0(base, ".y")
+  if (x_col %in% x_cols && y_col %in% y_cols) {
+    paired_cols <- c(paired_cols, x_col, y_col)
+  }
+}
+
+# Add any remaining x or y columns that didn't have pairs
+remaining_cols <- c(
+  x_cols[!x_cols %in% paired_cols],
+  y_cols[!y_cols %in% paired_cols]
+)
+
+# Reorder the dataset
+column_order <- c(other_cols, paired_cols, remaining_cols)
+linked_data_set <- linked_data_set[, column_order, with = FALSE]
+
+linked_data_set |>
+  filter(
+    date_of_transfer.x != date_of_transfer.y,
+    match_exact == 0L,
+    saon_clean.x == saon_clean.y
+  ) |>
+  arrange(desc(mpost)) |>
+  head(10000) |>
+  View()
+```
+
+### Build Property Panel
+
+```{r}
+threshold_fuzzy <- 0.7
+
+if (!"flagged_fuzzy" %in% names(rent_dt)) {
+  rent_dt[, flagged_fuzzy := FALSE]
+}
+
+rent_dt[,
+  property_id := fifelse(
+    !is.na(group_exact),
+    sprintf("exact_%07d", group_exact),
+    NA_character_
+  )
+]
+
+fuzzy_edges <- linked_data_set[
+  mpost >= threshold_fuzzy,
+  .(from = transaction_id.x, to = transaction_id.y, mpost)
+]
+
+if (nrow(fuzzy_edges) > 0) {
+  g <- igraph::graph_from_data_frame(
+    fuzzy_edges[, .(from, to)],
+    directed = FALSE
+  )
+  comps <- igraph::components(g)
+
+  component_map <- data.table(
+    transaction_id = names(comps$membership),
+    fuzzy_component = comps$membership
+  )
+
+  component_ids <- merge(
+    component_map,
+    rent_dt[, .(transaction_id, property_id)],
+    by = "transaction_id",
+    all.x = TRUE
+  )
+
+  resolved_ids <- component_ids[,
+    {
+      existing_ids <- unique(na.omit(property_id))
+
+      if (length(existing_ids) == 1L) {
+        .(property_id = existing_ids, needs_review = FALSE)
+      } else if (length(existing_ids) > 1L) {
+        .(property_id = existing_ids[1L], needs_review = TRUE)
+      } else {
+        .(
+          property_id = sprintf("fuzzy_%07d", fuzzy_component[1L]),
+          needs_review = FALSE
+        )
+      }
+    },
+    by = fuzzy_component
+  ]
+
+  component_map <- merge(
+    component_map,
+    resolved_ids,
+    by = "fuzzy_component",
+    all.x = TRUE
+  )
+
+  rent_dt <- merge(
+    rent_dt,
+    component_map[, .(
+      transaction_id,
+      property_id_fuzzy = property_id,
+      needs_review
+    )],
+    by = "transaction_id",
+    all.x = TRUE
+  )
+
+  rent_dt[
+    !is.na(property_id_fuzzy),
+    flagged_fuzzy := fifelse(needs_review, TRUE, flagged_fuzzy, na = FALSE)
+  ]
+
+  rent_dt[
+    is.na(property_id) & !is.na(property_id_fuzzy),
+    property_id := property_id_fuzzy
+  ]
+
+  rent_dt[, c("property_id_fuzzy", "needs_review") := NULL]
+}
+
+setorder(rent_dt, property_id, date_of_transfer, transaction_id)
+
+panel_dt <- rent_dt[!is.na(property_id)]
+
+# Ensure unmatched transactions are treated as single-sale properties in the summary
+rent_dt[,
+  property_id_combined := fifelse(
+    !is.na(property_id),
+    property_id,
+    sprintf("unmatched_%07d", .I)
+  )
+]
+
+combined_summary_dt <- rent_dt[,
+  .(sale_count = .N),
+  by = property_id_combined
+]
+
+total_properties_combined <- nrow(combined_summary_dt)
+
+repeat_summary_combined <- combined_summary_dt[,
+  .(
+    n_properties = .N,
+    share_properties = .N / total_properties_combined
+  ),
+  by = sale_count
+][order(sale_count)]
+
+repeat_summary_combined <- as_tibble(repeat_summary_combined)
+
+rent_dt[, property_id_combined := NULL]
+
+repeat_summary_combined
+
+panel_summary <- panel_dt[,
+  .(
+    n_sales = .N,
+    first_sale = min(date_of_transfer, na.rm = TRUE),
+    last_sale = max(date_of_transfer, na.rm = TRUE),
+    n_flagged = sum(flagged_fuzzy, na.rm = TRUE)
+  ),
+  by = property_id
+]
+
+panel_summary[order(-n_sales)]
+```

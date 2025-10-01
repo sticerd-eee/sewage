@@ -58,7 +58,7 @@ setup_logging <- function() {
 CONFIG <- list(
   processed_dir = here::here("data", "processed"),
   db_path = here::here("data", "duckdb.duckdb"),
-  radius_thresholds = c(250, 500, 1000),
+  radius_thresholds = c(250, 500, 1000, 2000),
   output_dir = here::here("data", "processed", "general_panel", "sales"),
   base_year = 2021
 )

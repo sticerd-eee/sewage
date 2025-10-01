@@ -1077,3 +1077,109 @@ knitr::include_graphics(here(
 ```
 
 :::
+
+## Repeated Purchases {#sec-05-04-repeated-purchases}
+
+I examine properties with repeat sales to check if we have enough observations to used fixed effects à la Palmquist, 1982. The table below shows, for each sale count, the number and share of properties with that many sales, as well as the proportion of those sales that occur within 250m, 500m, and 1000m of spill sites.
+
+```{r, repeated_purchases_table}
+# Pre-compute distance flags per house_id (avoids many-to-many join explosion)
+house_distance_dt <- as.data.table(spill_lookup)[,
+  .(
+    within_250m = any(distance_m <= 250, na.rm = TRUE),
+    within_500m = any(distance_m <= 500, na.rm = TRUE),
+    within_1000m = any(distance_m <= 1000, na.rm = TRUE)
+  ),
+  by = house_id
+]
+
+# Load all sales data (includes both single and repeat sales with repeat_id)
+all_sales_dt <- as.data.table(import(
+  here("data", "processed", "repeated_transactions", "repeated_sales.parquet"),
+  trust = TRUE
+))
+
+# Join with distance flags, aggregate by repeat_id, then by sale_count
+repeat_purchase_summary <- all_sales_dt[
+  house_distance_dt,
+  on = "house_id",
+  nomatch = NA
+][,
+  .(
+    sale_count = .N,
+    within_250m = any(within_250m, na.rm = TRUE),
+    within_500m = any(within_500m, na.rm = TRUE),
+    within_1000m = any(within_1000m, na.rm = TRUE)
+  ),
+  by = repeat_id
+][,
+  .(
+    n_properties = .N,
+    share_within_250m = mean(within_250m, na.rm = TRUE),
+    share_within_500m = mean(within_500m, na.rm = TRUE),
+    share_within_1000m = mean(within_1000m, na.rm = TRUE)
+  ),
+  by = sale_count
+][,
+  share_properties := n_properties / sum(n_properties)
+][
+  order(sale_count)
+] %>%
+  as_tibble()
+
+# Display the table
+reactable(
+  repeat_purchase_summary,
+  columns = list(
+    sale_count = colDef(
+      name = "Sale Count",
+      format = colFormat(digits = 0)
+    ),
+    n_properties = colDef(
+      name = "# Properties",
+      format = colFormat(separators = TRUE)
+    ),
+    share_properties = colDef(
+      name = "Share of Properties",
+      format = colFormat(percent = TRUE, digits = 2)
+    ),
+    share_within_250m = colDef(
+      name = "Within 250m",
+      format = colFormat(percent = TRUE, digits = 2)
+    ),
+    share_within_500m = colDef(
+      name = "Within 500m",
+      format = colFormat(percent = TRUE, digits = 2)
+    ),
+    share_within_1000m = colDef(
+      name = "Within 1000m",
+      format = colFormat(percent = TRUE, digits = 2)
+    )
+  ),
+  columnGroups = list(
+    colGroup(
+      name = "Property Distribution",
+      columns = c("n_properties", "share_properties")
+    ),
+    colGroup(
+      name = "Share of Sales Near Spill Sites",
+      columns = c(
+        "share_within_250m",
+        "share_within_500m",
+        "share_within_1000m"
+      )
+    )
+  ),
+  defaultColDef = colDef(
+    headerStyle = list(fontSize = "0.8em", whiteSpace = "wrap"),
+    style = list(fontSize = "0.75em"),
+    minWidth = 80
+  ),
+  resizable = TRUE,
+  filterable = FALSE,
+  defaultPageSize = 10,
+  compact = TRUE,
+  style = list(maxWidth = "100%", overflowX = "auto")
+)
+```
+

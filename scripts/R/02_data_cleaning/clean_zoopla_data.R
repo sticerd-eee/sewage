@@ -56,6 +56,8 @@ CONFIG <- list(
   # Time-frame
   years = 2021:2023,
   base_year = 2021,
+  # Data retention options
+  keep_address_line_1 = TRUE,  # Toggle to FALSE to exclude address data
   # Input file paths
   input_dir = here::here("data", "raw", "zoopla"),
   
@@ -65,6 +67,7 @@ CONFIG <- list(
   ),
   # Column renaming map: old_name = new_name
   column_name_mapping = c(
+    "zp.Address1" = "address_line_01",      # First line of address
     "zp.Postcode" = "postcode",             # Full postcode (spaces removed later)
     "zp.PropertyType" = "property_type",     # Zoopla property type
     "zp.Bedrooms" = "bedrooms",             # Listed bedrooms
@@ -149,8 +152,12 @@ clean_zoopla_data <- function(df) {
       lubridate::year(`zp.LatestToRent`) %in% CONFIG$years |
         lubridate::year(`zp.Rented`) %in% CONFIG$years
     ) |>
-    # Drop address lines (postcode retained)
-    select(-contains("zp.Address")) |>
+    # Drop address lines (postcode retained, optionally keep Address1)
+    {if (CONFIG$keep_address_line_1) {
+      select(., -matches("zp\\.Address[2-9]"))  # Keep Address1, remove others
+    } else {
+      select(., -contains("zp.Address"))         # Remove all address fields
+    }} |>
     # Standardise names using CONFIG map
     rename_with(
       ~ if_else(
