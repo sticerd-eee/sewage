@@ -449,7 +449,8 @@ make_one_plot <- function(idx, sid, qtr) {
     }
   }
 
-  # plot
+    # plot (keep geometry; remove all clutter)
+    # plot (keep geometry; remove EVERYTHING else)
   p <- ggplot() +
     # River flow with BLUE arrows
     geom_segment(
@@ -458,26 +459,35 @@ make_one_plot <- function(idx, sid, qtr) {
       linewidth = 0.25, alpha = 0.7, color = COL_RIVER,
       arrow = grid::arrow(length = grid::unit(2, "mm"), type = "closed")
     ) +
-    # Shortest paths (color by relation)
+    # Shortest paths (bold lines; color by relation)
     { if (!is.null(paths_sf)) geom_sf(data = paths_sf, aes(color = relation), linewidth = 1, alpha = 0.9) else NULL } +
-    # Assets colored by relation
+    # Assets as red/green dots
     geom_sf(data = assets_sf, aes(color = spill_relation), size = 2.4) +
-    # Site marker
+    # Site marker (black star)
     geom_sf(data = site_pt, shape = 8, size = 4, stroke = 1.2, color = "black") +
-    coord_sf(crs = sf::st_crs(CRS_BNG)) +
-    scale_color_manual(values = REL_COLORS, breaks = c("downstream_of_site","upstream_of_site"),
-                       labels = c("Downstream of site", "Upstream of site"), name = "Relation") +
-    labs(
-      title = sprintf("Site %s — %s, %s (r = %dm)", as.character(sid), toupper(KIND), as.character(qtr), RADIUS),
-      subtitle = "Blue arrows show river flow. Colors show classification relative to the SITE.\nBold lines are sample shortest paths along the network.",
-      x = "Easting (m, BNG)", y = "Northing (m, BNG)"
-    ) +
-    theme_minimal(base_size = 12) +
-    theme(legend.position = "bottom")
+    # Tight extent; no axes/grid/datum
+    coord_sf(crs = sf::st_crs(CRS_BNG), expand = FALSE, datum = NA) +
+    # Keep red/green mapping; suppress legend entirely
+    scale_color_manual(values = REL_COLORS, guide = "none") +
+    # Explicitly blank any titles/labels that might be carried over
+    ggtitle(NULL) +
+    labs(title = NULL, subtitle = NULL, caption = NULL, x = NULL, y = NULL, colour = NULL, fill = NULL) +
+    theme_void(base_size = 12) +
+    theme(
+      legend.position = "none",
+      plot.title = element_blank(),
+      plot.subtitle = element_blank(),
+      plot.caption = element_blank(),
+      axis.title = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_blank(),
+      plot.margin = unit(c(0, 0, 0, 0), "pt"),
+      panel.spacing = unit(0, "pt")
+    )
 
   outfile <- file.path(OUT_DIR, sprintf("updown_map_MULTI_%s_site%s_q%s_r%d_%02d.png",
                                         KIND, as.character(sid), as.character(qtr), RADIUS, idx))
-  ggsave(outfile, p, width = 9, height = 7, dpi = 300)
+  ggsave(outfile, p, width = 9, height = 7, dpi = 300, bg = "white")
   message("Wrote: ", outfile)
   TRUE
 }

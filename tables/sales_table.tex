@@ -1,0 +1,35 @@
+\begin{table}
+\centering
+\begin{talltblr}[         %% tabularray outer open
+caption={Effect of Sewage Spills on Log House Prices},
+note{}={Heteroskedasticity-robust standard errors in parentheses.},
+note{ }={Significance levels: * p < 0.10, ** p < 0.05, *** p < 0.01.},
+note{  }={Reference category: properties with zero sewage spills within 250m.},
+note{   }={Controls in the table include property type (detached, semi-detached, terraced, flats/maisonettes, other), old/new (binary variable indicating whether the property was a newly built property that had not been previously sold), and duration (freehold vs leasehold).},
+]                     %% tabularray outer close
+{                     %% tabularray inner open
+colspec={Q[]Q[]Q[]Q[]},
+hline{2}={1-4}{solid, black, 0.05em},
+hline{12}={1-4}{solid, black, 0.05em},
+hline{1}={1-4}{solid, black, 0.1em},
+hline{16}={1-4}{solid, black, 0.1em},
+column{2-4}={}{halign=c},
+column{1}={}{halign=l},
+}                     %% tabularray inner close
+& OLS & FE & FE + Controls \\
+Constant (zero spills) & \num{12.443}*** &  &  \\
+& (\num{0.006}) &  &  \\
+Spill count Q1 & \num{-0.075}*** & \num{-0.031}** & \num{-0.031}** \\
+& (\num{0.007}) & (\num{0.014}) & (\num{0.013}) \\
+Spill count Q2 & \num{-0.085}*** & \num{-0.032}** & \num{-0.021}* \\
+& (\num{0.007}) & (\num{0.014}) & (\num{0.012}) \\
+Spill count Q3 & \num{-0.157}*** & \num{-0.057}*** & \num{-0.031}*** \\
+& (\num{0.007}) & (\num{0.013}) & (\num{0.012}) \\
+Spill count Q4 & \num{-0.206}*** & \num{-0.054}*** & \num{-0.030}** \\
+& (\num{0.007}) & (\num{0.014}) & (\num{0.013}) \\
+Observations & \num{172103} & \num{171537} & \num{171537} \\
+R-squared & \num{0.007} & \num{0.476} & \num{0.564} \\
+LSOA FE & No & Yes & Yes \\
+Property controls & No & No & Yes \\
+\end{talltblr}
+\end{table}

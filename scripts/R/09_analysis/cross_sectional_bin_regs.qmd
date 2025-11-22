@@ -1,0 +1,882 @@
+---
+author: "Jacopo Olivieri"
+date: 2024-10-15
+editor: source
+format: html
+number-sections: true
+number-depth: 4
+execute: 
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+  fig-width: 9
+  fig-asp: 0.618 
+  fig-align: center
+---
+
+# Cross-Sectional Binned Regressions
+
+```{r setup}
+# Initialize packages with version control
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Run manual renv commands if needed
+# renv::activate() # Activate the project library
+# renv::restore()  # Restore the environment if running for first time
+# renv::snapshot()  # After adding/updating packages, snapshot the state
+
+# Load required packages
+required_packages <- c(
+  "arrow",
+  "rmarkdown",
+  "rio",
+  "tidyverse",
+  "purrr",
+  "here",
+  "janitor",
+  "sf",
+  "sp",
+  "rnaturalearth",
+  "rnaturalearthdata",
+  "rnrfa",
+  "DescTools",
+  "gridExtra",
+  "modelsummary",
+  "tmap",
+  "leaflet",
+  "htmltools",
+  "servr",
+  "viridis",
+  "readxl",
+  "reactable",
+  "plotly",
+  "ggExtra",
+  "sandwich",
+  "fixest",
+  "gt",
+  "flextable"
+)
+
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(required_packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+```
+
+## Sewage Spills
+
+For each year, we classify sewage spill sites into states based on their spill metrics: "0" for no spills, and quartiles Q1-Q4 for sites with positive spills. We then calculate the probability of transitions between these states from one year to the next.
+
+```{r}
+# Sewage Spills
+path_spill_yr <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_yr.parquet"
+)
+
+## Load sewage spills
+spills <- import(path_spill_yr, trust = TRUE)
+```
+
+```{r prepare-transition-data}
+# Function to bin spill metrics by year (0 or quartiles for positive values)
+bin_spills_by_year <- function(data, metric_col) {
+  data %>%
+    group_by(year) %>%
+    mutate(
+      metric_value = .data[[metric_col]],
+      # For non-zero values, compute quartiles within each year
+      metric_for_quartile = if_else(metric_value == 0, NA_real_, metric_value),
+      quartile = ntile(metric_for_quartile, 4),
+      state = case_when(
+        is.na(metric_value) ~ NA_character_,
+        metric_value == 0 ~ "0",
+        TRUE ~ paste0("Q", quartile)
+      )
+    ) %>%
+    ungroup() %>%
+    select(site_id, year, state)
+}
+
+# Prepare transition data for spill count
+spill_count_states <- bin_spills_by_year(spills, "spill_count_yr") %>%
+  rename(state_count = state)
+
+# Prepare transition data for spill hours
+spill_hrs_states <- bin_spills_by_year(spills, "spill_hrs_yr") %>%
+  rename(state_hrs = state)
+
+# Create year-to-year transitions (t -> t+1)
+# Only keep sites that have data in both consecutive years
+create_transitions <- function(state_data, state_col) {
+  state_data %>%
+    arrange(site_id, year) %>%
+    group_by(site_id) %>%
+    mutate(
+      state_next = lead(.data[[state_col]]),
+      year_next = lead(year)
+    ) %>%
+    ungroup() %>%
+    filter(
+      !is.na(.data[[state_col]]),
+      !is.na(state_next),
+      year_next == year + 1 # Ensure consecutive years
+    ) %>%
+    rename(
+      state_current = !!state_col,
+      transition_year = year
+    ) %>%
+    select(site_id, transition_year, state_current, state_next)
+}
+
+transitions_count <- create_transitions(spill_count_states, "state_count")
+transitions_hrs <- create_transitions(spill_hrs_states, "state_hrs")
+```
+
+```{r calculate-transition-probabilities}
+# Function to calculate transition probability matrix
+calc_transition_matrix <- function(transitions_data) {
+  # Count transitions
+  transition_counts <- transitions_data %>%
+    count(state_current, state_next, name = "n_transitions")
+
+  # Calculate totals for each starting state
+  state_totals <- transition_counts %>%
+    group_by(state_current) %>%
+    summarise(total = sum(n_transitions), .groups = "drop")
+
+  # Calculate probabilities
+  transition_probs <- transition_counts %>%
+    left_join(state_totals, by = "state_current") %>%
+    mutate(
+      probability = n_transitions / total,
+      pct_label = sprintf("%.1f%%", probability * 100)
+    ) %>%
+    select(state_current, state_next, probability, pct_label)
+
+  return(transition_probs)
+}
+
+# Calculate transition matrices for both metrics
+trans_prob_count <- calc_transition_matrix(transitions_count)
+trans_prob_hrs <- calc_transition_matrix(transitions_hrs)
+```
+
+```{r plot-phase-diagrams, fig.width=12, fig.asp=0.5}
+# Function to create phase diagram heatmap
+plot_phase_diagram <- function(trans_prob_data, title) {
+  # Define state order
+  state_levels <- c("0", "Q1", "Q2", "Q3", "Q4")
+
+  # Ensure all state combinations exist (fill missing with 0)
+  complete_grid <- expand.grid(
+    state_current = state_levels,
+    state_next = state_levels,
+    stringsAsFactors = FALSE
+  )
+
+  plot_data <- complete_grid %>%
+    left_join(trans_prob_data, by = c("state_current", "state_next")) %>%
+    mutate(
+      probability = replace_na(probability, 0),
+      pct_label = if_else(
+        probability == 0,
+        "",
+        sprintf("%.1f%%", probability * 100)
+      ),
+      state_current = factor(state_current, levels = state_levels),
+      state_next = factor(state_next, levels = rev(state_levels))
+    )
+
+  ggplot(
+    plot_data,
+    aes(x = state_current, y = state_next, fill = probability)
+  ) +
+    geom_tile(color = "white", linewidth = 0.5) +
+    geom_text(
+      aes(label = pct_label),
+      color = "white",
+      size = 3.5,
+      fontface = "bold"
+    ) +
+    scale_fill_viridis_c(
+      option = "mako",
+      direction = -1,
+      limits = c(0, 1),
+      begin = 0.15,
+      end = 1,
+      labels = scales::percent_format(accuracy = 1),
+      name = "Transition\nProbability"
+    ) +
+    labs(
+      title = title,
+      x = "State in Year t",
+      y = "State in Year t+1"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      panel.grid = element_blank(),
+      axis.text = element_text(face = "bold")
+    ) +
+    coord_fixed()
+}
+
+# Create plots
+p_count <- plot_phase_diagram(
+  trans_prob_count,
+  "Spill Count Quartile (2021-2023 Pooled)"
+)
+ggsave(
+  filename = here::here("output", "figures", "spill_count_persistence.pdf"),
+  plot = p_count,
+  width = 1.618 * 8,
+  height = 8,
+  dpi = 300,
+  unit = "in"
+)
+
+p_hrs <- plot_phase_diagram(
+  trans_prob_hrs,
+  "Spill Hours Quartile (2021-2023 Pooled)"
+)
+ggsave(
+  filename = here::here("output", "figures", "spill_hours_persistence.pdf"),
+  plot = p_hrs,
+  width = 8,
+  height = 1.618 * 8,
+  dpi = 300,
+  unit = "in"
+)
+```
+
+### Spill Count
+
+```{r}
+p_count
+```
+
+### Spill Hours
+
+```{r}
+p_hrs
+```
+
+
+
+## Sales
+
+We collapse the data to the household level. For each household, we compute the sum of spills from spill sites within a 250m radius over the entire period (2021-2023), and we record the quartile bin for that total so that later regressions compare properties across spill-intensity quartiles.
+
+```{r load-data-sales}
+# House Prices
+path_sales <- here::here("data", "processed", "house_price.parquet")
+
+# Panel Data
+
+## General
+path_general_panel_sales <- here::here(
+  "data",
+  "processed",
+  "general_panel",
+  "sales"
+)
+
+rad <- 250L
+base_year <- 2021
+gen_panel_sales <- arrow::open_dataset(path_general_panel_sales) |>
+  filter(radius == rad) |>
+  collect() |>
+  mutate(
+    year = (qtr_id - 1) %/% 4 + base_year,
+    year_transfer = qtr_id_transfer %/% 4 + base_year
+  ) |>
+  distinct(house_id, site_id, year, year_transfer, distance_m, within_radius)
+
+sales <- import(path_sales, trust = TRUE) |>
+  mutate(year = (qtr_id - 1) %/% 4 + 1) |>
+  select(
+    -transaction_id,
+    -date_of_transfer,
+    -quality,
+    -paon,
+    -saon,
+    -street,
+    -locality,
+    -town_city,
+    -district,
+    -county,
+    -ppd_category,
+    -record_status
+  ) |>
+  mutate(
+    property_type = forcats::as_factor(property_type),
+    old_new = forcats::as_factor(old_new),
+    duration = forcats::as_factor(duration)
+  )
+
+## Assemble sales data
+dat_sales <- gen_panel_sales |>
+  left_join(sales, by = join_by(house_id, year)) |>
+  left_join(spills, by = join_by(site_id, year))
+```
+
+```{r prep-data-sales}
+spill_sales_collapsed <- gen_panel_sales |>
+  filter(!is.na(site_id)) |>
+  left_join(spills, by = join_by(site_id, year)) |>
+  # filter(is.na(distance_m) | distance_m <= 125) |>
+  group_by(house_id) |>
+  summarise(
+    spill_count = sum(spill_count_yr, na.rm = TRUE),
+    spill_hrs = sum(spill_hrs_yr, na.rm = TRUE),
+  )
+
+# Helper to bucket spill metrics into "0 spills" plus four quartiles
+bin_spill_measure <- function(x) {
+  x_for_ntile <- dplyr::if_else(x == 0, NA_real_, x, missing = NA_real_)
+  quartile <- dplyr::ntile(x_for_ntile, 4)
+  bins <- dplyr::case_when(
+    is.na(x) ~ NA_character_,
+    x == 0 ~ "0 spills",
+    TRUE ~ paste0("Q", quartile)
+  )
+  factor(bins, levels = c("0 spills", paste0("Q", 1:4)))
+}
+
+dat <- sales |>
+  left_join(spill_sales_collapsed, by = join_by(house_id)) |>
+  mutate(
+    spill_count_bin = bin_spill_measure(spill_count),
+    spill_hrs_bin = bin_spill_measure(spill_hrs),
+    log_price = log(price)
+  )
+```
+
+```{r}
+#| tbl-pos: H
+#| layout-ncol: 1
+
+dat_no_na <- dat |>
+  filter(
+    !is.na(spill_count),
+    !is.na(spill_hrs),
+    !is.na(lsoa)
+  ) |>
+  mutate(
+    spill_count_bin = forcats::fct_relevel(spill_count_bin, "0 spills"),
+    spill_count_bin = forcats::fct_drop(spill_count_bin),
+    spill_hrs_bin = forcats::fct_relevel(spill_hrs_bin, "0 spills"),
+    spill_hrs_bin = forcats::fct_drop(spill_hrs_bin),
+    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    property_type = forcats::fct_drop(property_type),
+    old_new = forcats::fct_drop(old_new),
+    duration = forcats::fct_drop(duration)
+  )
+
+model_spill_count <- fixest::feols(
+  log_price ~ spill_count_bin,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+model_spill_count_lsoa <- fixest::feols(
+  log_price ~ spill_count_bin | lsoa,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+model_spill_hrs <- fixest::feols(
+  log_price ~ spill_hrs_bin,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+model_spill_hrs_lsoa <- fixest::feols(
+  log_price ~ spill_hrs_bin | lsoa,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+model_spill_count_lsoa_controls <- fixest::feols(
+  log_price ~ spill_count_bin + property_type + old_new + duration | lsoa,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+model_spill_hrs_lsoa_controls <- fixest::feols(
+  log_price ~ spill_hrs_bin + property_type + old_new + duration | lsoa,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+coef_labels <- c(
+  "(Intercept)" = "Constant (zero spills)",
+  "spill_count_binQ1" = "Spill count Q1",
+  "spill_count_binQ2" = "Spill count Q2",
+  "spill_count_binQ3" = "Spill count Q3",
+  "spill_count_binQ4" = "Spill count Q4",
+  "spill_hrs_binQ1" = "Spill duration Q1",
+  "spill_hrs_binQ2" = "Spill duration Q2",
+  "spill_hrs_binQ3" = "Spill duration Q3",
+  "spill_hrs_binQ4" = "Spill duration Q4"
+)
+
+gof_map <- tibble::tribble(
+  ~raw        , ~clean         , ~fmt ,
+  "nobs"      , "Observations" ,    0 ,
+  "r.squared" , "R-squared"    ,    3
+)
+
+table_notes <- c(
+  "Heteroskedasticity-robust standard errors in parentheses.",
+  "Significance levels: * p < 0.10, ** p < 0.05, *** p < 0.01.",
+  "Reference category: properties with zero sewage spills within 250m.",
+  "Controls in the table include property type (detached, semi-detached, terraced, flats/maisonettes, other), old/new (binary variable indicating whether the property was a newly built property that had not been previously sold), and duration (freehold vs leasehold)."
+)
+
+create_regression_table <- function(
+  models,
+  add_rows,
+  title,
+  column_labels,
+  spanner_map,
+  source_note = NULL
+) {
+  base_table <- modelsummary::modelsummary(
+    models,
+    output = "gt",
+    estimate = "{estimate}{stars}",
+    statistic = "({std.error})",
+    stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+    fmt = 3,
+    coef_map = coef_labels,
+    gof_map = gof_map,
+    add_rows = add_rows,
+    notes = table_notes
+  )
+
+  enhanced_table <- base_table |>
+    gt::tab_header(title = gt::md(paste0("**", title, "**"))) |>
+    gt::cols_label(.list = column_labels) |>
+    gt::cols_align(
+      align = "center",
+      columns = dplyr::all_of(names(column_labels))
+    ) |>
+    gt::tab_options(
+      table.width = gt::px(640),
+      data_row.padding = gt::px(2),
+      heading.title.font.size = 14,
+      column_labels.font.weight = "bold",
+      column_labels.font.size = 12,
+      table.font.size = 11
+    )
+
+  if (!is.null(source_note)) {
+    enhanced_table <- gt::tab_source_note(
+      enhanced_table,
+      source_note = source_note
+    )
+  }
+
+  purrr::reduce(
+    names(spanner_map),
+    .init = enhanced_table,
+    .f = function(tbl, spanner) {
+      gt::tab_spanner(
+        tbl,
+        label = spanner,
+        columns = dplyr::all_of(spanner_map[[spanner]])
+      )
+    }
+  )
+}
+
+export_regression_docx <- function(models, add_rows, path) {
+  dir_path <- dirname(path)
+  if (!dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
+  }
+
+  modelsummary::modelsummary(
+    models,
+    output = path,
+    estimate = "{estimate}{stars}",
+    statistic = "({std.error})",
+    stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+    fmt = 3,
+    coef_map = coef_labels,
+    gof_map = gof_map,
+    add_rows = add_rows,
+    notes = table_notes
+  )
+}
+
+sales_models <- list(
+  "Model 1" = model_spill_count,
+  "Model 2" = model_spill_count_lsoa,
+  "Model 3" = model_spill_count_lsoa_controls,
+  "Model 4" = model_spill_hrs,
+  "Model 5" = model_spill_hrs_lsoa,
+  "Model 6" = model_spill_hrs_lsoa_controls
+)
+
+sales_column_labels <- c(
+  "Model 1" = "OLS",
+  "Model 2" = "FE",
+  "Model 3" = "FE + Controls",
+  "Model 4" = "OLS",
+  "Model 5" = "FE",
+  "Model 6" = "FE + Controls"
+)
+
+sales_spanner_map <- list(
+  "Spill count bins" = names(sales_column_labels)[1:3],
+  "Spill duration bins" = names(sales_column_labels)[4:6]
+)
+
+sales_add_rows <- tibble::tribble(
+  ~term               , ~`Model 1` , ~`Model 2` , ~`Model 3` , ~`Model 4` , ~`Model 5` , ~`Model 6` ,
+  "LSOA FE"           , "No"       , "Yes"      , "Yes"      , "No"       , "Yes"      , "Yes"      ,
+  # "Quarter FE", "No", "Yes", "Yes", "No", "Yes", "Yes",
+  "Property controls" , "No"       , "No"       , "Yes"      , "No"       , "No"       , "Yes"
+)
+
+sales_table <- create_regression_table(
+  models = sales_models,
+  add_rows = sales_add_rows,
+  title = "Effect of Sewage Spills on Log House Prices",
+  column_labels = sales_column_labels,
+  spanner_map = sales_spanner_map,
+  source_note = "Dependent variable: log(price)"
+)
+
+sales_table
+```
+
+
+Only spill count
+```{r}
+# Only spill count
+#| tbl-pos: H
+#| layout-ncol: 1
+
+dat_no_na <- dat |>
+  filter(
+    !is.na(spill_count),
+    !is.na(spill_hrs),
+    !is.na(lsoa)
+  ) |>
+  mutate(
+    spill_count_bin = forcats::fct_relevel(spill_count_bin, "0 spills"),
+    spill_count_bin = forcats::fct_drop(spill_count_bin),
+    spill_hrs_bin = forcats::fct_relevel(spill_hrs_bin, "0 spills"),
+    spill_hrs_bin = forcats::fct_drop(spill_hrs_bin),
+    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    property_type = forcats::fct_drop(property_type),
+    old_new = forcats::fct_drop(old_new),
+    duration = forcats::fct_drop(duration)
+  )
+
+model_spill_count <- fixest::feols(
+  log_price ~ spill_count_bin,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+model_spill_count_lsoa <- fixest::feols(
+  log_price ~ spill_count_bin | lsoa,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+model_spill_hrs <- fixest::feols(
+  log_price ~ spill_hrs_bin,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+model_spill_hrs_lsoa <- fixest::feols(
+  log_price ~ spill_hrs_bin | lsoa,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+model_spill_count_lsoa_controls <- fixest::feols(
+  log_price ~ spill_count_bin + property_type + old_new + duration | lsoa,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+model_spill_hrs_lsoa_controls <- fixest::feols(
+  log_price ~ spill_hrs_bin + property_type + old_new + duration | lsoa,
+  data = dat_no_na,
+  vcov = "hetero"
+)
+
+coef_labels <- c(
+  "(Intercept)" = "Constant (zero spills)",
+  "spill_count_binQ1" = "Spill count Q1",
+  "spill_count_binQ2" = "Spill count Q2",
+  "spill_count_binQ3" = "Spill count Q3",
+  "spill_count_binQ4" = "Spill count Q4",
+  "spill_hrs_binQ1" = "Spill duration Q1",
+  "spill_hrs_binQ2" = "Spill duration Q2",
+  "spill_hrs_binQ3" = "Spill duration Q3",
+  "spill_hrs_binQ4" = "Spill duration Q4"
+)
+
+gof_map <- tibble::tribble(
+  ~raw        , ~clean         , ~fmt ,
+  "nobs"      , "Observations" ,    0 ,
+  "r.squared" , "R-squared"    ,    3
+)
+
+table_notes <- c(
+  "Heteroskedasticity-robust standard errors in parentheses.",
+  "Significance levels: * p < 0.10, ** p < 0.05, *** p < 0.01.",
+  "Reference category: properties with zero sewage spills within 250m.",
+  "Controls in the table include property type (detached, semi-detached, terraced, flats/maisonettes, other), old/new (binary variable indicating whether the property was a newly built property that had not been previously sold), and duration (freehold vs leasehold)."
+)
+
+export_regression_latex <- function(models, add_rows, path, title = NULL) {
+  dir_path <- dirname(path)
+  if (!dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
+  }
+
+  modelsummary::modelsummary(
+    models,
+    output = path,
+    estimate = "{estimate}{stars}",
+    statistic = "({std.error})",
+    stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+    fmt = 3,
+    coef_map = coef_labels,
+    gof_map = gof_map,
+    add_rows = add_rows,
+    notes = table_notes,
+    title = title
+  )
+}
+
+sales_models <- list(
+  "OLS" = model_spill_count,
+  "FE" = model_spill_count_lsoa,
+  "FE + Controls" = model_spill_count_lsoa_controls
+)
+
+sales_add_rows <- tibble::tribble(
+  ~term               , ~OLS , ~FE   , ~`FE + Controls` ,
+  "LSOA FE"           , "No" , "Yes" , "Yes"            ,
+  "Property controls" , "No" , "No"  , "Yes"
+)
+
+# Export to LaTeX
+export_regression_latex(
+  models = sales_models,
+  add_rows = sales_add_rows,
+  path = "tables/sales_table.tex",
+  title = "Effect of Sewage Spills on Log House Prices"
+)
+```
+
+
+
+## Rent
+
+We collapse the data to the rental property level. For each rental property, we compute the sum of spills from spill sites within a 250m radius over the entire period (2021-2023), and we record the quartile bin for that total so that later regressions compare properties across spill-intensity quartiles.
+
+```{r load-data-rent}
+# Rental Prices
+path_rent <- here::here("data", "processed", "zoopla", "zoopla_rentals.parquet")
+
+# Panel Data
+
+## General
+path_general_panel_rental <- here::here(
+  "data",
+  "processed",
+  "general_panel",
+  "rentals"
+)
+
+rad <- 250L
+base_year <- 2021
+gen_panel_rental <- arrow::open_dataset(path_general_panel_rental) |>
+  filter(radius == rad) |>
+  collect() |>
+  mutate(
+    year = (qtr_id - 1) %/% 4 + base_year,
+    year_transfer = qtr_id_transfer %/% 4 + base_year
+  ) |>
+  distinct(rental_id, site_id, year, year_transfer, distance_m, within_radius)
+
+rentals <- import(path_rent, trust = TRUE) |>
+  mutate(year = (qtr_id - 1) %/% 4 + 2021) |>
+  select(
+    -postcode,
+    -listing_created,
+    -latest_to_rent,
+    -rented,
+    -rented_est,
+    -address_line_01,
+    -address_line_02,
+    -address_line_03
+  ) |>
+  mutate(
+    property_type = forcats::as_factor(property_type)
+  )
+
+## Load sewage spills (reuse from sales section)
+# spills <- import(path_spill_yr, trust = TRUE)
+
+## Assemble rental data
+dat_rental <- gen_panel_rental |>
+  left_join(rentals, by = join_by(rental_id, year)) |>
+  left_join(spills, by = join_by(site_id, year))
+```
+
+```{r prep-data-rent}
+spill_rental_collapsed <- gen_panel_rental |>
+  filter(!is.na(site_id)) |>
+  left_join(spills, by = join_by(site_id, year)) |>
+  group_by(rental_id) |>
+  summarise(
+    spill_count = sum(spill_count_yr, na.rm = TRUE),
+    spill_hrs = sum(spill_hrs_yr, na.rm = TRUE),
+  )
+
+# Trim outliers at 2.5 and 97.5 percentiles
+price_quantiles <- quantile(
+  rentals$listing_price,
+  c(0.025, 0.975),
+  na.rm = TRUE
+)
+
+dat_rent <- rentals |>
+  filter(
+    listing_price >= price_quantiles[1],
+    listing_price <= price_quantiles[2]
+  ) |>
+  left_join(spill_rental_collapsed, by = join_by(rental_id)) |>
+  mutate(
+    spill_count_bin = bin_spill_measure(spill_count),
+    spill_hrs_bin = bin_spill_measure(spill_hrs),
+    log_price = log(listing_price)
+  )
+```
+
+```{r}
+#| tbl-pos: H
+#| layout-ncol: 1
+
+dat_rent_no_na <- dat_rent |>
+  filter(
+    !is.na(spill_count),
+    !is.na(spill_hrs),
+    !is.na(lsoa)
+  ) |>
+  mutate(
+    spill_count_bin = forcats::fct_relevel(spill_count_bin, "0 spills"),
+    spill_count_bin = forcats::fct_drop(spill_count_bin),
+    spill_hrs_bin = forcats::fct_relevel(spill_hrs_bin, "0 spills"),
+    spill_hrs_bin = forcats::fct_drop(spill_hrs_bin),
+    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    property_type = forcats::fct_drop(property_type)
+  )
+
+
+model_spill_count_rent <- fixest::feols(
+  log_price ~ spill_count_bin,
+  data = dat_rent_no_na,
+  vcov = "hetero"
+)
+
+model_spill_count_lsoa_rent <- fixest::feols(
+  log_price ~ spill_count_bin | lsoa,
+  data = dat_rent_no_na,
+  vcov = "hetero"
+)
+
+model_spill_hrs_rent <- fixest::feols(
+  log_price ~ spill_hrs_bin,
+  data = dat_rent_no_na,
+  vcov = "hetero"
+)
+
+model_spill_hrs_lsoa_rent <- fixest::feols(
+  log_price ~ spill_hrs_bin | lsoa,
+  data = dat_rent_no_na,
+  vcov = "hetero"
+)
+
+model_spill_count_lsoa_controls_rent <- fixest::feols(
+  log_price ~ spill_count_bin + property_type + bedrooms + bathrooms | lsoa,
+  data = dat_rent_no_na,
+  vcov = "hetero"
+)
+
+model_spill_hrs_lsoa_controls_rent <- fixest::feols(
+  log_price ~ spill_hrs_bin + property_type + bedrooms + bathrooms | lsoa,
+  data = dat_rent_no_na,
+  vcov = "hetero"
+)
+
+rent_models <- list(
+  "Model 1" = model_spill_count_rent,
+  "Model 2" = model_spill_count_lsoa_rent,
+  "Model 3" = model_spill_count_lsoa_controls_rent,
+  "Model 4" = model_spill_hrs_rent,
+  "Model 5" = model_spill_hrs_lsoa_rent,
+  "Model 6" = model_spill_hrs_lsoa_controls_rent
+)
+
+rent_column_labels <- c(
+  "Model 1" = "OLS",
+  "Model 2" = "FE",
+  "Model 3" = "FE + Controls",
+  "Model 4" = "OLS",
+  "Model 5" = "FE",
+  "Model 6" = "FE + Controls"
+)
+
+rent_spanner_map <- list(
+  "Spill count bins" = names(rent_column_labels)[1:3],
+  "Spill duration bins" = names(rent_column_labels)[4:6]
+)
+
+rent_add_rows <- tibble::tribble(
+  ~term               , ~`Model 1` , ~`Model 2` , ~`Model 3` , ~`Model 4` , ~`Model 5` , ~`Model 6` ,
+  "LSOA FE"           , "No"       , "Yes"      , "Yes"      , "No"       , "Yes"      , "Yes"      ,
+  # "Quarter FE", "No", "Yes", "Yes", "No", "Yes", "Yes",
+  "Dwelling controls" , "No"       , "No"       , "Yes"      , "No"       , "No"       , "Yes"
+)
+
+table_notes <- c(
+  "Heteroskedasticity-robust standard errors in parentheses.",
+  "Significance levels: * p < 0.10, ** p < 0.05, *** p < 0.01.",
+  "Reference category: properties with zero sewage spills within 250m.",
+  "Controls in the table include property type (detached, semi-detached, terraced, flats/maisonettes, other), number of bedrooms, and number of bathrooms."
+)
+
+rent_table <- create_regression_table(
+  models = rent_models,
+  add_rows = rent_add_rows,
+  title = "Effect of Sewage Spills on Log Rental Prices",
+  column_labels = rent_column_labels,
+  spanner_map = rent_spanner_map,
+  source_note = "Dependent variable: log(listing_price)"
+)
+
+rent_table
+```

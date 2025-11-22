@@ -533,11 +533,11 @@ dat_above_5000 <- house_price_data_trimmed %>%
 
 # Summary stats for houses below 5000m
 dat_below_5000_prepared <- dat_agg_all_trimmed %>%
-  filter(!is.na(mean_distance)) %>%
+  filter(!is.na(min_distance)) %>%
   mutate(
     radius = as.character(radius),
-    inverse_spill_count = spill_count / mean_distance,
-    inverse_spill_hrs = spill_hrs / mean_distance,
+    inverse_spill_count = spill_count / min_distance,
+    inverse_spill_hrs = spill_hrs / min_distance,
     log_price = log(price)
   )
 
@@ -545,7 +545,7 @@ summary_table_below <- dat_below_5000_prepared %>%
   group_by(radius) %>%
   summarise(
     threshold_m = first(radius),
-    mean_distance_m = mean(mean_distance, na.rm = TRUE),
+    mean_distance_m = mean(min_distance, na.rm = TRUE),
     n_houses = uniqueN(house_id),
     n_spill_sites = mean(n_spill_sites, na.rm = TRUE),
     mean_price = mean(price, na.rm = TRUE),
@@ -569,7 +569,7 @@ reactable(
       format = colFormat(digits = 0)
     ),
     mean_distance_m = colDef(
-      name = "Mean Dist. (m)", # Shorten header
+      name = "Mean Min Dist. (m)", # Shorten header
       format = colFormat(digits = 0)
     ),
     n_houses = colDef(
@@ -663,14 +663,14 @@ spill_counts_base <- dat_agg_all_trimmed %>%
 
 # Calculate spill count quartile breakpoints
 spill_counts_quantiles <- quantile(
-  filter(spill_counts_base, !is.na(mean_distance))$spill_count,
+  filter(spill_counts_base, !is.na(min_distance))$spill_count,
   probs = seq(0, 1, 0.25),
   na.rm = TRUE
 )
 
 # Summary stats below threshold
 spill_counts_summary_below_threshold <- spill_counts_base %>%
-  filter(!is.na(mean_distance)) %>%
+  filter(!is.na(min_distance)) %>%
   mutate(
     quartile = cut(
       spill_count,
@@ -820,7 +820,7 @@ reactable(
 
 ### Bivariate Plots {#sec-05-03-03-bivariate-plots}
 
-Below I plot the relationship between house prices and spill severity (spill count and spill duration), distance to spill sites, and spill severity weighted by the inverse of the distance to the nearest spill (accounting for the possibility that closer spills have a larger impact on house prices). I do this for a sample of 300,000 houses (approximately 3% of all houses in the dataset) to reduce computation time. I trim the data to the 5th and 95th percentiles of house prices (as I don't believe these belong to the distribution we are interested in).
+Below I plot the relationship between house prices and spill severity (spill count and spill duration), minimum distance to spill sites, and spill severity weighted by the inverse of the distance to the nearest spill (accounting for the possibility that closer spills have a larger impact on house prices). I do this for a sample of 300,000 houses (approximately 3% of all houses in the dataset) to reduce computation time. I trim the data to the 5th and 95th percentiles of house prices (as I don't believe these belong to the distribution we are interested in).
 
 For each relationship, I plot a linear regression line and a local regression line (non-parametric) to show potential linear and non-linear relationships.  I present these relationships using data aggregated over all years as well as data aggregated over the trailing 12-month period.
     
@@ -853,8 +853,8 @@ plot_data <- bind_rows(
       levels = radius_levels,
       labels = paste0(radius_levels, "m")
     ),
-    inverse_spill_count = spill_count / mean_distance,
-    inverse_spill_hrs = spill_hrs / mean_distance,
+    inverse_spill_count = spill_count / min_distance,
+    inverse_spill_hrs = spill_hrs / min_distance,
     log_price = log(price)
   )
 
@@ -911,8 +911,8 @@ create_cs_plot <- function(
 # Define plot specifications for each variable
 plot_specs <- list(
   distance = list(
-    var = "mean_distance",
-    label = "Mean Distance to Spill Site",
+    var = "min_distance",
+    label = "Minimum Distance to Spill Site",
     title = "Distance Relationship"
   ),
   spill_count = list(
@@ -959,15 +959,15 @@ for (var_name in names(plot_specs)) {
     )
 
     # Construct file name based on variable and variant
-    file_name <- paste0(var_name, "_", variant_name, ".png")
+    file_name <- paste0(var_name, "_", variant_name, ".pdf")
 
     # Save the plot - note that filename is now the first argument and plot is specified by 'plot'
     ggsave(
       filename = here("book", "book_figs", file_name),
       plot = p,
-      width = 8,
-      height = 0.618 * 6,
-      dpi = 600
+      width = 1.618*8,
+      height = 8,
+      dpi = 300
     )
   }
 }
@@ -984,17 +984,17 @@ For distance thresholds below 2km, the non-parametric fit shows a U-shaped patte
 
 ##### Linear
 ```{r, plot_spill_count_lm}
-knitr::include_graphics(here("book", "book_figs", "spill_count_lm.png"))
+knitr::include_graphics(here("book", "book_figs", "spill_count_lm.pdf"))
 ```
 
 ##### All Years - Linear and LOESS
 ```{r, plot_spill_count_all}
-knitr::include_graphics(here("book", "book_figs", "spill_count_all.png"))
+knitr::include_graphics(here("book", "book_figs", "spill_count_all.pdf"))
 ```
 
 ##### 12 Months - Linear and LOESS
 ```{r, plot_spill_count_12mo}
-knitr::include_graphics(here("book", "book_figs", "spill_count_12mo.png"))
+knitr::include_graphics(here("book", "book_figs", "spill_count_12mo.pdf"))
 ```
 
 :::
@@ -1007,17 +1007,17 @@ The relationship between spill duration and house price is comparable to the rel
 
 ##### Linear
 ```{r, plot_spill_duration_lm}
-knitr::include_graphics(here("book", "book_figs", "spill_duration_lm.png"))
+knitr::include_graphics(here("book", "book_figs", "spill_duration_lm.pdf"))
 ```
 
 ##### All Years - Linear and LOESS
 ```{r, plot_spill_duration_all}
-knitr::include_graphics(here("book", "book_figs", "spill_duration_all.png"))
+knitr::include_graphics(here("book", "book_figs", "spill_duration_all.pdf"))
 ```
 
 ##### 12 Months - Linear and LOESS
 ```{r, plot_spill_duration_12mo}
-knitr::include_graphics(here("book", "book_figs", "spill_duration_12mo.png"))
+knitr::include_graphics(here("book", "book_figs", "spill_duration_12mo.pdf"))
 ```
 
 :::
@@ -1032,17 +1032,17 @@ For all thresholds, the non-parametric fit shows a U-shaped pattern, which is co
 
 ##### Linear
 ```{r, plot_distance_lm}
-knitr::include_graphics(here("book", "book_figs", "distance_lm.png"))
+knitr::include_graphics(here("book", "book_figs", "distance_lm.pdf"))
 ```
 
 ##### All Years - Linear and LOESS
 ```{r, plot_distance_all}
-knitr::include_graphics(here("book", "book_figs", "distance_all.png"))
+knitr::include_graphics(here("book", "book_figs", "distance_all.pdf"))
 ```
 
 ##### 12 Months - Linear and LOESS
 ```{r, plot_distance_12mo}
-knitr::include_graphics(here("book", "book_figs", "distance_12mo.png"))
+knitr::include_graphics(here("book", "book_figs", "distance_12mo.pdf"))
 ```
 
 :::
@@ -1055,7 +1055,7 @@ There's a negative cross-sectional linear relationship between inverse spill cou
 
 ##### Linear
 ```{r, plot_inverse_lm}
-knitr::include_graphics(here("book", "book_figs", "inverse_spill_count_lm.png"))
+knitr::include_graphics(here("book", "book_figs", "inverse_spill_count_lm.pdf"))
 ``` 
 
 ##### All Years - Linear and LOESS    
@@ -1063,7 +1063,7 @@ knitr::include_graphics(here("book", "book_figs", "inverse_spill_count_lm.png"))
 knitr::include_graphics(here(
   "book",
   "book_figs",
-  "inverse_spill_count_all.png"
+  "inverse_spill_count_all.pdf"
 ))
 ```
 
@@ -1072,7 +1072,7 @@ knitr::include_graphics(here(
 knitr::include_graphics(here(
   "book",
   "book_figs",
-  "inverse_spill_count_12mo.png"
+  "inverse_spill_count_12mo.pdf"
 ))
 ```
 

@@ -1490,6 +1490,7 @@ plot_reg_chaisemartin(
 :::
 
 :::
+
 ### Continuous Treatment - Average Spill Count {#sec-06-02-05-continuous-treatment}
 
 ::: {.panel-tabset group="continuous-site"}
@@ -5473,7 +5474,7 @@ plot_reg_sunab(
 ```{r plot-rental-sunab-1000m-duration-nc-p90}
 plot_reg_sunab(
   data = results_sunab,
-  radius = 1000,o
+  radius = 1000,
   model = "bin_logp_sh_p90_all_fe_qtr_id_lsoa"
 )
 ```
