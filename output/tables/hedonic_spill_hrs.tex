@@ -1,0 +1,34 @@
+\begin{table}
+\centering
+\begin{talltblr}[         %% tabularray outer open
+caption={Effect of Sewage Spills (Hours) on Property Values},
+note{}={Heteroskedasticity-robust standard errors in parentheses.},
+note{ }={Significance levels: * p < 0.10, ** p < 0.05, *** p < 0.01.},
+note{  }={Reference category: properties with zero sewage spills within 250m.},
+note{   }={Sales controls: property type (detached, semi-detached, terraced, flats/maisonettes, other), old/new (newly built indicator), and duration (freehold vs leasehold).},
+note{    }={Rental controls: property type, number of bedrooms, and number of bathrooms.},
+]                     %% tabularray outer close
+{                     %% tabularray inner open
+colspec={Q[]Q[]Q[]Q[]Q[]Q[]Q[]},
+hline{2}={1-7}{solid, black, 0.05em},
+hline{12}={1-7}{solid, black, 0.05em},
+hline{1}={1-7}{solid, black, 0.1em},
+hline{14}={1-7}{solid, black, 0.1em},
+column{2-7}={}{halign=c},
+column{1}={}{halign=l},
+}                     %% tabularray inner close
+& (1) & (2) & (3) & (4) & (5) & (6) \\
+Constant (zero spills) & \num{12.443}*** &  &  & \num{5.491}*** &  &  \\
+& (\num{0.006}) &  &  & (\num{0.005}) &  &  \\
+Spill duration Q1 & \num{-0.145}*** & \num{-0.033}** & \num{-0.035}*** & \num{-0.101}*** & \num{-0.028}*** & \num{0.001} \\
+& (\num{0.007}) & (\num{0.014}) & (\num{0.013}) & (\num{0.006}) & (\num{0.010}) & (\num{0.007}) \\
+Spill duration Q2 & \num{-0.139}*** & \num{-0.047}*** & \num{-0.026}** & \num{-0.092}*** & \num{-0.011} & \num{0.019}** \\
+& (\num{0.007}) & (\num{0.014}) & (\num{0.012}) & (\num{0.006}) & (\num{0.010}) & (\num{0.008}) \\
+Spill duration Q3 & \num{-0.103}*** & \num{-0.041}*** & \num{-0.027}** & \num{-0.022}*** & \num{-0.019}* & \num{0.015}* \\
+& (\num{0.007}) & (\num{0.014}) & (\num{0.012}) & (\num{0.006}) & (\num{0.011}) & (\num{0.008}) \\
+Spill duration Q4 & \num{-0.136}*** & \num{-0.051}*** & \num{-0.025}** & \num{-0.126}*** & \num{-0.025}** & \num{0.016}** \\
+& (\num{0.007}) & (\num{0.014}) & (\num{0.012}) & (\num{0.006}) & (\num{0.011}) & (\num{0.008}) \\
+Observations & \num{172103} & \num{171537} & \num{171537} & \num{78772} & \num{77679} & \num{61715} \\
+R-squared & \num{0.003} & \num{0.476} & \num{0.564} & \num{0.010} & \num{0.663} & \num{0.863} \\
+\end{talltblr}
+\end{table}

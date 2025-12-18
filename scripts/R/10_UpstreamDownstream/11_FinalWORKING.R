@@ -1,15 +1,18 @@
-## 10_UpDown_basic_sales_500m.R
-## Link sales houses to nearby spill sites along rivers (debug, first 50 spills)
+## 10_Final.R
+## Link sales houses to nearby spill sites along rivers, and build Up/Down tags.
 ## This version:
 ##  - For each spill, builds a local merged river LINESTRING from nearby segments
 ##  - Uses that LINESTRING for along-river positions and lateral distances
-##  - Uses river attributes id / start_node / end_node / length to label Up/Down
+##  - Uses startNode/endNode network to label Up/Down
+##  - Adds a diagnostic plot for spill site_id == 10
+##  - Adds house easting/northing (HH_E, HH_N) to final output
 
 suppressPackageStartupMessages({
   library(here)
   library(arrow)
   library(dplyr)
   library(sf)
+  library(ggplot2)
 })
 
 ROOT <- here::here()
@@ -21,6 +24,27 @@ path_watercourse <- file.path(ROOT, "data/raw/rivers/oprvrs_essh_gb/data/Waterco
 crs_bng <- 27700  # OSGB36 / British National Grid
 
 sf_use_s2(FALSE)  # projected coordinates; use GEOS
+
+# -------------------------------------------------------------------
+# 0. Read river layer and inspect attributes once
+# -------------------------------------------------------------------
+
+rivers_raw <- st_read(path_watercourse, quiet = TRUE)
+
+cat("=== DEBUG: river attribute names as seen by R ===\n")
+print(names(rivers_raw))
+
+cat("\n=== DEBUG: first 5 rows of river attributes (no geometry) ===\n")
+print(head(st_drop_geometry(rivers_raw), 5))
+cat("==============================================\n\n")
+
+# Rename to standard network names (segment id + node ids)
+rivers <- rivers_raw %>%
+  rename(
+    id         = identifier,
+    start_node = startNode,
+    end_node   = endNode
+  )
 
 # -------------------------------------------------------------------
 # Parameters
@@ -40,30 +64,12 @@ RIVER_SEARCH_RADIUS_M <- max(CAND_RADIUS_M, ALONG_MAX_M) * 2  # e.g. 3000 m
 # -------------------------------------------------------------------
 
 cat("=== Step 1: Load data ===\n")
-
 spill <- read_parquet(path_spill)
 sales <- read_parquet(path_sales)
 
-rivers_raw <- st_read(path_watercourse, quiet = TRUE)
-
-cat("Spill rows : ", nrow(spill),      "\n", sep = "")
-cat("Sales rows : ", nrow(sales),      "\n", sep = "")
-cat("Rivers rows: ", nrow(rivers_raw), "\n\n", sep = "")
-
-cat("=== DEBUG: river attribute names as seen by R ===\n")
-print(names(rivers_raw))
-
-cat("\n=== DEBUG: first 5 rows of river attributes (no geometry) ===\n")
-print(head(st_drop_geometry(rivers_raw), 5))
-cat("==============================================\n\n")
-
-# Rename to consistent network fields
-rivers <- rivers_raw %>%
-  rename(
-    id         = identifier,
-    start_node = startNode,
-    end_node   = endNode
-  )
+cat("Spill rows : ", nrow(spill),        "\n", sep = "")
+cat("Sales rows : ", nrow(sales),        "\n", sep = "")
+cat("Rivers rows: ", nrow(rivers),       "\n\n", sep = "")
 
 # -------------------------------------------------------------------
 # 2. Convert to sf, restrict spills to first N_SPILLS_TEST
@@ -111,10 +117,10 @@ if (length(missing_cols) > 0) {
 }
 
 # Extract network attributes
-river_ids <- as.character(rivers_2d[["id"]])
-start_ids <- as.character(rivers_2d[["start_node"]])
-end_ids   <- as.character(rivers_2d[["end_node"]])
-seg_len   <- as.numeric(rivers_2d[["length"]])
+river_ids  <- rivers_2d[["id"]]         # segment IDs (GUIDs)
+start_ids  <- rivers_2d[["start_node"]] # node IDs at start of segment
+end_ids    <- rivers_2d[["end_node"]]   # node IDs at end of segment
+seg_len    <- as.numeric(rivers_2d[["length"]])
 
 # If any seg_len are NA or non-positive, fall back to geometric length
 bad_len <- !is.finite(seg_len) | seg_len <= 0
@@ -137,10 +143,6 @@ cat("Nearest rivers computed in ", round(t_nn["elapsed"], 2), " seconds.\n\n", s
 # -------------------------------------------------------------------
 # Helper: approximate along-river position via line sampling
 # -------------------------------------------------------------------
-# Given:
-#   line_geom : sfc LINESTRING length 1
-#   pts       : sf or sfc POINT (one or many)
-# Returns numeric vector t in [0, 1] for each point
 
 approx_t_on_line <- function(line_geom, pts, n_samples = N_SAMPLES_LINE) {
   samples    <- st_line_sample(line_geom, sample = seq(0, 1, length.out = n_samples))
@@ -162,24 +164,12 @@ approx_t_on_line <- function(line_geom, pts, n_samples = N_SAMPLES_LINE) {
 # -------------------------------------------------------------------
 # Helper: build a local merged river LINESTRING around a spill
 # -------------------------------------------------------------------
-# For each spill:
-#   - Take all river segments within RIVER_SEARCH_RADIUS_M
-#   - st_union + cast to MULTILINESTRING + st_line_merge
-#   - Resulting geometry is (possibly) multiple LINESTRINGs
-#   - If multiple, pick the one closest to the spill
-# Returns: sfc_LINESTRING length 1, or NULL if impossible
 
 build_local_river_line <- function(spill_point, rivers, river_idx0,
                                    search_radius_m = RIVER_SEARCH_RADIUS_M) {
-  # spill_point: sf with 1 POINT row
-  # rivers: sf LINESTRING collection
-  # river_idx0: integer index from st_nearest_feature (for fallback)
-  
-  # segments within search_radius_m of the spill
   idx_list <- st_is_within_distance(spill_point, rivers, dist = search_radius_m)
   idx <- sort(unique(unlist(idx_list)))
   
-  # fallback: if nothing within radius, use the nearest segment
   if (length(idx) == 0L && !is.na(river_idx0) && river_idx0 > 0L) {
     idx <- river_idx0
   }
@@ -191,14 +181,9 @@ build_local_river_line <- function(spill_point, rivers, river_idx0,
   
   geom_local <- st_geometry(rivers_local)
   geom_union <- st_union(geom_local)
-  
-  # Make sure we have MULTILINESTRING as required by st_line_merge.sfc
   geom_multi <- st_cast(geom_union, "MULTILINESTRING")
-  
-  merged <- st_line_merge(geom_multi)
-  
-  # Ensure LINESTRING(s)
-  merged_ls <- st_cast(merged, "LINESTRING")
+  merged     <- st_line_merge(geom_multi)
+  merged_ls  <- st_cast(merged, "LINESTRING")
   
   if (length(merged_ls) == 0L) {
     return(NULL)
@@ -208,79 +193,76 @@ build_local_river_line <- function(spill_point, rivers, river_idx0,
     return(merged_ls)
   }
   
-  # If multiple merged lines exist, choose the one closest to the spill
-  dists <- st_distance(spill_point, merged_ls)
+  dists    <- st_distance(spill_point, merged_ls)
   best_idx <- which.min(as.numeric(dists[1, ]))
   
   merged_ls[best_idx]
 }
 
 # -------------------------------------------------------------------
-# Helper: walk downstream / upstream using start_node / end_node
+# Helper: walk upstream / downstream using node connectivity
 # -------------------------------------------------------------------
 
-get_downstream_ids <- function(center_row, max_dist,
-                               river_ids, start_ids, end_ids, seg_len) {
+get_downstream_rows <- function(center_row, max_dist,
+                                start_ids, end_ids, seg_len) {
   res_rows  <- integer(0)
   cum_dist  <- 0
   current   <- center_row
-  visited   <- logical(length(river_ids))
-  visited[current] <- TRUE
+  visited   <- logical(length(start_ids))
   
   repeat {
-    node <- end_ids[current]  # downstream node of current segment
-    if (is.na(node) || node == "") break
+    node <- end_ids[current]
+    if (is.na(node)) break
     
-    # segments that START at this node are downstream neighbours
     nbrs <- which(start_ids == node & !visited)
+    nbrs <- setdiff(nbrs, current)
     if (length(nbrs) == 0L) break
     
-    # naive choice: pick the first neighbour as "main stem"
     next_row <- nbrs[1L]
+    seg_len_next <- seg_len[next_row]
+    if (!is.finite(seg_len_next) || seg_len_next <= 0) break
     
-    d <- seg_len[next_row]
-    if (!is.finite(d) || d <= 0) break
-    if (cum_dist + d > max_dist) break
+    new_dist <- cum_dist + seg_len_next
+    if (new_dist > max_dist) break
     
-    res_rows         <- c(res_rows, next_row)
-    cum_dist         <- cum_dist + d
+    res_rows          <- c(res_rows, next_row)
     visited[next_row] <- TRUE
-    current          <- next_row
+    cum_dist          <- new_dist
+    current           <- next_row
   }
   
-  river_ids[res_rows]
+  res_rows
 }
 
-get_upstream_ids <- function(center_row, max_dist,
-                             river_ids, start_ids, end_ids, seg_len) {
+get_upstream_rows <- function(center_row, max_dist,
+                              start_ids, end_ids, seg_len) {
   res_rows  <- integer(0)
   cum_dist  <- 0
   current   <- center_row
-  visited   <- logical(length(river_ids))
-  visited[current] <- TRUE
+  visited   <- logical(length(start_ids))
   
   repeat {
-    node <- start_ids[current]  # upstream node of current segment
-    if (is.na(node) || node == "") break
+    node <- start_ids[current]
+    if (is.na(node)) break
     
-    # segments that END at this node are upstream neighbours
     nbrs <- which(end_ids == node & !visited)
+    nbrs <- setdiff(nbrs, current)
     if (length(nbrs) == 0L) break
     
-    # naive choice: pick the first neighbour as "main stem"
     next_row <- nbrs[1L]
+    seg_len_next <- seg_len[next_row]
+    if (!is.finite(seg_len_next) || seg_len_next <= 0) break
     
-    d <- seg_len[next_row]
-    if (!is.finite(d) || d <= 0) break
-    if (cum_dist + d > max_dist) break
+    new_dist <- cum_dist + seg_len_next
+    if (new_dist > max_dist) break
     
-    res_rows         <- c(res_rows, next_row)
-    cum_dist         <- cum_dist + d
+    res_rows          <- c(res_rows, next_row)
     visited[next_row] <- TRUE
-    current          <- next_row
+    cum_dist          <- new_dist
+    current           <- next_row
   }
   
-  river_ids[res_rows]
+  res_rows
 }
 
 # -------------------------------------------------------------------
@@ -305,11 +287,8 @@ for (i in seq_len(nrow(spills_sf))) {
     next
   }
   
-  # Central segment row and id for this spill
   center_row <- river_idx0
-  center_id  <- river_ids[center_row]
   
-  # Build local merged river line around this spill
   t_build <- system.time({
     line_geom <- build_local_river_line(sp, rivers_2d, river_idx0,
                                         search_radius_m = RIVER_SEARCH_RADIUS_M)
@@ -320,7 +299,6 @@ for (i in seq_len(nrow(spills_sf))) {
     next
   }
   
-  # Sanity check: must be a single LINESTRING
   if (!(inherits(line_geom, "sfc_LINESTRING") && length(line_geom) == 1L)) {
     cat("  -> Local river geometry is not a single LINESTRING; skipping.\n\n")
     next
@@ -335,24 +313,22 @@ for (i in seq_len(nrow(spills_sf))) {
     next
   }
   
-  # Approximate spill position along river (t in [0,1])
   t_spill   <- approx_t_on_line(line_geom, st_geometry(sp))
   pos_spill <- t_spill * line_len
   cat("  Spill t_on_line: ", round(t_spill, 4),
       " -> pos_spill (m): ", round(pos_spill, 1), "\n", sep = "")
   
-  # Precompute upstream/downstream segment IDs around this spill using network
-  down_ids <- get_downstream_ids(center_row, ALONG_MAX_M,
-                                 river_ids, start_ids, end_ids, seg_len)
-  up_ids   <- get_upstream_ids(center_row, ALONG_MAX_M,
-                               river_ids, start_ids, end_ids, seg_len)
+  down_rows <- get_downstream_rows(center_row, ALONG_MAX_M,
+                                   start_ids, end_ids, seg_len)
+  up_rows   <- get_upstream_rows(center_row, ALONG_MAX_M,
+                                 start_ids, end_ids, seg_len)
+  down_ids  <- river_ids[down_rows]
+  up_ids    <- river_ids[up_rows]
   
-  # Candidate houses: within CAND_RADIUS_M Euclidean of this spill
   t_cand <- system.time({
-    # IMPORTANT: spill as x, sales as y
     idx_list <- st_is_within_distance(sp, sales_sf, dist = CAND_RADIUS_M)
   })
-  cand_idx <- unique(unlist(idx_list))  # indices of sales_sf
+  cand_idx <- unique(unlist(idx_list))
   cand_n   <- length(cand_idx)
   cat("  Candidate houses within ", CAND_RADIUS_M, " m: ",
       cand_n, " (t = ", round(t_cand["elapsed"], 2), " s)\n", sep = "")
@@ -364,19 +340,16 @@ for (i in seq_len(nrow(spills_sf))) {
   
   hh_pts <- sales_sf[cand_idx, ]
   
-  # Nearest river segment row for each candidate house (for network-based UpDown)
-  hh_seg_idx <- st_nearest_feature(hh_pts, rivers_2d)   # row indices
-  hh_seg_id  <- river_ids[hh_seg_idx]                   # segment ids
+  hh_seg_idx <- st_nearest_feature(hh_pts, rivers_2d)
+  hh_seg_id  <- river_ids[hh_seg_idx]
   
-  # Distance house -> local merged river line
   t_dist <- system.time({
-    dist_mat       <- st_distance(hh_pts, line_geom)  # n_hh x 1
+    dist_mat       <- st_distance(hh_pts, line_geom)
     Dist_River_vec <- as.numeric(dist_mat[, 1])
   })
   cat("  House->river distances computed (t = ",
       round(t_dist["elapsed"], 2), " s).\n", sep = "")
   
-  # Approximate house positions along same local river line
   t_pos <- system.time({
     t_hh   <- approx_t_on_line(line_geom, st_geometry(hh_pts))
     pos_hh <- t_hh * line_len
@@ -384,7 +357,7 @@ for (i in seq_len(nrow(spills_sf))) {
   cat("  House positions along river computed (t = ",
       round(t_pos["elapsed"], 2), " s).\n", sep = "")
   
-  River_Len_vec <- pos_hh - pos_spill  # signed along-river distance (m)
+  River_Len_vec <- pos_hh - pos_spill
   
   cat("  River_Len range (m): ",
       paste(round(range(River_Len_vec, na.rm = TRUE), 1), collapse = " to "),
@@ -393,7 +366,6 @@ for (i in seq_len(nrow(spills_sf))) {
       paste(round(range(Dist_River_vec, na.rm = TRUE), 1), collapse = " to "),
       "\n", sep = "")
   
-  # Filter houses: ±ALONG_MAX_M along river and ≤LATERAL_MAX_M from river
   keep   <- (abs(River_Len_vec) <= ALONG_MAX_M) & (Dist_River_vec <= LATERAL_MAX_M)
   n_keep <- sum(keep, na.rm = TRUE)
   cat("  Houses passing filters (|River_Len| <= ", ALONG_MAX_M,
@@ -405,46 +377,41 @@ for (i in seq_len(nrow(spills_sf))) {
   }
   
   hh_keep          <- hh_pts[keep, ]
-  hh_seg_idx_keep  <- hh_seg_idx[keep]
   hh_seg_id_keep   <- hh_seg_id[keep]
   River_Len_keep   <- River_Len_vec[keep]
   Dist_River_keep  <- Dist_River_vec[keep]
   
-  # Upstream / downstream classification:
-  #  - same segment: sign of River_Len
-  #  - other segments: membership of up_ids / down_ids chains
   UpDown_keep <- rep(NA_character_, length(hh_seg_id_keep))
   
-  # Same segment as spill
-  same_seg <- hh_seg_idx_keep == center_row
+  same_seg <- hh_seg_idx[keep] == center_row
   if (any(same_seg)) {
     UpDown_keep[same_seg] <- ifelse(River_Len_keep[same_seg] >= 0,
                                     "downstream", "upstream")
   }
   
-  # Use network chains for other segments
   is_unknown <- is.na(UpDown_keep)
   if (any(is_unknown) && length(down_ids) > 0L) {
-    seg_unknown <- hh_seg_id_keep[is_unknown]
-    in_down <- seg_unknown %in% down_ids
+    in_down <- hh_seg_id_keep[is_unknown] %in% down_ids
     if (any(in_down)) {
       UpDown_keep[which(is_unknown)[in_down]] <- "downstream"
     }
   }
   is_unknown <- is.na(UpDown_keep)
   if (any(is_unknown) && length(up_ids) > 0L) {
-    seg_unknown <- hh_seg_id_keep[is_unknown]
-    in_up <- seg_unknown %in% up_ids
+    in_up <- hh_seg_id_keep[is_unknown] %in% up_ids
     if (any(in_up)) {
       UpDown_keep[which(is_unknown)[in_up]] <- "upstream"
     }
   }
   
+  # NOTE: no rounding here; keep raw distances
   pairs_list[[i]] <- tibble(
     HH_ID      = hh_keep$house_id,
+    HH_E       = hh_keep$easting,
+    HH_N       = hh_keep$northing,
     Sewage_ID  = sewage_id,
-    River_Len  = round(River_Len_keep, 1),   # signed along-river distance (m)
-    Dist_River = round(Dist_River_keep, 1),  # lateral distance (m)
+    River_Len  = River_Len_keep,
+    Dist_River = Dist_River_keep,
     UpDown     = UpDown_keep
   )
   
@@ -453,10 +420,11 @@ for (i in seq_len(nrow(spills_sf))) {
 
 pairs_sales <- bind_rows(pairs_list)
 
-# Ensure correct structure even if empty
 if (nrow(pairs_sales) == 0L) {
   pairs_sales <- tibble(
     HH_ID      = integer(),
+    HH_E       = double(),
+    HH_N       = double(),
     Sewage_ID  = integer(),
     River_Len  = double(),
     Dist_River = double(),
@@ -469,3 +437,99 @@ if (nrow(pairs_sales) == 0L) {
 
 cat("\nExample rows (up to 20):\n")
 print(head(pairs_sales, 20))
+
+# -------------------------------------------------------------------
+# 5. Diagnostic visualisation for one spill (site_id == 10)
+# -------------------------------------------------------------------
+
+site_to_plot <- 10L
+
+cat("\n=== Step 5: Diagnostic plot for spill site_id == ", site_to_plot, " ===\n", sep = "")
+
+sp_plot <- spills_sf %>% filter(site_id == site_to_plot)
+
+if (nrow(sp_plot) != 1L) {
+  cat("No unique spill with site_id == ", site_to_plot, " found in spills_sf; skipping plot.\n", sep = "")
+} else {
+  i_plot    <- which(spills_sf$site_id == site_to_plot)[1]
+  river_idx0 <- nn_spill[i_plot]
+  
+  if (is.na(river_idx0) || river_idx0 < 1L) {
+    cat("  -> Invalid nearest river_idx for plot spill; skipping plot.\n")
+  } else {
+    line_geom <- build_local_river_line(sp_plot, rivers_2d, river_idx0,
+                                        search_radius_m = RIVER_SEARCH_RADIUS_M)
+    if (is.null(line_geom)) {
+      cat("  -> Could not build local river line for plot; skipping plot.\n")
+    } else {
+      line_len <- as.numeric(st_length(line_geom))
+      t_spill  <- approx_t_on_line(line_geom, st_geometry(sp_plot))
+      pos_spill <- t_spill * line_len
+      
+      idx_list <- st_is_within_distance(sp_plot, sales_sf, dist = CAND_RADIUS_M)
+      cand_idx <- unique(unlist(idx_list))
+      
+      if (length(cand_idx) == 0L) {
+        cat("  -> No candidate houses near plot spill; skipping plot.\n")
+      } else {
+        hh_pts <- sales_sf[cand_idx, ]
+        
+        dist_mat       <- st_distance(hh_pts, line_geom)
+        Dist_River_vec <- as.numeric(dist_mat[, 1])
+        
+        t_hh   <- approx_t_on_line(line_geom, st_geometry(hh_pts))
+        pos_hh <- t_hh * line_len
+        
+        River_Len_vec <- pos_hh - pos_spill
+        
+        keep <- (abs(River_Len_vec) <= ALONG_MAX_M) & (Dist_River_vec <= LATERAL_MAX_M)
+        if (!any(keep, na.rm = TRUE)) {
+          cat("  -> No houses pass filters for plot spill; skipping plot.\n")
+        } else {
+          hh_keep <- hh_pts[keep, ]
+          hh_keep$River_Len  <- round(River_Len_vec[keep], 1)
+          hh_keep$Dist_River <- round(Dist_River_vec[keep], 1)
+          
+          # attach UpDown from pairs_sales using HH_ID only
+          pairs_10 <- pairs_sales %>% filter(Sewage_ID == site_to_plot)
+          if (nrow(pairs_10) > 0) {
+            hh_keep <- hh_keep %>%
+              left_join(
+                pairs_10 %>% select(HH_ID, UpDown),
+                by = c("house_id" = "HH_ID")
+              )
+          }
+          
+          perp_segments <- st_nearest_points(hh_keep, line_geom)
+          perp_sf <- st_sf(
+            type = "house_link",
+            geometry = perp_segments
+          )
+          
+          spill_seg <- st_nearest_points(sp_plot, line_geom)
+          spill_seg_sf <- st_sf(
+            type = "spill_link",
+            geometry = spill_seg
+          )
+          
+          line_sf <- st_sf(type = "river", geometry = line_geom)
+          
+          p <- ggplot() +
+            geom_sf(data = line_sf) +
+            geom_sf(data = perp_sf, linetype = "dashed") +
+            geom_sf(data = spill_seg_sf, linetype = "solid") +
+            geom_sf(data = sp_plot, colour = "red", size = 3, shape = 4) +
+            geom_sf(data = hh_keep, aes(colour = UpDown), size = 1) +
+            ggtitle(paste0(
+              "Spill site ", site_to_plot,
+              " – houses within ±", ALONG_MAX_M,
+              " m along and ≤", LATERAL_MAX_M, " m from river"
+            ))
+          
+          print(p)
+          cat("  -> Diagnostic plot for site_id ", site_to_plot, " printed.\n", sep = "")
+        }
+      }
+    }
+  }
+}
