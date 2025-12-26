@@ -285,11 +285,18 @@ Scripts for merging and integrating data from different sources and time periods
 
 Scripts for creating final analysis-ready datasets for econometric analysis. Scripts handle panel construction, treatment variable creation, and final dataset optimisation for different analytical approaches.
 
-**`cross_section_sales_db.R`**  
+**`cross_section_sales_db.R`**
     - **Input:** House price data, spill-house lookup table, and monthly spill data loaded into DuckDB.
     - Creates cross-sectional datasets aggregated at house level for multiple timeframes and spatial radii.
     - Calculates spill exposure metrics: total counts, total hours, number of sites, mean/minimum distances.
     - **Output:** Partitioned by `radius` under `data/processed/cross_section/sales/` in two directories: `all_years/` and `prior_12mo/`.
+
+**`cross_section_sales_prior_to_sale_db.R`**
+    - **Input:** House price data (`house_price.parquet`), spill-house lookup table (`spill_house_lookup.parquet`), and matched spill events (`matched_events_annual_data.parquet`).
+    - Creates cross-sectional datasets aggregated from January 1, 2021 to the day before each house sale.
+    - Calculates spill exposure metrics: total counts, total hours, daily averages, number of sites, mean/minimum distances.
+    - Handles houses with no nearby sites (zeros, NA distances) and sites with no spill events (zeros, actual distances).
+    - **Output:** Partitioned by `radius` under `data/processed/cross_section/sales/prior_to_sale/`.
 
 **`cross_section_rental_db.R`**  
     - **Input:** Zoopla rentals data (`zoopla_rentals.parquet`), rental–spill lookup (`spill_rental_lookup.parquet`), and monthly spill data loaded into DuckDB.
@@ -375,20 +382,21 @@ The following sequence removes circular dependencies and includes all scripts in
 
 #### Layer 06: Analysis Datasets
 23. **`cross_section_sales_db.R`** — Cross-sectional datasets (sales; requires steps 4, 15, 20)
-24. **`cross_section_rental_db.R`** — Cross-sectional datasets (rentals; requires steps 5, 15, 20 & 22)
-25. **`site_panel_sales.R`** — Site-level panels (requires steps 4, 15, 20)
-26. **`site_panel_rental.R`** — Rental site-level panels (requires steps 5, 15, 21)
-27. **`house_panel_within_radius.R`** — House-level panels (requires steps 4, 15, 20)
-28. **`rental_panel_within_radius.R`** — Rental-level panels (requires steps 5, 15, 21)
-29. **`sale_panel_exp.R`** — Sales general panel export (requires steps 27–28)
-30. **`rental_panel_exp.R`** — Rental general panel export (requires steps 25, 28)
+24. **`cross_section_sales_prior_to_sale_db.R`** — Prior-to-sale cross-sectional datasets (requires steps 4, 11, 20)
+25. **`cross_section_rental_db.R`** — Cross-sectional datasets (rentals; requires steps 5, 15, 20 & 22)
+26. **`site_panel_sales.R`** — Site-level panels (requires steps 4, 15, 20)
+27. **`site_panel_rental.R`** — Rental site-level panels (requires steps 5, 15, 21)
+28. **`house_panel_within_radius.R`** — House-level panels (requires steps 4, 15, 20)
+29. **`rental_panel_within_radius.R`** — Rental-level panels (requires steps 5, 15, 21)
+30. **`sale_panel_exp.R`** — Sales general panel export (requires steps 28–29)
+31. **`rental_panel_exp.R`** — Rental general panel export (requires steps 26, 29)
 
 **Dependencies Notes:**
 - Steps 1–2 can run in parallel.
 - Steps 3–6 are independent and can run in parallel; step 5 (Zoopla) is optional until used downstream.
 - Steps 7–10 depend on ingestion outputs.
 - Step 16 runs after unique spill sites (step 14) to avoid circularity; steps 17–19 form the rainfall/dry-spill sub-pipeline.
-- Layer 06 scripts build on spill aggregations and spatial matching; keep order 23/24 → 25/26/27/28 → 29/30.
+- Layer 06 scripts build on spill aggregations and spatial matching; keep order 23/24/25 → 26/27/28/29 → 30/31.
 
 ### Key Data Flows
 

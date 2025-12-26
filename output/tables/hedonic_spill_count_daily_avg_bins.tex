@@ -1,0 +1,61 @@
+\begin{table}[H]
+\centering
+\begin{talltblr}[         %% tabularray outer open
+caption={Effect of Sewage Spills (Count) on Property Values},
+label={tbl:hedonic-spill-count-bins},
+note{}={ },
+]                     %% tabularray outer close
+{                     %% tabularray inner open
+colspec={Q[]Q[]Q[]Q[]Q[]Q[]Q[]},
+hline{2}={3,6-7}{solid, black, 0.05em},
+hline{3}={1-7}{solid, black, 0.05em},
+hline{33}={1-7}{solid, black, 0.05em},
+hline{2}={2,5}{solid, black, 0.05em, l=-0.5},
+hline{2}={4}{solid, black, 0.05em, r=-0.5},
+hline{1}={1-7}{solid, black, 0.1em},
+hline{36}={1-7}{solid, black, 0.1em},
+column{3-4,6-7}={}{halign=c},
+cell{1}{1}={}{halign=c},
+cell{1}{2}={c=3}{halign=c},
+cell{1}{5}={c=3}{halign=c},
+cell{2-35}{1}={}{halign=l},
+cell{2-35}{2}={}{halign=c},
+cell{2-35}{5}={}{halign=c},
+}                     %% tabularray inner close
+& House Sales &  &  & House Rentals &  &  \\
+& (1) & (2) & (3) & (4) & (5) & (6) \\
+Constant (zero spills) & \num{12.413}*** &  &  & \num{5.591}*** &  &  \\
+& (\num{0.001}) &  &  & (\num{0.000}) &  &  \\
+Spill count Q1 & \num{-0.054}*** & \num{-0.010}*** & \num{0.024}*** & \num{-0.190}*** & \num{0.028}*** & \num{0.044}*** \\
+& (\num{0.003}) & (\num{0.003}) & (\num{0.002}) & (\num{0.004}) & (\num{0.003}) & (\num{0.002}) \\
+Spill count Q2 & \num{-0.057}*** & \num{-0.018}*** & \num{0.023}*** & \num{-0.132}*** & \num{0.018}*** & \num{0.039}*** \\
+& (\num{0.003}) & (\num{0.003}) & (\num{0.002}) & (\num{0.004}) & (\num{0.003}) & (\num{0.002}) \\
+Spill count Q3 & \num{-0.089}*** & \num{-0.028}*** & \num{0.006}** & \num{-0.170}*** & \num{0.007}** & \num{0.023}*** \\
+& (\num{0.003}) & (\num{0.003}) & (\num{0.002}) & (\num{0.004}) & (\num{0.003}) & (\num{0.002}) \\
+Spill count Q4 & \num{-0.131}*** & \num{-0.030}*** & \num{0.006}** & \num{-0.233}*** & \num{-0.017}*** & \num{0.005}** \\
+& (\num{0.003}) & (\num{0.003}) & (\num{0.003}) & (\num{0.004}) & (\num{0.003}) & (\num{0.002}) \\
+Flat &  &  & \num{-0.792}*** &  &  &  \\
+&  &  & (\num{0.002}) &  &  &  \\
+Other &  &  & \num{-0.261}*** &  &  &  \\
+&  &  & (\num{0.003}) &  &  &  \\
+Semi-detached &  &  & \num{-0.368}*** &  &  & \num{0.169}*** \\
+&  &  & (\num{0.001}) &  &  & (\num{0.025}) \\
+Terraced &  &  & \num{-0.542}*** &  &  & \num{0.115}*** \\
+&  &  & (\num{0.001}) &  &  & (\num{0.021}) \\
+New build &  &  & \num{0.120}*** &  &  &  \\
+&  &  & (\num{0.001}) &  &  &  \\
+Leasehold &  &  & \num{-0.176}*** &  &  &  \\
+&  &  & (\num{0.002}) &  &  &  \\
+Bungalow &  &  &  &  &  & \num{0.223}*** \\
+&  &  &  &  &  & (\num{0.016}) \\
+Detached &  &  &  &  &  & \num{0.247}*** \\
+&  &  &  &  &  & (\num{0.028}) \\
+Bedrooms &  &  &  &  &  & \num{0.134}*** \\
+&  &  &  &  &  & (\num{0.021}) \\
+Bathrooms &  &  &  &  &  & \num{0.120}*** \\
+&  &  &  &  &  & (\num{0.014}) \\
+LSOA FE & No & Yes & Yes & No & Yes & Yes \\
+Observations & \num{1308310} & \num{1308017} & \num{1308017} & \num{1386976} & \num{1386736} & \num{1108259} \\
+Adj. R-squared & \num{0.002} & \num{0.530} & \num{0.701} & \num{0.006} & \num{0.603} & \num{0.833} \\
+\end{talltblr}
+\end{table}

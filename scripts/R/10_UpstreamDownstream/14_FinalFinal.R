@@ -1,11 +1,12 @@
-## 14_FinalFinal.R (clean, fixed, runs on older sf by using lwgeom)
+## 14_FinalFinal.R (clean, fixed, NO lwgeom dependency)
 ## Link sales houses to nearby spill sites along rivers, and build Up/Down tags.
 ##
-## Key fixes:
+## Key fixes vs your original:
 ##  - Uses geometric segment lengths (st_length) for network distance.
 ##  - Builds full downstream/upstream adjacency (all branches) from startNode/endNode.
 ##  - Labels Up/Down by directed reachability within ALONG_MAX_M (not nbrs[1]).
-##  - Labels same-segment Up/Down using lwgeom::st_line_locate_point (sf-older safe).
+##  - Labels same-segment Up/Down by a robust sampling-based locate on THAT segment
+##    (avoids merged-line orientation AND avoids lwgeom version issues).
 ##  - Keeps local merged LINESTRING for lateral distance + |along| filtering.
 ##  - Diagnostic plot for spill site_id == 10.
 ##  - Outputs HH_E/HH_N in final.
@@ -15,7 +16,6 @@ suppressPackageStartupMessages({
   library(arrow)
   library(dplyr)
   library(sf)
-  library(lwgeom)     # IMPORTANT: for st_line_locate_point on older sf
   library(ggplot2)
   library(data.table)
 })
@@ -54,9 +54,12 @@ rivers <- rivers_raw %>%
 # -------------------------------------------------------------------
 N_SPILLS_TEST  <- 50     # use first 50 spills as "universe" for testing
 CAND_RADIUS_M  <- 1500   # Euclidean radius around spill to preselect houses
-ALONG_MAX_M    <- 500    # ±500 m along network from spill
+ALONG_MAX_M    <- 500    # ±500 m along network from spill (reachability window)
 LATERAL_MAX_M  <- 500    # ≤500 m from merged local river line
-N_SAMPLES_LINE <- 1001   # resolution for along-line approximation (merged line)
+N_SAMPLES_LINE <- 1001   # resolution for merged-line along-position approximation
+
+# For SAME-SEGMENT ordering we can use fewer samples (cheaper; segments are short)
+N_SAMPLES_SEG  <- 401
 
 # radius to select local river network around each spill
 RIVER_SEARCH_RADIUS_M <- max(CAND_RADIUS_M, ALONG_MAX_M) * 2  # e.g. 3000 m
@@ -140,14 +143,13 @@ from <- as.integer(edges_dt$i.seg)
 to   <- as.integer(edges_dt$seg)
 
 adj_down <- split(to, from)  # downstream neighbors per segment
-adj_up   <- split(from, to)  # upstream neighbors per segment
+adj_up   <- split(from, to)  # upstream neighbors per segment (reverse)
 
 # Fill missing with empty vectors for safe indexing
 adj_down_full <- vector("list", n_segs)
 adj_up_full   <- vector("list", n_segs)
 adj_down_full[as.integer(names(adj_down))] <- adj_down
 adj_up_full[as.integer(names(adj_up))]     <- adj_up
-
 adj_down <- lapply(adj_down_full, function(x) if (is.null(x)) integer(0) else as.integer(x))
 adj_up   <- lapply(adj_up_full,   function(x) if (is.null(x)) integer(0) else as.integer(x))
 
@@ -156,7 +158,7 @@ rm(seg_dt, edges_dt, from, to, adj_down_full, adj_up_full)
 cat("Adjacency ready. (Segments: ", n_segs, ")\n\n", sep = "")
 
 # -------------------------------------------------------------------
-# 3. Nearest river segment for each spill (for diagnostics / fallback)
+# 3. Nearest river segment for each spill
 # -------------------------------------------------------------------
 cat("=== Step 3: Nearest river segment for each spill ===\n")
 t_nn <- system.time({
@@ -165,9 +167,28 @@ t_nn <- system.time({
 cat("Nearest rivers computed in ", round(t_nn["elapsed"], 2), " seconds.\n\n", sep = "")
 
 # -------------------------------------------------------------------
-# Helper: approximate along-river position via line sampling (merged local line)
+# Helper: ensure a single LINESTRING geometry (pick closest if multiple)
 # -------------------------------------------------------------------
-approx_t_on_line <- function(line_geom, pts, n_samples = N_SAMPLES_LINE) {
+as_single_linestring <- function(line_geom, ref_pt) {
+  # line_geom: sfc_LINESTRING or sfc_MULTILINESTRING (length 1)
+  if (inherits(line_geom, "sfc_LINESTRING") && length(line_geom) == 1L) return(line_geom)
+
+  # cast to LINESTRINGs, pick nearest to ref point
+  ls <- st_cast(line_geom, "LINESTRING")
+  if (length(ls) == 0L) return(NULL)
+  if (length(ls) == 1L) return(ls)
+
+  d <- st_distance(ref_pt, ls)
+  best <- which.min(as.numeric(d[1, ]))
+  ls[best]
+}
+
+# -------------------------------------------------------------------
+# Helper: approximate fractional position on a LINESTRING by sampling
+# -------------------------------------------------------------------
+approx_fraction_on_line <- function(line_geom, pts, n_samples) {
+  # line_geom: sfc_LINESTRING length 1
+  # pts: sfc_POINT length N (or 1)
   samples    <- st_line_sample(line_geom, sample = seq(0, 1, length.out = n_samples))
   samples_pt <- st_cast(samples, "POINT")
 
@@ -197,8 +218,9 @@ build_local_river_line <- function(spill_point, rivers, river_idx0,
   geom_union <- st_union(st_geometry(rivers[idx, ]))
   geom_multi <- st_cast(geom_union, "MULTILINESTRING")
   merged     <- st_line_merge(geom_multi)
-  merged_ls  <- st_cast(merged, "LINESTRING")
 
+  # may yield LINESTRING or MULTILINESTRING; cast below
+  merged_ls  <- st_cast(merged, "LINESTRING")
   if (length(merged_ls) == 0L) return(NULL)
   if (length(merged_ls) == 1L) return(merged_ls)
 
@@ -244,16 +266,18 @@ reachable_within <- function(start_seg, max_dist, adj, seg_len) {
 }
 
 # -------------------------------------------------------------------
-# Helper: same-segment Up/Down using lwgeom::st_line_locate_point
+# Helper: same-segment Up/Down using sampling on THAT segment geometry
 # -------------------------------------------------------------------
-label_same_segment <- function(center_row, spill_sf, hh_sf_same, rivers_2d) {
-  seg_geom <- st_geometry(rivers_2d[center_row, ])
-  seg_L    <- as.numeric(st_length(seg_geom))
-  if (!is.finite(seg_L) || seg_L <= 0) return(rep(NA_character_, nrow(hh_sf_same)))
+label_same_segment <- function(center_row, spill_sf, hh_sf_same, rivers_2d,
+                               n_samples_seg = N_SAMPLES_SEG) {
+  seg_geom0 <- st_geometry(rivers_2d[center_row, ])
+  seg_geom  <- as_single_linestring(seg_geom0, st_geometry(spill_sf))
+  if (is.null(seg_geom)) return(rep(NA_character_, nrow(hh_sf_same)))
 
-  # lwgeom returns units; coerce to numeric and divide by total length for fraction
-  t_spill <- as.numeric(lwgeom::st_line_locate_point(seg_geom, st_geometry(spill_sf))) / seg_L
-  t_hh    <- as.numeric(lwgeom::st_line_locate_point(seg_geom, st_geometry(hh_sf_same))) / seg_L
+  t_spill <- approx_fraction_on_line(seg_geom, st_geometry(spill_sf), n_samples = n_samples_seg)
+
+  # if only 1 house, approx_fraction_on_line returns length-1 numeric; otherwise vector
+  t_hh <- approx_fraction_on_line(seg_geom, st_geometry(hh_sf_same), n_samples = n_samples_seg)
 
   ifelse(t_hh >= t_spill, "downstream", "upstream")
 }
@@ -278,14 +302,13 @@ for (i in seq_len(nrow(spills_sf))) {
     cat("  -> Invalid nearest river_idx; skipping.\n\n")
     next
   }
-
   center_row <- river_idx0
 
+  # local merged line for distance + |along| filtering
   t_build <- system.time({
     line_geom <- build_local_river_line(sp, rivers_2d, river_idx0,
                                         search_radius_m = RIVER_SEARCH_RADIUS_M)
   })
-
   if (is.null(line_geom)) {
     cat("  -> Could not build local river line; skipping.\n\n")
     next
@@ -303,8 +326,8 @@ for (i in seq_len(nrow(spills_sf))) {
     next
   }
 
-  # Spill position along merged local line (for |River_Len| filtering only)
-  t_spill   <- approx_t_on_line(line_geom, st_geometry(sp))
+  # Spill position along merged local line (ONLY for |River_Len| filtering)
+  t_spill   <- approx_fraction_on_line(line_geom, st_geometry(sp), n_samples = N_SAMPLES_LINE)
   pos_spill <- t_spill * line_len
   cat("  Spill t_on_line: ", round(t_spill, 4),
       " -> pos_spill (m): ", round(pos_spill, 1), "\n", sep = "")
@@ -315,7 +338,7 @@ for (i in seq_len(nrow(spills_sf))) {
   down_ids  <- river_ids[down_rows]
   up_ids    <- river_ids[up_rows]
 
-  # Candidate houses in Euclidean radius
+  # Candidate houses within Euclidean radius
   t_cand <- system.time({
     idx_list <- st_is_within_distance(sp, sales_sf, dist = CAND_RADIUS_M)
   })
@@ -343,15 +366,15 @@ for (i in seq_len(nrow(spills_sf))) {
   cat("  House->river distances computed (t = ",
       round(t_dist["elapsed"], 2), " s).\n", sep = "")
 
-  # House position along merged local line (for |River_Len| filtering only)
+  # House position along merged local line (ONLY for |River_Len| filtering)
   t_pos <- system.time({
-    t_hh   <- approx_t_on_line(line_geom, st_geometry(hh_pts))
+    t_hh   <- approx_fraction_on_line(line_geom, st_geometry(hh_pts), n_samples = N_SAMPLES_LINE)
     pos_hh <- t_hh * line_len
   })
   cat("  House positions along river computed (t = ",
       round(t_pos["elapsed"], 2), " s).\n", sep = "")
 
-  River_Len_vec <- pos_hh - pos_spill  # sign NOT interpreted; only abs used
+  River_Len_vec <- pos_hh - pos_spill  # sign NOT interpreted
 
   cat("  River_Len range (m): ",
       paste(round(range(River_Len_vec, na.rm = TRUE), 1), collapse = " to "),
@@ -379,14 +402,15 @@ for (i in seq_len(nrow(spills_sf))) {
   # Up/Down assignment
   UpDown_keep <- rep(NA_character_, length(hh_seg_id_keep))
 
-  # Same segment: segment-local order via lwgeom locate_point
+  # Same segment: sampling-based locate on that segment geometry
   same_seg <- hh_seg_idx_keep == center_row
   if (any(same_seg)) {
     UpDown_keep[same_seg] <- label_same_segment(
       center_row = center_row,
       spill_sf   = sp,
       hh_sf_same = hh_keep[same_seg, ],
-      rivers_2d  = rivers_2d
+      rivers_2d  = rivers_2d,
+      n_samples_seg = N_SAMPLES_SEG
     )
   }
 
@@ -462,7 +486,7 @@ if (nrow(sp_plot) != 1L) {
       cat("  -> Could not build local river line for plot; skipping plot.\n")
     } else {
       line_len <- as.numeric(st_length(line_geom))
-      t_spill  <- approx_t_on_line(line_geom, st_geometry(sp_plot))
+      t_spill  <- approx_fraction_on_line(line_geom, st_geometry(sp_plot), n_samples = N_SAMPLES_LINE)
       pos_spill <- t_spill * line_len
 
       idx_list <- st_is_within_distance(sp_plot, sales_sf, dist = CAND_RADIUS_M)
@@ -476,7 +500,7 @@ if (nrow(sp_plot) != 1L) {
         dist_mat       <- st_distance(hh_pts, line_geom)
         Dist_River_vec <- as.numeric(dist_mat[, 1])
 
-        t_hh   <- approx_t_on_line(line_geom, st_geometry(hh_pts))
+        t_hh   <- approx_fraction_on_line(line_geom, st_geometry(hh_pts), n_samples = N_SAMPLES_LINE)
         pos_hh <- t_hh * line_len
         River_Len_vec <- pos_hh - pos_spill
 

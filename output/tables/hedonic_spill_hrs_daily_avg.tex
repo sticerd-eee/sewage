@@ -1,0 +1,55 @@
+\begin{table}[H]
+\centering
+\begin{talltblr}[         %% tabularray outer open
+caption={Effect of Sewage Spills (Hours) on Property Values},
+label={tbl:hedonic-spill-hrs},
+note{}={ },
+]                     %% tabularray outer close
+{                     %% tabularray inner open
+colspec={Q[]Q[]Q[]Q[]Q[]Q[]Q[]},
+hline{2}={3,6-7}{solid, black, 0.05em},
+hline{3}={1-7}{solid, black, 0.05em},
+hline{27}={1-7}{solid, black, 0.05em},
+hline{2}={2,5}{solid, black, 0.05em, l=-0.5},
+hline{2}={4}{solid, black, 0.05em, r=-0.5},
+hline{1}={1-7}{solid, black, 0.1em},
+hline{30}={1-7}{solid, black, 0.1em},
+column{3-4,6-7}={}{halign=c},
+cell{1}{1}={}{halign=c},
+cell{1}{2}={c=3}{halign=c},
+cell{1}{5}={c=3}{halign=c},
+cell{2-29}{1}={}{halign=l},
+cell{2-29}{2}={}{halign=c},
+cell{2-29}{5}={}{halign=c},
+}                     %% tabularray inner close
+& House Sales &  &  & House Rentals &  &  \\
+& (1) & (2) & (3) & (4) & (5) & (6) \\
+Constant & \num{12.406}*** &  &  & \num{5.584}*** &  &  \\
+& (\num{0.001}) &  &  & (\num{0.000}) &  &  \\
+Daily avg. spill hours & \num{-0.013}*** & \num{-0.006}*** & \num{-0.001} & \num{-0.055}*** & \num{-0.008}*** & \num{-0.003}*** \\
+& (\num{0.001}) & (\num{0.001}) & (\num{0.001}) & (\num{0.002}) & (\num{0.001}) & (\num{0.001}) \\
+Flat &  &  & \num{-0.791}*** &  &  &  \\
+&  &  & (\num{0.002}) &  &  &  \\
+Other &  &  & \num{-0.261}*** &  &  &  \\
+&  &  & (\num{0.003}) &  &  &  \\
+Semi-detached &  &  & \num{-0.368}*** &  &  & \num{0.169}*** \\
+&  &  & (\num{0.001}) &  &  & (\num{0.025}) \\
+Terraced &  &  & \num{-0.541}*** &  &  & \num{0.115}*** \\
+&  &  & (\num{0.001}) &  &  & (\num{0.021}) \\
+New build &  &  & \num{0.120}*** &  &  &  \\
+&  &  & (\num{0.001}) &  &  &  \\
+Leasehold &  &  & \num{-0.176}*** &  &  &  \\
+&  &  & (\num{0.002}) &  &  &  \\
+Bungalow &  &  &  &  &  & \num{0.222}*** \\
+&  &  &  &  &  & (\num{0.016}) \\
+Detached &  &  &  &  &  & \num{0.247}*** \\
+&  &  &  &  &  & (\num{0.028}) \\
+Bedrooms &  &  &  &  &  & \num{0.134}*** \\
+&  &  &  &  &  & (\num{0.021}) \\
+Bathrooms &  &  &  &  &  & \num{0.121}*** \\
+&  &  &  &  &  & (\num{0.014}) \\
+LSOA FE & No & Yes & Yes & No & Yes & Yes \\
+Observations & \num{1308310} & \num{1308017} & \num{1308017} & \num{1386976} & \num{1386736} & \num{1108259} \\
+Adj. R-squared & \num{0.000} & \num{0.530} & \num{0.701} & \num{0.001} & \num{0.603} & \num{0.833} \\
+\end{talltblr}
+\end{table}
