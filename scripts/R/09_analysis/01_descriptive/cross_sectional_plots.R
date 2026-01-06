@@ -1,20 +1,30 @@
 # ==============================================================================
 # Cross-Sectional Bivariate Plots - Sales and Rentals Combined
 # ==============================================================================
+#
 # Purpose: Generate bivariate plots showing relationships between prices
 #          and sewage spill metrics (count, duration, distance) at different
-#          distance thresholds (250m, 500m, 1000m) for both sales and rentals
+#          distance thresholds (250m, 500m, 1000m) for both sales and rentals.
 #
 # Author: Jacopo Olivieri
 # Date: 2025-11-22
 #
-# Outputs: PDF plots saved to output/figures/
-#          - Sales plots with sales_ prefix
-#          - Rental plots with rental_ prefix
-#          - 4 variables per dataset (distance, spill_count, spill_duration, inverse_spill_count)
+# Inputs:
+#   - data/processed/house_price.parquet - House sales transactions
+#   - data/processed/zoopla/zoopla_rentals.parquet - Rental transactions
+#   - data/processed/cross_section/sales/all_years/ - Cross-sectional sales
+#   - data/processed/cross_section/rentals/all_years/ - Cross-sectional rentals
+#
+# Outputs:
+#   - output/figures/sales_{variable}_{method}.pdf - Sales bivariate plots
+#   - output/figures/rental_{variable}_{method}.pdf - Rental bivariate plots
+#
 # ==============================================================================
 
-# Configuration ----------------------------------------------------------------
+
+# ==============================================================================
+# 1. Configuration
+# ==============================================================================
 # Sample size options:
 #   Numeric value (e.g., 300000) - sample specified number of properties
 #   NULL                         - use entire dataset (no sampling)
@@ -30,7 +40,9 @@ PLOT_DPI <- 300
 #   "loess"         - local regression only
 SMOOTHING_METHODS <- c("lm")
 
-# Package Management -----------------------------------------------------------
+# ==============================================================================
+# 2. Package Management
+# ==============================================================================
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv")
 }
@@ -56,18 +68,22 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
-# Font Setup -------------------------------------------------------------------
+# ==============================================================================
+# 3. Setup
+# ==============================================================================
+
+# 3.1 Font Setup ---------------------------------------------------------------
 showtext::showtext_auto()
 showtext::showtext_opts(dpi = 300)
 sysfonts::font_add_google("Libertinus Serif", "libertinus", db_cache = FALSE)
 
-# Output Directory Setup -------------------------------------------------------
+# 3.2 Output Directory ---------------------------------------------------------
 output_dir <- here::here("output", "figures")
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
-# ggplot Theme -----------------------------------------------------------------
+# 3.3 ggplot Theme -------------------------------------------------------------
 theme_pref <- theme_minimal() +
   theme(
     text = element_text(size = 9, family = "Libertinus Serif"),
@@ -91,7 +107,7 @@ theme_pref <- theme_minimal() +
     plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
   )
 
-# Plotting Function ------------------------------------------------------------
+# 3.4 Plotting Function --------------------------------------------------------
 create_cs_plot <- function(
   plot_data,
   x_var,
@@ -127,7 +143,11 @@ create_cs_plot <- function(
   return(p)
 }
 
-# Process Sales Data -----------------------------------------------------------
+# ==============================================================================
+# 4. Data Loading and Preparation
+# ==============================================================================
+
+# 4.1 Process Sales Data -------------------------------------------------------
 cat("Processing sales data...\n")
 
 # House price data
@@ -179,7 +199,7 @@ plot_data_sales <- dat_agg_sales %>%
     log_price = log(price)
   )
 
-# Process Rentals Data ---------------------------------------------------------
+# 4.2 Process Rentals Data -----------------------------------------------------
 cat("Processing rentals data...\n")
 
 # Zoopla rental data
@@ -232,7 +252,9 @@ plot_data_rentals <- dat_agg_rentals %>%
     log_price = log(listing_price)
   )
 
-# Generate and Save Plots ------------------------------------------------------
+# ==============================================================================
+# 5. Generate and Save Plots
+# ==============================================================================
 
 # Plot specifications
 plot_specs <- list(

@@ -1,0 +1,27 @@
+\begin{table}[H]
+    \centering
+    \begin{talltblr}[         %% tabularray outer open
+        caption={Effect of Sewage Spills on Property Values: Palmquist (1982) Repeat Transactions},
+        note{}={Dependent variable is the depreciation-adjusted log price/rent ratio between consecutive transactions of the same property (Palmquist, 1982). Sample: repeat sales/rentals within 250m of sewage spill sites. Treatment: change in cumulative 4-quarter spill exposure between transactions. Time FE: Bailey-Muth-Nourse dummies (+1 final, -1 initial transaction). Conley (1999) spatial SEs (500m cutoff) in parentheses. Depreciation rate: 1 percent annually.},
+        ]                     %% tabularray outer close
+        {                     %% tabularray inner open
+        colspec={Q[]Q[]Q[]Q[]Q[]},
+        hline{2}={1-5}{solid, black, 0.05em},
+        hline{6}={1-5}{solid, black, 0.05em},
+        hline{1}={1-5}{solid, black, 0.1em},
+        hline{9}={1-5}{solid, black, 0.1em},
+        column{2-5}={}{halign=c},
+        column{1}={}{halign=l},
+        }                     %% tabularray inner close
+                                                   & \multicolumn{2}{c}{Sales} & \multicolumn{2}{c}{Rentals}                         \\
+        \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+                                                   & (1)                       & (2)                         & (3)       & (4)       \\
+        \$\textbackslash{}Delta\$ Spill count (4Q) & -0.00107*                 &                             & -0.00008  &           \\
+                                                   & (0.00058)                 &                             & (0.00011) &           \\
+        \$\textbackslash{}Delta\$ Spill hours (4Q) &                           & -0.00011***                 &           & 0.00001   \\
+                                                   &                           & (0.00003)                   &           & (0.00001) \\
+        Time FE (BMN)                              & Yes                       & Yes                         & Yes       & Yes       \\
+        Observations                               & 2758                      & 2758                        & 8210      & 8210      \\
+        Adj. R-squared                             & -0.001                    & -0.001                      & 0.037     & 0.038     \\
+    \end{talltblr}
+\end{table}

@@ -1,18 +1,30 @@
 # ==============================================================================
 # Spill Maps - MSOA-Level Sewage Spill Spatial Distribution
 # ==============================================================================
-# Purpose: Generate static PDF maps showing spill counts by MSOA for 2021-2023
-#          Produces two maps: total spills and dry spills (sum across 2021-2023)
+#
+# Purpose: Generate static PDF maps showing spill counts by MSOA for 2021-2023.
+#          Produces two maps: total spills and dry spills (sum across years).
 #
 # Author: Jacopo Olivieri
 # Date: 2025-12-17
 #
-# Outputs: PDF maps saved to output/figures/maps/
-#          - spill_total_count_2021_2023.pdf
-#          - dry_spill_total_count_2021_2023.pdf
+# Inputs:
+#   - data/processed/agg_spill_stats/agg_spill_yr.parquet - Yearly spill data
+#   - data/processed/agg_spill_stats/agg_spill_dry_yr.parquet - Dry spill data
+#   - data/processed/unique_spill_sites.parquet - Site coordinates
+#   - data/raw/shapefiles/MSOA_BCG/ - MSOA boundary shapefiles
+#   - data/raw/shapefiles/MSOA_population/sapemsoasyoatablefinal.xlsx - Population
+#
+# Outputs:
+#   - output/figures/maps/spill_total_count_2021_2023.pdf
+#   - output/figures/maps/dry_spill_total_count_2021_2023.pdf
+#
 # ==============================================================================
 
-# Configuration ----------------------------------------------------------------
+
+# ==============================================================================
+# 1. Configuration
+# ==============================================================================
 PLOT_WIDTH <- 7
 PLOT_HEIGHT <- 11
 PLOT_DPI <- 300
@@ -22,7 +34,9 @@ YEAR_FILENAME_LABEL <- paste(min(TARGET_YEARS), max(TARGET_YEARS), sep = "_")
 NO_SPILL_COLOR <- "grey90"
 VIRIDIS_PALETTE <- "magma"
 
-# Package Management -----------------------------------------------------------
+# ==============================================================================
+# 2. Package Management
+# ==============================================================================
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv")
 }
@@ -47,13 +61,18 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
-# Font Setup -------------------------------------------------------------------
+
+# ==============================================================================
+# 3. Setup
+# ==============================================================================
+
+# 3.1 Font Setup ---------------------------------------------------------------
 showtext::showtext_auto()
 showtext::showtext_opts(dpi = 300)
 sysfonts::font_add_google("Libertinus Serif", "libertinus", db_cache = FALSE)
 FONT_FAMILY <- "libertinus"
 
-# Publication-Quality Map Theme ------------------------------------------------
+# 3.2 Publication-Quality Map Theme --------------------------------------------
 theme_map_publication <- function() {
   theme_void(base_family = FONT_FAMILY) +
     theme(
@@ -70,13 +89,15 @@ theme_map_publication <- function() {
     )
 }
 
-# Output Directory Setup -------------------------------------------------------
+# 3.3 Output Directory ---------------------------------------------------------
 output_dir <- here::here("output", "figures", "maps")
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
-# Load Data --------------------------------------------------------------------
+# ==============================================================================
+# 4. Data Loading
+# ==============================================================================
 cat("Loading data...\n")
 
 # Regular spill data
@@ -120,7 +141,9 @@ msoa_population <- readxl::read_excel(
 
 cat("  Data loaded successfully\n")
 
-# Helper Functions -------------------------------------------------------------
+# ==============================================================================
+# 5. Helper Functions
+# ==============================================================================
 
 # Aggregate regular spills to MSOA level
 aggregate_spills_to_msoa <- function(data, spill_sites, years) {
@@ -334,7 +357,9 @@ plot_static_dry_spill_map <- function(data, value_col) {
     )
 }
 
-# Process Data -----------------------------------------------------------------
+# ==============================================================================
+# 6. Data Processing
+# ==============================================================================
 cat("Processing spill data for", YEAR_RANGE_LABEL, "...\n")
 
 # Aggregate regular spills
@@ -349,7 +374,9 @@ msoa_dry_spills <- aggregate_dry_spills_to_msoa(
 )
 cat("  Dry spills aggregated\n")
 
-# Generate and Save Maps -------------------------------------------------------
+# ==============================================================================
+# 7. Generate and Save Maps
+# ==============================================================================
 cat("Generating maps...\n")
 
 # Regular spill map

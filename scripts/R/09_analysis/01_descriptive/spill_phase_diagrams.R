@@ -1,26 +1,36 @@
 # ==============================================================================
 # Sewage Spill Persistence Phase Diagrams
 # ==============================================================================
+#
 # Purpose: Generate phase diagrams showing year-to-year transition probabilities
-#          for sewage spill sites across quartile bins (0, Q1, Q2, Q3, Q4)
+#          for sewage spill sites across quartile bins (0, Q1, Q2, Q3, Q4).
 #
 # Author: Jacopo Olivieri
 # Date: 2025-11-22
 #
-# Outputs: PDF phase diagrams saved to output/figures/
-#          - spill_count_persistence.pdf
-#          - spill_hours_persistence.pdf
+# Inputs:
+#   - data/processed/agg_spill_stats/agg_spill_yr.parquet - Yearly spill data
+#
+# Outputs:
+#   - output/figures/spill_count_persistence.pdf
+#   - output/figures/spill_hours_persistence.pdf
 #
 # Note: Years are hardcoded to 2021-2023 period
+#
 # ==============================================================================
 
-# Configuration ----------------------------------------------------------------
+
+# ==============================================================================
+# 1. Configuration
+# ==============================================================================
 PLOT_WIDTH <- 20 * 1.618
 PLOT_HEIGHT <- 20
 PLOT_DPI <- 300
 VIRIDIS_PALETTE <- "magma"
 
-# Package Management -----------------------------------------------------------
+# ==============================================================================
+# 2. Package Management
+# ==============================================================================
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv")
 }
@@ -45,18 +55,23 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
-# Font Setup -------------------------------------------------------------------
+
+# ==============================================================================
+# 3. Setup
+# ==============================================================================
+
+# 3.1 Font Setup ---------------------------------------------------------------
 showtext::showtext_auto()
 showtext::showtext_opts(dpi = 300)
 sysfonts::font_add_google("Libertinus Serif", "libertinus", db_cache = FALSE)
 
-# Output Directory Setup -------------------------------------------------------
+# 3.2 Output Directory ---------------------------------------------------------
 output_dir <- here::here("output", "figures")
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
-# ggplot Theme -----------------------------------------------------------------
+# 3.3 ggplot Theme -------------------------------------------------------------
 theme_pref <- theme_minimal() +
   theme(
     text = element_text(size = 10, family = "libertinus"),
@@ -72,7 +87,7 @@ theme_pref <- theme_minimal() +
     plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
   )
 
-# Helper Functions -------------------------------------------------------------
+# 3.4 Helper Functions ---------------------------------------------------------
 
 # Bin spill metrics by year (0 or quartiles for positive values)
 bin_spills_by_year <- function(data, metric_col) {
@@ -191,7 +206,9 @@ plot_phase_diagram <- function(trans_prob_data) {
     coord_fixed()
 }
 
-# Load Data --------------------------------------------------------------------
+# ==============================================================================
+# 4. Data Loading and Preparation
+# ==============================================================================
 cat("Loading sewage spill data...\n")
 
 path_spill_yr <- here::here(
@@ -203,7 +220,7 @@ path_spill_yr <- here::here(
 
 spills <- import(path_spill_yr, trust = TRUE)
 
-# Prepare Transition Data ------------------------------------------------------
+# 4.1 Prepare Transition Data --------------------------------------------------
 cat("Preparing transition data...\n")
 
 # Spill count states
@@ -218,13 +235,15 @@ spill_hrs_states <- bin_spills_by_year(spills, "spill_hrs_yr") %>%
 transitions_count <- create_transitions(spill_count_states, "state_count")
 transitions_hrs <- create_transitions(spill_hrs_states, "state_hrs")
 
-# Calculate Transition Probabilities ------------------------------------------
+# 4.2 Calculate Transition Probabilities --------------------------------------
 cat("Calculating transition probabilities...\n")
 
 trans_prob_count <- calc_transition_matrix(transitions_count)
 trans_prob_hrs <- calc_transition_matrix(transitions_hrs)
 
-# Generate and Save Plots ------------------------------------------------------
+# ==============================================================================
+# 5. Generate and Save Plots
+# ==============================================================================
 cat("Generating phase diagrams...\n")
 
 # Spill Count Phase Diagram

@@ -1,31 +1,40 @@
 # ==============================================================================
 # Cross-Sectional Regression Analysis: Spill Hours
 # ==============================================================================
-# Purpose: Estimate the effect of sewage spill duration (hours) on property values
-#          Panel A: Sales (log house prices)
-#          Panel B: Rentals (log rental prices)
-#          Each panel includes OLS, FE, and FE + Controls specifications
+#
+# Purpose: Estimate the effect of sewage spill duration (hours) on property
+#          values. Panel A: Sales (log house prices), Panel B: Rentals (log
+#          rental prices). Each panel includes OLS, FE, and FE + Controls.
 #
 # Author: Jacopo Olivieri
 # Date: 2024-10-15
 #
-# Outputs: LaTeX regression table saved to output/tables/
-#          - hedonic_spill_hrs.tex (combined table with both panels)
+# Inputs:
+#   - data/processed/agg_spill_stats/agg_spill_yr.parquet - Yearly spill data
+#   - data/processed/house_price.parquet - House sales transactions
+#   - data/processed/zoopla/zoopla_rentals.parquet - Rental transactions
+#   - data/processed/general_panel/sales/ - General panel (Arrow dataset)
+#   - data/processed/general_panel/rentals/ - General panel (Arrow dataset)
+#
+# Outputs:
+#   - output/tables/hedonic_spill_hrs.tex - Combined LaTeX table
+#
 # ==============================================================================
 
-# Configuration ----------------------------------------------------------------
+
+# ==============================================================================
+# 1. Configuration
+# ==============================================================================
 RAD <- 250L
 BASE_YEAR <- 2021
 
-# Package Management -----------------------------------------------------------
+
+# ==============================================================================
+# 2. Package Management
+# ==============================================================================
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv")
 }
-
-# Run manual renv commands if needed
-# renv::activate() # Activate the project library
-# renv::restore()  # Restore the environment if running for first time
-# renv::snapshot()  # After adding/updating packages, snapshot the state
 
 required_packages <- c(
   "arrow",

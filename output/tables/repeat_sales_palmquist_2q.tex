@@ -1,0 +1,35 @@
+\begin{table}[H]
+\centering
+\begin{talltblr}[         %% tabularray outer open
+caption={Effect of Sewage Spills on Property Values: Palmquist (1982) Repeat Transactions},
+label={tbl:repeat-transactions-palmquist},
+note{}={ },
+]                     %% tabularray outer close
+{                     %% tabularray inner open
+colspec={Q[]Q[]Q[]Q[]Q[]},
+hline{2}={5}{solid, black, 0.05em},
+hline{3}={1-5}{solid, black, 0.05em},
+hline{7}={1-5}{solid, black, 0.05em},
+hline{2}={2,4}{solid, black, 0.05em, l=-0.5},
+hline{2}={3}{solid, black, 0.05em, r=-0.5},
+hline{1}={1-5}{solid, black, 0.1em},
+hline{10}={1-5}{solid, black, 0.1em},
+column{3,5}={}{halign=c},
+cell{1}{1}={}{halign=c},
+cell{1}{2}={c=2}{halign=c},
+cell{1}{4}={c=2}{halign=c},
+cell{2-9}{1}={}{halign=l},
+cell{2-9}{2}={}{halign=c},
+cell{2-9}{4}={}{halign=c},
+}                     %% tabularray inner close
+& Sales &  & Rentals &  \\
+& (1) & (2) & (3) & (4) \\
+\$\textbackslash{}Delta\$ Spill count (2Q) & -0.00006 &  & 0.00025 &  \\
+& (0.00064) &  & (0.00031) &  \\
+\$\textbackslash{}Delta\$ Spill hours (2Q) &  & 0.00001 &  & 0.00004 \\
+&  & (0.00005) &  & (0.00003) \\
+Time FE (BMN) & Yes & Yes & Yes & Yes \\
+Observations & 4807 & 4807 & 13936 & 13936 \\
+Adj. R-squared & 0.001 & 0.001 & 0.044 & 0.046 \\
+\end{talltblr}
+\end{table}

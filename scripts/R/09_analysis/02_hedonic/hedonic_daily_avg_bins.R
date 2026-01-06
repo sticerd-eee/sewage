@@ -1,28 +1,35 @@
 # ==============================================================================
-# Cross-Sectional Regression Analysis: Daily Average Spill Measures
+# Cross-Sectional Regression Analysis: Daily Average Spill Measures (Quartiles)
 # ==============================================================================
+#
 # Purpose: Estimate the effect of sewage spills on property values using
-#          continuous daily average measures (spill count and hours)
-#          Panel A: Sales (log house prices)
-#          Panel B: Rentals (log rental prices)
-#          Each panel includes OLS, FE, and FE + Controls specifications
+#          quartile-binned daily average measures (spill count and hours).
+#          Panel A: Sales (log house prices), Panel B: Rentals (log rental
+#          prices). Each panel includes OLS, FE, and FE + Controls.
 #
 # Author: Jacopo Olivieri
 # Date: 2024-12-24
 #
-# Data Sources:
-#   - data/processed/cross_section/sales/prior_to_sale
-#   - data/processed/cross_section/rentals/prior_to_rental
+# Inputs:
+#   - data/processed/cross_section/sales/prior_to_sale/ - Cross-sectional sales
+#   - data/processed/cross_section/rentals/prior_to_rental/ - Cross-sectional rentals
 #
-# Outputs: LaTeX regression tables saved to output/tables/
-#          - hedonic_spill_count_daily_avg.tex
-#          - hedonic_spill_hrs_daily_avg.tex
+# Outputs:
+#   - output/tables/hedonic_spill_count_daily_avg_bins.tex
+#   - output/tables/hedonic_spill_hrs_daily_avg_bins.tex
+#
 # ==============================================================================
 
-# Configuration ----------------------------------------------------------------
+
+# ==============================================================================
+# 1. Configuration
+# ==============================================================================
 RAD <- 250L
 
-# Package Management -----------------------------------------------------------
+
+# ==============================================================================
+# 2. Package Management
+# ==============================================================================
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv")
 }
@@ -54,6 +61,19 @@ if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
+# Helper Function --------------------------------------------------------------
+# Helper to bucket spill metrics into "0 spills" plus four quartiles
+bin_spill_measure <- function(x) {
+  x_for_ntile <- dplyr::if_else(x == 0, NA_real_, x, missing = NA_real_)
+  quartile <- dplyr::ntile(x_for_ntile, 4)
+  bins <- dplyr::case_when(
+    is.na(x) ~ NA_character_,
+    x == 0 ~ "0 spills",
+    TRUE ~ paste0("Q", quartile)
+  )
+  factor(bins, levels = c("0 spills", paste0("Q", 1:4)))
+}
+
 # ==============================================================================
 # Panel A: Sales
 # ==============================================================================
@@ -76,7 +96,6 @@ sales <- import(
   select(
     -transaction_id,
     -date_of_transfer,
-    -price,
     -quality,
     -paon,
     -saon,
@@ -107,14 +126,21 @@ cat("Preparing sales data...\n")
 
 dat_sales_clean <- dat_cs_sales |>
   inner_join(sales_trimmed, by = "house_id") |>
-  mutate(log_price = log(price.y)) |>
+  mutate(
+    log_price = log(price.y),
+    spill_count_daily_avg_bin = bin_spill_measure(spill_count_daily_avg),
+    spill_hrs_daily_avg_bin = bin_spill_measure(spill_hrs_daily_avg)
+  ) |>
   filter(
-    !is.na(spill_count_daily_avg),
+    !is.na(spill_count_daily_avg_bin),
     !is.na(lsoa)
   ) |>
   mutate(
+    spill_count_daily_avg_bin = forcats::fct_relevel(spill_count_daily_avg_bin, "0 spills"),
+    spill_count_daily_avg_bin = forcats::fct_drop(spill_count_daily_avg_bin),
+    spill_hrs_daily_avg_bin = forcats::fct_relevel(spill_hrs_daily_avg_bin, "0 spills"),
+    spill_hrs_daily_avg_bin = forcats::fct_drop(spill_hrs_daily_avg_bin),
     lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
-    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
     property_type = forcats::fct_drop(property_type),
     old_new = forcats::fct_drop(old_new),
     duration = forcats::fct_drop(duration)
@@ -168,114 +194,124 @@ cat("Preparing rental data...\n")
 
 dat_rental_clean <- dat_cs_rentals |>
   inner_join(rentals_trimmed, by = "rental_id") |>
-  mutate(log_price = log(listing_price.y)) |>
+  mutate(
+    log_price = log(listing_price.y),
+    spill_count_daily_avg_bin = bin_spill_measure(spill_count_daily_avg),
+    spill_hrs_daily_avg_bin = bin_spill_measure(spill_hrs_daily_avg)
+  ) |>
   filter(
-    !is.na(spill_count_daily_avg),
+    !is.na(spill_count_daily_avg_bin),
     !is.na(lsoa)
   ) |>
   mutate(
+    spill_count_daily_avg_bin = forcats::fct_relevel(spill_count_daily_avg_bin, "0 spills"),
+    spill_count_daily_avg_bin = forcats::fct_drop(spill_count_daily_avg_bin),
+    spill_hrs_daily_avg_bin = forcats::fct_relevel(spill_hrs_daily_avg_bin, "0 spills"),
+    spill_hrs_daily_avg_bin = forcats::fct_drop(spill_hrs_daily_avg_bin),
     lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
-    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
     property_type = forcats::fct_drop(property_type)
   )
 
 cat("  Rental observations:", nrow(dat_rental_clean), "\n")
 
 # ==============================================================================
-# Estimate Models: Spill Count Daily Average
+# Estimate Models: Spill Count Daily Average (Quartiles)
 # ==============================================================================
 cat("Estimating spill count models...\n")
 
 # Sales Models
 model_sales_count_1 <- fixest::feols(
-  log_price ~ spill_count_daily_avg,
+  log_price ~ spill_count_daily_avg_bin,
   data = dat_sales_clean,
   vcov = "hetero"
 )
 
 model_sales_count_2 <- fixest::feols(
-  log_price ~ spill_count_daily_avg | lsoa,
+  log_price ~ spill_count_daily_avg_bin | lsoa,
   data = dat_sales_clean,
   vcov = "hetero"
 )
 
 model_sales_count_3 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + property_type + old_new + duration | lsoa,
+  log_price ~ spill_count_daily_avg_bin + property_type + old_new + duration | lsoa,
   data = dat_sales_clean,
   vcov = "hetero"
 )
 
 # Rental Models
 model_rental_count_1 <- fixest::feols(
-  log_price ~ spill_count_daily_avg,
+  log_price ~ spill_count_daily_avg_bin,
   data = dat_rental_clean,
   vcov = "hetero"
 )
 
 model_rental_count_2 <- fixest::feols(
-  log_price ~ spill_count_daily_avg | lsoa,
+  log_price ~ spill_count_daily_avg_bin | lsoa,
   data = dat_rental_clean,
   vcov = "hetero"
 )
 
 model_rental_count_3 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms | lsoa,
+  log_price ~ spill_count_daily_avg_bin + property_type + bedrooms + bathrooms | lsoa,
   data = dat_rental_clean,
   vcov = "hetero"
 )
 
 # ==============================================================================
-# Estimate Models: Spill Hours Daily Average
+# Estimate Models: Spill Hours Daily Average (Quartiles)
 # ==============================================================================
 cat("Estimating spill hours models...\n")
 
 # Sales Models
 model_sales_hrs_1 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg,
+  log_price ~ spill_hrs_daily_avg_bin,
   data = dat_sales_clean,
   vcov = "hetero"
 )
 
 model_sales_hrs_2 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg | lsoa,
+  log_price ~ spill_hrs_daily_avg_bin | lsoa,
   data = dat_sales_clean,
   vcov = "hetero"
 )
 
 model_sales_hrs_3 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg + property_type + old_new + duration | lsoa,
+  log_price ~ spill_hrs_daily_avg_bin + property_type + old_new + duration | lsoa,
   data = dat_sales_clean,
   vcov = "hetero"
 )
 
 # Rental Models
 model_rental_hrs_1 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg,
+  log_price ~ spill_hrs_daily_avg_bin,
   data = dat_rental_clean,
   vcov = "hetero"
 )
 
 model_rental_hrs_2 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg | lsoa,
+  log_price ~ spill_hrs_daily_avg_bin | lsoa,
   data = dat_rental_clean,
   vcov = "hetero"
 )
 
 model_rental_hrs_3 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms | lsoa,
+  log_price ~ spill_hrs_daily_avg_bin + property_type + bedrooms + bathrooms | lsoa,
   data = dat_rental_clean,
   vcov = "hetero"
 )
 
 # ==============================================================================
-# Export Tables: Spill Count Daily Average
+# Export Tables: Spill Count Daily Average (Quartiles)
 # ==============================================================================
 cat("Exporting spill count table...\n")
 
-# Coefficient labels
+# Coefficient labels (including controls)
 coef_labels_count <- c(
-  "(Intercept)" = "Constant",
-  "spill_count_daily_avg" = "Daily avg. spill count",
+  "(Intercept)" = "Constant (zero spills)",
+  "spill_count_daily_avg_binQ1" = "Spill count Q1",
+  "spill_count_daily_avg_binQ2" = "Spill count Q2",
+  "spill_count_daily_avg_binQ3" = "Spill count Q3",
+  "spill_count_daily_avg_binQ4" = "Spill count Q4",
   # Sales controls
   "property_typeF" = "Flat",
   "property_typeO" = "Other",
@@ -318,13 +354,6 @@ add_rows <- tibble::tribble(
 )
 attr(add_rows, "position") <- "coef_end"
 
-# Custom notes
-custom_notes_count <- paste0(
-  "\\\\begin{tablenotes}[flushleft]\n",
-  "       \\\\item \\\\hspace{-0.25cm} \\\\protect\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Heteroskedasticity-robust standard errors in parentheses. Daily avg. spill count measures the average number of spill events per day from January 2021 to the transaction date. LSOA FE denotes Lower Layer Super Output Area fixed effects. Property controls include property type, new-build status, and tenure for sales; property type, bedrooms, and bathrooms for rentals. \\\\sym{***} \\\\(p<0.01\\\\), \\\\sym{**} \\\\(p<0.05\\\\), \\\\sym{*} \\\\(p<0.1\\\\).}\n",
-  "    \\\\end{tablenotes}"
-)
-
 # Export table
 table_latex_count <- modelsummary::modelsummary(
   panels_count,
@@ -347,22 +376,25 @@ table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_la
 # Add label in tabularray format
 table_latex_count <- sub(
   "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-spill-count},",
+  "caption={\\1},\nlabel={tbl:hedonic-spill-count-bins},",
   table_latex_count
 )
 
-output_path_count <- file.path(output_dir, "hedonic_spill_count_daily_avg.tex")
+output_path_count <- file.path(output_dir, "hedonic_spill_count_daily_avg_bins.tex")
 writeLines(table_latex_count, output_path_count)
 
 # ==============================================================================
-# Export Tables: Spill Hours Daily Average
+# Export Tables: Spill Hours Daily Average (Quartiles)
 # ==============================================================================
 cat("Exporting spill hours table...\n")
 
 # Coefficient labels (including controls)
 coef_labels_hrs <- c(
-  "(Intercept)" = "Constant",
-  "spill_hrs_daily_avg" = "Daily avg. spill hours",
+  "(Intercept)" = "Constant (zero spills)",
+  "spill_hrs_daily_avg_binQ1" = "Spill hours Q1",
+  "spill_hrs_daily_avg_binQ2" = "Spill hours Q2",
+  "spill_hrs_daily_avg_binQ3" = "Spill hours Q3",
+  "spill_hrs_daily_avg_binQ4" = "Spill hours Q4",
   # Sales controls
   "property_typeF" = "Flat",
   "property_typeO" = "Other",
@@ -391,13 +423,6 @@ panels_hrs <- list(
   )
 )
 
-# Custom notes
-custom_notes_hrs <- paste0(
-  "\\\\begin{tablenotes}[flushleft]\n",
-  "       \\\\item \\\\hspace{-0.25cm} \\\\protect\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Heteroskedasticity-robust standard errors in parentheses. Daily avg. spill hours measures the average hours of sewage spilling per day from January 2021 to the transaction date. LSOA FE denotes Lower Layer Super Output Area fixed effects. Property controls include property type, new-build status, and tenure for sales; property type, bedrooms, and bathrooms for rentals. \\\\sym{***} \\\\(p<0.01\\\\), \\\\sym{**} \\\\(p<0.05\\\\), \\\\sym{*} \\\\(p<0.1\\\\).}\n",
-  "    \\\\end{tablenotes}"
-)
-
 # Export table
 table_latex_hrs <- modelsummary::modelsummary(
   panels_hrs,
@@ -420,16 +445,16 @@ table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_late
 # Add label in tabularray format
 table_latex_hrs <- sub(
   "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-spill-hrs},",
+  "caption={\\1},\nlabel={tbl:hedonic-spill-hrs-bins},",
   table_latex_hrs
 )
 
-output_path_hrs <- file.path(output_dir, "hedonic_spill_hrs_daily_avg.tex")
+output_path_hrs <- file.path(output_dir, "hedonic_spill_hrs_daily_avg_bins.tex")
 writeLines(table_latex_hrs, output_path_hrs)
 
 # ==============================================================================
 # Summary
 # ==============================================================================
 cat("\nLaTeX tables exported to:", output_dir, "\n")
-cat("  - hedonic_spill_count_daily_avg.tex\n")
-cat("  - hedonic_spill_hrs_daily_avg.tex\n")
+cat("  - hedonic_spill_count_daily_avg_bins.tex\n")
+cat("  - hedonic_spill_hrs_daily_avg_bins.tex\n")

@@ -1,26 +1,53 @@
-################################################################################
-# Project: Sewage in Our Waters
-# Script: Sewage Data Load
-# Date: 2025-10-02
+# ==============================================================================
+# Sewage Data Load
+# ==============================================================================
+#
+# Purpose: Load and assemble panel datasets for sewage spill analysis. Creates
+#          general panel (house-level) and within-radius panel (site-level)
+#          datasets for both sales and rental transactions.
+#
 # Author: Jacopo Olivieri
-################################################################################
+# Date: 2025-10-02
+#
+# Inputs:
+#   - data/processed/house_price.parquet - House sales transactions
+#   - data/processed/zoopla/zoopla_rentals.parquet - Rental transactions
+#   - data/processed/agg_spill_stats/agg_spill_dry_qtr.parquet - Quarterly spills
+#   - data/processed/agg_spill_stats/agg_spill_dry_mo.parquet - Monthly spills
+#   - data/processed/general_panel/sales/ - General panel (Arrow dataset)
+#   - data/processed/general_panel/rentals/ - General panel (Arrow dataset)
+#   - data/processed/within_radius_panel/sales/ - Within panel (Arrow dataset)
+#   - data/processed/within_radius_panel/rentals/ - Within panel (Arrow dataset)
+#
+# Outputs:
+#   - dat_sales: General panel sales data (in memory)
+#   - dat_rent: General panel rental data (in memory)
+#   - dat_sales_within: Within-radius panel sales data (in memory)
+#   - dat_rent_within: Within-radius panel rental data (in memory)
+#
+# ==============================================================================
 
-################################################################################
-# Load Packages
-################################################################################
 
-# Load packages
-initialise_environment <- function() {
-  required_packages <- c("arrow", "here", "rio", "dplyr")
-  invisible(lapply(required_packages, library, character.only = TRUE))
+# ==============================================================================
+# 1. Package Management
+# ==============================================================================
+
+required_packages <- c("arrow", "here", "rio", "dplyr")
+
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(sapply(packages, library, character.only = TRUE))
 }
-initialise_environment()
+install_if_missing(required_packages)
 
 
 
-################################################################################
-# Define Data Paths
-################################################################################
+# ==============================================================================
+# 2. Define Data Paths
+# ==============================================================================
 
 ## House Prices
 path_sales <- here::here("data", "processed", "house_price.parquet")
@@ -88,16 +115,15 @@ path_within_panel_sales <- here::here(
 
 
 
-################################################################################
-# 1. General Panel Data Load
-# (panel unit: house; observation unit: house transaction)
-################################################################################
+# ==============================================================================
+# 3. General Panel Data Load
+# ==============================================================================
+# Panel unit: house; observation unit: house transaction
 
 ## Define radius
 rad <- 250L # 500, 1000
 
-# 1.1 General Panel - Sales 
-################################################################################
+# 3.1 General Panel - Sales ------------------------------------------------
 
 ## Load sales data
 gen_panel_sales <- arrow::open_dataset(path_general_panel_sales) |>
@@ -115,8 +141,7 @@ dat_sales <- gen_panel_sales |>
 
 
 
-# 1.2 General Panel - Rental
-################################################################################
+# 3.2 General Panel - Rental -----------------------------------------------
 
 ## Define radius
 rad <- 250L # 500, 1000
@@ -137,13 +162,12 @@ dat_rent <- gen_panel_rent |>
 
 
 
-################################################################################
-# 2. Within Panel Data Load
-# (panel unit: spill site; observation unit: house transaction)
-################################################################################
+# ==============================================================================
+# 4. Within Panel Data Load
+# ==============================================================================
+# Panel unit: spill site; observation unit: house transaction
 
-# 2.1 Within Panel - Sales
-################################################################################
+# 4.1 Within Panel - Sales -------------------------------------------------
 
 ## Define radius and time-period
 rad <- 250L # 500, 1000
@@ -165,10 +189,7 @@ dat_sales_within <- within_panel_sales |>
   left_join(spills, by = join_by(site_id, qtr_id)) #month_id
 
 
-# 2.2 Within Panel - Rental
-################################################################################
-
-# Within Panel Data Load
+# 4.2 Within Panel - Rental ------------------------------------------------
 
 ## Define radius and time-period
 rad <- 250L # 500, 1000

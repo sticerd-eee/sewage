@@ -1,0 +1,26 @@
+\begin{table}[H]
+\centering
+\begin{talltblr}[         %% tabularray outer open
+caption={Effect of Sewage Spills on House Prices: Repeat Sales with Household FE},
+note{}={Dependent variable is log house price. Sample restricted to repeat sales (properties sold 2+ times) within 250m of sewage spill sites. Treatment variables measure cumulative spill count and hours in the 4 quarters prior to the transaction. Standard errors clustered by property in parentheses.},
+]                     %% tabularray outer close
+{                     %% tabularray inner open
+colspec={Q[]Q[]Q[]Q[]Q[]},
+hline{2}={1-5}{solid, black, 0.05em},
+hline{6}={1-5}{solid, black, 0.05em},
+hline{1}={1-5}{solid, black, 0.1em},
+hline{10}={1-5}{solid, black, 0.1em},
+column{2-5}={}{halign=c},
+column{1}={}{halign=l},
+}                     %% tabularray inner close
+& (1) & (2) & (3) & (4) \\
+Spill count (4Q) & 0.00206*** & 0.00000 &  & 0.00012 \\
+& (2.0157e-04) & (0.00021) &  & (0.00028) \\
+Spill hours (4Q) &  &  & -1.0453e-05 & -0.00002 \\
+&  &  & (1.728e-05) & (0.00002) \\
+Household FE & Yes & Yes & Yes & Yes \\
+Quarter FE & No & Yes & Yes & Yes \\
+Observations & 15292 & 15292 & 15292 & 15292 \\
+Adj. R-squared & 0.623 & 0.635 & 0.635 & 0.635 \\
+\end{talltblr}
+\end{table}

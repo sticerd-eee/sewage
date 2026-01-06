@@ -1,31 +1,40 @@
 # ==============================================================================
 # Cross-Sectional Regression Analysis: Spill Count
 # ==============================================================================
-# Purpose: Estimate the effect of sewage spill count on property values
+#
+# Purpose: Estimate the effect of sewage spill count on property values.
 #          Panel A: Sales (log house prices)
 #          Panel B: Rentals (log rental prices)
-#          Each panel includes OLS, FE, and FE + Controls specifications
+#          Each panel includes OLS, FE, and FE + Controls specifications.
 #
 # Author: Jacopo Olivieri
 # Date: 2024-10-15
 #
-# Outputs: LaTeX regression table saved to output/tables/
-#          - hedonic_spill_count.tex (combined table with both panels)
+# Inputs:
+#   - data/processed/agg_spill_stats/agg_spill_yr.parquet - Yearly spill data
+#   - data/processed/house_price.parquet - House sales transactions
+#   - data/processed/zoopla/zoopla_rentals.parquet - Rental transactions
+#   - data/processed/general_panel/sales/ - General panel (Arrow dataset)
+#   - data/processed/general_panel/rentals/ - General panel (Arrow dataset)
+#
+# Outputs:
+#   - output/tables/hedonic_spill_count.tex - Combined LaTeX table
+#
 # ==============================================================================
 
-# Configuration ----------------------------------------------------------------
+
+# ==============================================================================
+# 1. Configuration
+# ==============================================================================
 RAD <- 250L
 BASE_YEAR <- 2021
 
-# Package Management -----------------------------------------------------------
+# ==============================================================================
+# 2. Package Management
+# ==============================================================================
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv")
 }
-
-# Run manual renv commands if needed
-# renv::activate() # Activate the project library
-# renv::restore()  # Restore the environment if running for first time
-# renv::snapshot()  # After adding/updating packages, snapshot the state
 
 required_packages <- c(
   "arrow",
@@ -48,13 +57,18 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
-# Output Directory Setup -------------------------------------------------------
+
+# ==============================================================================
+# 3. Setup
+# ==============================================================================
+
+# 3.1 Output Directory ---------------------------------------------------------
 output_dir <- here::here("output", "tables")
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
-# Helper Function --------------------------------------------------------------
+# 3.2 Helper Function ----------------------------------------------------------
 # Helper to bucket spill metrics into "0 spills" plus four quartiles
 bin_spill_measure <- function(x) {
   x_for_ntile <- dplyr::if_else(x == 0, NA_real_, x, missing = NA_real_)
@@ -67,8 +81,7 @@ bin_spill_measure <- function(x) {
   factor(bins, levels = c("0 spills", paste0("Q", 1:4)))
 }
 
-# Data Loading -----------------------------------------------------------------
-
+# 3.3 Data Loading - Common ----------------------------------------------------
 # Sewage Spills
 path_spill_yr <- here::here(
   "data",
@@ -80,10 +93,10 @@ path_spill_yr <- here::here(
 spills <- import(path_spill_yr, trust = TRUE)
 
 # ==============================================================================
-# Panel A: Sales
+# 4. Panel A: Sales
 # ==============================================================================
 
-# Load Sales Data --------------------------------------------------------------
+# 4.1 Load Sales Data ----------------------------------------------------------
 
 # House Prices
 path_sales <- here::here("data", "processed", "house_price.parquet")
@@ -127,7 +140,7 @@ sales <- import(path_sales, trust = TRUE) |>
     duration = forcats::as_factor(duration)
   )
 
-# Prepare Sales Data -----------------------------------------------------------
+# 4.2 Prepare Sales Data -------------------------------------------------------
 
 spill_sales_collapsed <- gen_panel_sales |>
   filter(!is.na(site_id)) |>
@@ -156,7 +169,7 @@ dat_sales_clean <- sales |>
     duration = forcats::fct_drop(duration)
   )
 
-# Estimate Sales Models --------------------------------------------------------
+# 4.3 Estimate Sales Models ----------------------------------------------------
 
 model_sales_1 <- fixest::feols(
   log_price ~ spill_count_bin,
@@ -177,10 +190,10 @@ model_sales_3 <- fixest::feols(
 )
 
 # ==============================================================================
-# Panel B: Rentals
+# 5. Panel B: Rentals
 # ==============================================================================
 
-# Load Rental Data -------------------------------------------------------------
+# 5.1 Load Rental Data ---------------------------------------------------------
 
 # Rental Prices
 path_rent <- here::here("data", "processed", "zoopla", "zoopla_rentals.parquet")
@@ -218,7 +231,7 @@ rentals <- import(path_rent, trust = TRUE) |>
     property_type = forcats::as_factor(property_type)
   )
 
-# Prepare Rental Data ----------------------------------------------------------
+# 5.2 Prepare Rental Data ------------------------------------------------------
 
 spill_rental_collapsed <- gen_panel_rental |>
   filter(!is.na(site_id)) |>
@@ -256,7 +269,7 @@ dat_rental_clean <- rentals |>
     property_type = forcats::fct_drop(property_type)
   )
 
-# Estimate Rental Models -------------------------------------------------------
+# 5.3 Estimate Rental Models ---------------------------------------------------
 
 model_rental_1 <- fixest::feols(
   log_price ~ spill_count_bin,
@@ -277,7 +290,7 @@ model_rental_3 <- fixest::feols(
 )
 
 # ==============================================================================
-# Export Tables
+# 6. Export Tables
 # ==============================================================================
 
 # Coefficient labels

@@ -1,17 +1,25 @@
 # ==============================================================================
 # Google Trends Analysis - "Sewage Spill" Search Interest Over Time
 # ==============================================================================
+#
 # Purpose: Plot Google Trends data for "Sewage spill" web searches in the UK
-#          showing temporal patterns from 2018-2024
+#          showing temporal patterns from 2018-2024 with event annotations.
 #
 # Author: Jacopo Olivieri
 # Date: 2025-11-24
 #
-# Outputs: PDF plot saved to output/figures/
-#          - google_trends_sewage_spill_uk.pdf
+# Inputs:
+#   - data/raw/google_trends/google_trends_uk.xlsx - Google Trends data
+#
+# Outputs:
+#   - output/figures/google_trends_sewage_spill_uk.pdf
+#
 # ==============================================================================
 
-# Configuration ----------------------------------------------------------------
+
+# ==============================================================================
+# 1. Configuration
+# ==============================================================================
 PLOT_WIDTH <- 20 * 1.618# Width in cm
 PLOT_HEIGHT <- 20       # Height in cm
 PLOT_DPI <- 300         # Resolution
@@ -32,7 +40,9 @@ EVENT_LINE_COLOR <- "grey70"  # Light grey for reference lines
 EVENT_TEXT_COLOR <- "black"  # Black text for annotations
 EVENT_TEXT_SIZE <- 4.5  # Text size for annotations
 
-# Package Management -----------------------------------------------------------
+# ==============================================================================
+# 2. Package Management
+# ==============================================================================
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv")
 }
@@ -55,18 +65,23 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
-# Font Setup -------------------------------------------------------------------
+
+# ==============================================================================
+# 3. Setup
+# ==============================================================================
+
+# 3.1 Font Setup ---------------------------------------------------------------
 showtext::showtext_auto()
 showtext::showtext_opts(dpi = 300)
 sysfonts::font_add_google("Libertinus Serif", "libertinus", db_cache = FALSE)
 
-# Output Directory Setup -------------------------------------------------------
+# 3.2 Output Directory ---------------------------------------------------------
 output_dir <- here::here("output", "figures")
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
-# ggplot Theme -----------------------------------------------------------------
+# 3.3 ggplot Theme -------------------------------------------------------------
 theme_pref <- theme_minimal() +
   theme(
     text = element_text(size = 9, family = "Libertinus Serif"),
@@ -87,7 +102,9 @@ theme_pref <- theme_minimal() +
     plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
   )
 
-# Load Data --------------------------------------------------------------------
+# ==============================================================================
+# 4. Data Loading and Preparation
+# ==============================================================================
 cat("Loading Google Trends data...\n")
 
 google_trends <- readxl::read_excel(
@@ -95,7 +112,7 @@ google_trends <- readxl::read_excel(
   sheet = "united_kingdom"
 )
 
-# Process Data -----------------------------------------------------------------
+# 4.1 Process Data -------------------------------------------------------------
 cat("Processing data...\n")
 
 # Convert date string to proper Date object and filter to 2018-2024
@@ -114,7 +131,9 @@ google_trends_clean <- google_trends %>%
   ) %>%
   select(date, search_interest)
 
-# Create Plot ------------------------------------------------------------------
+# ==============================================================================
+# 5. Create and Save Plot
+# ==============================================================================
 cat("Creating plot...\n")
 
 p <- ggplot(google_trends_clean, aes(x = date, y = search_interest)) +
@@ -219,7 +238,7 @@ p <- ggplot(google_trends_clean, aes(x = date, y = search_interest)) +
   ) +
   theme_pref
 
-# Save Plot --------------------------------------------------------------------
+# 5.1 Save Plot ----------------------------------------------------------------
 cat("Saving plot...\n")
 
 file_name <- "google_trends_sewage_spill_uk.pdf"

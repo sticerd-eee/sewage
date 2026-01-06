@@ -321,10 +321,24 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
     - Implements the same nearest-site and distance-weighted exposure measures.
     - **Output:** Rental-level panel datasets saved to `data/processed/within_radius_panel/rentals/`.
 
-**`rental_panel_exp.R`**  
+**`rental_panel_exp.R`**
     - **Input:** Zoopla rental listings (`zoopla_rentals.parquet`), rental–spill lookup (`spill_rental_lookup.parquet`), and quarterly spill statistics.
     - Creates panel datasets linking rental transactions to nearby sewage spill sites across different radii. The datasets can be joined with the zoopla_rentals data, and spill statistics data.
     - **Output:** Partitioned by `radius` under `data/processed/general_panel/rentals/`.
+
+**`grid_long_difference_sales.R`**
+    - **Input:** House price data (`house_price.parquet`), house-spill lookup (`spill_house_lookup.parquet`), annual spill statistics (`agg_spill_yr.parquet`).
+    - Creates 250m × 250m grid-level dataset for long-difference analysis of house prices and sewage spill exposure.
+    - Aggregates transactions and spill exposure by grid cell and calendar year (2021–2023).
+    - Computes mean log prices, spill counts/hours, transaction counts, and composition controls.
+    - **Output:** `data/processed/long_difference/long_diff_grid_house_sales.parquet`.
+
+**`grid_long_difference_rentals.R`**
+    - **Input:** Zoopla rental data (`zoopla_rentals.parquet`), rental-spill lookup (`spill_rental_lookup.parquet`), annual spill statistics (`agg_spill_yr.parquet`).
+    - Creates 250m × 250m grid-level dataset for long-difference analysis of rental prices and sewage spill exposure.
+    - Aggregates rentals and spill exposure by grid cell and calendar year (2021–2023).
+    - Computes mean log prices, spill counts/hours, transaction counts, and composition controls.
+    - **Output:** `data/processed/long_difference/long_diff_grid_rentals.parquet`.
 
 **`site_panel_sales.R`**  
     - **Input:** House price data, spill lookup table, and monthly spill data in DuckDB database.
@@ -390,6 +404,8 @@ The following sequence removes circular dependencies and includes all scripts in
 29. **`rental_panel_within_radius.R`** — Rental-level panels (requires steps 5, 15, 21)
 30. **`sale_panel_exp.R`** — Sales general panel export (requires steps 28–29)
 31. **`rental_panel_exp.R`** — Rental general panel export (requires steps 26, 29)
+32. **`grid_long_difference_sales.R`** — Grid-level long-difference dataset for sales (requires steps 4, 15, 20)
+33. **`grid_long_difference_rentals.R`** — Grid-level long-difference dataset for rentals (requires steps 5, 15, 21)
 
 **Dependencies Notes:**
 - Steps 1–2 can run in parallel.
@@ -429,4 +445,4 @@ For detailed analysis results, methodology, and interactive visualisations, visi
 
 ---
 
-Last updated: 2 September 2025
+Last updated: 6 January 2026

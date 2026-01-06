@@ -1,0 +1,36 @@
+\begin{table}[H]
+\centering
+\begin{talltblr}[         %% tabularray outer open
+caption={Long Difference: Effect of Changes in Sewage Spills on Property Values (Exposed Cells)},
+label={tbl:long-difference-exposed},
+note{}={ },
+]                     %% tabularray outer close
+{                     %% tabularray inner open
+colspec={Q[]Q[]Q[]Q[]Q[]},
+hline{2}={5}{solid, black, 0.05em},
+hline{3}={1-5}{solid, black, 0.05em},
+hline{9}={1-5}{solid, black, 0.05em},
+hline{2}={2,4}{solid, black, 0.05em, l=-0.5},
+hline{2}={3}{solid, black, 0.05em, r=-0.5},
+hline{1}={1-5}{solid, black, 0.1em},
+hline{11}={1-5}{solid, black, 0.1em},
+column{3,5}={}{halign=c},
+cell{1}{1}={}{halign=c},
+cell{1}{2}={c=2}{halign=c},
+cell{1}{4}={c=2}{halign=c},
+cell{2-10}{1}={}{halign=l},
+cell{2-10}{2}={}{halign=c},
+cell{2-10}{4}={}{halign=c},
+}                     %% tabularray inner close
+& House Sales &  & House Rentals &  \\
+& (1) & (2) & (3) & (4) \\
+Constant & \num{0.078}*** & \num{0.077}*** & \num{0.182}*** & \num{0.182}*** \\
+& (\num{0.005}) & (\num{0.005}) & (\num{0.004}) & (\num{0.004}) \\
+\$\textbackslash{}Delta\$ Spill count & \num{0.000} &  & \num{-0.000}* &  \\
+& (\num{0.000}) &  & (\num{0.000}) &  \\
+\$\textbackslash{}Delta\$ Spill hours &  & \num{0.000} &  & \num{-0.000} \\
+&  & (\num{0.000}) &  & (\num{0.000}) \\
+Observations & \num{10412} & \num{10412} & \num{4685} & \num{4685} \\
+Adj. R-squared & \num{-0.000} & \num{0.000} & \num{0.000} & \num{-0.000} \\
+\end{talltblr}
+\end{table}
