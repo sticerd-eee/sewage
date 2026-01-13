@@ -65,12 +65,12 @@ The project is organised as follows:
 
 ### Dataset List
 
-| Data Directory               | Source                                | Notes                                                                                                       | Citation |
-|------------------------------|----------------------------------------|-------------------------------------------------------------------------------------------------------------|----------|
-| `data/raw/edm_data/`         | UK Government: Environment Agency     | **Event Duration Monitoring (2021–2024+):** Individual sewage spill events across all 10 WaSCs in England. Includes historical Excel files (2021-2023) and live API data (2024+) | [Environment Agency EDM](https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac) |
-| `data/raw/ea_consents/`      | UK Government: Environment Agency     | **Consented Discharges to Controlled Waters with Conditions:** Site locations, permit details, and discharge consent information under Environmental Permit Regulations | [EA Consents Data](https://www.data.gov.uk/dataset/55b8eaa8-60df-48a8-929a-060891b7a109) |
-| `data/raw/haduk_rainfall_data/` | UK Government: Met Office          | **HadUK-Grid Rainfall Data (2020–2023):** Daily precipitation totals on 60km grid across UK from nationally consistent observational dataset. Used to identify "dry spills" occurring during minimal rainfall periods. Monthly NetCDF files with transverse mercator projection | [Met Office HadUK-Grid](https://www.metoffice.gov.uk/research/climate/maps-and-data/data/haduk-grid/haduk-grid) |
-| `data/raw/lr_house_price/`   | UK Government: HM Land Registry       | **Land Registry House Prices:** Complete property transaction records for England and Wales (2021-2024+) including sale prices, addresses, and property characteristics | [Price Paid Data](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads) |
+| Data Directory                  | Source                            | Notes                                                                                                                                                                                                                                                                           | Citation                                                                                                        |
+| ------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `data/raw/edm_data/`            | UK Government: Environment Agency | **Event Duration Monitoring (2021–2024+):** Individual sewage spill events across all 10 WaSCs in England. Includes historical Excel files (2021-2023) and live API data (2024+)                                                                                                | [Environment Agency EDM](https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac)          |
+| `data/raw/ea_consents/`         | UK Government: Environment Agency | **Consented Discharges to Controlled Waters with Conditions:** Site locations, permit details, and discharge consent information under Environmental Permit Regulations                                                                                                         | [EA Consents Data](https://www.data.gov.uk/dataset/55b8eaa8-60df-48a8-929a-060891b7a109)                        |
+| `data/raw/haduk_rainfall_data/` | UK Government: Met Office         | **HadUK-Grid Rainfall Data (2020–2023):** Daily precipitation totals on 60km grid across UK from nationally consistent observational dataset. Used to identify "dry spills" occurring during minimal rainfall periods. Monthly NetCDF files with transverse mercator projection | [Met Office HadUK-Grid](https://www.metoffice.gov.uk/research/climate/maps-and-data/data/haduk-grid/haduk-grid) |
+| `data/raw/lr_house_price/`      | UK Government: HM Land Registry   | **Land Registry House Prices:** Complete property transaction records for England and Wales (2021-2024+) including sale prices, addresses, and property characteristics                                                                                                         | [Price Paid Data](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads)                |
 
 
 #### Event Duration Monitoring
@@ -285,20 +285,20 @@ Scripts for merging and integrating data from different sources and time periods
 
 Scripts for creating final analysis-ready datasets for econometric analysis. Scripts handle panel construction, treatment variable creation, and final dataset optimisation for different analytical approaches.
 
-**`cross_section_sales_db.R`**
+**`cross_section_sales.R`**
     - **Input:** House price data, spill-house lookup table, and monthly spill data loaded into DuckDB.
     - Creates cross-sectional datasets aggregated at house level for multiple timeframes and spatial radii.
     - Calculates spill exposure metrics: total counts, total hours, number of sites, mean/minimum distances.
     - **Output:** Partitioned by `radius` under `data/processed/cross_section/sales/` in two directories: `all_years/` and `prior_12mo/`.
 
-**`cross_section_sales_prior_to_sale_db.R`**
+**`cross_section_prior_to_sale.R`**
     - **Input:** House price data (`house_price.parquet`), spill-house lookup table (`spill_house_lookup.parquet`), and matched spill events (`matched_events_annual_data.parquet`).
     - Creates cross-sectional datasets aggregated from January 1, 2021 to the day before each house sale.
     - Calculates spill exposure metrics: total counts, total hours, daily averages, number of sites, mean/minimum distances.
     - Handles houses with no nearby sites (zeros, NA distances) and sites with no spill events (zeros, actual distances).
     - **Output:** Partitioned by `radius` under `data/processed/cross_section/sales/prior_to_sale/`.
 
-**`cross_section_rental_db.R`**  
+**`cross_section_rental.R`**  
     - **Input:** Zoopla rentals data (`zoopla_rentals.parquet`), rental–spill lookup (`spill_rental_lookup.parquet`), and monthly spill data loaded into DuckDB.
     - Creates cross-sectional datasets aggregated at rental level for multiple timeframes and spatial radii (12‑month window anchored on `rented_est`).
     - Calculates spill exposure metrics and distance summaries as per sales.
@@ -395,9 +395,9 @@ The following sequence removes circular dependencies and includes all scripts in
 • Note: Integration scripts are executed earlier for dependency reasons — see steps 11–12.
 
 #### Layer 06: Analysis Datasets
-23. **`cross_section_sales_db.R`** — Cross-sectional datasets (sales; requires steps 4, 15, 20)
-24. **`cross_section_sales_prior_to_sale_db.R`** — Prior-to-sale cross-sectional datasets (requires steps 4, 11, 20)
-25. **`cross_section_rental_db.R`** — Cross-sectional datasets (rentals; requires steps 5, 15, 20 & 22)
+23. **`cross_section_sales.R`** — Cross-sectional datasets (sales; requires steps 4, 15, 20)
+24. **`cross_section_prior_to_sale.R`** — Prior-to-sale cross-sectional datasets (requires steps 4, 11, 20)
+25. **`cross_section_rental.R`** — Cross-sectional datasets (rentals; requires steps 5, 15, 20 & 22)
 26. **`site_panel_sales.R`** — Site-level panels (requires steps 4, 15, 20)
 27. **`site_panel_rental.R`** — Rental site-level panels (requires steps 5, 15, 21)
 28. **`house_panel_within_radius.R`** — House-level panels (requires steps 4, 15, 20)

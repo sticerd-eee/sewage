@@ -146,7 +146,7 @@ digraph DataPipeline {
     label = '06 Final Dataset Assembly Layer';
     style='filled,rounded'; fillcolor='#faf5ff'; color='#a855f7'; fontcolor='#581c87'; penwidth=2;
     node [style='filled,rounded', rx=6, ry=6, fillcolor='#e0e7ff', color='#6366f1', penwidth=2, fontcolor='#312e81'];
-    S16 [label='cross_section_sales_db.R\\nCreates cross-sectional databases aggregating spill data (sales)'];
+    S16 [label='cross_section_sales.R\\nCreates cross-sectional databases aggregating spill data (sales)'];
     S18 [label='site_panel_sales.R\\nCreates site-level panel data by aggregating house price statistics'];
     S19 [label='house_panel_within_radius.R\\nCreates house panel data for houses within specified radius thresholds'];
     S20 [label='sale_panel_exp.R\\nCreates comprehensive house panel data including all houses'];
@@ -383,7 +383,7 @@ digraph DataPipeline {
 
 **Cross-Sectional Database Creation (Sales)**
 
-- **script_name**: `cross_section_sales_db.R`
+- **script_name**: `cross_section_sales.R`
 - **purpose**: Creates cross-sectional databases aggregating spill data: one for all years and one for 12 months prior to house sales, partitioned by radius thresholds.
 - **inputs**: 
   - `"data/processed/house_price.parquet"`
@@ -395,7 +395,7 @@ digraph DataPipeline {
 
 **Cross-Sectional Database Creation (Rentals)**
 
-- **script_name**: `cross_section_rental_db.R`
+- **script_name**: `cross_section_rental.R`
 - **purpose**: Creates cross-sectional rental datasets: all years and 12 months prior to `rented_est`, partitioned by radius thresholds.
 - **inputs**: 
   - `"data/processed/zoopla/zoopla_rentals.parquet"`

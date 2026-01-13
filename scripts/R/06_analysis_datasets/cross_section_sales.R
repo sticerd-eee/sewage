@@ -39,7 +39,7 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "cross_section_sales_db.log")
+  log_path <- here::here("output", "log", "cross_section_sales.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
   logger::log_appender(logger::appender_file(log_path))
