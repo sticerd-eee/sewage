@@ -3,10 +3,13 @@
 \begin{talltblr}[         %% tabularray outer open
 caption={Long Difference: Effect of Changes in Sewage Spills on Property Values (Exposed Cells)},
 label={tbl:long-difference-exposed},
-note{}={ },
+note{}={\footnotesize{\textbf{Notes:} This table presents long-difference estimates of the relationship between changes in sewage spill exposure and changes in property values in England between 2021 and 2023. The dependent variable is the change in mean log transaction price (columns 1--2) or mean log weekly asking rent (columns 3--4) at the grid-cell level. Observations are aggregated to 250m $\times$ 250m grid cells; for each cell, spill exposure is calculated by first summing annual spill counts or hours across all storm overflows within 250m of each transacted property, then averaging these property-level totals within the cell. $\Delta$ Spill count measures the change in the number of spill events; $\Delta$ Spill hours measures the change in total spill duration. The sample includes only grid cells within 250m of at least one storm overflow in either 2021 or 2023 that also have property transactions in both years. Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},
 ]                     %% tabularray outer close
 {                     %% tabularray inner open
-colspec={Q[]Q[]Q[]Q[]Q[]},
+width=0.9\linewidth,
+colsep=3pt,
+cells   = {font = \fontsize{11pt}{12pt}\selectfont},
+colspec={X[l] X[c] X[c] X[c] X[c] },
 hline{2}={5}{solid, black, 0.05em},
 hline{3}={1-5}{solid, black, 0.05em},
 hline{9}={1-5}{solid, black, 0.05em},
@@ -26,9 +29,9 @@ cell{2-10}{4}={}{halign=c},
 & (1) & (2) & (3) & (4) \\
 Constant & \num{0.078}*** & \num{0.077}*** & \num{0.182}*** & \num{0.182}*** \\
 & (\num{0.005}) & (\num{0.005}) & (\num{0.004}) & (\num{0.004}) \\
-\$\textbackslash{}Delta\$ Spill count & \num{0.000} &  & \num{-0.000}* &  \\
+$\Delta$ Spill count & \num{0.000} &  & \num{-0.000}* &  \\
 & (\num{0.000}) &  & (\num{0.000}) &  \\
-\$\textbackslash{}Delta\$ Spill hours &  & \num{0.000} &  & \num{-0.000} \\
+$\Delta$ Spill hours &  & \num{0.000} &  & \num{-0.000} \\
 &  & (\num{0.000}) &  & (\num{0.000}) \\
 Observations & \num{10412} & \num{10412} & \num{4685} & \num{4685} \\
 Adj. R-squared & \num{-0.000} & \num{0.000} & \num{0.000} & \num{-0.000} \\

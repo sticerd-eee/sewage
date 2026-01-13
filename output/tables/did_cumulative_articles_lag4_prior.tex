@@ -1,0 +1,42 @@
+\begin{table}[H]
+  \centering
+  \begin{talltblr}[         %% tabularray outer open
+    caption={Effect of Sewage Spills on Property Values: 4-Month Lagged Log Cumulative Media Coverage},
+    label={tbl:did-cumulative-articles-lag4-prior},
+    note{}={\footnotesize{\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Daily avg. spill count measures the average total number of spill events per day (12/24 count) recorded across all nearby overflows from January 2021 to the transaction date. Log cumulative articles (4-month lag) is the natural log of the total number of UK news articles about sewage from January 2021 to 4 months before the transaction (LexisNexis). Conley spatial standard errors (500m cutoff) in parentheses. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},
+    ]                     %% tabularray outer close
+    {                     %% tabularray inner open
+    width=0.9\linewidth,
+    colsep=3pt,
+    cells   = {font = \fontsize{11pt}{12pt}\selectfont},
+    colspec={X[l] X[c] X[c] X[c] X[c] X[c] X[c] },
+    hline{2}={3,6-7}{solid, black, 0.05em},
+    hline{3}={1-7}{solid, black, 0.05em},
+    hline{9}={1-7}{solid, black, 0.05em},
+    hline{2}={2,5}{solid, black, 0.05em, l=-0.5},
+    hline{2}={4}{solid, black, 0.05em, r=-0.5},
+    hline{1}={1-7}{solid, black, 0.1em},
+    hline{14}={1-7}{solid, black, 0.1em},
+    column{3-4,6-7}={}{halign=c},
+        cell{1}{1}={}{halign=c},
+        cell{1}{2}={c=3}{halign=c},
+        cell{1}{5}={c=3}{halign=c},
+        cell{2-13}{1}={}{halign=l},
+        cell{2-13}{2}={}{halign=c},
+        cell{2-13}{5}={}{halign=c},
+      }                     %% tabularray inner close
+                                                            & House Sales &          &          & House Rentals &          &          \\
+                                                            & (1)         & (2)      & (3)      & (4)           & (5)      & (6)      \\
+    Daily avg. spill count                                  & -0.250***   & -0.026   & 0.088**  & -0.825***     & 0.040    & 0.065**  \\
+                                                            & (0.097)     & (0.041)  & (0.040)  & (0.131)       & (0.033)  & (0.029)  \\
+    Log cumulative articles (4-mo lag)                      & 0.007***    & 0.090*** & 0.063*** & 0.046***      & 0.018*** & 0.027*** \\
+                                                            & (0.001)     & (0.003)  & (0.003)  & (0.001)       & (0.003)  & (0.003)  \\
+    Daily avg. spill count $\times$ Log cumulative articles & -0.051***   & -0.010   & 0.002    & -0.037        & -0.012*  & 0.001    \\
+                                                            & (0.014)     & (0.010)  & (0.009)  & (0.028)       & (0.007)  & (0.005)  \\
+    Property controls                                       & No          & No       & Yes      & No            & No       & Yes      \\
+    LSOA FE                                                 & No          & Yes      & Yes      & No            & Yes      & Yes      \\
+    Quarter FE                                              & No          & Yes      & Yes      & No            & Yes      & Yes      \\
+    Observations                                            & 1182101     & 1181795  & 1181795  & 1290069       & 1289805  & 1033837  \\
+    Adj. R-squared                                          & 0.001       & 0.440    & 0.555    & 0.016         & 0.628    & 0.847    \\
+  \end{talltblr}
+\end{table}

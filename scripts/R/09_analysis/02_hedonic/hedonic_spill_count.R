@@ -5,7 +5,7 @@
 # Purpose: Estimate the effect of sewage spill count on property values.
 #          Panel A: Sales (log house prices)
 #          Panel B: Rentals (log rental prices)
-#          Each panel includes OLS, FE, and FE + Controls specifications.
+#          Each panel includes OLS, Controls, FE, and FE + Controls specifications.
 #
 # Author: Jacopo Olivieri
 # Date: 2024-10-15
@@ -177,6 +177,12 @@ model_sales_1 <- fixest::feols(
   vcov = "hetero"
 )
 
+model_sales_1b <- fixest::feols(
+  log_price ~ spill_count_bin + property_type + old_new + duration,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
 model_sales_2 <- fixest::feols(
   log_price ~ spill_count_bin | lsoa,
   data = dat_sales_clean,
@@ -277,6 +283,12 @@ model_rental_1 <- fixest::feols(
   vcov = "hetero"
 )
 
+model_rental_1b <- fixest::feols(
+  log_price ~ spill_count_bin + property_type + bedrooms + bathrooms,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
 model_rental_2 <- fixest::feols(
   log_price ~ spill_count_bin | lsoa,
   data = dat_rental_clean,
@@ -295,7 +307,7 @@ model_rental_3 <- fixest::feols(
 
 # Coefficient labels
 coef_labels <- c(
-  "(Intercept)" = "Constant (zero spills)",
+  "(Intercept)" = "Constant",
   "spill_count_binQ1" = "Spill count Q1",
   "spill_count_binQ2" = "Spill count Q2",
   "spill_count_binQ3" = "Spill count Q3",
@@ -313,29 +325,29 @@ gof_map <- tibble::tribble(
 panels <- list(
   "House Sales" = list(
     "(1)" = model_sales_1,
-    "(2)" = model_sales_2,
-    "(3)" = model_sales_3
+    "(2)" = model_sales_1b,
+    "(3)" = model_sales_2,
+    "(4)" = model_sales_3
   ),
   "House Rentals" = list(
-    "(4)" = model_rental_1,
-    "(5)" = model_rental_2,
-    "(6)" = model_rental_3
+    "(5)" = model_rental_1,
+    "(6)" = model_rental_1b,
+    "(7)" = model_rental_2,
+    "(8)" = model_rental_3
   )
 )
 
 # Add rows for fixed effects and controls
 add_rows <- tibble::tribble(
-  ~term                , ~`(1)` , ~`(2)` , ~`(3)` , ~`(4)` , ~`(5)` , ~`(6)` ,
-  "LSOA FE"            , "No"   , "Yes"  , "Yes"  , "No"   , "Yes"  , "Yes"  ,
-  "Property controls"  , "No"   , "No"   , "Yes"  , "No"   , "No"   , "Yes"
+  ~term                , ~`(1)` , ~`(2)` , ~`(3)` , ~`(4)` , ~`(5)` , ~`(6)` , ~`(7)` , ~`(8)` ,
+  "LSOA FE"            , "No"   , "No"   , "Yes"  , "Yes"  , "No"   , "No"   , "Yes"  , "Yes"  ,
+  "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"
 )
 attr(add_rows, "position") <- "coef_end"
 
-# One-line custom notes
+# One-line custom notes (tabularray format)
 custom_notes <- paste0(
-  "\\\\begin{tablenotes}[flushleft]\n",
-  "       \\\\item \\\\hspace{-0.25cm} \\\\protect\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Heteroskedasticity-robust standard errors in parentheses. Spill count quartiles (Q1-Q4) represent increasing sewage spill frequency. LSOA FE denotes Lower Layer Super Output Area fixed effects. Property controls include property type, new-build status, and tenure for sales; property type, bedrooms, and bathrooms for rentals. \\\\sym{***} \\\\(p<0.01\\\\), \\\\sym{**} \\\\(p<0.05\\\\), \\\\sym{*} \\\\(p<0.1\\\\).}\n",
-  "    \\\\end{tablenotes}"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values for houses within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the cumulative count of spill events from nearby overflows over the sample period, classified into quartiles (Q1--Q4) based on the distribution of positive spill counts in 2021--2023; the reference category is properties near overflows with zero recorded spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export Combined Table
@@ -346,7 +358,7 @@ table_latex <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 3,
+  fmt = 2,
   coef_map = coef_labels,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -364,12 +376,18 @@ table_latex <- sub(
   table_latex
 )
 
-# Replace tablenotes with custom one-liner
+# Replace empty note with custom notes (tabularray format)
 table_latex <- sub(
-  "(?s)\\\\begin\\{tablenotes\\}.*?\\\\end\\{tablenotes\\}",
+  "note\\{\\}=\\{\\s*\\},",
   custom_notes,
-  table_latex,
-  perl = TRUE
+  table_latex
+)
+
+# Add colsep and font size for tighter column spacing
+table_latex <- sub(
+  "(\\{\\s*%% tabularray inner open\\n)",
+  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+  table_latex
 )
 
 output_path <- file.path(output_dir, "hedonic_spill_count.tex")

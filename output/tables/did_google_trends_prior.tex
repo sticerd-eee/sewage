@@ -1,0 +1,42 @@
+\begin{table}[H]
+  \centering
+  \begin{talltblr}[         %% tabularray outer open
+    caption={Effect of Sewage Spills on Property Values: Pre/Post Google Trends Peak (Prior to Transaction)},
+    label={tbl:did-google-trends-prior},
+    note{}={\footnotesize{\textbf{Notes:} Dependent variables are log house price (cols 1-4) and log rental price (cols 5-8). Daily spill count measures the average total number of spill events per day (12/24 count) recorded across all nearby overflows from January 2021 to the transaction date. Post is an indicator equal to one for transactions occurring on or after August 2022, identified as the peak month for both Google Trends search interest for 'sewage spill' and UK news coverage of sewage incidents (see Figure 1). Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},
+    ]                     %% tabularray outer close
+    {                     %% tabularray inner open
+    width=0.9\linewidth,
+    colsep=3pt,
+    cells   = {font = \fontsize{11pt}{12pt}\selectfont},
+    colspec={l X[c] X[c] X[c] X[c] X[c] X[c] X[c] X[c] },
+    hline{2}={3-4,7-9}{solid, black, 0.05em},
+    hline{3}={1-9}{solid, black, 0.05em},
+    hline{9}={1-9}{solid, black, 0.05em},
+    hline{2}={2,6}{solid, black, 0.05em, l=-0.5},
+    hline{2}={5}{solid, black, 0.05em, r=-0.5},
+    hline{1}={1-9}{solid, black, 0.1em},
+    hline{14}={1-9}{solid, black, 0.1em},
+    column{3-5,7-9}={}{halign=c},
+        cell{1}{1}={}{halign=c},
+        cell{1}{2}={c=4}{halign=c},
+        cell{1}{6}={c=4}{halign=c},
+        cell{2-13}{1}={}{halign=l},
+        cell{2-13}{2}={}{halign=c},
+        cell{2-13}{6}={}{halign=c},
+      }                     %% tabularray inner close
+                      & House Sales &          &         &         & House Rentals &          &         &         \\
+                      & (1)         & (2)      & (3)     & (4)     & (5)           & (6)      & (7)     & (8)     \\
+    Daily spill count & -0.33***    & -0.17*** & -0.04*  & 0.08*** & -0.80***      & -0.75*** & 0.01    & 0.06*** \\
+                      & (0.07)      & (0.06)   & (0.02)  & (0.02)  & (0.10)        & (0.09)   & (0.02)  & (0.02)  \\
+    Post              & 0.04***     & 0.05***  &         &         & 0.14***       & 0.12***  &         &         \\
+                      & (0.00)      & (0.00)   &         &         & (0.00)        & (0.00)   &         &         \\
+    {Daily spill count                                                                                            \\ $\times$ Post} & -0.23*** & -0.13*** & -0.03 & 0.03 & -0.24*** & -0.19** & -0.06** & -0.01 \\
+                      & (0.05)      & (0.05)   & (0.03)  & (0.03)  & (0.09)        & (0.08)   & (0.02)  & (0.02)  \\
+    Property controls & No          & Yes      & No      & Yes     & No            & Yes      & No      & Yes     \\
+    LSOA FE           & No          & No       & Yes     & Yes     & No            & No       & Yes     & Yes     \\
+    Quarter FE        & No          & No       & Yes     & Yes     & No            & No       & Yes     & Yes     \\
+    Observations      & 1370917     & 1370917  & 1370633 & 1370633 & 1449451       & 1155410  & 1449223 & 1154971 \\
+    Adj. R-squared    & 0.002       & 0.133    & 0.439   & 0.554   & 0.018         & 0.294    & 0.625   & 0.843   \\
+  \end{talltblr}
+\end{table}

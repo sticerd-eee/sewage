@@ -5,7 +5,7 @@
 # Purpose: Estimate the effect of sewage spills on property values using
 #          continuous daily average measures (spill count and hours).
 #          Panel A: Sales (log house prices), Panel B: Rentals (log rental
-#          prices). Each panel includes OLS, FE, and FE + Controls.
+#          prices). Each panel includes OLS, Controls, FE, and FE + Controls.
 #
 # Author: Jacopo Olivieri
 # Date: 2024-12-24
@@ -83,7 +83,6 @@ sales <- import(
   select(
     -transaction_id,
     -date_of_transfer,
-    -price,
     -quality,
     -paon,
     -saon,
@@ -113,8 +112,9 @@ sales_trimmed <- sales |>
 cat("Preparing sales data...\n")
 
 dat_sales_clean <- dat_cs_sales |>
+  select(-any_of("price")) |>
   inner_join(sales_trimmed, by = "house_id") |>
-  mutate(log_price = log(price.y)) |>
+  mutate(log_price = log(price)) |>
   filter(
     !is.na(spill_count_daily_avg),
     !is.na(lsoa)
@@ -174,8 +174,9 @@ rentals_trimmed <- rentals |>
 cat("Preparing rental data...\n")
 
 dat_rental_clean <- dat_cs_rentals |>
+  select(-any_of("listing_price")) |>
   inner_join(rentals_trimmed, by = "rental_id") |>
-  mutate(log_price = log(listing_price.y)) |>
+  mutate(log_price = log(listing_price)) |>
   filter(
     !is.na(spill_count_daily_avg),
     !is.na(lsoa)
@@ -200,6 +201,12 @@ model_sales_count_1 <- fixest::feols(
   vcov = "hetero"
 )
 
+model_sales_count_1b <- fixest::feols(
+  log_price ~ spill_count_daily_avg + property_type + old_new + duration,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
 model_sales_count_2 <- fixest::feols(
   log_price ~ spill_count_daily_avg | lsoa,
   data = dat_sales_clean,
@@ -215,6 +222,12 @@ model_sales_count_3 <- fixest::feols(
 # Rental Models
 model_rental_count_1 <- fixest::feols(
   log_price ~ spill_count_daily_avg,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
+model_rental_count_1b <- fixest::feols(
+  log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms,
   data = dat_rental_clean,
   vcov = "hetero"
 )
@@ -243,6 +256,12 @@ model_sales_hrs_1 <- fixest::feols(
   vcov = "hetero"
 )
 
+model_sales_hrs_1b <- fixest::feols(
+  log_price ~ spill_hrs_daily_avg + property_type + old_new + duration,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
 model_sales_hrs_2 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg | lsoa,
   data = dat_sales_clean,
@@ -258,6 +277,12 @@ model_sales_hrs_3 <- fixest::feols(
 # Rental Models
 model_rental_hrs_1 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
+model_rental_hrs_1b <- fixest::feols(
+  log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms,
   data = dat_rental_clean,
   vcov = "hetero"
 )
@@ -282,19 +307,7 @@ cat("Exporting spill count table...\n")
 # Coefficient labels
 coef_labels_count <- c(
   "(Intercept)" = "Constant",
-  "spill_count_daily_avg" = "Daily avg. spill count",
-  # Sales controls
-  "property_typeF" = "Flat",
-  "property_typeO" = "Other",
-  "property_typeS" = "Semi-detached",
-  "property_typeT" = "Terraced",
-  "old_newY" = "New build",
-  "durationL" = "Leasehold",
-  # Rental controls
-  "property_typeB" = "Bungalow",
-  "property_typeD" = "Detached",
-  "bedrooms" = "Bedrooms",
-  "bathrooms" = "Bathrooms"
+  "spill_count_daily_avg" = "Daily spill count"
 )
 
 # Goodness of fit map
@@ -308,28 +321,29 @@ gof_map <- tibble::tribble(
 panels_count <- list(
   "House Sales" = list(
     "(1)" = model_sales_count_1,
-    "(2)" = model_sales_count_2,
-    "(3)" = model_sales_count_3
+    "(2)" = model_sales_count_1b,
+    "(3)" = model_sales_count_2,
+    "(4)" = model_sales_count_3
   ),
   "House Rentals" = list(
-    "(4)" = model_rental_count_1,
-    "(5)" = model_rental_count_2,
-    "(6)" = model_rental_count_3
+    "(5)" = model_rental_count_1,
+    "(6)" = model_rental_count_1b,
+    "(7)" = model_rental_count_2,
+    "(8)" = model_rental_count_3
   )
 )
 
-# Add rows for fixed effects
+# Add rows for fixed effects and controls
 add_rows <- tibble::tribble(
-  ~term     , ~`(1)` , ~`(2)` , ~`(3)` , ~`(4)` , ~`(5)` , ~`(6)` ,
-  "LSOA FE" , "No"   , "Yes"  , "Yes"  , "No"   , "Yes"  , "Yes"
+  ~term                , ~`(1)` , ~`(2)` , ~`(3)` , ~`(4)` , ~`(5)` , ~`(6)` , ~`(7)` , ~`(8)` ,
+  "LSOA FE"            , "No"   , "No"   , "Yes"  , "Yes"  , "No"   , "No"   , "Yes"  , "Yes"  ,
+  "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"
 )
 attr(add_rows, "position") <- "coef_end"
 
-# Custom notes
+# Notes
 custom_notes_count <- paste0(
-  "\\\\begin{tablenotes}[flushleft]\n",
-  "       \\\\item \\\\hspace{-0.25cm} \\\\protect\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Heteroskedasticity-robust standard errors in parentheses. Daily avg. spill count measures the average number of spill events per day from January 2021 to the transaction date. LSOA FE denotes Lower Layer Super Output Area fixed effects. Property controls include property type, new-build status, and tenure for sales; property type, bedrooms, and bathrooms for rentals. \\\\sym{***} \\\\(p<0.01\\\\), \\\\sym{**} \\\\(p<0.05\\\\), \\\\sym{*} \\\\(p<0.1\\\\).}\n",
-  "    \\\\end{tablenotes}"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values for houses within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average total number of spill events per day (12/24 count)lon recorded across all nearby overflows from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export table
@@ -340,7 +354,7 @@ table_latex_count <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 3,
+  fmt = 2,
   coef_map = coef_labels_count,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -354,7 +368,21 @@ table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_la
 # Add label in tabularray format
 table_latex_count <- sub(
   "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-spill-count},",
+  "caption={\\1},\nlabel={tbl:hedonic-spill-count-daily},",
+  table_latex_count
+)
+
+# Add colsep and font size for tighter column spacing
+table_latex_count <- sub(
+  "(\\{\\s*%% tabularray inner open\\n)",
+  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+  table_latex_count
+)
+
+# Replace empty note with custom notes (tabularray format)
+table_latex_count <- sub(
+  "note\\{\\}=\\{\\s*\\},",
+  custom_notes_count,
   table_latex_count
 )
 
@@ -369,40 +397,27 @@ cat("Exporting spill hours table...\n")
 # Coefficient labels (including controls)
 coef_labels_hrs <- c(
   "(Intercept)" = "Constant",
-  "spill_hrs_daily_avg" = "Daily avg. spill hours",
-  # Sales controls
-  "property_typeF" = "Flat",
-  "property_typeO" = "Other",
-  "property_typeS" = "Semi-detached",
-  "property_typeT" = "Terraced",
-  "old_newY" = "New build",
-  "durationL" = "Leasehold",
-  # Rental controls
-  "property_typeB" = "Bungalow",
-  "property_typeD" = "Detached",
-  "bedrooms" = "Bedrooms",
-  "bathrooms" = "Bathrooms"
+  "spill_hrs_daily_avg" = "Daily spill hours"
 )
 
 # Combined models for joint table
 panels_hrs <- list(
   "House Sales" = list(
     "(1)" = model_sales_hrs_1,
-    "(2)" = model_sales_hrs_2,
-    "(3)" = model_sales_hrs_3
+    "(2)" = model_sales_hrs_1b,
+    "(3)" = model_sales_hrs_2,
+    "(4)" = model_sales_hrs_3
   ),
   "House Rentals" = list(
-    "(4)" = model_rental_hrs_1,
-    "(5)" = model_rental_hrs_2,
-    "(6)" = model_rental_hrs_3
+    "(5)" = model_rental_hrs_1,
+    "(6)" = model_rental_hrs_1b,
+    "(7)" = model_rental_hrs_2,
+    "(8)" = model_rental_hrs_3
   )
 )
-
-# Custom notes
+# Notes
 custom_notes_hrs <- paste0(
-  "\\\\begin{tablenotes}[flushleft]\n",
-  "       \\\\item \\\\hspace{-0.25cm} \\\\protect\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Heteroskedasticity-robust standard errors in parentheses. Daily avg. spill hours measures the average hours of sewage spilling per day from January 2021 to the transaction date. LSOA FE denotes Lower Layer Super Output Area fixed effects. Property controls include property type, new-build status, and tenure for sales; property type, bedrooms, and bathrooms for rentals. \\\\sym{***} \\\\(p<0.01\\\\), \\\\sym{**} \\\\(p<0.05\\\\), \\\\sym{*} \\\\(p<0.1\\\\).}\n",
-  "    \\\\end{tablenotes}"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values for houses within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average total number of spill events per day (12/24 count) recorded across all nearby overflows from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export table
@@ -413,7 +428,7 @@ table_latex_hrs <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 3,
+  fmt = 2,
   coef_map = coef_labels_hrs,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -427,7 +442,21 @@ table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_late
 # Add label in tabularray format
 table_latex_hrs <- sub(
   "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-spill-hrs},",
+  "caption={\\1},\nlabel={tbl:hedonic-spill-hrs-daily},",
+  table_latex_hrs
+)
+
+# Add colsep and font size for tighter column spacing
+table_latex_hrs <- sub(
+  "(\\{\\s*%% tabularray inner open\\n)",
+  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+  table_latex_hrs
+)
+
+# Replace empty note with custom notes (tabularray format)
+table_latex_hrs <- sub(
+  "note\\{\\}=\\{\\s*\\},",
+  custom_notes_hrs,
   table_latex_hrs
 )
 

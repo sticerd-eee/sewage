@@ -3,10 +3,13 @@
 \begin{talltblr}[         %% tabularray outer open
 caption={Effect of Sewage Spills on Property Values: Palmquist (1982) Repeat Transactions},
 label={tbl:repeat-transactions-palmquist},
-note{}={ },
+note{}={\footnotesize{\textbf{Notes:} This table presents repeat-transaction estimates of the effect of changes in sewage spill exposure on property values, following Palmquist (1982). The sample comprises properties within 250m of a storm overflow in England with at least two transactions during 2021--2023. The dependent variable is the depreciation-adjusted log price change between consecutive transactions, assuming 1\% annual depreciation. Spill exposure is measured as the change in total spill count (columns 1 and 3) or total spill hours (columns 2 and 4) recorded across all storm overflows within 250m during the four quarters preceding each transaction. Time fixed effects are implemented using Bailey--Muth--Nourse (BMN) dummies, which take value $+1$ for the final transaction quarter and $-1$ for the initial transaction quarter. Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},
 ]                     %% tabularray outer close
 {                     %% tabularray inner open
-colspec={Q[]Q[]Q[]Q[]Q[]},
+width=0.9\linewidth,
+colsep=3pt,
+cells   = {font = \fontsize{11pt}{12pt}\selectfont},
+colspec={X[l] X[c] X[c] X[c] X[c] },
 hline{2}={5}{solid, black, 0.05em},
 hline{3}={1-5}{solid, black, 0.05em},
 hline{7}={1-5}{solid, black, 0.05em},
@@ -24,10 +27,10 @@ cell{2-9}{4}={}{halign=c},
 }                     %% tabularray inner close
 & Sales &  & Rentals &  \\
 & (1) & (2) & (3) & (4) \\
-\$\textbackslash{}Delta\$ Spill count (4Q) & -0.00107* &  & -0.00008 &  \\
-& (0.00058) &  & (0.00011) &  \\
-\$\textbackslash{}Delta\$ Spill hours (4Q) &  & -0.00011*** &  & 0.00001 \\
-&  & (0.00003) &  & (0.00001) \\
+$\Delta$ Spill count (4Q) & -0.001* &  & -0.000 &  \\
+& (0.001) &  & (0.000) &  \\
+$\Delta$ Spill hours (4Q) &  & -0.000*** &  & 0.000 \\
+&  & (0.000) &  & (0.000) \\
 Time FE (BMN) & Yes & Yes & Yes & Yes \\
 Observations & 2758 & 2758 & 8210 & 8210 \\
 Adj. R-squared & -0.001 & -0.001 & 0.037 & 0.038 \\

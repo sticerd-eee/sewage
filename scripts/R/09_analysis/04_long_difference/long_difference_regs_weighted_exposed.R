@@ -313,19 +313,9 @@ panels <- list(
   )
 )
 
-# Custom notes
+# Notes
 custom_notes <- paste0(
-  "\\\\begin{tablenotes}[flushleft]\n",
-  "       \\\\item \\\\hspace{-0.25cm} \\\\protect\\\\footnotesize{\\\\textbf{Notes:} ",
-  "Weighted long difference regression (2023 $-$ 2021). Unit of observation is a 250m $\\\\times$ 250m grid cell. ",
-  "Sample restricted to grid cells within 250m of at least one sewage outlet in either 2021 or 2023. ",
-  "Regressions weighted by total number of transactions in each grid cell (2021 + 2023). ",
-  "Dependent variable is the change in mean log price within the grid cell. ",
-  "$\\\\Delta$ Spill count is the change in mean annual spill count across properties within 250m of a sewage outlet. ",
-  "$\\\\Delta$ Spill hours is the corresponding change in total spill duration. ",
-  "Heteroskedasticity-robust standard errors in parentheses. ",
-  "\\\\sym{***} \\\\(p<0.01\\\\), \\\\sym{**} \\\\(p<0.05\\\\), \\\\sym{*} \\\\(p<0.1\\\\).}\n",
-  "    \\\\end{tablenotes}"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents long-difference estimates of the relationship between changes in sewage spill exposure and changes in property values in England between 2021 and 2023. The dependent variable is the change in mean log transaction price (columns 1--2) or mean log weekly asking rent (columns 3--4) at the grid-cell level. Observations are aggregated to 250m $\\\\times$ 250m grid cells; for each cell, spill exposure is calculated by first summing annual spill counts or hours across all storm overflows within 250m of each transacted property, then averaging these property-level totals within the cell. $\\\\Delta$ Spill count measures the change in the number of spill events; $\\\\Delta$ Spill hours measures the change in total spill duration. The sample includes only grid cells within 250m of at least one storm overflow in either 2021 or 2023 that also have property transactions in both years. Regressions are weighted by the total number of transactions in each grid cell (2021 + 2023). Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export table
@@ -333,6 +323,7 @@ table_latex <- modelsummary::modelsummary(
   panels,
   shape = "cbind",
   output = "latex",
+  escape = FALSE,
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
@@ -353,13 +344,23 @@ table_latex <- sub(
   table_latex
 )
 
-# Replace tablenotes with custom one-liner
+# Add colsep and font size for tighter column spacing
 table_latex <- sub(
-  "(?s)\\\\begin\\{tablenotes\\}.*?\\\\end\\{tablenotes\\}",
-  custom_notes,
-  table_latex,
-  perl = TRUE
+  "(\\{\\s*%% tabularray inner open\\n)",
+  "\\1width=0.9\\\\linewidth,\ncolsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+  table_latex
 )
+
+# Replace empty note with custom notes (tabularray format)
+table_latex <- sub(
+  "note\\{\\}=\\{\\s*\\},",
+  custom_notes,
+  table_latex
+)
+
+# Distribute available width among columns (X[] instead of Q[])
+table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
+table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={X[l] ", table_latex)
 
 # Write to file
 output_path <- file.path(output_dir, "long_difference_weighted_exposed.tex")

@@ -4,9 +4,6 @@
 #
 # Purpose: Estimate the effect of sewage spills on property values using
 #          repeat sales/rentals methodology following Palmquist (1982).
-#          - Dependent variable: Depreciation-adjusted log price/rent ratio
-#          - Treatment: Change in spill exposure between consecutive transactions
-#          - Standard errors: Conley (1999) spatial SEs
 #          Sample: Repeat sales/rentals within 250m of spill sites.
 #
 # Reference: Palmquist, R.B. (1982). "Measuring Environmental Effects on
@@ -497,24 +494,18 @@ attr(add_rows, "position") <- "coef_end"
 # Set option to avoid siunitx wrapping
 options("modelsummary_format_numeric_latex" = "plain")
 
-# Notes text (dynamic based on SPILL_WINDOW)
-notes_text <- paste(
-  "Dependent variable is the depreciation-adjusted log price/rent ratio between",
-  "consecutive transactions of the same property (Palmquist, 1982).",
-  "Sample: repeat sales/rentals within 250m of sewage spill sites.",
-  sprintf("Treatment: change in cumulative %d-quarter spill exposure between transactions.", SPILL_WINDOW),
-  "Time FE: Bailey-Muth-Nourse dummies (+1 final, -1 initial transaction).",
-  sprintf("Conley (1999) spatial SEs (%.0fm cutoff) in parentheses.", CONLEY_CUTOFF * 1000),
-  "Depreciation rate: 1 percent annually."
+# Notes
+custom_notes <- paste0(
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents repeat-transaction estimates of the effect of changes in sewage spill exposure on property values, following Palmquist (1982). The sample comprises properties within 250m of a storm overflow in England with at least two transactions during 2021--2023. The dependent variable is the depreciation-adjusted log price change between consecutive transactions, assuming 1\\\\% annual depreciation. Spill exposure is measured as the change in total spill count (columns 1 and 3) or total spill hours (columns 2 and 4) recorded across all storm overflows within 250m during the four quarters preceding each transaction. Time fixed effects are implemented using Bailey--Muth--Nourse (BMN) dummies, which take value $+1$ for the final transaction quarter and $-1$ for the initial transaction quarter. Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Structure models into panels (like hedonic_daily_avg.R)
 panels <- list(
-  "Sales" = list(
+  "House Sales" = list(
     "(1)" = model_count,
     "(2)" = model_hrs
   ),
-  "Rentals" = list(
+  "House Rentals" = list(
     "(3)" = model_rent_count,
     "(4)" = model_rent_hrs
   )
@@ -525,10 +516,11 @@ table_latex <- modelsummary::modelsummary(
   panels,
   shape = "cbind",
   output = "latex",
+  escape = FALSE,
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 5,
+  fmt = 3,
   coef_map = coef_labels,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -545,6 +537,24 @@ table_latex <- sub(
   "caption={\\1},\nlabel={tbl:repeat-transactions-palmquist},",
   table_latex
 )
+
+# Add colsep and font size for tighter column spacing
+table_latex <- sub(
+  "(\\{\\s*%% tabularray inner open\\n)",
+  "\\1width=0.9\\\\linewidth,\ncolsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+  table_latex
+)
+
+# Replace empty note with custom notes (tabularray format)
+table_latex <- sub(
+  "note\\{\\}=\\{\\s*\\},",
+  custom_notes,
+  table_latex
+)
+
+# Distribute available width among columns (X[] instead of Q[])
+table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
+table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={X[l] ", table_latex)
 
 # Write to file (dynamic filename based on SPILL_WINDOW)
 output_path <- file.path(output_dir, sprintf("repeat_sales_palmquist_%dq.tex", SPILL_WINDOW))
