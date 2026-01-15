@@ -97,6 +97,7 @@ dat_cs_sales <- arrow::open_dataset(
   here::here("data", "processed", "cross_section", "sales", "prior_to_sale")
 ) |>
   filter(radius == RAD) |>
+  filter(n_spill_sites > 0) |>
   collect()
 
 cat(sprintf("  Found %d sales records within %dm\n", nrow(dat_cs_sales), RAD))
@@ -164,6 +165,7 @@ dat_cs_rentals <- arrow::open_dataset(
   here::here("data", "processed", "cross_section", "rentals", "prior_to_rental")
 ) |>
   filter(radius == RAD) |>
+  filter(n_spill_sites > 0) |>
   collect()
 
 cat(sprintf("  Found %d rental records within %dm\n", nrow(dat_cs_rentals), RAD))
@@ -339,11 +341,11 @@ attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-4) and log rental price (cols 5-8). Daily spill count measures the average total number of spill events per day (12/24 count) recorded across all nearby overflows from January 2021 to the transaction date. $\\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative UK news articles about sewage from LexisNexis, measured from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or the log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. \\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative UK news coverage of sewage spills from LexisNexis from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Set option to avoid siunitx wrapping
-options("modelsummary_format_numeric_latex" = "plain")
+# options("modelsummary_format_numeric_latex" = "plain")
 
 # Structure models into panels
 panels <- list(

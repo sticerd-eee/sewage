@@ -1,42 +1,42 @@
 \begin{table}[H]
-\centering
-\begin{talltblr}[         %% tabularray outer open
-caption={Effect of Sewage Spills on Property Values: Log Cumulative Media Coverage (Prior to Transaction)},
-label={tbl:did-cumulative-articles-prior},
-note{}={\footnotesize{\textbf{Notes:} Dependent variables are log house price (cols 1-4) and log rental price (cols 5-8). Daily spill count measures the average total number of spill events per day (12/24 count) recorded across all nearby overflows from January 2021 to the transaction date. $\log (\text{Articles})$ is the natural logarithm of cumulative UK news articles about sewage from LexisNexis, measured from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},
-]                     %% tabularray outer close
-{                     %% tabularray inner open
-width=0.9\linewidth,
-colsep=3pt,
-cells   = {font = \fontsize{11pt}{12pt}\selectfont},
-colspec={l X[c] X[c] X[c] X[c] X[c] X[c] X[c] X[c] },
-hline{2}={3-4,7-9}{solid, black, 0.05em},
-hline{3}={1-9}{solid, black, 0.05em},
-hline{9}={1-9}{solid, black, 0.05em},
-hline{2}={2,6}{solid, black, 0.05em, l=-0.5},
-hline{2}={5}{solid, black, 0.05em, r=-0.5},
-hline{1}={1-9}{solid, black, 0.1em},
-hline{14}={1-9}{solid, black, 0.1em},
-column{3-5,7-9}={}{halign=c},
-cell{1}{1}={}{halign=c},
-cell{1}{2}={c=4}{halign=c},
-cell{1}{6}={c=4}{halign=c},
-cell{2-13}{1}={}{halign=l},
-cell{2-13}{2}={}{halign=c},
-cell{2-13}{6}={}{halign=c},
-}                     %% tabularray inner close
-& House Sales &  &  &  & House Rentals &  &  &  \\
-& (1) & (2) & (3) & (4) & (5) & (6) & (7) & (8) \\
-Daily spill count & -0.16*** & -0.10* & 0.00 & 0.06* & -0.43*** & -0.46*** & 0.04* & 0.03* \\
-& (0.05) & (0.05) & (0.03) & (0.03) & (0.12) & (0.12) & (0.02) & (0.02) \\
-$\log (\text{Articles})$ & 0.01*** & 0.01*** & 0.06*** & 0.05*** & 0.05*** & 0.04*** & 0.02*** & 0.03*** \\
-& (0.00) & (0.00) & (0.00) & (0.00) & (0.00) & (0.00) & (0.00) & (0.00) \\
-{Daily spill count \\ $\times$ $\log (\text{Articles})$} & -0.06*** & -0.03** & -0.01 & 0.01 & -0.11*** & -0.09*** & -0.01** & 0.01 \\
-& (0.01) & (0.01) & (0.01) & (0.01) & (0.03) & (0.03) & (0.01) & (0.00) \\
-Property controls & No & Yes & No & Yes & No & Yes & No & Yes \\
-LSOA FE & No & No & Yes & Yes & No & No & Yes & Yes \\
-Quarter FE & No & No & Yes & Yes & No & No & Yes & Yes \\
-Observations & 1370917 & 1370917 & 1370633 & 1370633 & 1449451 & 1155410 & 1449223 & 1154971 \\
-Adj. R-squared & 0.001 & 0.132 & 0.439 & 0.554 & 0.017 & 0.294 & 0.625 & 0.843 \\
-\end{talltblr}
+  \centering
+  \begin{talltblr}[         %% tabularray outer open
+    caption={Effect of Sewage Spills on Property Values: Log Cumulative Media Coverage (Prior to Transaction)},
+    label={tbl:did-cumulative-articles-prior},
+    note{}={\footnotesize{\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or the log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. \log (\text{Articles})$ is the natural logarithm of cumulative UK news articles about sewage from LexisNexis from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},
+    ]                     %% tabularray outer close
+    {                     %% tabularray inner open
+    width=0.9\linewidth,
+    colsep=3pt,
+    cells   = {font = \fontsize{11pt}{12pt}\selectfont},
+    colspec={l X[c] X[c] X[c] X[c] X[c] X[c] X[c] X[c] },
+    hline{2}={3-4,7-9}{solid, black, 0.05em},
+    hline{3}={1-9}{solid, black, 0.05em},
+    hline{9}={1-9}{solid, black, 0.05em},
+    hline{2}={2,6}{solid, black, 0.05em, l=-0.5},
+    hline{2}={5}{solid, black, 0.05em, r=-0.5},
+    hline{1}={1-9}{solid, black, 0.1em},
+    hline{14}={1-9}{solid, black, 0.1em},
+    column{3-5,7-9}={}{halign=c},
+        cell{1}{1}={}{halign=c},
+        cell{1}{2}={c=4}{halign=c},
+        cell{1}{6}={c=4}{halign=c},
+        cell{2-13}{1}={}{halign=l},
+        cell{2-13}{2}={}{halign=c},
+        cell{2-13}{6}={}{halign=c},
+      }                     %% tabularray inner close
+                             & House Sales   &               &               &               & House Rentals &               &               &               \\
+                             & (1)           & (2)           & (3)           & (4)           & (5)           & (6)           & (7)           & (8)           \\
+    Daily spill count        & \num{0.04}    & \num{0.02}    & \num{0.07}*   & \num{0.04}    & \num{-0.07}   & \num{-0.11}   & \num{0.01}    & \num{-0.02}   \\
+                             & (\num{0.06})  & (\num{0.06})  & (\num{0.04})  & (\num{0.04})  & (\num{0.11})  & (\num{0.11})  & (\num{0.03})  & (\num{0.02})  \\
+    $\log (\text{Articles})$ & \num{0.01}*** & \num{0.02}*** & \num{0.07}*** & \num{0.05}*** & \num{0.05}*** & \num{0.05}*** & \num{0.02}*** & \num{0.03}*** \\
+                             & (\num{0.00})  & (\num{0.00})  & (\num{0.01})  & (\num{0.01})  & (\num{0.00})  & (\num{0.00})  & (\num{0.01})  & (\num{0.00})  \\
+    {Daily spill count                                                                                                                                       \\ $\times$ $\log (\text{Articles})$} & \num{-0.05}*** & \num{-0.02} & \num{-0.01} & \num{0.00} & \num{-0.03} & \num{-0.02} & \num{0.00} & \num{0.01} \\
+                             & (\num{0.02})  & (\num{0.02})  & (\num{0.01})  & (\num{0.01})  & (\num{0.03})  & (\num{0.03})  & (\num{0.01})  & (\num{0.01})  \\
+    Property controls        & No            & Yes           & No            & Yes           & No            & Yes           & No            & Yes           \\
+    LSOA FE                  & No            & No            & Yes           & Yes           & No            & No            & Yes           & Yes           \\
+    Quarter FE               & No            & No            & Yes           & Yes           & No            & No            & Yes           & Yes           \\
+    Observations             & \num{130744}  & \num{130744}  & \num{130045}  & \num{130045}  & \num{82167}   & \num{65316}   & \num{81085}   & \num{64192}   \\
+    Adj. R-squared           & \num{0.002}   & \num{0.125}   & \num{0.456}   & \num{0.546}   & \num{0.023}   & \num{0.307}   & \num{0.654}   & \num{0.849}   \\
+  \end{talltblr}
 \end{table}

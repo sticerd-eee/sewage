@@ -143,7 +143,7 @@ spill_sales_collapsed <- gen_panel_sales |>
   left_join(spills, by = join_by(site_id, year)) |>
   group_by(house_id) |>
   summarise(
-    spill_hrs = sum(spill_hrs_yr, na.rm = TRUE)
+    spill_hrs = sum(spill_hrs_yr)
   )
 
 dat_sales_clean <- sales |>
@@ -234,21 +234,10 @@ spill_rental_collapsed <- gen_panel_rental |>
   left_join(spills, by = join_by(site_id, year)) |>
   group_by(rental_id) |>
   summarise(
-    spill_hrs = sum(spill_hrs_yr, na.rm = TRUE)
+    spill_hrs = sum(spill_hrs_yr)
   )
 
-# Trim outliers at 2.5 and 97.5 percentiles
-price_quantiles <- quantile(
-  rentals$listing_price,
-  c(0.025, 0.975),
-  na.rm = TRUE
-)
-
 dat_rental_clean <- rentals |>
-  filter(
-    listing_price >= price_quantiles[1],
-    listing_price <= price_quantiles[2]
-  ) |>
   left_join(spill_rental_collapsed, by = join_by(rental_id)) |>
   mutate(
     spill_hrs_bin = bin_spill_measure(spill_hrs),

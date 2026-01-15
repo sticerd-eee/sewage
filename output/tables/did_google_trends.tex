@@ -3,7 +3,7 @@
 \begin{talltblr}[         %% tabularray outer open
 caption={Effect of Sewage Spills on Property Values: Pre/Post Google Trends Peak},
 label={tbl:did-google-trends},
-note{}={\footnotesize{\textbf{Notes:} This table presents difference-in-differences estimates of the relationship between sewage spill exposure, media attention, and property values for houses within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Daily spill count is measured as the average number of spill events per day (12/24 count) recorded across all nearby overflows from January 2021 to the transaction date. Post is an indicator equal to one for transactions occurring on or after August 2022, the peak month for both Google Trends searches and news coverage of sewage spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},
+note{}={\footnotesize{\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--3) or the log weekly asking rent for rentals (columns 4--6). Spill intensity is measured as the average number of spill events per day (12/24 count) recorded across all nearby overflows from January 2021 up to the transaction date. Post is an indicator equal to one for transactions occurring on or after August 2022 (the peak month for Google Trends searches and news coverage of sewage spills). Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},
 ]                     %% tabularray outer close
 {                     %% tabularray inner open
 width=0.9\linewidth,
@@ -27,16 +27,16 @@ cell{2-13}{5}={}{halign=c},
 }                     %% tabularray inner close
 & House Sales &  &  & House Rentals &  &  \\
 & (1) & (2) & (3) & (4) & (5) & (6) \\
-Spill intensity & -0.001*** & -0.000*** & 0.000 & -0.001*** & -0.000 & 0.000*** \\
-& (0.000) & (0.000) & (0.000) & (0.000) & (0.000) & (0.000) \\
-Post & 0.039*** &  &  & 0.140*** &  &  \\
-& (0.002) &  &  & (0.002) &  &  \\
-{Spill intensity \\ $\times$ Post} & -0.000 & 0.000 & 0.000 & 0.000** & -0.000** & -0.000** \\
-& (0.000) & (0.000) & (0.000) & (0.000) & (0.000) & (0.000) \\
+Spill intensity & \num{-0.001}*** & \num{-0.000}*** & \num{0.000} & \num{-0.001}*** & \num{-0.000} & \num{0.000}*** \\
+& (\num{0.000}) & (\num{0.000}) & (\num{0.000}) & (\num{0.000}) & (\num{0.000}) & (\num{0.000}) \\
+Post & \num{0.039}*** &  &  & \num{0.140}*** &  &  \\
+& (\num{0.002}) &  &  & (\num{0.002}) &  &  \\
+{Spill intensity \\ $\times$ Post} & \num{-0.000} & \num{0.000} & \num{0.000} & \num{0.000}** & \num{-0.000}** & \num{-0.000}** \\
+& (\num{0.000}) & (\num{0.000}) & (\num{0.000}) & (\num{0.000}) & (\num{0.000}) & (\num{0.000}) \\
 Property controls & No & No & Yes & No & No & Yes \\
 LSOA FE & No & Yes & Yes & No & Yes & Yes \\
 Quarter FE & No & Yes & Yes & No & Yes & Yes \\
-Observations & 3163654 & 3163653 & 3163653 & 1449811 & 1449583 & 1155251 \\
-Adj. R-squared & 0.003 & 0.456 & 0.572 & 0.018 & 0.625 & 0.843 \\
+Observations & \num{3163654} & \num{3163653} & \num{3163653} & \num{1449811} & \num{1449583} & \num{1155251} \\
+Adj. R-squared & \num{0.003} & \num{0.456} & \num{0.572} & \num{0.018} & \num{0.625} & \num{0.843} \\
 \end{talltblr}
 \end{table}

@@ -2,7 +2,8 @@
 \centering
 \begin{talltblr}[         %% tabularray outer open
 caption={Effect of Sewage Spills (Count) on Property Values},
-note{}={\footnotesize{\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values for houses within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the cumulative count of spill events from nearby overflows over the sample period, classified into quartiles (Q1--Q4) based on the distribution of positive spill counts in 2021--2023; the reference category is properties near overflows with zero recorded spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},
+  label = {tbl:hedonic-spill-count},
+note{}={\footnotesize{\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m over the entire 2021--2023 period, classified into quartiles (Q1--Q4) based on the distribution of strictly positive exposure; the reference category is properties near overflows with zero recorded spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},
 ]                     %% tabularray outer close
 {                     %% tabularray inner open
 colsep=3pt,
@@ -25,19 +26,19 @@ cell{2-16}{6}={}{halign=c},
 }                     %% tabularray inner close
 & House Sales &  &  &  & House Rentals &  &  &  \\
 & (1) & (2) & (3) & (4) & (5) & (6) & (7) & (8) \\
-Constant & 12.44*** & 12.95*** &  &  & 5.49*** & 4.92*** &  &  \\
-& (0.01) & (0.01) &  &  & (0.00) & (0.01) &  &  \\
-Spill count Q1 & -0.07*** & -0.08*** & -0.03** & -0.03** & -0.07*** & -0.06*** & -0.03*** & 0.00 \\
-& (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) \\
-Spill count Q2 & -0.09*** & -0.09*** & -0.03** & -0.02* & -0.03*** & -0.01** & -0.01 & 0.01 \\
-& (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) \\
-Spill count Q3 & -0.16*** & -0.15*** & -0.06*** & -0.03*** & -0.10*** & -0.08*** & -0.02* & 0.02** \\
-& (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) \\
-Spill count Q4 & -0.21*** & -0.16*** & -0.05*** & -0.03** & -0.15*** & -0.13*** & -0.02* & 0.01* \\
-& (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) & (0.01) \\
+Constant & \num{12.35}*** & \num{12.89}*** &  &  & \num{5.45}*** & \num{4.83}*** &  &  \\
+& (\num{0.01}) & (\num{0.01}) &  &  & (\num{0.01}) & (\num{0.01}) &  &  \\
+Spill count Q1 & \num{-0.01} & \num{-0.02}*** & \num{-0.06}*** & \num{-0.04}** & \num{-0.06}*** & \num{-0.04}*** & \num{-0.04}** & \num{0.01} \\
+& (\num{0.01}) & (\num{0.01}) & (\num{0.02}) & (\num{0.02}) & (\num{0.01}) & (\num{0.01}) & (\num{0.02}) & (\num{0.01}) \\
+Spill count Q2 & \num{-0.01} & \num{-0.03}*** & \num{-0.06}*** & \num{-0.04}** & \num{0.01} & \num{0.02}** & \num{-0.06}*** & \num{-0.02}* \\
+& (\num{0.01}) & (\num{0.01}) & (\num{0.02}) & (\num{0.02}) & (\num{0.01}) & (\num{0.01}) & (\num{0.02}) & (\num{0.01}) \\
+Spill count Q3 & \num{-0.08}*** & \num{-0.09}*** & \num{-0.10}*** & \num{-0.06}*** & \num{-0.07}*** & \num{-0.05}*** & \num{-0.05}*** & \num{0.02} \\
+& (\num{0.01}) & (\num{0.01}) & (\num{0.02}) & (\num{0.02}) & (\num{0.01}) & (\num{0.01}) & (\num{0.02}) & (\num{0.01}) \\
+Spill count Q4 & \num{-0.14}*** & \num{-0.12}*** & \num{-0.08}*** & \num{-0.03}* & \num{-0.14}*** & \num{-0.11}*** & \num{-0.06}*** & \num{-0.01} \\
+& (\num{0.01}) & (\num{0.01}) & (\num{0.02}) & (\num{0.02}) & (\num{0.01}) & (\num{0.01}) & (\num{0.02}) & (\num{0.01}) \\
 LSOA FE & No & No & Yes & Yes & No & No & Yes & Yes \\
 Property controls & No & Yes & No & Yes & No & Yes & No & Yes \\
-Observations & 172103 & 172103 & 171537 & 171537 & 78772 & 62852 & 77679 & 61715 \\
-Adj. R-squared & 0.007 & 0.132 & 0.452 & 0.543 & 0.012 & 0.274 & 0.639 & 0.852 \\
+Observations & \num{123666} & \num{123666} & \num{123160} & \num{123160} & \num{58006} & \num{46075} & \num{57111} & \num{45141} \\
+Adj. R-squared & \num{0.005} & \num{0.139} & \num{0.467} & \num{0.557} & \num{0.010} & \num{0.282} & \num{0.644} & \num{0.827} \\
 \end{talltblr}
 \end{table}

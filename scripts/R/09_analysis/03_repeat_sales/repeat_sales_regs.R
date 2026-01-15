@@ -184,7 +184,7 @@ cat(sprintf("  Computed rolling exposure for %d site-quarter observations\n",
 # 1.4 Join and aggregate to house-transaction level ----------------------------
 cat("Building panel dataset...\n")
 
-# First, filter repeat_sales to houses within 250m of any site
+# First, filter repeat_sales to properties within 250m of any site
 houses_near_sites <- repeat_sales |>
   semi_join(spill_lookup, by = "house_id")
 
@@ -492,11 +492,11 @@ add_rows <- tibble::tribble(
 attr(add_rows, "position") <- "coef_end"
 
 # Set option to avoid siunitx wrapping
-options("modelsummary_format_numeric_latex" = "plain")
+# options("modelsummary_format_numeric_latex" = "plain")
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents repeat-transaction estimates of the effect of changes in sewage spill exposure on property values, following Palmquist (1982). The sample comprises properties within 250m of a storm overflow in England with at least two transactions during 2021--2023. The dependent variable is the depreciation-adjusted log price change between consecutive transactions, assuming 1\\\\% annual depreciation. Spill exposure is measured as the change in total spill count (columns 1 and 3) or total spill hours (columns 2 and 4) recorded across all storm overflows within 250m during the four quarters preceding each transaction. Time fixed effects are implemented using Bailey--Muth--Nourse (BMN) dummies, which take value $+1$ for the final transaction quarter and $-1$ for the initial transaction quarter. Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents repeat-transaction estimates of the effect of changes in sewage spill exposure on property values, following Palmquist (1982). The sample includes properties within 250m of a storm overflow in England that have at least two transactions during 2021--2023. The dependent variable is the depreciation-adjusted change in log transaction price for sales (columns 1--2) or in log weekly asking rent for rentals (columns 3--4) between consecutive transactions, assuming 1\\\\% annual depreciation. Spill exposure is measured as the change in total spill count (12/24 count) or the change in total spill hours recorded across all storm overflows within 250m during the four quarters preceding each transaction. Time fixed effects are implemented using Bailey--Muth--Nourse (BMN) dummies, which take value $+1$ for the final transaction quarter and $-1$ for the initial transaction quarter. No additional covariates are included. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Structure models into panels (like hedonic_daily_avg.R)
@@ -554,7 +554,7 @@ table_latex <- sub(
 
 # Distribute available width among columns (X[] instead of Q[])
 table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
-table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={X[l] ", table_latex)
+table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex)
 
 # Write to file (dynamic filename based on SPILL_WINDOW)
 output_path <- file.path(output_dir, sprintf("repeat_sales_palmquist_%dq.tex", SPILL_WINDOW))

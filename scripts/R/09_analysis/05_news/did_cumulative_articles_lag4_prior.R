@@ -99,6 +99,7 @@ dat_cs_sales <- arrow::open_dataset(
   here::here("data", "processed", "cross_section", "sales", "prior_to_sale")
 ) |>
   filter(radius == RAD) |>
+  filter(n_spill_sites > 0) |>
   collect()
 
 cat(sprintf("  Found %d sales records within %dm\n", nrow(dat_cs_sales), RAD))
@@ -169,6 +170,7 @@ dat_cs_rentals <- arrow::open_dataset(
   here::here("data", "processed", "cross_section", "rentals", "prior_to_rental")
 ) |>
   filter(radius == RAD) |>
+  filter(n_spill_sites > 0) |>
   collect()
 
 cat(sprintf("  Found %d rental records within %dm\n", nrow(dat_cs_rentals), RAD))
@@ -327,11 +329,11 @@ attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Daily avg. spill count measures the average total number of spill events per day (12/24 count) recorded across all nearby overflows from January 2021 to the transaction date. Log cumulative articles (4-month lag) is the natural log of the total number of UK news articles about sewage from January 2021 to 4 months before the transaction (LexisNexis). Conley spatial standard errors (500m cutoff) in parentheses. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Daily avg. spill count measures the average total number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Log cumulative articles (4-month lag) is the natural log of the total number of UK news articles about sewage from January 2021 to 4 months before the transaction (LexisNexis). Conley spatial standard errors (500m cutoff) in parentheses. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Set option to avoid siunitx wrapping
-options("modelsummary_format_numeric_latex" = "plain")
+# options("modelsummary_format_numeric_latex" = "plain")
 
 # Structure models into panels
 panels <- list(

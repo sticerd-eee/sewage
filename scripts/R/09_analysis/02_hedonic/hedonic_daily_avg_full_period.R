@@ -1,22 +1,26 @@
 # ==============================================================================
-# Cross-Sectional Regression Analysis: Daily Average Spill Measures
+# Cross-Sectional Regression Analysis: Daily Average (Full Period)
 # ==============================================================================
 #
 # Purpose: Estimate the effect of sewage spills on property values using
-#          continuous daily average measures (spill count and hours).
+#          continuous daily average measures calculated over the entire
+#          2021-2023 period (not just prior to transaction date).
 #          Panel A: Sales (log house prices), Panel B: Rentals (log rental
 #          prices). Each panel includes OLS, Controls, FE, and FE + Controls.
 #
 # Author: Jacopo Olivieri
-# Date: 2024-12-24
+# Date: 2025-01-15
 #
 # Inputs:
-#   - data/processed/cross_section/sales/prior_to_sale/ - Cross-sectional sales
-#   - data/processed/cross_section/rentals/prior_to_rental/ - Cross-sectional rentals
+#   - data/processed/agg_spill_stats/agg_spill_yr.parquet - Yearly spill data
+#   - data/processed/house_price.parquet - House sales transactions
+#   - data/processed/zoopla/zoopla_rentals.parquet - Rental transactions
+#   - data/processed/general_panel/sales/ - General panel (Arrow dataset)
+#   - data/processed/general_panel/rentals/ - General panel (Arrow dataset)
 #
 # Outputs:
-#   - output/tables/hedonic_spill_count_daily_avg.tex
-#   - output/tables/hedonic_spill_hrs_daily_avg.tex
+#   - output/tables/hedonic_spill_count_daily_avg_full.tex
+#   - output/tables/hedonic_spill_hrs_daily_avg_full.tex
 #
 # ==============================================================================
 
@@ -25,6 +29,8 @@
 # 1. Configuration
 # ==============================================================================
 RAD <- 250L
+BASE_YEAR <- 2021
+N_DAYS_FULL_PERIOD <- 1095L  # 365 * 3 (2021-2023)
 
 
 # ==============================================================================
@@ -55,33 +61,57 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
-# Output Directory Setup -------------------------------------------------------
+
+# ==============================================================================
+# 3. Setup
+# ==============================================================================
+
+# 3.1 Output Directory ---------------------------------------------------------
 output_dir <- here::here("output", "tables")
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
+# 3.2 Data Loading - Common ----------------------------------------------------
+# Sewage Spills
+path_spill_yr <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_yr.parquet"
+)
+
+spills <- import(path_spill_yr, trust = TRUE)
+
 # ==============================================================================
-# Panel A: Sales
+# 4. Panel A: Sales
 # ==============================================================================
 
-# Load Sales Data --------------------------------------------------------------
+# 4.1 Load Sales Data ----------------------------------------------------------
 cat("Loading sales data...\n")
 
-# Cross-section data with spill metrics (prior to sale)
-## Filter for houses with at least one spill site within radius
-dat_cs_sales <- arrow::open_dataset(
-  here::here("data", "processed", "cross_section", "sales", "prior_to_sale")
-) |>
-  filter(radius == RAD) |>
-  filter(n_spill_sites > 0) |> 
-  collect()
+# House Prices
+path_sales <- here::here("data", "processed", "house_price.parquet")
 
-# House price data for property characteristics and LSOA
-sales <- import(
-  here::here("data", "processed", "house_price.parquet"),
-  trust = TRUE
-) |>
+# Panel Data - General
+path_general_panel_sales <- here::here(
+  "data",
+  "processed",
+  "general_panel",
+  "sales"
+)
+
+gen_panel_sales <- arrow::open_dataset(path_general_panel_sales) |>
+  filter(radius == RAD) |>
+  collect() |>
+  mutate(
+    year = (qtr_id - 1) %/% 4 + BASE_YEAR,
+    year_transfer = qtr_id_transfer %/% 4 + BASE_YEAR
+  ) |>
+  distinct(house_id, site_id, year, year_transfer, distance_m, within_radius)
+
+sales <- import(path_sales, trust = TRUE) |>
+  mutate(year = (qtr_id - 1) %/% 4 + 1) |>
   select(
     -transaction_id,
     -date_of_transfer,
@@ -102,15 +132,27 @@ sales <- import(
     duration = forcats::as_factor(duration)
   )
 
-# Prepare Sales Data -----------------------------------------------------------
+# 4.2 Prepare Sales Data -------------------------------------------------------
 cat("Preparing sales data...\n")
 
-dat_sales_clean <- dat_cs_sales |>
-  select(-any_of("price")) |>
-  inner_join(sales, by = "house_id") |>
-  mutate(log_price = log(price)) |>
+spill_sales_collapsed <- gen_panel_sales |>
+  filter(!is.na(site_id)) |>
+  left_join(spills, by = join_by(site_id, year)) |>
+  group_by(house_id) |>
+  summarise(
+    spill_count = sum(spill_count_yr),
+    spill_hrs = sum(spill_hrs_yr)
+  )
+
+dat_sales_clean <- sales |>
+  left_join(spill_sales_collapsed, by = join_by(house_id)) |>
+  mutate(
+    spill_count_daily_avg = spill_count / N_DAYS_FULL_PERIOD,
+    spill_hrs_daily_avg = spill_hrs / N_DAYS_FULL_PERIOD,
+    log_price = log(price)
+  ) |>
   filter(
-    !is.na(spill_count_daily_avg),
+    !is.na(spill_count),
     !is.na(lsoa)
   ) |>
   mutate(
@@ -124,25 +166,34 @@ dat_sales_clean <- dat_cs_sales |>
 cat("  Sales observations:", nrow(dat_sales_clean), "\n")
 
 # ==============================================================================
-# Panel B: Rentals
+# 5. Panel B: Rentals
 # ==============================================================================
 
-# Load Rental Data -------------------------------------------------------------
+# 5.1 Load Rental Data ---------------------------------------------------------
 cat("Loading rental data...\n")
 
-# Cross-section data with spill metrics (prior to rental)
-dat_cs_rentals <- arrow::open_dataset(
-  here::here("data", "processed", "cross_section", "rentals", "prior_to_rental")
-) |>
-  filter(radius == RAD) |>
-  filter(n_spill_sites > 0) |> 
-  collect()
+# Rental Prices
+path_rent <- here::here("data", "processed", "zoopla", "zoopla_rentals.parquet")
 
-# Rental price data for property characteristics and LSOA
-rentals <- import(
-  here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
-  trust = TRUE
-) |>
+# Panel Data - General
+path_general_panel_rental <- here::here(
+  "data",
+  "processed",
+  "general_panel",
+  "rentals"
+)
+
+gen_panel_rental <- arrow::open_dataset(path_general_panel_rental) |>
+  filter(radius == RAD) |>
+  collect() |>
+  mutate(
+    year = (qtr_id - 1) %/% 4 + BASE_YEAR,
+    year_transfer = qtr_id_transfer %/% 4 + BASE_YEAR
+  ) |>
+  distinct(rental_id, site_id, year, year_transfer, distance_m, within_radius)
+
+rentals <- import(path_rent, trust = TRUE) |>
+  mutate(year = (qtr_id - 1) %/% 4 + 2021) |>
   select(
     -postcode,
     -listing_created,
@@ -157,15 +208,27 @@ rentals <- import(
     property_type = forcats::as_factor(property_type)
   )
 
-# Prepare Rental Data ----------------------------------------------------------
+# 5.2 Prepare Rental Data ------------------------------------------------------
 cat("Preparing rental data...\n")
 
-dat_rental_clean <- dat_cs_rentals |>
-  select(-any_of("listing_price")) |>
-  inner_join(rentals, by = "rental_id") |>
-  mutate(log_price = log(listing_price)) |>
+spill_rental_collapsed <- gen_panel_rental |>
+  filter(!is.na(site_id)) |>
+  left_join(spills, by = join_by(site_id, year)) |>
+  group_by(rental_id) |>
+  summarise(
+    spill_count = sum(spill_count_yr),
+    spill_hrs = sum(spill_hrs_yr)
+  )
+
+dat_rental_clean <- rentals |>
+  left_join(spill_rental_collapsed, by = join_by(rental_id)) |>
+  mutate(
+    spill_count_daily_avg = spill_count / N_DAYS_FULL_PERIOD,
+    spill_hrs_daily_avg = spill_hrs / N_DAYS_FULL_PERIOD,
+    log_price = log(listing_price)
+  ) |>
   filter(
-    !is.na(spill_count_daily_avg),
+    !is.na(spill_count),
     !is.na(lsoa)
   ) |>
   mutate(
@@ -177,7 +240,7 @@ dat_rental_clean <- dat_cs_rentals |>
 cat("  Rental observations:", nrow(dat_rental_clean), "\n")
 
 # ==============================================================================
-# Estimate Models: Spill Count Daily Average
+# 6. Estimate Models: Spill Count Daily Average
 # ==============================================================================
 cat("Estimating spill count models...\n")
 
@@ -232,7 +295,7 @@ model_rental_count_3 <- fixest::feols(
 )
 
 # ==============================================================================
-# Estimate Models: Spill Hours Daily Average
+# 7. Estimate Models: Spill Hours Daily Average
 # ==============================================================================
 cat("Estimating spill hours models...\n")
 
@@ -287,7 +350,7 @@ model_rental_hrs_3 <- fixest::feols(
 )
 
 # ==============================================================================
-# Export Tables: Spill Count Daily Average
+# 8. Export Tables: Spill Count Daily Average
 # ==============================================================================
 cat("Exporting spill count table...\n")
 
@@ -330,7 +393,7 @@ attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes_count <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m over the entire 2021--2023 period. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export table
@@ -346,7 +409,7 @@ table_latex_count <- modelsummary::modelsummary(
   gof_map = gof_map,
   add_rows = add_rows,
   notes = " ",
-  title = "Effect of Sewage Spills (Count) on Property Values"
+  title = "Effect of Sewage Spills (Count) on Property Values: Full Period"
 )
 
 # Force table environment to [H]
@@ -355,7 +418,7 @@ table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_la
 # Add label in tabularray format
 table_latex_count <- sub(
   "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-spill-count-daily},",
+  "caption={\\1},\nlabel={tbl:hedonic-spill-count-daily-full},",
   table_latex_count
 )
 
@@ -373,11 +436,11 @@ table_latex_count <- sub(
   table_latex_count
 )
 
-output_path_count <- file.path(output_dir, "hedonic_spill_count_daily_avg.tex")
+output_path_count <- file.path(output_dir, "hedonic_spill_count_daily_avg_full.tex")
 writeLines(table_latex_count, output_path_count)
 
 # ==============================================================================
-# Export Tables: Spill Hours Daily Average
+# 9. Export Tables: Spill Hours Daily Average
 # ==============================================================================
 cat("Exporting spill hours table...\n")
 
@@ -402,9 +465,10 @@ panels_hrs <- list(
     "(8)" = model_rental_hrs_3
   )
 )
+
 # Notes
 custom_notes_hrs <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average total number of spill hours per day recorded across all overflows within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average total number of spill hours per day recorded across all overflows within 250m over the entire 2021--2023 period. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export table
@@ -420,7 +484,7 @@ table_latex_hrs <- modelsummary::modelsummary(
   gof_map = gof_map,
   add_rows = add_rows,
   notes = " ",
-  title = "Effect of Sewage Spills (Hours) on Property Values"
+  title = "Effect of Sewage Spills (Hours) on Property Values: Full Period"
 )
 
 # Force table environment to [H]
@@ -429,7 +493,7 @@ table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_late
 # Add label in tabularray format
 table_latex_hrs <- sub(
   "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-spill-hrs-daily},",
+  "caption={\\1},\nlabel={tbl:hedonic-spill-hrs-daily-full},",
   table_latex_hrs
 )
 
@@ -447,12 +511,12 @@ table_latex_hrs <- sub(
   table_latex_hrs
 )
 
-output_path_hrs <- file.path(output_dir, "hedonic_spill_hrs_daily_avg.tex")
+output_path_hrs <- file.path(output_dir, "hedonic_spill_hrs_daily_avg_full.tex")
 writeLines(table_latex_hrs, output_path_hrs)
 
 # ==============================================================================
-# Summary
+# 10. Summary
 # ==============================================================================
 cat("\nLaTeX tables exported to:", output_dir, "\n")
-cat("  - hedonic_spill_count_daily_avg.tex\n")
-cat("  - hedonic_spill_hrs_daily_avg.tex\n")
+cat("  - hedonic_spill_count_daily_avg_full.tex\n")
+cat("  - hedonic_spill_hrs_daily_avg_full.tex\n")

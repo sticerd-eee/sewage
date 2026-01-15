@@ -306,12 +306,13 @@ add_rows <- tibble::tribble(
 attr(add_rows, "position") <- "coef_end"
 
 # Set option to avoid siunitx wrapping
-options("modelsummary_format_numeric_latex" = "plain")
+# options("modelsummary_format_numeric_latex" = "plain")
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents difference-in-differences estimates of the relationship between sewage spill exposure, media attention, and property values for houses within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Daily spill count is measured as the average number of spill events per day (12/24 count) recorded across all nearby overflows from January 2021 to the transaction date. Post is an indicator equal to one for transactions occurring on or after August 2022, the peak month for both Google Trends searches and news coverage of sewage spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--3) or the log weekly asking rent for rentals (columns 4--6). Spill intensity is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 up to the transaction date. Post is an indicator equal to one for transactions occurring on or after August 2022 (the peak month for Google Trends searches and news coverage of sewage spills). Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
+
 
 # Structure models into panels
 panels <- list(

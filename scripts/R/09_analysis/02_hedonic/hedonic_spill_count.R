@@ -147,7 +147,7 @@ spill_sales_collapsed <- gen_panel_sales |>
   left_join(spills, by = join_by(site_id, year)) |>
   group_by(house_id) |>
   summarise(
-    spill_count = sum(spill_count_yr, na.rm = TRUE)
+    spill_count = sum(spill_count_yr)
   )
 
 dat_sales_clean <- sales |>
@@ -244,21 +244,10 @@ spill_rental_collapsed <- gen_panel_rental |>
   left_join(spills, by = join_by(site_id, year)) |>
   group_by(rental_id) |>
   summarise(
-    spill_count = sum(spill_count_yr, na.rm = TRUE)
+    spill_count = sum(spill_count_yr)
   )
 
-# Trim outliers at 2.5 and 97.5 percentiles
-price_quantiles <- quantile(
-  rentals$listing_price,
-  c(0.025, 0.975),
-  na.rm = TRUE
-)
-
 dat_rental_clean <- rentals |>
-  filter(
-    listing_price >= price_quantiles[1],
-    listing_price <= price_quantiles[2]
-  ) |>
   left_join(spill_rental_collapsed, by = join_by(rental_id)) |>
   mutate(
     spill_count_bin = bin_spill_measure(spill_count),
@@ -347,7 +336,7 @@ attr(add_rows, "position") <- "coef_end"
 
 # One-line custom notes (tabularray format)
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values for houses within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the cumulative count of spill events from nearby overflows over the sample period, classified into quartiles (Q1--Q4) based on the distribution of positive spill counts in 2021--2023; the reference category is properties near overflows with zero recorded spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m over the entire 2021--2023 period, classified into quartiles (Q1--Q4) based on the distribution of strictly positive exposure; the reference category is properties near overflows with zero recorded spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export Combined Table
@@ -371,8 +360,8 @@ table_latex <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex)
 
 # Add label for referencing
 table_latex <- sub(
-  "(\\\\caption\\{[^}]*\\})",
-  "\\\\1\n\\\\label{tbl:hedonic-spill-count}",
+  "(caption\\s*=\\s*\\{[^}]*\\})",
+  "\\1,\n  label = {tbl:hedonic-spill-count}",
   table_latex
 )
 

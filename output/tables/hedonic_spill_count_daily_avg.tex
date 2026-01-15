@@ -3,7 +3,7 @@
 \begin{talltblr}[         %% tabularray outer open
 caption={Effect of Sewage Spills (Count) on Property Values},
 label={tbl:hedonic-spill-count-daily},
-note{}={\footnotesize{\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values for houses within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average total number of spill events per day (12/24 count)lon recorded across all nearby overflows from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},
+note{}={\footnotesize{\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},
 ]                     %% tabularray outer close
 {                     %% tabularray inner open
 colsep=3pt,
@@ -26,13 +26,13 @@ cell{2-10}{6}={}{halign=c},
 }                     %% tabularray inner close
 & House Sales &  &  &  & House Rentals &  &  &  \\
 & (1) & (2) & (3) & (4) & (5) & (6) & (7) & (8) \\
-Constant & \num{12.41}*** & \num{12.84}*** &  &  & \num{5.59}*** & \num{5.11}*** &  &  \\
-& (\num{0.00}) & (\num{0.00}) &  &  & (\num{0.00}) & (\num{0.02}) &  &  \\
-Daily spill count & \num{-0.37}*** & \num{-0.22}*** & \num{-0.09}*** & \num{0.01} & \num{-0.79}*** & \num{-0.75}*** & \num{-0.07}*** & \num{0.00} \\
-& (\num{0.01}) & (\num{0.01}) & (\num{0.01}) & (\num{0.01}) & (\num{0.01}) & (\num{0.01}) & (\num{0.01}) & (\num{0.01}) \\
+Constant & \num{12.32}*** & \num{12.84}*** &  &  & \num{5.43}*** & \num{4.80}*** &  &  \\
+& (\num{0.00}) & (\num{0.00}) &  &  & (\num{0.00}) & (\num{0.01}) &  &  \\
+Daily spill count & \num{-0.19}*** & \num{-0.11}*** & \num{-0.05}*** & \num{-0.07}*** & \num{-0.25}*** & \num{-0.23}*** & \num{-0.11}*** & \num{-0.12}*** \\
+& (\num{0.01}) & (\num{0.01}) & (\num{0.02}) & (\num{0.02}) & (\num{0.01}) & (\num{0.01}) & (\num{0.02}) & (\num{0.01}) \\
 LSOA FE & No & No & Yes & Yes & No & No & Yes & Yes \\
 Property controls & No & Yes & No & Yes & No & Yes & No & Yes \\
-Observations & \num{1308310} & \num{1308310} & \num{1308017} & \num{1308017} & \num{1386976} & \num{1108718} & \num{1386736} & \num{1108259} \\
-Adj. R-squared & \num{0.001} & \num{0.186} & \num{0.530} & \num{0.701} & \num{0.003} & \num{0.236} & \num{0.603} & \num{0.833} \\
+Observations & \num{130744} & \num{130744} & \num{130045} & \num{130045} & \num{82167} & \num{65316} & \num{81085} & \num{64192} \\
+Adj. R-squared & \num{0.001} & \num{0.124} & \num{0.454} & \num{0.543} & \num{0.003} & \num{0.292} & \num{0.627} & \num{0.825} \\
 \end{talltblr}
 \end{table}
