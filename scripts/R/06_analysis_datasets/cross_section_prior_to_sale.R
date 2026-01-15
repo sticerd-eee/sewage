@@ -67,7 +67,7 @@ load_data <- function() {
     file.path(CONFIG$processed_dir, "house_price.parquet")
   ) |>
     dplyr::select(house_id, price, date_of_transfer) |>
-    dplyr::filter(date_of_transfer > CONFIG$window_start) |>
+    dplyr::filter(date_of_transfer >= CONFIG$window_start) |>
     dplyr::collect() |>
     as.data.table()
   setkey(house_dt, house_id)
@@ -186,13 +186,21 @@ calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
     )]
   }
 
+  # Collapse same-distance sites per house to avoid roll-join ties
+  site_agg <- site_agg[, .(
+    spill_hrs = sum(spill_hrs),
+    spill_count = sum(spill_count),
+    n_spill_sites = .N,
+    distance_sum = sum(distance_m)
+  ), by = .(house_id, distance_m)]
+
   # Order once and build cumulative metrics so each radius can use a rolling join
   setorder(site_agg, house_id, distance_m)
   site_agg[, `:=`(
     cum_spill_hrs = cumsum(spill_hrs),
     cum_spill_count = cumsum(spill_count),
-    cum_distance_sum = cumsum(distance_m),
-    n_spill_sites = seq_len(.N),
+    cum_distance_sum = cumsum(distance_sum),
+    n_spill_sites = cumsum(n_spill_sites),
     min_distance = distance_m[1]
   ), by = house_id]
   setkey(site_agg, house_id, distance_m)
