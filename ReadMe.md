@@ -291,6 +291,12 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
     - Calculates spill exposure metrics: total counts, total hours, number of sites, mean/minimum distances.
     - **Output:** Partitioned by `radius` under `data/processed/cross_section/sales/` in two directories: `all_years/` and `prior_12mo/`.
 
+**`cross_section_rental.R`**  
+    - **Input:** Zoopla rentals data (`zoopla_rentals.parquet`), rental–spill lookup (`spill_rental_lookup.parquet`), and monthly spill data loaded into DuckDB.
+    - Creates cross-sectional datasets aggregated at rental level for multiple timeframes and spatial radii (12‑month window anchored on `rented_est`).
+    - Calculates spill exposure metrics and distance summaries as per sales.
+    - **Output:** Partitioned by `radius` under `data/processed/cross_section/rentals/` in two directories: `all_years/` and `prior_12mo/`.
+
 **`cross_section_prior_to_sale.R`**
     - **Input:** House price data (`house_price.parquet`), spill-house lookup table (`spill_house_lookup.parquet`), and matched spill events (`matched_events_annual_data.parquet`).
     - Creates cross-sectional datasets aggregated from January 1, 2021 to the day before each house sale.
@@ -298,16 +304,22 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
     - Handles houses with no nearby sites (zeros, NA distances) and sites with no spill events (zeros, actual distances).
     - **Output:** Partitioned by `radius` under `data/processed/cross_section/sales/prior_to_sale/`.
 
-**`cross_section_rental.R`**  
-    - **Input:** Zoopla rentals data (`zoopla_rentals.parquet`), rental–spill lookup (`spill_rental_lookup.parquet`), and monthly spill data loaded into DuckDB.
-    - Creates cross-sectional datasets aggregated at rental level for multiple timeframes and spatial radii (12‑month window anchored on `rented_est`).
-    - Calculates spill exposure metrics and distance summaries as per sales.
-    - **Output:** Partitioned by `radius` under `data/processed/cross_section/rentals/` in two directories: `all_years/` and `prior_12mo/`.
+**`cross_section_prior_to_rental.R`**
+    - **Input:** Zoopla rentals data (`zoopla_rentals.parquet`), rental-spill lookup (`spill_rental_lookup.parquet`), and matched spill events (`matched_events_annual_data.parquet`).
+    - Creates cross-sectional datasets aggregated from January 1, 2021 to the day before each rental.
+    - Calculates spill exposure metrics: total counts, total hours, daily averages, number of sites, mean/minimum distances.
+    - Handles rentals with no nearby sites (zeros, NA distances) and sites with no spill events (zeros, actual distances).
+    - **Output:** Partitioned by `radius` under `data/processed/cross_section/rentals/prior_to_rental/`.
 
 **`sale_panel_exp.R`**  
     - **Input:** House-level panel data from sale panel scripts.
     - Creates panel datasets linking house sale transactions to nearby sewage spill sites across different radii. The datasets can be joined with the house_price data (for house price data), and spill statistics data.
     - **Output:** Final analysis datasets saved to `data/final/dat_event/` and `data/final/dat_hedonic/`.
+
+**`rental_panel_exp.R`**
+    - **Input:** Zoopla rental listings (`zoopla_rentals.parquet`), rental–spill lookup (`spill_rental_lookup.parquet`), and quarterly spill statistics.
+    - Creates panel datasets linking rental transactions to nearby sewage spill sites across different radii. The datasets can be joined with the zoopla_rentals data, and spill statistics data.
+    - **Output:** Partitioned by `radius` under `data/processed/general_panel/rentals/`.
 
 **`house_panel_within_radius.R`**  
     - **Input:** House price data, spill lookup table, and site-level panel data.
@@ -320,11 +332,6 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
     - Mirrors the sales workflow to build rental-level panels linking lets to nearby spill sites.
     - Implements the same nearest-site and distance-weighted exposure measures.
     - **Output:** Rental-level panel datasets saved to `data/processed/within_radius_panel/rentals/`.
-
-**`rental_panel_exp.R`**
-    - **Input:** Zoopla rental listings (`zoopla_rentals.parquet`), rental–spill lookup (`spill_rental_lookup.parquet`), and quarterly spill statistics.
-    - Creates panel datasets linking rental transactions to nearby sewage spill sites across different radii. The datasets can be joined with the zoopla_rentals data, and spill statistics data.
-    - **Output:** Partitioned by `radius` under `data/processed/general_panel/rentals/`.
 
 **`grid_long_difference_sales.R`**
     - **Input:** House price data (`house_price.parquet`), house-spill lookup (`spill_house_lookup.parquet`), annual spill statistics (`agg_spill_yr.parquet`).
@@ -356,6 +363,144 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
 
 - `scripts/R/utils/postcode_processing_utils.R`: Postcode geocoding utilities using PostcodesioR with retry/backoff, batch processing, shared cache management (`get_postcode_data`, `process_postcodes`, `cleanup_postcode_cache`).
 - `scripts/R/utils/spill_aggregation_utils.R`: Shared spill aggregation helpers including `split_monthly_records`, `prepare_spill_data`, 12/24 counting via `count_spills`, and `calculate_spill_hours`.
+
+### Analysis Scripts (09_analysis)
+
+All analysis scripts estimate effects on both house sales and rental prices unless otherwise noted.
+
+#### 01_descriptive/ - Descriptive figures
+
+Scripts for generating descriptive visualisations of spill patterns, price relationships, and media coverage trends.
+
+**`cross_sectional_plots.R`**
+    - **Input:** `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`, `data/processed/cross_section/sales/all_years/`, `data/processed/cross_section/rentals/all_years/`.
+    - **Description:** Bivariate scatter plots of log prices against spill metrics (count, hours, distance) at 250m, 500m, and 1km radii for sales and rentals.
+    - **Output:** `output/figures/sales_{variable}_lm.pdf`, `output/figures/rental_{variable}_lm.pdf`.
+
+**`google_trends_sewage_spill.R`**
+    - **Input:** `data/raw/google_trends/google_trends_uk.xlsx`.
+    - **Description:** Time series of Google Trends "Sewage spill" search interest (2018-2024) with event annotations for key media coverage dates.
+    - **Output:** `output/figures/google_trends_sewage_spill_uk.pdf`.
+
+**`google_trends_article_counts_combined.R`**
+    - **Input:** `data/raw/google_trends/google_trends_uk.xlsx`, `data/processed/lexis_nexis/search1_monthly.parquet`.
+    - **Description:** Dual y-axis time series combining Google Trends and LexisNexis article counts with aligned scales and event annotations.
+    - **Output:** `output/figures/google_trends_article_counts_combined.pdf`.
+
+**`spill_maps.R`**
+    - **Input:** `data/processed/agg_spill_stats/agg_spill_yr.parquet`, `data/processed/agg_spill_stats/agg_spill_dry_yr.parquet`, `data/processed/unique_spill_sites.parquet`, `data/raw/shapefiles/MSOA_BCG/`, `data/raw/shapefiles/MSOA_population/sapemsoasyoatablefinal.xlsx`.
+    - **Description:** MSOA-level choropleth maps of log spill counts (total and dry) for 2021-2023.
+    - **Output:** `output/figures/maps/spill_total_count_2021_2023.pdf`, `output/figures/maps/dry_spill_total_count_2021_2023.pdf`.
+
+**`spill_maps_inset.R`**
+    - **Input:** Same as `spill_maps.R`.
+    - **Description:** MSOA-level choropleth maps with circular Greater London inset.
+    - **Output:** `output/figures/maps/spill_total_count_2021_2023_inset.pdf`, `output/figures/maps/dry_spill_total_count_2021_2023_inset.pdf`.
+
+**`spill_phase_diagrams.R`**
+    - **Input:** `data/processed/agg_spill_stats/agg_spill_yr.parquet`.
+    - **Description:** Year-to-year transition probability heatmaps showing persistence of spill severity across sites (5 states: 0, Q1-Q4).
+    - **Output:** `output/figures/spill_count_persistence.pdf`, `output/figures/spill_hours_persistence.pdf`.
+
+#### 02_hedonic/ - Hedonic price regressions
+
+Cross-sectional hedonic regressions of log prices on spill exposure. Scripts vary by:
+- **Time period**: `prior` = exposure from 1 Jan 2021 to day before transaction; `full` = exposure over full 2021-2023 period
+- **Functional form**: `continuous` = linear treatment; `bins` = quartile indicators
+- **Treatment measure**: All scripts estimate both spill count and spill hours
+
+**`hedonic_spill_count.R`**
+    - **Input:** `data/processed/agg_spill_stats/agg_spill_yr.parquet`, `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`, `data/processed/general_panel/sales/`, `data/processed/general_panel/rentals/`.
+    - **Specification:** Full period, continuous, count only. Includes OLS, controls, and fixed effects variants.
+    - **Output:** `output/tables/hedonic_spill_count.tex`.
+
+**`hedonic_continuous_prior.R`**
+    - **Input:** `data/processed/cross_section/sales/prior_to_sale/`, `data/processed/cross_section/rentals/prior_to_rental/`, `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`.
+    - **Specification:** Prior-to-transaction period, continuous, count and hours.
+    - **Output:** `output/tables/hedonic_count_continuous_prior.tex`, `output/tables/hedonic_hrs_continuous_prior.tex`.
+
+**`hedonic_bins_prior.R`**
+    - **Input:** `data/processed/cross_section/sales/prior_to_sale/`, `data/processed/cross_section/rentals/prior_to_rental/`, `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`.
+    - **Specification:** Prior-to-transaction period, quartile bins, count and hours.
+    - **Output:** `output/tables/hedonic_count_bins_prior.tex`, `output/tables/hedonic_hrs_bins_prior.tex`.
+
+**`hedonic_continuous_full.R`**
+    - **Input:** `data/processed/agg_spill_stats/agg_spill_yr.parquet`, `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`, `data/processed/general_panel/sales/`, `data/processed/general_panel/rentals/`.
+    - **Specification:** Full 2021-2023 period, continuous, count and hours.
+    - **Output:** `output/tables/hedonic_count_continuous_full.tex`, `output/tables/hedonic_hrs_continuous_full.tex`.
+
+**`hedonic_bins_full.R`**
+    - **Input:** `data/processed/agg_spill_stats/agg_spill_yr.parquet`, `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`, `data/processed/general_panel/sales/`, `data/processed/general_panel/rentals/`.
+    - **Specification:** Full 2021-2023 period, quartile bins, count and hours.
+    - **Output:** `output/tables/hedonic_count_bins_full.tex`, `output/tables/hedonic_hrs_bins_full.tex`.
+
+#### 03_repeat_sales/ - Repeat sales and rentals
+
+Repeat-transaction regressions exploiting within-property price variation.
+
+**`repeat_sales.R`**
+    - **Input:** `data/processed/repeated_transactions/repeated_sales.parquet`, `data/processed/repeated_transactions/repeated_rentals.parquet`, `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`, `data/processed/spill_house_lookup.parquet`, `data/processed/zoopla/spill_rental_lookup.parquet`, `data/processed/agg_spill_stats/agg_spill_qtr.parquet`.
+    - **Specification:** Palmquist (1982) approach with rolling 4-quarter spill exposure within 250m radius.
+    - **Output:** `output/tables/repeat_sales.tex`.
+
+#### 04_long_difference/ - Long-difference grid regressions
+
+Long-difference regressions at the 250m grid-cell level. Scripts vary by:
+- **Sample**: `all` = all grid cells; `exposed` = cells with nearby spill sites only
+- **Weighting**: `unweighted` = equal weights; `weighted` = transaction-count weights
+
+**`longdiff_unweighted_all.R`**
+    - **Input:** `data/processed/long_difference/long_diff_grid_house_sales.parquet`, `data/processed/long_difference/long_diff_grid_rentals.parquet`.
+    - **Specification:** All grid cells, unweighted.
+    - **Output:** `output/tables/longdiff_unweighted_all.tex`.
+
+**`longdiff_unweighted_exposed.R`**
+    - **Input:** `data/processed/long_difference/long_diff_grid_house_sales.parquet`, `data/processed/long_difference/long_diff_grid_rentals.parquet`.
+    - **Specification:** Exposed grid cells only, unweighted.
+    - **Output:** `output/tables/longdiff_unweighted_exposed.tex`.
+
+**`longdiff_weighted_all.R`**
+    - **Input:** `data/processed/long_difference/long_diff_grid_house_sales.parquet`, `data/processed/long_difference/long_diff_grid_rentals.parquet`.
+    - **Specification:** All grid cells, transaction-count weighted.
+    - **Output:** `output/tables/longdiff_weighted_all.tex`.
+
+**`longdiff_weighted_exposed.R`**
+    - **Input:** `data/processed/long_difference/long_diff_grid_house_sales.parquet`, `data/processed/long_difference/long_diff_grid_rentals.parquet`.
+    - **Specification:** Exposed grid cells only, transaction-count weighted.
+    - **Output:** `output/tables/longdiff_weighted_exposed.tex`.
+
+#### 05_news/ - News and information effects
+
+Difference-in-differences and event-study designs exploiting variation in public attention to sewage issues. Scripts vary by:
+- **Information shock**: Google Trends peak vs cumulative LexisNexis article coverage
+- **Estimation**: `did` = two-period DiD; `es` = event study with quarter-by-quarter coefficients
+- **Treatment measure**: `full` = full-period spill exposure; `prior` = prior-to-transaction exposure
+- **Lag**: `lag4` = 4-month lagged media coverage (default = contemporaneous)
+
+**`did_trends_full.R`**
+    - **Input:** `data/raw/google_trends/google_trends_uk.xlsx`, `data/processed/agg_spill_stats/agg_spill_yr.parquet`, `data/processed/house_price.parquet`, `data/processed/general_panel/sales/`, `data/processed/zoopla/zoopla_rentals.parquet`, `data/processed/zoopla/spill_rental_lookup.parquet`.
+    - **Specification:** Google Trends shock, two-period DiD, full-period spill exposure.
+    - **Output:** `output/tables/did_trends_full.tex`.
+
+**`did_trends_prior.R`**
+    - **Input:** `data/raw/google_trends/google_trends_uk.xlsx`, `data/processed/cross_section/sales/prior_to_sale/`, `data/processed/cross_section/rentals/prior_to_rental/`, `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`.
+    - **Specification:** Google Trends shock, two-period DiD, prior-to-transaction spill exposure.
+    - **Output:** `output/tables/did_trends_prior.tex`.
+
+**`es_trends_prior.R`**
+    - **Input:** `data/raw/google_trends/google_trends_uk.xlsx`, `data/processed/cross_section/sales/prior_to_sale/`, `data/processed/cross_section/rentals/prior_to_rental/`, `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`.
+    - **Specification:** Google Trends shock, event study, prior-to-transaction spill exposure.
+    - **Output:** `output/tables/es_trends_prior.tex`, `output/figures/es_trends_prior_sales.pdf`, `output/figures/es_trends_prior_rentals.pdf`.
+
+**`did_articles_prior.R`**
+    - **Input:** `data/processed/lexis_nexis/search1_monthly.parquet`, `data/processed/cross_section/sales/prior_to_sale/`, `data/processed/cross_section/rentals/prior_to_rental/`, `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`.
+    - **Specification:** LexisNexis cumulative coverage, two-period DiD, prior-to-transaction spill exposure, contemporaneous.
+    - **Output:** `output/tables/did_articles_prior.tex`.
+
+**`did_articles_lag4_prior.R`**
+    - **Input:** `data/processed/lexis_nexis/search1_monthly.parquet`, `data/processed/cross_section/sales/prior_to_sale/`, `data/processed/cross_section/rentals/prior_to_rental/`, `data/processed/house_price.parquet`, `data/processed/zoopla/zoopla_rentals.parquet`.
+    - **Specification:** LexisNexis cumulative coverage, two-period DiD, prior-to-transaction spill exposure, 4-month lag.
+    - **Output:** `output/tables/did_articles_lag4_prior.tex`.
 
 ### Script Execution Order
 
@@ -398,21 +543,22 @@ The following sequence removes circular dependencies and includes all scripts in
 23. **`cross_section_sales.R`** — Cross-sectional datasets (sales; requires steps 4, 15, 20)
 24. **`cross_section_prior_to_sale.R`** — Prior-to-sale cross-sectional datasets (requires steps 4, 11, 20)
 25. **`cross_section_rental.R`** — Cross-sectional datasets (rentals; requires steps 5, 15, 20 & 22)
-26. **`site_panel_sales.R`** — Site-level panels (requires steps 4, 15, 20)
-27. **`site_panel_rental.R`** — Rental site-level panels (requires steps 5, 15, 21)
-28. **`house_panel_within_radius.R`** — House-level panels (requires steps 4, 15, 20)
-29. **`rental_panel_within_radius.R`** — Rental-level panels (requires steps 5, 15, 21)
-30. **`sale_panel_exp.R`** — Sales general panel export (requires steps 28–29)
-31. **`rental_panel_exp.R`** — Rental general panel export (requires steps 26, 29)
-32. **`grid_long_difference_sales.R`** — Grid-level long-difference dataset for sales (requires steps 4, 15, 20)
-33. **`grid_long_difference_rentals.R`** — Grid-level long-difference dataset for rentals (requires steps 5, 15, 21)
+26. **`cross_section_prior_to_rental.R`** — Prior-to-rental cross-sectional datasets (requires steps 5, 11, 21)
+27. **`site_panel_sales.R`** — Site-level panels (requires steps 4, 15, 20)
+28. **`site_panel_rental.R`** — Rental site-level panels (requires steps 5, 15, 21)
+29. **`house_panel_within_radius.R`** — House-level panels (requires steps 4, 15, 20)
+30. **`rental_panel_within_radius.R`** — Rental-level panels (requires steps 5, 15, 21)
+31. **`sale_panel_exp.R`** — Sales general panel export (requires steps 29–30)
+32. **`rental_panel_exp.R`** — Rental general panel export (requires steps 27, 30)
+33. **`grid_long_difference_sales.R`** — Grid-level long-difference dataset for sales (requires steps 4, 15, 20)
+34. **`grid_long_difference_rentals.R`** — Grid-level long-difference dataset for rentals (requires steps 5, 15, 21)
 
 **Dependencies Notes:**
 - Steps 1–2 can run in parallel.
 - Steps 3–6 are independent and can run in parallel; step 5 (Zoopla) is optional until used downstream.
 - Steps 7–10 depend on ingestion outputs.
 - Step 16 runs after unique spill sites (step 14) to avoid circularity; steps 17–19 form the rainfall/dry-spill sub-pipeline.
-- Layer 06 scripts build on spill aggregations and spatial matching; keep order 23/24/25 → 26/27/28/29 → 30/31.
+- Layer 06 scripts build on spill aggregations and spatial matching; keep order 23/24/25/26 → 27/28/29/30 → 31/32.
 
 ### Key Data Flows
 

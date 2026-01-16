@@ -118,7 +118,11 @@ dat_sales_clean <- dat_cs_sales |>
   mutate(log_price = log(price)) |>
   filter(
     !is.na(spill_count_daily_avg),
+    !is.na(spill_hrs_daily_avg),
     !is.na(lsoa),
+    !is.na(property_type),
+    !is.na(old_new),
+    !is.na(duration),
     !is.na(month_id)
   ) |>
   mutate(
@@ -183,7 +187,11 @@ dat_rental_clean <- dat_cs_rentals |>
   mutate(log_price = log(listing_price)) |>
   filter(
     !is.na(spill_count_daily_avg),
+    !is.na(spill_hrs_daily_avg),
     !is.na(lsoa),
+    !is.na(property_type),
+    !is.na(bedrooms),
+    !is.na(bathrooms),
     !is.na(month_id)
   ) |>
   mutate(
