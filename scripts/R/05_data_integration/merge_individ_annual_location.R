@@ -92,6 +92,7 @@ CONFIG <- list(
     "wfd_waterbody_id_cycle_2", "receiving_water_name",
     "shellfish_water", "bathing_water",
     "edm_commission_date", "edm_operation_percent",
+    "edm_operation_reason", "edm_operation_action",
     "data_source", "no_full_years_edm_data",
     "group_id_event", "group_id_annual"
   )
