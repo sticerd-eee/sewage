@@ -22,8 +22,8 @@
 # ==============================================================================
 # 1. Configuration
 # ==============================================================================
-PLOT_WIDTH <- 20 * 1.618  # Width in cm
-PLOT_HEIGHT <- 20         # Height in cm
+PLOT_WIDTH <- 18 * 1.618  # Width in cm
+PLOT_HEIGHT <- 18         # Height in cm
 PLOT_DPI <- 300           # Resolution
 START_YEAR <- 2018        # First year to display
 END_YEAR <- 2024          # Last year to display
@@ -95,18 +95,18 @@ if (!dir.exists(output_dir)) {
 # 3.3 ggplot Theme -------------------------------------------------------------
 theme_pref <- theme_minimal() +
   theme(
-    text = element_text(size = 9, family = "Libertinus Serif"),
+    text = element_text(size = 10, family = "Libertinus Serif"),
     plot.title = element_text(
       face = "bold",
-      size = 11,
+      size = 12,
       family = "Libertinus Serif",
       margin = ggplot2::margin(b = 9, unit = "pt")
     ),
-    axis.title = element_text(face = "bold", size = 11, family = "Libertinus Serif"),
-    axis.text = element_text(size = 9, family = "Libertinus Serif"),
+    axis.title = element_text(face = "bold", size = 12, family = "Libertinus Serif"),
+    axis.text = element_text(size = 10, family = "Libertinus Serif"),
     axis.title.y.right = element_text(
       face = "bold",
-      size = 11,
+      size = 12,
       family = "Libertinus Serif",
       color = COLOR_ARTICLES
     ),
@@ -120,7 +120,7 @@ theme_pref <- theme_minimal() +
     plot.background = element_rect(fill = "white", color = NA),
     legend.position = "bottom",
     legend.title = element_blank(),
-    legend.text = element_text(size = 9, family = "Libertinus Serif"),
+    legend.text = element_text(size = 10, family = "Libertinus Serif"),
     plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
   )
 

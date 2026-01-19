@@ -23,8 +23,8 @@
 # ==============================================================================
 # 1. Configuration
 # ==============================================================================
-PLOT_WIDTH <- 20 * 1.618
-PLOT_HEIGHT <- 20
+PLOT_WIDTH <- 18 * 1.618
+PLOT_HEIGHT <- 18
 PLOT_DPI <- 300
 VIRIDIS_PALETTE <- "magma"
 
@@ -75,13 +75,13 @@ if (!dir.exists(output_dir)) {
 theme_pref <- theme_minimal() +
   theme(
     text = element_text(size = 10, family = "libertinus"),
-    axis.title = element_text(face = "bold", size = 11, family = "libertinus"),
+    axis.title = element_text(face = "bold", size = 12, family = "libertinus"),
     axis.text = element_text(face = "bold", size = 10, family = "libertinus"),
     panel.grid = element_blank(),
     panel.background = element_rect(fill = "white", color = NA),
     plot.background = element_rect(fill = "white", color = NA),
     legend.position = "bottom",
-    legend.title = element_text(face = "bold", size = 11, family = "libertinus"),
+    legend.title = element_text(face = "bold", size = 12, family = "libertinus"),
     legend.text = element_text(size = 10, family = "libertinus"),
     legend.background = element_rect(fill = "white", color = NA),
     plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")

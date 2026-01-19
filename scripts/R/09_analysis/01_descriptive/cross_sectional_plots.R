@@ -86,23 +86,23 @@ if (!dir.exists(output_dir)) {
 # 3.3 ggplot Theme -------------------------------------------------------------
 theme_pref <- theme_minimal() +
   theme(
-    text = element_text(size = 9, family = "Libertinus Serif"),
+    text = element_text(size = 10, family = "Libertinus Serif"),
     plot.title = element_text(
       face = "bold",
-      size = 11,
+      size = 12,
       family = "Libertinus Serif",
       margin = ggplot2::margin(b = 9, unit = "pt")
     ),
-    axis.title = element_text(face = "bold", size = 11, family = "Libertinus Serif"),
-    axis.text = element_text(size = 9, family = "Libertinus Serif"),
+    axis.title = element_text(face = "bold", size = 12, family = "Libertinus Serif"),
+    axis.text = element_text(size = 10, family = "Libertinus Serif"),
     panel.grid.minor = element_blank(),
     panel.grid.major.x = element_line(color = "gray95"),
     panel.grid.major.y = element_line(color = "gray95"),
     panel.background = element_rect(fill = "white", color = NA),
     plot.background = element_rect(fill = "white", color = NA),
     legend.position = "bottom",
-    legend.title = element_text(face = "bold", size = 11, family = "Libertinus Serif"),
-    legend.text = element_text(size = 9, family = "Libertinus Serif"),
+    legend.title = element_text(face = "bold", size = 12, family = "Libertinus Serif"),
+    legend.text = element_text(size = 10, family = "Libertinus Serif"),
     legend.background = element_rect(fill = "white", color = NA),
     plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
   )

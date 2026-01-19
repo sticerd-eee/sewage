@@ -20,8 +20,8 @@
 # ==============================================================================
 # 1. Configuration
 # ==============================================================================
-PLOT_WIDTH <- 20 * 1.618# Width in cm
-PLOT_HEIGHT <- 20       # Height in cm
+PLOT_WIDTH <- 18 * 1.618# Width in cm
+PLOT_HEIGHT <- 18       # Height in cm
 PLOT_DPI <- 300         # Resolution
 START_YEAR <- 2018      # First year to display
 END_YEAR <- 2024        # Last year to display
@@ -87,11 +87,11 @@ theme_pref <- theme_minimal() +
     text = element_text(size = 9, family = "Libertinus Serif"),
     plot.title = element_text(
       face = "bold",
-      size = 11,
+      size = 12,
       family = "Libertinus Serif",
       margin = ggplot2::margin(b = 9, unit = "pt")
     ),
-    axis.title = element_text(face = "bold", size = 11, family = "Libertinus Serif"),
+    axis.title = element_text(face = "bold", size = 12, family = "Libertinus Serif"),
     axis.text = element_text(size = 9, family = "Libertinus Serif"),
     panel.grid.minor = element_blank(),
     panel.grid.major.x = element_line(color = "gray95"),
