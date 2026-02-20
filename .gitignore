@@ -10,6 +10,26 @@ renv/local/
 
 # Data files
 data/
+# RiverNetworks
+RiverNetworks/
+!RiverNetworks/**/
+!RiverNetworks/**/*.R
+!RiverNetworks/**/*.sql
+!RiverNetworks/**/*.sh
+!RiverNetworks/**/Dockerfile
+!RiverNetworks/**/docker-compose*.yml
+!RiverNetworks/**/.dockerignore
+
+# Upstream downstream
+upstream_downstream/
+!upstream_downstream/**/
+!upstream_downstream/**/*.R
+!upstream_downstream/**/*.sql
+!upstream_downstream/**/*.sh
+!upstream_downstream/**/Dockerfile
+!upstream_downstream/**/docker-compose*.yml
+!upstream_downstream/**/.dockerignore
+
 *.csv
 *.xlsx
 *.xlsb
@@ -77,6 +97,7 @@ DD_work/
 
 # Large output files
 output/maps/
+lma/
 
 # Python virtual environments
 scripts/python/.venv/

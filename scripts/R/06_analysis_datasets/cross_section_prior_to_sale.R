@@ -51,14 +51,46 @@ CONFIG <- list(
   radius_thresholds = c(250, 500, 1000),
   base_year = 2021,
   window_start = as.POSIXct("2021-01-01 00:00:00", tz = "UTC"),
-  chunk_size = 100000  # Number of houses to process per batch
+  chunk_size = 100000,  # Number of houses to process per batch
+  unique_spill_sites_path = here::here("data", "processed", "unique_spill_sites.parquet")
 )
 
 # Data Loading Functions
 ############################################################
 
+#' Derive site-level missing flags for the sale-year window
+#' @param unique_sites_dt Unique spill sites data.table
+#' @param sale_years Integer vector of sale years
+#' @return data.table with site_id and site_missing
+derive_site_missing_flags <- function(unique_sites_dt, sale_years) {
+  if (is.null(unique_sites_dt) || nrow(unique_sites_dt) == 0) {
+    return(data.table(site_id = character(), site_missing = logical()))
+  }
+
+  avail_cols <- paste0("available_year_", sale_years)
+  missing_cols <- setdiff(avail_cols, names(unique_sites_dt))
+  if (length(missing_cols) > 0) {
+    logger::log_warn(
+      "Missing availability columns in unique spill sites: {paste(missing_cols, collapse = ', ')}; treating as missing"
+    )
+    for (col in missing_cols) {
+      unique_sites_dt[, (col) := FALSE]
+    }
+  }
+
+  unique_sites_dt[, (avail_cols) := lapply(.SD, function(x) {
+    x <- as.logical(x)
+    fifelse(is.na(x), FALSE, x)
+  }), .SDcols = avail_cols]
+
+  unique_sites_dt[, site_missing := !Reduce(`&`, .SD), .SDcols = avail_cols]
+  site_missing_dt <- unique_sites_dt[, .(site_missing = any(site_missing)), by = site_id]
+  setkey(site_missing_dt, site_id)
+  return(site_missing_dt)
+}
+
 #' Load datasets from parquet files
-#' @return List containing house_dt, spill_lookup_dt, raw_events_dt
+#' @return List containing house_dt, spill_lookup_dt, raw_events_dt, site_missing_dt
 load_data <- function() {
   logger::log_info("Loading datasets from parquet files")
 
@@ -72,6 +104,22 @@ load_data <- function() {
     as.data.table()
   setkey(house_dt, house_id)
   logger::log_info("House price data loaded: {nrow(house_dt)} rows")
+
+  sale_years <- sort(unique(lubridate::year(house_dt$date_of_transfer)))
+  min_sale_year <- min(sale_years)
+  max_sale_year <- max(sale_years)
+  sample_years <- seq(min_sale_year, max_sale_year)
+  logger::log_info("Sale year window for missingness: {min_sale_year}-{max_sale_year}")
+
+  unique_sites_dt <- arrow::read_parquet(CONFIG$unique_spill_sites_path) |>
+    as.data.table()
+  site_missing_dt <- derive_site_missing_flags(unique_sites_dt, sample_years)
+  logger::log_info(
+    "Unique spill sites loaded: {nrow(unique_sites_dt)} rows; missing flags for {nrow(site_missing_dt)} sites"
+  )
+  logger::log_info(
+    "Sites flagged as missing in sale-year window: {site_missing_dt[site_missing == TRUE, .N]}"
+  )
 
  # Load spill lookup - filter to max radius threshold to reduce join size
   max_radius <- max(CONFIG$radius_thresholds)
@@ -101,7 +149,8 @@ load_data <- function() {
   list(
     house_dt = house_dt,
     spill_lookup_dt = spill_lookup_dt,
-    raw_events_dt = raw_events_dt
+    raw_events_dt = raw_events_dt,
+    site_missing_dt = site_missing_dt
   )
 }
 
@@ -121,13 +170,15 @@ create_joined_events <- function(house_ids, data) {
     nomatch = 0L
   ]
   lookup_chunk <- lookup_chunk[, .(house_id, site_id, distance_m)]
+  lookup_chunk <- data$site_missing_dt[lookup_chunk, on = "site_id"]
+  lookup_chunk[, site_missing := fifelse(is.na(site_missing), TRUE, site_missing)]
 
   if (nrow(lookup_chunk) == 0) {
     return(list(events_dt = NULL, lookup_chunk = lookup_chunk))
   }
 
   # Join: house -> spill_lookup
-  house_sites <- lookup_chunk[house_chunk, nomatch = NULL]
+  house_sites <- lookup_chunk[house_chunk, on = "house_id", nomatch = NULL]
 
   # Join: house_sites -> raw_events
   joined <- data$raw_events_dt[house_sites, on = "site_id", nomatch = NULL, allow.cartesian = TRUE]
@@ -150,9 +201,9 @@ create_joined_events <- function(house_ids, data) {
 }
 
 #' Calculate spill metrics per radius with a single pass over site-level data
-#' @param lookup_dt Spill lookup data.table (house_id, site_id, distance_m)
+#' @param lookup_dt Spill lookup data.table (house_id, site_id, distance_m, site_missing)
 #' @param events_dt Joined events data.table (or NULL if no events)
-#' @return data.table with spill counts, hours, site counts, and distance metrics
+#' @return data.table with spill counts, hours, site counts, distance metrics, and missing flag
 calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
   radii <- sort(CONFIG$radius_thresholds)
 
@@ -160,7 +211,10 @@ calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
     return(NULL)
   }
 
-  site_lookup <- lookup_dt[, .(distance_m = min(distance_m)), by = .(house_id, site_id)]
+  site_lookup <- lookup_dt[, .(
+    distance_m = min(distance_m),
+    site_missing = any(site_missing)
+  ), by = .(house_id, site_id)]
 
   if (!is.null(events_dt) && nrow(events_dt) > 0) {
     event_agg <- events_dt[, .(
@@ -191,7 +245,8 @@ calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
     spill_hrs = sum(spill_hrs),
     spill_count = sum(spill_count),
     n_spill_sites = .N,
-    distance_sum = sum(distance_m)
+    distance_sum = sum(distance_m),
+    missing_sites = sum(site_missing)
   ), by = .(house_id, distance_m)]
 
   # Order once and build cumulative metrics so each radius can use a rolling join
@@ -201,6 +256,7 @@ calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
     cum_spill_count = cumsum(spill_count),
     cum_distance_sum = cumsum(distance_sum),
     n_spill_sites = cumsum(n_spill_sites),
+    cum_missing_sites = cumsum(missing_sites),
     min_distance = distance_m[1]
   ), by = house_id]
   setkey(site_agg, house_id, distance_m)
@@ -220,10 +276,19 @@ calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
     spill_count = fifelse(is.na(cum_spill_count), 0, cum_spill_count),
     n_spill_sites = fifelse(is.na(n_spill_sites), 0L, n_spill_sites),
     mean_distance = fifelse(n_spill_sites > 0, cum_distance_sum / n_spill_sites, NA_real_),
-    min_distance = fifelse(n_spill_sites > 0, min_distance, NA_real_)
+    min_distance = fifelse(n_spill_sites > 0, min_distance, NA_real_),
+    has_missing_site = fifelse(is.na(cum_missing_sites), FALSE, cum_missing_sites > 0)
   )]
 
-  metrics[, .(house_id, radius, spill_hrs, n_spill_sites, spill_count, mean_distance, min_distance)]
+  metrics[has_missing_site == TRUE, `:=`(
+    spill_hrs = NA_real_,
+    spill_count = NA_real_
+  )]
+
+  metrics[, .(
+    house_id, radius, spill_hrs, n_spill_sites, spill_count,
+    mean_distance, min_distance, has_missing_site
+  )]
 }
 
 #' Get house metadata (price, n_days_in_window)
@@ -300,12 +365,18 @@ create_prior_to_sale_db <- function(data) {
   )
 
   # Single pass NA/zero handling
+  if (!"has_missing_site" %in% names(result)) {
+    result[, has_missing_site := FALSE]
+  } else {
+    result[is.na(has_missing_site), has_missing_site := FALSE]
+  }
+
   metric_cols <- c("spill_count", "spill_hrs", "n_spill_sites")
   for (col in metric_cols) {
     if (!col %in% names(result)) {
       result[, (col) := 0]
     } else {
-      set(result, which(is.na(result[[col]])), col, 0)
+      result[is.na(get(col)) & !has_missing_site, (col) := 0]
     }
   }
 
@@ -314,6 +385,7 @@ create_prior_to_sale_db <- function(data) {
     spill_count_daily_avg = spill_count / n_days_in_window,
     spill_hrs_daily_avg = spill_hrs / n_days_in_window
   )]
+  logger::log_info("Rows with missing sites (spill metrics set to NA): {result[has_missing_site == TRUE, .N]}")
 
   setorder(result, house_id, radius)
   logger::log_info("Prior-to-sale database created: {nrow(result)} rows")

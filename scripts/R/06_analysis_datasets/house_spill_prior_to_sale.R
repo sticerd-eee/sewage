@@ -1,13 +1,13 @@
 ############################################################
-# Create Prior-to-Rental Cross-sectional Database
+# Create Prior-to-Sale Cross-sectional Database: House-Site Level
 # Project: Sewage
-# Date: 19/12/2025
-# Author: Jacopo Olivieri
+# Date: 22/01/2026
+# Author: Alina Zeltikova
 ############################################################
 
 #' This script creates a cross-sectional database that aggregates
-#' sewage spill data from January 1, 2021 to the day before each rental.
-#' It calculates daily average spill count and spill hours.
+#' sewage spill data from January 1, 2021 to the day before each house sale.
+#' It calculates daily average spill count and spill hours for each house-spill site pair.
 
 # Setup Functions
 ############################################################
@@ -19,14 +19,14 @@ initialise_environment <- function() {
     "here", "logger", "glue", "fs",
     "lubridate", "arrow", "data.table", "dplyr"
   )
-
+  
   invisible(sapply(required_packages, function(pkg) {
     if (!requireNamespace(pkg, quietly = TRUE)) {
       install.packages(pkg)
     }
     library(pkg, character.only = TRUE)
   }))
-
+  
   # Source shared utilities for count_spills function
   source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
 }
@@ -34,9 +34,9 @@ initialise_environment <- function() {
 #' Set up logging configuration
 #' @return NULL
 setup_logging <- function() {
-  log_path <- here::here("output", "log", "cross_section_prior_to_rental.log")
+  log_path <- here::here("output", "log", "house_site_prior_to_sale.log")
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-
+  
   logger::log_appender(logger::appender_file(log_path))
   logger::log_layout(logger::layout_glue_colors)
   logger::log_threshold(logger::DEBUG)
@@ -51,23 +51,23 @@ CONFIG <- list(
   radius_thresholds = c(250, 500, 1000),
   base_year = 2021,
   window_start = as.POSIXct("2021-01-01 00:00:00", tz = "UTC"),
-  chunk_size = 100000,  # Number of rentals to process per batch
+  chunk_size = 10000,  # Number of houses to process per batch
   unique_spill_sites_path = here::here("data", "processed", "unique_spill_sites.parquet")
 )
 
 # Data Loading Functions
 ############################################################
 
-#' Derive site-level missing flags for the rental-year window
+#' Derive site-level missing flags for the sale-year window
 #' @param unique_sites_dt Unique spill sites data.table
-#' @param rental_years Integer vector of rental years
+#' @param sale_years Integer vector of sale years
 #' @return data.table with site_id and site_missing
-derive_site_missing_flags <- function(unique_sites_dt, rental_years) {
+derive_site_missing_flags <- function(unique_sites_dt, sale_years) {
   if (is.null(unique_sites_dt) || nrow(unique_sites_dt) == 0) {
     return(data.table(site_id = character(), site_missing = logical()))
   }
-
-  avail_cols <- paste0("available_year_", rental_years)
+  
+  avail_cols <- paste0("available_year_", sale_years)
   missing_cols <- setdiff(avail_cols, names(unique_sites_dt))
   if (length(missing_cols) > 0) {
     logger::log_warn(
@@ -77,12 +77,12 @@ derive_site_missing_flags <- function(unique_sites_dt, rental_years) {
       unique_sites_dt[, (col) := FALSE]
     }
   }
-
+  
   unique_sites_dt[, (avail_cols) := lapply(.SD, function(x) {
     x <- as.logical(x)
     fifelse(is.na(x), FALSE, x)
   }), .SDcols = avail_cols]
-
+  
   unique_sites_dt[, site_missing := !Reduce(`&`, .SD), .SDcols = avail_cols]
   site_missing_dt <- unique_sites_dt[, .(site_missing = any(site_missing)), by = site_id]
   setkey(site_missing_dt, site_id)
@@ -90,27 +90,27 @@ derive_site_missing_flags <- function(unique_sites_dt, rental_years) {
 }
 
 #' Load datasets from parquet files
-#' @return List containing rental_dt, spill_lookup_dt, raw_events_dt, site_missing_dt
+#' @return List containing house_dt, spill_lookup_dt, raw_events_dt, site_missing_dt
 load_data <- function() {
   logger::log_info("Loading datasets from parquet files")
-
-  # Load rental data
-  rental_dt <- arrow::open_dataset(
-    file.path(CONFIG$processed_dir, "zoopla", "zoopla_rentals.parquet")
+  
+  # Load house price data
+  house_dt <- arrow::open_dataset(
+    file.path(CONFIG$processed_dir, "house_price.parquet")
   ) |>
-    dplyr::select(rental_id, listing_price, rented_est) |>
-    dplyr::filter(rented_est >= CONFIG$window_start) |>
+    dplyr::select(house_id, price, date_of_transfer) |>
+    dplyr::filter(date_of_transfer >= CONFIG$window_start) |>
     dplyr::collect() |>
     as.data.table()
-  setkey(rental_dt, rental_id)
-  logger::log_info("Rental data loaded: {nrow(rental_dt)} rows")
-
-  rental_years <- sort(unique(lubridate::year(rental_dt$rented_est)))
-  min_rental_year <- min(rental_years)
-  max_rental_year <- max(rental_years)
-  sample_years <- seq(min_rental_year, max_rental_year)
-  logger::log_info("Rental year window for missingness: {min_rental_year}-{max_rental_year}")
-
+  setkey(house_dt, house_id)
+  logger::log_info("House price data loaded: {nrow(house_dt)} rows")
+  
+  sale_years <- sort(unique(lubridate::year(house_dt$date_of_transfer)))
+  min_sale_year <- min(sale_years)
+  max_sale_year <- max(sale_years)
+  sample_years <- seq(min_sale_year, max_sale_year)
+  logger::log_info("Sale year window for missingness: {min_sale_year}-{max_sale_year}")
+  
   unique_sites_dt <- arrow::read_parquet(CONFIG$unique_spill_sites_path) |>
     as.data.table()
   site_missing_dt <- derive_site_missing_flags(unique_sites_dt, sample_years)
@@ -118,21 +118,21 @@ load_data <- function() {
     "Unique spill sites loaded: {nrow(unique_sites_dt)} rows; missing flags for {nrow(site_missing_dt)} sites"
   )
   logger::log_info(
-    "Sites flagged as missing in rental-year window: {site_missing_dt[site_missing == TRUE, .N]}"
+    "Sites flagged as missing in sale-year window: {site_missing_dt[site_missing == TRUE, .N]}"
   )
-
- # Load spill lookup - filter to max radius threshold to reduce join size
+  
+  # Load spill lookup - filter to max radius threshold to reduce join size
   max_radius <- max(CONFIG$radius_thresholds)
   spill_lookup_dt <- arrow::open_dataset(
-    file.path(CONFIG$processed_dir, "zoopla", "spill_rental_lookup.parquet")
+    file.path(CONFIG$processed_dir, "spill_house_lookup.parquet")
   ) |>
-    dplyr::select(rental_id, site_id, distance_m) |>
+    dplyr::select(house_id, site_id, distance_m) |>
     dplyr::filter(distance_m <= max_radius) |>
     dplyr::collect() |>
     as.data.table()
-  setkey(spill_lookup_dt, rental_id)
+  setkey(spill_lookup_dt, house_id)
   logger::log_info("Spill lookup data loaded: {nrow(spill_lookup_dt)} rows (filtered to {max_radius}m)")
-
+  
   # Load raw spill events
   raw_events_dt <- arrow::open_dataset(
     file.path(CONFIG$processed_dir, "matched_events_annual_data",
@@ -145,9 +145,9 @@ load_data <- function() {
   raw_events_dt[, year := NULL]
   setkey(raw_events_dt, site_id)
   logger::log_info("Raw spill events loaded: {nrow(raw_events_dt)} rows")
-
+  
   list(
-    rental_dt = rental_dt,
+    house_dt = house_dt,
     spill_lookup_dt = spill_lookup_dt,
     raw_events_dt = raw_events_dt,
     site_missing_dt = site_missing_dt
@@ -157,53 +157,54 @@ load_data <- function() {
 # Processing Functions
 ############################################################
 
-#' Create joined events table for a subset of rentals
-#' @param rental_ids Vector of rental_ids to process
+#' Create joined events table for a subset of houses
+#' @param house_ids Vector of house_ids to process
 #' @param data List containing loaded data tables
 #' @return list with `events_dt` (joined data) and `lookup_chunk`
-create_joined_events <- function(rental_ids, data) {
-  # Subset to this chunk of rentals
-  rental_chunk <- data$rental_dt[.(rental_ids), nomatch = 0L]
+create_joined_events <- function(house_ids, data) {
+  # Subset to this chunk of houses
+  house_chunk <- data$house_dt[.(house_ids), nomatch = 0L]
   lookup_chunk <- data$spill_lookup_dt[
-    data.table(rental_id = rental_ids),
-    on = "rental_id",
+    data.table(house_id = house_ids),
+    on = "house_id",
     nomatch = 0L
   ]
-  lookup_chunk <- lookup_chunk[, .(rental_id, site_id, distance_m)]
+  lookup_chunk <- lookup_chunk[, .(house_id, site_id, distance_m)]
   lookup_chunk <- data$site_missing_dt[lookup_chunk, on = "site_id"]
   lookup_chunk[, site_missing := fifelse(is.na(site_missing), TRUE, site_missing)]
-
+  
   if (nrow(lookup_chunk) == 0) {
     return(list(events_dt = NULL, lookup_chunk = lookup_chunk))
   }
-
-  # Join: rental -> spill_lookup
-  rental_sites <- lookup_chunk[rental_chunk, on = "rental_id", nomatch = NULL]
-
-  # Join: rental_sites -> raw_events
-  joined <- data$raw_events_dt[rental_sites, on = "site_id", nomatch = NULL, allow.cartesian = TRUE]
-
+  
+  # Join: house -> spill_lookup
+  house_sites <- lookup_chunk[house_chunk, on = "house_id", nomatch = NULL]
+  
+  # Join: house_sites -> raw_events
+  joined <- data$raw_events_dt[house_sites, on = "site_id", nomatch = NULL, allow.cartesian = TRUE]
+  
   # Filter to overlapping events and clamp times
-  joined <- joined[start_time < rented_est & end_time >= CONFIG$window_start]
-
+  joined <- joined[start_time < date_of_transfer & end_time >= CONFIG$window_start]
+  
   if (nrow(joined) == 0) {
     return(list(events_dt = NULL, lookup_chunk = lookup_chunk))
   }
-
+  
   joined[, `:=`(
     clamped_start = pmax(start_time, CONFIG$window_start),
-    clamped_end = pmin(end_time, rented_est)
+    clamped_end = pmin(end_time, date_of_transfer)
   )]
   joined[, event_hours := as.numeric(difftime(clamped_end, clamped_start, units = "hours"))]
-
+  
   joined <- joined[event_hours > 0]
   return(list(events_dt = joined, lookup_chunk = lookup_chunk))
 }
 
-#' Calculate spill metrics per radius with a single pass over site-level data
-#' @param lookup_dt Spill lookup data.table (rental_id, site_id, distance_m, site_missing)
+#' Calculate spill metrics per radius at site level
+#' @param lookup_dt Spill lookup data.table (house_id, site_id, distance_m, site_missing)
 #' @param events_dt Joined events data.table (or NULL if no events)
 #' @return data.table with spill counts, hours, site counts, distance metrics, and missing flag
+
 calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
   radii <- sort(CONFIG$radius_thresholds)
 
@@ -214,18 +215,18 @@ calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
   site_lookup <- lookup_dt[, .(
     distance_m = min(distance_m),
     site_missing = any(site_missing)
-  ), by = .(rental_id, site_id)]
+  ), by = .(house_id, site_id)]
 
   if (!is.null(events_dt) && nrow(events_dt) > 0) {
     event_agg <- events_dt[, .(
       spill_hrs = sum(event_hours, na.rm = TRUE),
       spill_count = count_spills(clamped_start, clamped_end)
-    ), by = .(rental_id, site_id)]
+    ), by = .(house_id, site_id)]
 
     site_agg <- merge(
       site_lookup,
       event_agg,
-      by = c("rental_id", "site_id"),
+      by = c("house_id", "site_id"),
       all.x = TRUE
     )
     site_agg[, `:=`(
@@ -240,176 +241,168 @@ calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
     )]
   }
 
-  # Collapse same-distance sites per rental to avoid roll-join ties
-  site_agg <- site_agg[, .(
-    spill_hrs = sum(spill_hrs),
-    spill_count = sum(spill_count),
-    n_spill_sites = .N,
-    distance_sum = sum(distance_m),
-    missing_sites = sum(site_missing)
-  ), by = .(rental_id, distance_m)]
+  # TEST: REMOVE LATER
+  metrics_list <- vector("list", length(radii))
 
-  # Order once and build cumulative metrics so each radius can use a rolling join
-  setorder(site_agg, rental_id, distance_m)
-  site_agg[, `:=`(
-    cum_spill_hrs = cumsum(spill_hrs),
-    cum_spill_count = cumsum(spill_count),
-    cum_distance_sum = cumsum(distance_sum),
-    n_spill_sites = cumsum(n_spill_sites),
-    cum_missing_sites = cumsum(missing_sites),
-    min_distance = distance_m[1]
-  ), by = rental_id]
-  setkey(site_agg, rental_id, distance_m)
+  for (i in seq_along(radii)) {
+    r <- radii[i]
+    # Shallow copy (copies structure, not data) and filter
+    dt <- site_agg[distance_m <= r]
+    dt[, radius := r]
+    metrics_list[[i]] <- dt
+  }
 
-  radius_grid <- CJ(rental_id = unique(site_agg$rental_id), radius = radii)
-  radius_grid[, radius_join := radius]
-  setkey(radius_grid, rental_id, radius_join)
+  metrics <- rbindlist(metrics_list, use.names = TRUE)
+  
+ # Replicate site data for each radius threshold and filter by distance
+  # metrics <- rbindlist(lapply(radii, function(r) {
+  #   dt <- copy(site_agg)
+  #   dt[, radius := r]
+  #   dt <- dt[distance_m <= r]
+  #   dt
+  # }))
 
-  metrics <- site_agg[
-    radius_grid,
-    roll = Inf,
-    on = .(rental_id, distance_m = radius_join)
-  ]
-
-  metrics[, `:=`(
-    spill_hrs = fifelse(is.na(cum_spill_hrs), 0, cum_spill_hrs),
-    spill_count = fifelse(is.na(cum_spill_count), 0, cum_spill_count),
-    n_spill_sites = fifelse(is.na(n_spill_sites), 0L, n_spill_sites),
-    mean_distance = fifelse(n_spill_sites > 0, cum_distance_sum / n_spill_sites, NA_real_),
-    min_distance = fifelse(n_spill_sites > 0, min_distance, NA_real_),
-    has_missing_site = fifelse(is.na(cum_missing_sites), FALSE, cum_missing_sites > 0)
-  )]
-
-  metrics[has_missing_site == TRUE, `:=`(
+  # Set missing metrics to NA
+  metrics[site_missing == TRUE, `:=`(
     spill_hrs = NA_real_,
     spill_count = NA_real_
   )]
 
-  metrics[, .(
-    rental_id, radius, spill_hrs, n_spill_sites, spill_count,
-    mean_distance, min_distance, has_missing_site
-  )]
+  return(metrics[, .(house_id, site_id, radius, distance_m,
+                     spill_hrs, spill_count, site_missing)])
 }
 
-#' Get rental metadata (listing_price, n_days_in_window)
-#' @param rental_dt Rental data.table
-#' @return data.table with rental metadata
-get_rental_metadata <- function(rental_dt) {
-  metadata <- rental_dt[, .(
-    rental_id,
-    listing_price,
-    n_days_in_window = as.integer(difftime(rented_est, CONFIG$window_start, units = "days"))
+
+#' Get house metadata (price, n_days_in_window)
+#' @param house_dt House price data.table
+#' @return data.table with house metadata
+get_house_metadata <- function(house_dt) {
+  metadata <- house_dt[, .(
+    house_id,
+    price,
+    n_days_in_window = as.integer(difftime(date_of_transfer, CONFIG$window_start, units = "days"))
   )]
   return(metadata)
 }
 
-#' Process a single chunk of rentals
-#' @param rental_ids Vector of rental_ids to process
+#' Process a single chunk of houses
+#' @param house_ids Vector of house_ids to process
 #' @param data List containing loaded data tables
 #' @return data.table with results for this chunk
-process_chunk <- function(rental_ids, data) {
-  joined <- create_joined_events(rental_ids, data)
+
+process_chunk <- function(house_ids, data) {
+  joined <- create_joined_events(house_ids, data)
   lookup_chunk <- joined$lookup_chunk
 
-  # Get rental metadata for this chunk
-  rental_meta <- get_rental_metadata(data$rental_dt[.(rental_ids), nomatch = 0L])
+  # Deduplicate to ensure unique house-site pairs
+  lookup_chunk <- unique(lookup_chunk, by = c("house_id", "site_id"))
 
-  # Create grid for rentals in this chunk
-  chunk_rentals <- CJ(
-    rental_id = rental_meta$rental_id,
-    radius = CONFIG$radius_thresholds
-  )
+  # Get house metadata for this chunk
+  house_meta <- get_house_metadata(data$house_dt[.(house_ids), nomatch = 0L])
 
-  # Merge all results
-  setkey(chunk_rentals, rental_id, radius)
-  setkey(rental_meta, rental_id)
-
+  # Calculate site-level metrics with radius filtering
   metrics_dt <- calculate_metrics_by_radius(lookup_chunk, joined$events_dt)
-  if (!is.null(metrics_dt) && nrow(metrics_dt) > 0) setkey(metrics_dt, rental_id, radius)
 
-  result <- if (!is.null(metrics_dt) && nrow(metrics_dt) > 0) {
-    metrics_dt[chunk_rentals, on = .(rental_id, radius)]
-  } else {
-    chunk_rentals
+  if (is.null(metrics_dt) || nrow(metrics_dt) == 0) {
+    # Return empty result with proper structure
+    return(data.table(
+      house_id = character(),
+      site_id = character(),
+      radius = numeric(),
+      distance_m = numeric(),
+      spill_hrs = numeric(),
+      spill_count = numeric(),
+      site_missing = logical(),
+      price = numeric(),
+      n_days_in_window = integer()
+    ))
   }
-  result <- rental_meta[result, on = "rental_id"]
+
+  # Merge with house metadata
+  setkey(metrics_dt, house_id)
+  setkey(house_meta, house_id)
+  result <- house_meta[metrics_dt, on = "house_id"]
 
   return(result)
 }
 
-#' Create the prior-to-rental cross-sectional database
+#' Create the prior-to-sale cross-sectional database
 #' @param data List containing loaded data tables
-#' @return data.table with aggregated prior-to-rental data
-create_prior_to_rental_db <- function(data) {
-  logger::log_info("Creating prior-to-rental cross-sectional database")
+#' @return data.table with aggregated prior-to-sale data
 
-  # Split rental_ids into chunks (index ranges to avoid pre-materializing all chunks)
-  all_rental_ids <- unique(data$rental_dt$rental_id)
-  n_ids <- length(all_rental_ids)
+create_prior_to_sale_db <- function(data) {
+  logger::log_info("Creating prior-to-sale cross-sectional database")
+  
+  all_house_ids <- unique(data$house_dt$house_id)
+#  all_house_ids <- head(all_house_ids, 50000) # TEST: REMOVE LATER
+  n_ids <- length(all_house_ids)
   n_chunks <- ceiling(n_ids / CONFIG$chunk_size)
   starts <- seq(1L, n_ids, by = CONFIG$chunk_size)
-
-  logger::log_info("Processing {length(all_rental_ids)} rentals in {n_chunks} chunks")
-
-  # Process all chunks
+  
+  logger::log_info("Processing {length(all_house_ids)} houses in {n_chunks} chunks")
+  
   result <- rbindlist(
     lapply(seq_along(starts), function(i) {
       logger::log_info("Processing chunk {i}/{n_chunks}")
       start <- starts[[i]]
       end <- min(start + CONFIG$chunk_size - 1L, n_ids)
-      res <- process_chunk(all_rental_ids[start:end], data)
+      res <- process_chunk(all_house_ids[start:end], data)
       res
     }),
     use.names = TRUE,
     fill = TRUE
   )
-
-  # Single pass NA/zero handling
-  if (!"has_missing_site" %in% names(result)) {
-    result[, has_missing_site := FALSE]
+  
+  # NA/zero handling
+  if (!"site_missing" %in% names(result)) {
+    result[, site_missing := FALSE]
   } else {
-    result[is.na(has_missing_site), has_missing_site := FALSE]
+    result[is.na(site_missing), site_missing := FALSE]
   }
-
-  metric_cols <- c("spill_count", "spill_hrs", "n_spill_sites")
+  
+  metric_cols <- c("spill_count", "spill_hrs")
   for (col in metric_cols) {
     if (!col %in% names(result)) {
       result[, (col) := 0]
     } else {
-      result[is.na(get(col)) & !has_missing_site, (col) := 0]
+      result[is.na(get(col)) & !site_missing, (col) := 0]
     }
   }
-
-  # Compute daily averages once after metrics are filled
+  
+  # Compute daily averages per site-house
   result[, `:=`(
     spill_count_daily_avg = spill_count / n_days_in_window,
     spill_hrs_daily_avg = spill_hrs / n_days_in_window
   )]
-  logger::log_info("Rows with missing sites (spill metrics set to NA): {result[has_missing_site == TRUE, .N]}")
-
-  setorder(result, rental_id, radius)
-  logger::log_info("Prior-to-rental database created: {nrow(result)} rows")
+  
+  logger::log_info("Rows with missing sites (spill metrics set to NA): {result[site_missing == TRUE, .N]}")
+  
+  # Order by house_id, site_id, radius
+  setorder(result, house_id, site_id, radius)
+  logger::log_info("Prior-to-sale database created: {nrow(result)} rows")
   return(result)
 }
 
 #' Export data to Parquet format
 #' @param data data.table to export
 #' @return NULL
+
 export_data <- function(data) {
   tryCatch(
     {
       output_path <- here::here(
-        "data", "processed", "cross_section", "rentals", "prior_to_rental"
+        "data", "processed", "cross_section", "sales", "prior_to_sale", "house_site"
       )
-
-      logger::log_info("Exporting prior-to-rental data to parquet")
+      
+      logger::log_info("Exporting prior-to-sale data to parquet")
+      # CHANGE: Add site_id to partitioning or adjust as needed
       arrow::write_dataset(
         data,
         path = output_path,
         format = "parquet",
-        partitioning = "radius"
+        partitioning = c("radius")  # Or just "radius" if preferred
       )
-
+      
       logger::log_info("Data export complete")
       logger::log_info("Data saved to: {output_path}")
     },
@@ -428,16 +421,16 @@ export_data <- function(data) {
 main <- function() {
   initialise_environment()
   setup_logging()
-
+  
   # Load data from parquet files
   data <- load_data()
-
-  # Create prior-to-rental cross-sectional database
-  prior_to_rental_data <- create_prior_to_rental_db(data)
-
+  
+  # Create prior-to-sale cross-sectional database
+  prior_to_sale_data <- create_prior_to_sale_db(data)
+  
   # Export data
-  export_data(prior_to_rental_data)
-
+  export_data(prior_to_sale_data)
+  
   logger::log_info("Script completed successfully")
 }
 
@@ -445,3 +438,4 @@ main <- function() {
 if (sys.nframe() == 0) {
   main()
 }
+

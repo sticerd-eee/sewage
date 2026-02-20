@@ -1,0 +1,38 @@
+# Repository Guidelines
+
+## Project Structure & Module Organization
+This repository is a research pipeline centered on sewage-spill and housing analyses.
+
+- `scripts/R/01_*` to `scripts/R/06_*`: core data pipeline (ingestion -> final analysis datasets).
+- `scripts/R/09_analysis/`: regression, descriptive, repeat-sales, and news analyses.
+- `scripts/R/utils/`: shared helpers (for example postcode and spill aggregation utilities).
+- `scripts/R/testing/`: exploratory and validation notebooks (`.Rmd`/`.qmd`).
+- `book/`: Quarto book source; rendered site goes to `book/_site/`.
+- `data/raw`, `data/processed`, `data/final`: immutable inputs, intermediate files, and analysis-ready outputs.
+- `output/`: generated tables, figures, logs, and model artifacts.
+- `scripts/stata/` and `raw_to_final/`: Stata conversion/finalization workflows.
+
+## Build, Test, and Development Commands
+- `R -q -e "renv::restore()"`: install/lock R dependencies from `renv.lock`.
+- `Rscript scripts/R/02_data_cleaning/clean_lr_house_price_data.R`: run a single pipeline step.
+- `bash scripts/R/09_analysis/run_all_analysis.sh --dry-run`: preview analysis run order.
+- `bash scripts/R/09_analysis/run_all_analysis.sh`: execute analysis scripts in configured order.
+- `quarto render book`: build the project website/book locally.
+- `python scripts/python/setup.py`: create local Python venv and install `scripts/python/requirements.txt`.
+
+## Coding Style & Naming Conventions
+- Prefer `snake_case` for script and object names (`aggregate_spill_stats.R`, `qtr_id`).
+- Keep numeric pipeline prefixes for ordered R folders (`01_data_ingestion`, `02_data_cleaning`, etc.).
+- In R, follow tidyverse style: pipes, explicit package calls where useful, and readable function blocks.
+- Use project-rooted paths via `here::here(...)`; avoid hard-coded absolute paths.
+
+## Testing Guidelines
+- No formal CI test suite is currently enforced; validation is script/notebook-driven.
+- Add focused checks in `scripts/R/testing/` using `test_*.Rmd` naming.
+- Run targeted checks with `Rscript -e "rmarkdown::render('scripts/R/testing/test_aggregate_spill_stats.Rmd')"` and `quarto render scripts/R/testing/sales_repeat_purchases.qmd`.
+- Validate outputs by confirming regenerated files in `output/` and expected logs in `output/log/`.
+
+## Commit & Pull Request Guidelines
+- Follow existing history style: concise, imperative summaries (for example `fix: ...`, `refactor: ...`, `Added ...`).
+- Keep commits scoped to one logical pipeline or analysis change.
+- PRs should include what changed and why, impacted scripts/paths, rerun commands, output evidence (table/figure paths and screenshots for Quarto/book changes), and a linked issue/task when available.
