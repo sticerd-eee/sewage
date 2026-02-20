@@ -12,8 +12,8 @@
 #   - data/processed/agg_spill_stats/agg_spill_yr.parquet - Yearly spill data
 #   - data/processed/agg_spill_stats/agg_spill_dry_yr.parquet - Dry spill data
 #   - data/processed/unique_spill_sites.parquet - Site coordinates
-#   - data/raw/shapefiles/MSOA_BCG/ - MSOA boundary shapefiles
-#   - data/raw/shapefiles/MSOA_population/sapemsoasyoatablefinal.xlsx - Population
+#   - data/raw/shapefiles/msoa_bcg_2021/ - MSOA boundary shapefiles
+#   - data/raw/shapefiles/msoa_population_2021/sapemsoasyoatablefinal.xlsx - Population
 #
 # Outputs:
 #   - output/figures/maps/spill_total_count_2021_2023.pdf
@@ -118,7 +118,7 @@ spill_sites <- rio::import(
 
 # MSOA boundaries (England only) - load first to get England bounding box
 msoa_boundaries <- sf::st_read(
-  here::here("data", "raw", "shapefiles", "MSOA_BCG"),
+  here::here("data", "raw", "shapefiles", "msoa_bcg_2021"),
   quiet = TRUE
 ) %>%
   filter(str_detect(MSOA21CD, "^E")) %>%
@@ -130,7 +130,7 @@ msoa_boundaries <- sf::st_read(
 # MSOA population data
 msoa_population <- readxl::read_excel(
   here::here(
-    "data", "raw", "shapefiles", "MSOA_population",
+    "data", "raw", "shapefiles", "msoa_population_2021",
     "sapemsoasyoatablefinal.xlsx"
   ),
   sheet = "Mid-2022 MSOA 2021",

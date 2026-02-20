@@ -131,7 +131,7 @@ uk_map <- ne_countries(scale = "medium", returnclass = "sf") %>%
 
 # Load MSOA boundaries from local shapefile
 msoa_boundaries <- st_read(
-  here::here("data", "raw", "shapefiles", "MSOA_BCG"),
+  here::here("data", "raw", "shapefiles", "msoa_bcg_2021"),
   quiet = TRUE
 ) %>%
   filter(str_detect(MSOA21CD, "^E")) %>% # England only
@@ -147,7 +147,7 @@ msoa_population <- readxl::read_excel(
     "data",
     "raw",
     "shapefiles",
-    "MSOA_population",
+    "msoa_population_2021",
     "sapemsoasyoatablefinal.xlsx"
   ),
   sheet = "Mid-2022 MSOA 2021",

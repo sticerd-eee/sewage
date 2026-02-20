@@ -10,7 +10,7 @@ suppressPackageStartupMessages(library(rnrfa))
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 # --- Inputs ---
-msoa_shp <- "/Users/odran/Dropbox/sewage/data/raw/shapefiles/MSOA/MSOA_2021_EW_BFC_V7.shp"
+msoa_shp <- "/Users/odran/Dropbox/sewage/data/raw/shapefiles/msoa_2021/MSOA_2021_EW_BFC_V7.shp"
 agg_base <- "/Users/odran/Dropbox/sewage/data/processed/agg_spill_stats"
 p_all_mo <- file.path(agg_base, "agg_spill_mo.parquet")
 p_dry_mo <- file.path(agg_base, "agg_spill_dry_mo.parquet")

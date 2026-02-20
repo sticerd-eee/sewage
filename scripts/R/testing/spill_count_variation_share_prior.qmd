@@ -1,0 +1,1503 @@
+---
+title: "Residual Spill-Count Variation Shares (Prior, Continuous)"
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Setup
+
+```{r}
+required_packages <- c(
+  "arrow",
+  "rio",
+  "dplyr",
+  "forcats",
+  "fixest",
+  "ggplot2",
+  "gt",
+  "here",
+  "purrr",
+  "scales",
+  "sf",
+  "tidyr",
+  "tibble"
+)
+
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(lapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+RAD <- 250L
+
+add_month_id <- function(df, date_col) {
+  if ("month_id" %in% names(df)) {
+    return(df)
+  }
+
+  if (!(date_col %in% names(df))) {
+    stop("month_id not found and date column '", date_col, "' is unavailable.")
+  }
+
+  month_raw <- as.Date(df[[date_col]])
+  if (all(is.na(month_raw))) {
+    stop("Could not derive month_id from '", date_col, "'.")
+  }
+
+  df$month_id <- format(month_raw, "%Y-%m")
+  df
+}
+
+build_lsoa_area_lookup <- function(shapefile_path, lsoa_values = NULL) {
+  lsoa_sf <- sf::st_read(shapefile_path, quiet = TRUE)
+  code_candidates <- c(
+    "LSOA21CD",
+    "LSOA21NM",
+    "LSOA11CD",
+    "LSOA11NM",
+    "lsoa21cd",
+    "lsoa21nm",
+    "lsoa11cd",
+    "lsoa11nm",
+    "lsoa"
+  )
+  candidate_cols <- code_candidates[code_candidates %in% names(lsoa_sf)]
+
+  if (length(candidate_cols) == 0) {
+    stop(
+      "Could not find a usable LSOA code/name column in shapefile. Expected one of: ",
+      paste(code_candidates, collapse = ", "),
+      "."
+    )
+  }
+
+  overlap_n <- NA_integer_
+  n_values <- NA_integer_
+
+  if (is.null(lsoa_values)) {
+    join_col <- candidate_cols[1]
+  } else {
+    clean_values <- unique(as.character(lsoa_values))
+    clean_values <- clean_values[!is.na(clean_values)]
+    n_values <- length(clean_values)
+
+    overlap_by_col <- vapply(
+      candidate_cols,
+      function(col_nm) sum(clean_values %in% as.character(lsoa_sf[[col_nm]])),
+      integer(1)
+    )
+
+    join_col <- candidate_cols[which.max(overlap_by_col)]
+    overlap_n <- max(overlap_by_col)
+  }
+
+  tibble::tibble(
+    lsoa = as.character(lsoa_sf[[join_col]]),
+    lsoa_area_m2 = as.numeric(sf::st_area(lsoa_sf))
+  ) |>
+    dplyr::filter(!is.na(lsoa)) |>
+    dplyr::distinct(lsoa, .keep_all = TRUE) |>
+    (\(lookup_tbl) {
+      list(
+        lookup = lookup_tbl,
+        join_col = join_col,
+        overlap_n = overlap_n,
+        n_values = n_values
+      )
+    })()
+}
+
+build_aux_formula_with_lhs <- function(
+  lhs_var,
+  controls_terms,
+  use_controls,
+  use_geo_fe,
+  use_month_fe,
+  fe_var
+) {
+  rhs <- if (isTRUE(use_controls)) controls_terms else "1"
+
+  fe_terms <- c(
+    if (isTRUE(use_geo_fe)) fe_var,
+    if (isTRUE(use_month_fe)) "month_id"
+  )
+
+  if (length(fe_terms) == 0) {
+    formula_text <- paste0(lhs_var, " ~ ", rhs)
+  } else {
+    formula_text <- paste0(
+      lhs_var,
+      " ~ ",
+      rhs,
+      " | ",
+      paste(fe_terms, collapse = " + ")
+    )
+  }
+
+  list(
+    formula = stats::as.formula(formula_text),
+    formula_text = formula_text
+  )
+}
+
+build_aux_formula <- function(
+  controls_terms,
+  use_controls,
+  use_geo_fe,
+  use_month_fe,
+  fe_var
+) {
+  build_aux_formula_with_lhs(
+    lhs_var = "spill_count_daily_avg",
+    controls_terms = controls_terms,
+    use_controls = use_controls,
+    use_geo_fe = use_geo_fe,
+    use_month_fe = use_month_fe,
+    fe_var = fe_var
+  )
+}
+
+compute_residual_share <- function(formula_obj, data) {
+  model <- fixest::feols(
+    formula_obj,
+    data = data,
+    vcov = "hetero"
+  )
+
+  resid <- stats::residuals(model)
+  spill <- stats::fitted(model) + resid
+
+  var_raw <- stats::var(spill, na.rm = TRUE)
+  var_resid <- stats::var(resid, na.rm = TRUE)
+
+  residual_share <- if (is.na(var_raw) || var_raw <= 0) {
+    NA_real_
+  } else {
+    var_resid / var_raw
+  }
+
+  r2 <- unname(as.numeric(fixest::fitstat(model, "r2")))
+  one_minus_r2 <- 1 - r2
+
+  tibble::tibble(
+    n = stats::nobs(model),
+    var_raw = var_raw,
+    var_resid = var_resid,
+    residual_share = residual_share,
+    r2 = r2,
+    one_minus_r2 = one_minus_r2,
+    identity_gap = abs(residual_share - one_minus_r2)
+  )
+}
+
+spec_grid <- tibble::tribble(
+  ~spec_num , ~lsoa_fe , ~month_fe , ~property_controls ,
+  1L        , FALSE    , FALSE     , FALSE              ,
+  2L        , FALSE    , FALSE     , TRUE               ,
+  3L        , TRUE     , FALSE     , FALSE              ,
+  4L        , TRUE     , FALSE     , TRUE               ,
+  5L        , FALSE    , TRUE      , FALSE              ,
+  6L        , FALSE    , TRUE      , TRUE               ,
+  7L        , TRUE     , TRUE      , FALSE              ,
+  8L        , TRUE     , TRUE      , TRUE
+)
+
+run_panel <- function(
+  data,
+  panel_label,
+  controls_terms,
+  spec_prefix,
+  fe_var
+) {
+  spec_grid |>
+    mutate(
+      panel = panel_label,
+      spec_id = paste0(spec_prefix, spec_num),
+      formula_info = purrr::pmap(
+        list(property_controls, lsoa_fe, month_fe),
+        \(use_controls, use_geo_fe, use_month_fe) {
+          build_aux_formula(
+            controls_terms = controls_terms,
+            use_controls = use_controls,
+            use_geo_fe = use_geo_fe,
+            use_month_fe = use_month_fe,
+            fe_var = fe_var
+          )
+        }
+      ),
+      formula = purrr::map(formula_info, "formula"),
+      formula_text = purrr::map_chr(formula_info, "formula_text"),
+      stats = purrr::map(formula, \(fml) compute_residual_share(fml, data))
+    ) |>
+    select(-formula_info, -formula) |>
+    tidyr::unnest(cols = c(stats))
+}
+
+run_direction_panel <- function(
+  data,
+  panel_label,
+  variant_label,
+  controls_terms,
+  spec_prefix,
+  upstream_var,
+  downstream_var,
+  fe_var
+) {
+  variable_grid <- tibble::tribble(
+    ~variable    , ~outcome_var   ,
+    "Upstream"   , upstream_var   ,
+    "Downstream" , downstream_var
+  )
+
+  tidyr::crossing(spec_grid, variable_grid) |>
+    dplyr::mutate(
+      panel = panel_label,
+      variant = variant_label,
+      spec_id = paste0(spec_prefix, spec_num),
+      formula_info = purrr::pmap(
+        list(outcome_var, property_controls, lsoa_fe, month_fe),
+        \(outcome_var, use_controls, use_geo_fe, use_month_fe) {
+          build_aux_formula_with_lhs(
+            lhs_var = outcome_var,
+            controls_terms = controls_terms,
+            use_controls = use_controls,
+            use_geo_fe = use_geo_fe,
+            use_month_fe = use_month_fe,
+            fe_var = fe_var
+          )
+        }
+      ),
+      formula = purrr::map(formula_info, "formula"),
+      formula_text = purrr::map_chr(formula_info, "formula_text"),
+      stats = purrr::map(formula, \(fml) compute_residual_share(fml, data))
+    ) |>
+    dplyr::select(-formula_info, -formula, -outcome_var) |>
+    tidyr::unnest(cols = c(stats))
+}
+```
+
+## Load and Prepare Data
+
+```{r}
+# Cross-section data with spill metrics
+# Filter for properties with at least one spill site within radius.
+dat_cs_sales_all <- arrow::open_dataset(
+  here::here("data", "processed", "cross_section", "sales", "prior_to_sale")
+) |>
+  dplyr::filter(radius == RAD) |>
+  dplyr::collect()
+
+dat_cs_sales <- dat_cs_sales_all |>
+  dplyr::filter(n_spill_sites > 0)
+
+sales <- rio::import(
+  here::here("data", "processed", "house_price.parquet"),
+  trust = TRUE
+) |>
+  add_month_id("date_of_transfer") |>
+  dplyr::select(
+    -dplyr::any_of(c(
+      "transaction_id",
+      "date_of_transfer",
+      "quality",
+      "paon",
+      "saon",
+      "street",
+      "locality",
+      "town_city",
+      "district",
+      "county",
+      "ppd_category",
+      "record_status"
+    ))
+  ) |>
+  dplyr::mutate(
+    property_type = forcats::as_factor(property_type),
+    old_new = forcats::as_factor(old_new),
+    duration = forcats::as_factor(duration)
+  )
+
+dat_sales_clean <- dat_cs_sales |>
+  dplyr::select(-dplyr::any_of("price")) |>
+  dplyr::inner_join(sales, by = "house_id") |>
+  dplyr::mutate(log_price = log(price)) |>
+  dplyr::filter(
+    !is.na(spill_count_daily_avg),
+    !is.na(lsoa),
+    !is.na(msoa),
+    !is.na(property_type),
+    !is.na(old_new),
+    !is.na(duration),
+    !is.na(month_id)
+  ) |>
+  dplyr::mutate(
+    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+    property_type = forcats::fct_drop(forcats::as_factor(property_type)),
+    old_new = forcats::fct_drop(forcats::as_factor(old_new)),
+    duration = forcats::fct_drop(forcats::as_factor(duration)),
+    month_id = forcats::fct_drop(forcats::as_factor(month_id))
+  )
+
+
+dat_cs_rentals_all <- arrow::open_dataset(
+  here::here("data", "processed", "cross_section", "rentals", "prior_to_rental")
+) |>
+  dplyr::filter(radius == RAD) |>
+  dplyr::collect()
+
+dat_cs_rentals <- dat_cs_rentals_all |>
+  dplyr::filter(n_spill_sites > 0)
+
+rentals <- rio::import(
+  here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
+  trust = TRUE
+) |>
+  add_month_id("listing_created") |>
+  dplyr::select(
+    -dplyr::any_of(c(
+      "postcode",
+      "listing_created",
+      "latest_to_rent",
+      "rented",
+      "rented_est",
+      "address_line_01",
+      "address_line_02",
+      "address_line_03"
+    ))
+  ) |>
+  dplyr::mutate(
+    property_type = forcats::as_factor(property_type)
+  )
+
+dat_rental_clean <- dat_cs_rentals |>
+  dplyr::select(-dplyr::any_of("listing_price")) |>
+  dplyr::inner_join(rentals, by = "rental_id") |>
+  dplyr::mutate(log_price = log(listing_price)) |>
+  dplyr::filter(
+    !is.na(spill_count_daily_avg),
+    !is.na(lsoa),
+    !is.na(msoa),
+    !is.na(property_type),
+    !is.na(bedrooms),
+    !is.na(bathrooms),
+    !is.na(month_id)
+  ) |>
+  dplyr::mutate(
+    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+    property_type = forcats::fct_drop(forcats::as_factor(property_type)),
+    month_id = forcats::fct_drop(forcats::as_factor(month_id))
+  )
+
+cat("Sales observations:", nrow(dat_sales_clean), "\n")
+cat("Rental observations:", nrow(dat_rental_clean), "\n")
+```
+
+## Build LSOA Diagnostics Data
+
+```{r}
+lsoa_obs_dist <- dplyr::bind_rows(
+  dat_sales_clean |>
+    dplyr::count(lsoa, name = "n_obs") |>
+    dplyr::mutate(sample = "Sales"),
+  dat_rental_clean |>
+    dplyr::count(lsoa, name = "n_obs") |>
+    dplyr::mutate(sample = "Rentals")
+) |>
+  dplyr::mutate(lsoa = as.character(lsoa))
+
+lsoa_area_lookup_info <- build_lsoa_area_lookup(
+  here::here(
+    "data",
+    "raw",
+    "shapefiles",
+    "lsoa_2011",
+    "LSOA_2011_EW_BFC_V3.shp"
+  ),
+  lsoa_values = lsoa_obs_dist$lsoa
+)
+
+lsoa_area_lookup <- lsoa_area_lookup_info$lookup
+
+lsoa_area_dist <- lsoa_obs_dist |>
+  dplyr::distinct(sample, lsoa) |>
+  dplyr::left_join(lsoa_area_lookup, by = "lsoa")
+
+area_match_summary <- lsoa_area_dist |>
+  dplyr::summarise(
+    n_lsoa = dplyr::n(),
+    n_with_area = sum(!is.na(lsoa_area_m2)),
+    share_with_area = n_with_area / n_lsoa
+  )
+
+buffer_area_m2 <- pi * (RAD^2)
+area_p95_m2 <- as.numeric(
+  stats::quantile(lsoa_area_dist$lsoa_area_m2, probs = 0.95, na.rm = TRUE)
+)
+obs_p95_n <- as.numeric(
+  stats::quantile(lsoa_obs_dist$n_obs, probs = 0.95, na.rm = TRUE)
+)
+
+if (!is.finite(area_p95_m2) || area_p95_m2 <= 0) {
+  stop("Invalid pooled p95 for LSOA area; check area diagnostics input.")
+}
+if (!is.finite(obs_p95_n) || obs_p95_n <= 0) {
+  stop("Invalid pooled p95 for observations-per-LSOA; check diagnostics input.")
+}
+
+cat("LSOA area-match diagnostics\n")
+cat(" - Area lookup join column:", lsoa_area_lookup_info$join_col, "\n")
+cat(
+  " - Distinct sample LSOAs matched in lookup column:",
+  lsoa_area_lookup_info$overlap_n,
+  "/",
+  lsoa_area_lookup_info$n_values,
+  "\n"
+)
+cat(" - LSOAs in sample:", area_match_summary$n_lsoa, "\n")
+cat(" - LSOAs matched to area:", area_match_summary$n_with_area, "\n")
+cat(
+  " - Match rate:",
+  scales::percent(area_match_summary$share_with_area, accuracy = 0.1),
+  "\n"
+)
+cat(
+  " - 250m buffer area (m^2):",
+  scales::comma(buffer_area_m2, accuracy = 1),
+  "\n"
+)
+cat(
+  " - Pooled p95 LSOA area (m^2):",
+  scales::comma(area_p95_m2, accuracy = 1),
+  "\n"
+)
+cat(
+  " - Pooled p95 observations per LSOA:",
+  scales::comma(obs_p95_n, accuracy = 1),
+  "\n"
+)
+
+if (area_match_summary$n_with_area == 0) {
+  stop(
+    "No LSOAs matched area lookup. Check LSOA code column/vintage alignment."
+  )
+}
+
+dat_sales_base <- dat_cs_sales_all |>
+  dplyr::select(-dplyr::any_of("price")) |>
+  dplyr::inner_join(sales, by = "house_id") |>
+  dplyr::filter(!is.na(lsoa)) |>
+  dplyr::mutate(lsoa = as.character(lsoa))
+
+dat_rental_base <- dat_cs_rentals_all |>
+  dplyr::select(-dplyr::any_of("listing_price")) |>
+  dplyr::inner_join(rentals, by = "rental_id") |>
+  dplyr::filter(!is.na(lsoa)) |>
+  dplyr::mutate(lsoa = as.character(lsoa))
+
+lsoa_retention_counts_dist <- dplyr::bind_rows(
+  dat_sales_base |>
+    dplyr::group_by(lsoa) |>
+    dplyr::summarise(
+      n_total = dplyr::n(),
+      n_kept = sum(dplyr::coalesce(n_spill_sites, 0) > 0),
+      n_dropped = n_total - n_kept,
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(sample = "Sales"),
+  dat_rental_base |>
+    dplyr::group_by(lsoa) |>
+    dplyr::summarise(
+      n_total = dplyr::n(),
+      n_kept = sum(dplyr::coalesce(n_spill_sites, 0) > 0),
+      n_dropped = n_total - n_kept,
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(sample = "Rentals")
+)
+
+retention_total_p99_n <- as.numeric(
+  stats::quantile(
+    lsoa_retention_counts_dist$n_total,
+    probs = 0.99,
+    na.rm = TRUE
+  )
+)
+
+if (!is.finite(retention_total_p99_n) || retention_total_p99_n <= 0) {
+  stop("Invalid pooled p99 for retention n_total; check diagnostics input.")
+}
+
+lsoa_area_dist_plot <- lsoa_area_dist |>
+  dplyr::filter(!is.na(lsoa_area_m2), lsoa_area_m2 <= area_p95_m2) |>
+  dplyr::mutate(lsoa_area_km2 = lsoa_area_m2 / 1e6)
+
+lsoa_obs_dist_plot <- lsoa_obs_dist |>
+  dplyr::filter(!is.na(n_obs), n_obs <= obs_p95_n)
+
+lsoa_retention_counts_dist_plot <- lsoa_retention_counts_dist |>
+  dplyr::filter(
+    !is.na(n_total),
+    n_total > 0,
+    n_total <= retention_total_p99_n
+  )
+
+lsoa_retention_counts_long_plot <- lsoa_retention_counts_dist_plot |>
+  dplyr::select(sample, lsoa, n_total, n_kept, n_dropped) |>
+  tidyr::pivot_longer(
+    cols = c(n_kept, n_dropped),
+    names_to = "status",
+    values_to = "n_component"
+  ) |>
+  dplyr::mutate(
+    status = factor(
+      status,
+      levels = c("n_kept", "n_dropped"),
+      labels = c(
+        "Kept (>0 spill site)",
+        "Dropped (0 spill sites)"
+      )
+    ),
+    lsoa_weight_component = n_component / n_total
+  )
+
+buffer_area_km2 <- buffer_area_m2 / 1e6
+area_p95_km2 <- area_p95_m2 / 1e6
+
+area_bins <- 40L
+obs_bins <- 40L
+retention_bins <- 40L
+
+cat(
+  " - Pooled p99 n_total for retention plot:",
+  scales::comma(retention_total_p99_n, accuracy = 1),
+  "\n"
+)
+cat(
+  " - Histogram bins (area / obs / retention):",
+  area_bins,
+  "/",
+  obs_bins,
+  "/",
+  retention_bins,
+  "\n"
+)
+```
+
+## Compute Residual Variation Shares
+
+```{r}
+sales_results_lsoa <- run_panel(
+  data = dat_sales_clean,
+  panel_label = "Sales",
+  controls_terms = "property_type + old_new + duration",
+  spec_prefix = "S",
+  fe_var = "lsoa"
+)
+
+rental_results_lsoa <- run_panel(
+  data = dat_rental_clean,
+  panel_label = "Rentals",
+  controls_terms = "property_type + bedrooms + bathrooms",
+  spec_prefix = "R",
+  fe_var = "lsoa"
+)
+
+sales_results_msoa <- run_panel(
+  data = dat_sales_clean,
+  panel_label = "Sales",
+  controls_terms = "property_type + old_new + duration",
+  spec_prefix = "S",
+  fe_var = "msoa"
+)
+
+rental_results_msoa <- run_panel(
+  data = dat_rental_clean,
+  panel_label = "Rentals",
+  controls_terms = "property_type + bedrooms + bathrooms",
+  spec_prefix = "R",
+  fe_var = "msoa"
+)
+
+all_results <- dplyr::bind_rows(
+  dplyr::mutate(sales_results_lsoa, geo_fe = "lsoa"),
+  dplyr::mutate(rental_results_lsoa, geo_fe = "lsoa"),
+  dplyr::mutate(sales_results_msoa, geo_fe = "msoa"),
+  dplyr::mutate(rental_results_msoa, geo_fe = "msoa")
+)
+```
+
+## Base Table Helpers
+
+```{r}
+format_results <- function(df, fe_label) {
+  out <- df |>
+    dplyr::arrange(spec_num) |>
+    dplyr::transmute(
+      Specification = spec_id,
+      fe_status = dplyr::if_else(lsoa_fe, "Yes", "No"),
+      `Month FE` = dplyr::if_else(month_fe, "Yes", "No"),
+      `Property controls` = dplyr::if_else(property_controls, "Yes", "No"),
+      Observations = n,
+      `Var(spill count)` = var_raw,
+      `Var(residual)` = var_resid,
+      `Residual variation share` = residual_share
+    )
+
+  names(out)[names(out) == "fe_status"] <- fe_label
+  out
+}
+
+make_styled_table <- function(df, title, fe_label) {
+  gt::gt(df) |>
+    gt::tab_header(title = gt::md(paste0("**", title, "**"))) |>
+    gt::cols_align(
+      align = "center",
+      columns = tidyselect::all_of(c(fe_label, "Month FE", "Property controls"))
+    ) |>
+    gt::cols_align(
+      align = "right",
+      columns = c(
+        Observations,
+        `Var(spill count)`,
+        `Var(residual)`,
+        `Residual variation share`
+      )
+    ) |>
+    gt::fmt_integer(columns = c(Observations), sep_mark = ",") |>
+    gt::fmt_number(
+      columns = c(`Var(spill count)`, `Var(residual)`),
+      decimals = 4
+    ) |>
+    gt::fmt_number(columns = c(`Residual variation share`), decimals = 3) |>
+    gt::opt_row_striping() |>
+    gt::tab_options(
+      table.width = gt::pct(100),
+      data_row.padding = gt::px(5),
+      column_labels.font.weight = "bold",
+      column_labels.font.size = gt::px(12),
+      table.font.size = gt::px(12)
+    )
+}
+```
+
+## LSOA Identification Diagnostics
+
+```{r}
+#| label: fig-lsoa-area-dist-sales
+#| fig-cap: "Sales: Distribution of LSOA areas (km^2) for LSOAs with at least one house within 250 m of at least one spill site. X-axis is capped at pooled p95; dashed line marks the area of a 250m-radius circle."
+#| fig-width: 8
+#| fig-height: 4.8
+lsoa_area_dist_plot |>
+  dplyr::filter(sample == "Sales") |>
+  ggplot2::ggplot(ggplot2::aes(x = lsoa_area_km2)) +
+  ggplot2::geom_histogram(
+    bins = area_bins,
+    fill = "#2C7FB8",
+    color = "white",
+    alpha = 0.9
+  ) +
+  ggplot2::annotate(
+    geom = "segment",
+    x = buffer_area_km2,
+    xend = buffer_area_km2,
+    y = 0,
+    yend = Inf,
+    linetype = "dashed",
+    linewidth = 0.7,
+    color = "#D55E00"
+  ) +
+  ggplot2::annotate(
+    geom = "text",
+    x = buffer_area_km2,
+    y = Inf,
+    label = "250m radius buffer",
+    angle = 0,
+    vjust = 1,
+    hjust = -0.1,
+    size = 3,
+    color = "#D55E00"
+  ) +
+  ggplot2::scale_x_continuous(labels = scales::label_number(accuracy = 0.01)) +
+  ggplot2::coord_cartesian(xlim = c(0, area_p95_km2)) +
+  ggplot2::labs(
+    x = "LSOA area (km^2)",
+    y = "Number of LSOAs"
+  ) +
+  ggplot2::theme_minimal(base_size = 12)
+```
+
+```{r}
+#| label: fig-lsoa-area-dist-rentals
+#| fig-cap: "Rentals: Distribution of LSOA areas (km^2) for LSOAs with at least one rental listing within 250 m of at least one spill site. X-axis is capped at pooled p95; dashed line marks the area of a 250m-radius circle."
+#| fig-width: 8
+#| fig-height: 4.8
+lsoa_area_dist_plot |>
+  dplyr::filter(sample == "Rentals") |>
+  ggplot2::ggplot(ggplot2::aes(x = lsoa_area_km2)) +
+  ggplot2::geom_histogram(
+    bins = area_bins,
+    fill = "#2C7FB8",
+    color = "white",
+    alpha = 0.9
+  ) +
+  ggplot2::annotate(
+    geom = "segment",
+    x = buffer_area_km2,
+    xend = buffer_area_km2,
+    y = 0,
+    yend = Inf,
+    linetype = "dashed",
+    linewidth = 0.7,
+    color = "#D55E00"
+  ) +
+  ggplot2::annotate(
+    geom = "text",
+    x = buffer_area_km2,
+    y = Inf,
+    label = "250m radius buffer",
+    angle = 90,
+    vjust = 1.4,
+    hjust = -0.1,
+    size = 3,
+    color = "#D55E00"
+  ) +
+  ggplot2::scale_x_continuous(labels = scales::label_number(accuracy = 0.01)) +
+  ggplot2::coord_cartesian(xlim = c(0, area_p95_km2)) +
+  ggplot2::labs(
+    x = "LSOA area (km^2)",
+    y = "Number of LSOAs"
+  ) +
+  ggplot2::theme_minimal(base_size = 12)
+```
+
+```{r}
+#| label: fig-lsoa-obs-dist-sales
+#| fig-cap: "Sales: Distribution of observations per LSOA for LSOAs with at least one house within 250 m of at least one spill site. X-axis is capped at pooled p95."
+#| fig-width: 8
+#| fig-height: 4.8
+lsoa_obs_dist_plot |>
+  dplyr::filter(sample == "Sales") |>
+  ggplot2::ggplot(ggplot2::aes(x = n_obs)) +
+  ggplot2::geom_histogram(
+    bins = 30,
+    fill = "#2C7FB8",
+    color = "white",
+    alpha = 0.9
+  ) +
+  ggplot2::scale_x_continuous(labels = scales::label_number()) +
+  ggplot2::coord_cartesian(xlim = c(0, obs_p95_n)) +
+  ggplot2::labs(
+    x = "Observations per LSOA",
+    y = "Number of LSOAs"
+  ) +
+  ggplot2::theme_minimal(base_size = 12)
+```
+
+```{r}
+#| label: fig-lsoa-obs-dist-rentals
+#| fig-cap: "Rentals: Distribution of observations per LSOA in the cleaned 250m sample used for FE specifications. X-axis is capped at pooled p95."
+#| fig-width: 8
+#| fig-height: 4.8
+lsoa_obs_dist_plot |>
+  dplyr::filter(sample == "Rentals") |>
+  ggplot2::ggplot(ggplot2::aes(x = n_obs)) +
+  ggplot2::geom_histogram(
+    bins = obs_bins,
+    fill = "#2C7FB8",
+    color = "white",
+    alpha = 0.9
+  ) +
+  ggplot2::scale_x_continuous(labels = scales::label_number()) +
+  ggplot2::coord_cartesian(xlim = c(0, obs_p95_n)) +
+  ggplot2::labs(
+    x = "Observations per LSOA",
+    y = "Number of LSOAs"
+  ) +
+  ggplot2::theme_minimal(base_size = 12)
+```
+
+```{r}
+#| label: fig-lsoa-retention-dist-sales
+#| fig-cap: "Sales: Stacked distribution of LSOAs by pre-filter size (n_total) at 250m. Bar height is number of LSOAs in each n_total bin; colors split each LSOA into kept vs dropped shares."
+#| fig-width: 8
+#| fig-height: 4.8
+lsoa_retention_counts_long_plot |>
+  dplyr::filter(sample == "Sales") |>
+  ggplot2::ggplot(
+    ggplot2::aes(x = n_total, weight = lsoa_weight_component, fill = status)
+  ) +
+  ggplot2::geom_histogram(
+    bins = retention_bins,
+    color = "white",
+    alpha = 0.9,
+    boundary = 0,
+    position = ggplot2::position_stack(reverse = TRUE)
+  ) +
+  ggplot2::scale_fill_manual(
+    values = c(
+      "Kept (>0 spill site)" = "#2A9D8F",
+      "Dropped (0 spill sites)" = "#E76F51"
+    ),
+    breaks = c(
+      "Kept (>0 spill site)",
+      "Dropped (0 spill sites)"
+    )
+  ) +
+  ggplot2::scale_x_continuous(
+    limits = c(0, retention_total_p99_n),
+    breaks = scales::breaks_pretty(n = 6),
+    labels = scales::label_number()
+  ) +
+  ggplot2::labs(
+    x = "Total observations per LSOA (Kept + Dropped)",
+    y = "Number of LSOAs",
+    fill = NULL
+  ) +
+  ggplot2::theme_minimal(base_size = 12)
+```
+
+```{r}
+#| label: fig-lsoa-retention-dist-rentals
+#| fig-cap: "Rentals: Stacked distribution of LSOAs by pre-filter size (n_total) at 250m. Bar height is number of LSOAs in each n_total bin; colors split each LSOA into kept vs dropped shares."
+#| fig-width: 8
+#| fig-height: 4.8
+lsoa_retention_counts_long_plot |>
+  dplyr::filter(sample == "Rentals") |>
+  ggplot2::ggplot(
+    ggplot2::aes(x = n_total, weight = lsoa_weight_component, fill = status)
+  ) +
+  ggplot2::geom_histogram(
+    bins = retention_bins,
+    color = "white",
+    alpha = 0.9,
+    boundary = 0,
+    position = ggplot2::position_stack(reverse = TRUE)
+  ) +
+  ggplot2::scale_fill_manual(
+    values = c(
+      "Kept (>0 spill site)" = "#2A9D8F",
+      "Dropped (0 spill sites)" = "#E76F51"
+    ),
+    breaks = c(
+      "Kept (>0 spill site)",
+      "Dropped (0 spill sites)"
+    )
+  ) +
+  ggplot2::scale_x_continuous(
+    limits = c(0, retention_total_p99_n),
+    breaks = scales::breaks_pretty(n = 6),
+    labels = scales::label_number()
+  ) +
+  ggplot2::labs(
+    x = "Total observations per LSOA (Kept + Dropped)",
+    y = "Number of LSOAs",
+    fill = NULL
+  ) +
+  ggplot2::theme_minimal(base_size = 12)
+```
+
+## Sales Table (LSOA FE)
+
+```{r}
+sales_table_lsoa <- format_results(sales_results_lsoa, fe_label = "LSOA FE")
+make_styled_table(
+  sales_table_lsoa,
+  "Sales: Residual Spill-Count Variation Share (LSOA FE)",
+  fe_label = "LSOA FE"
+)
+```
+
+## Rentals Table (LSOA FE)
+
+```{r}
+rental_table_lsoa <- format_results(rental_results_lsoa, fe_label = "LSOA FE")
+make_styled_table(
+  rental_table_lsoa,
+  "Rentals: Residual Spill-Count Variation Share (LSOA FE)",
+  fe_label = "LSOA FE"
+)
+```
+
+## Sales Table (MSOA FE)
+
+```{r}
+sales_table_msoa <- format_results(sales_results_msoa, fe_label = "MSOA FE")
+make_styled_table(
+  sales_table_msoa,
+  "Sales: Residual Spill-Count Variation Share (MSOA FE)",
+  fe_label = "MSOA FE"
+)
+```
+
+## Rentals Table (MSOA FE)
+
+```{r}
+rental_table_msoa <- format_results(rental_results_msoa, fe_label = "MSOA FE")
+make_styled_table(
+  rental_table_msoa,
+  "Rentals: Residual Spill-Count Variation Share (MSOA FE)",
+  fe_label = "MSOA FE"
+)
+```
+
+## Load and Prepare Upstream/Downstream Data
+
+```{r}
+dat_cs_sales_site <- arrow::open_dataset(
+  here::here(
+    "data",
+    "processed",
+    "cross_section",
+    "sales",
+    "prior_to_sale",
+    "house_site"
+  )
+) |>
+  dplyr::filter(radius == RAD) |>
+  dplyr::collect()
+
+dat_cs_rentals_site <- arrow::open_dataset(
+  here::here(
+    "data",
+    "processed",
+    "cross_section",
+    "rentals",
+    "prior_to_rental",
+    "rental_site"
+  )
+) |>
+  dplyr::filter(radius == RAD) |>
+  dplyr::collect()
+
+upstream_downstream_sales <- rio::import(
+  here::here(
+    "upstream_downstream",
+    "output",
+    "03-02",
+    "river_filter",
+    "spill_house_signed_with_lateral.csv"
+  )
+) |>
+  dplyr::mutate(
+    direction = ifelse(direction == -1, 1, 0),
+    direction = factor(
+      direction,
+      levels = c(1, 0),
+      labels = c("Upstream", "Downstream")
+    ),
+    dist_river_m = abs(signed_dist_m)
+  ) |>
+  dplyr::filter(
+    spill_lateral_m < RAD,
+    house_lateral_m < RAD,
+    dist_river_m < 1000
+  )
+
+upstream_downstream_rentals <- rio::import(
+  here::here(
+    "upstream_downstream",
+    "output",
+    "03-02",
+    "river_filter",
+    "spill_rental_signed_with_lateral.csv"
+  )
+) |>
+  dplyr::mutate(
+    direction = ifelse(direction == -1, 1, 0),
+    direction = factor(
+      direction,
+      levels = c(1, 0),
+      labels = c("Upstream", "Downstream")
+    ),
+    dist_river_m = abs(signed_dist_m)
+  ) |>
+  dplyr::filter(
+    spill_lateral_m < RAD,
+    rental_lateral_m < RAD,
+    dist_river_m < 1000
+  )
+
+dat_sales_direction_clean <- dat_cs_sales_site |>
+  dplyr::select(-dplyr::any_of("price")) |>
+  dplyr::inner_join(sales, by = "house_id") |>
+  dplyr::inner_join(upstream_downstream_sales, by = c("house_id", "site_id")) |>
+  dplyr::filter(
+    !is.na(spill_count_daily_avg),
+    !is.na(lsoa),
+    !is.na(msoa),
+    !is.na(property_type),
+    !is.na(old_new),
+    !is.na(duration),
+    !is.na(month_id),
+    !is.na(direction)
+  ) |>
+  dplyr::mutate(
+    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+    property_type = forcats::fct_drop(forcats::as_factor(property_type)),
+    old_new = forcats::fct_drop(forcats::as_factor(old_new)),
+    duration = forcats::fct_drop(forcats::as_factor(duration)),
+    month_id = forcats::fct_drop(forcats::as_factor(month_id))
+  )
+
+dat_rental_direction_clean <- dat_cs_rentals_site |>
+  dplyr::select(-dplyr::any_of("listing_price")) |>
+  dplyr::inner_join(rentals, by = "rental_id") |>
+  dplyr::inner_join(
+    upstream_downstream_rentals,
+    by = c("rental_id", "site_id")
+  ) |>
+  dplyr::filter(
+    !is.na(spill_count_daily_avg),
+    !is.na(lsoa),
+    !is.na(msoa),
+    !is.na(property_type),
+    !is.na(bedrooms),
+    !is.na(bathrooms),
+    !is.na(month_id),
+    !is.na(direction)
+  ) |>
+  dplyr::mutate(
+    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+    property_type = forcats::fct_drop(forcats::as_factor(property_type)),
+    month_id = forcats::fct_drop(forcats::as_factor(month_id))
+  )
+
+alpha <- 1
+
+dat_exposure_sales <- dat_sales_direction_clean |>
+  dplyr::group_by(house_id) |>
+  dplyr::mutate(
+    inv_dist_weight_raw = (dist_river_m + 0.01)^(-alpha)
+  ) |>
+  dplyr::summarise(
+    upstream_count = sum(
+      spill_count_daily_avg * (direction == "Upstream"),
+      na.rm = TRUE
+    ),
+    downstream_count = sum(
+      spill_count_daily_avg * (direction == "Downstream"),
+      na.rm = TRUE
+    ),
+    upstream_count_exposure = sum(
+      inv_dist_weight_raw * spill_count_daily_avg * (direction == "Upstream"),
+      na.rm = TRUE
+    ),
+    downstream_count_exposure = sum(
+      inv_dist_weight_raw * spill_count_daily_avg * (direction == "Downstream"),
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) |>
+  dplyr::inner_join(
+    sales |>
+      dplyr::select(
+        house_id,
+        lsoa,
+        msoa,
+        month_id,
+        property_type,
+        old_new,
+        duration
+      ),
+    by = "house_id"
+  ) |>
+  dplyr::filter(
+    !is.na(lsoa),
+    !is.na(msoa),
+    !is.na(month_id),
+    !is.na(property_type),
+    !is.na(old_new),
+    !is.na(duration)
+  ) |>
+  dplyr::mutate(
+    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+    property_type = forcats::fct_drop(forcats::as_factor(property_type)),
+    old_new = forcats::fct_drop(forcats::as_factor(old_new)),
+    duration = forcats::fct_drop(forcats::as_factor(duration)),
+    month_id = forcats::fct_drop(forcats::as_factor(month_id))
+  )
+
+dat_exposure_rentals <- dat_rental_direction_clean |>
+  dplyr::group_by(rental_id) |>
+  dplyr::mutate(
+    inv_dist_weight_raw = (dist_river_m + 0.01)^(-alpha)
+  ) |>
+  dplyr::summarise(
+    upstream_count = sum(
+      spill_count_daily_avg * (direction == "Upstream"),
+      na.rm = TRUE
+    ),
+    downstream_count = sum(
+      spill_count_daily_avg * (direction == "Downstream"),
+      na.rm = TRUE
+    ),
+    upstream_count_exposure = sum(
+      inv_dist_weight_raw * spill_count_daily_avg * (direction == "Upstream"),
+      na.rm = TRUE
+    ),
+    downstream_count_exposure = sum(
+      inv_dist_weight_raw * spill_count_daily_avg * (direction == "Downstream"),
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) |>
+  dplyr::inner_join(
+    rentals |>
+      dplyr::select(
+        rental_id,
+        lsoa,
+        msoa,
+        month_id,
+        property_type,
+        bedrooms,
+        bathrooms
+      ),
+    by = "rental_id"
+  ) |>
+  dplyr::filter(
+    !is.na(lsoa),
+    !is.na(msoa),
+    !is.na(month_id),
+    !is.na(property_type),
+    !is.na(bedrooms),
+    !is.na(bathrooms)
+  ) |>
+  dplyr::mutate(
+    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+    property_type = forcats::fct_drop(forcats::as_factor(property_type)),
+    month_id = forcats::fct_drop(forcats::as_factor(month_id))
+  )
+
+cat(
+  "Sales directional house-site pairs:",
+  nrow(dat_sales_direction_clean),
+  "\n"
+)
+cat(
+  "Rental directional rental-site pairs:",
+  nrow(dat_rental_direction_clean),
+  "\n"
+)
+cat("Sales directional exposure observations:", nrow(dat_exposure_sales), "\n")
+cat(
+  "Rental directional exposure observations:",
+  nrow(dat_exposure_rentals),
+  "\n"
+)
+```
+
+## Compute Upstream/Downstream Residual Variation Shares
+
+```{r}
+sales_direction_unweighted_lsoa <- run_direction_panel(
+  data = dat_exposure_sales,
+  panel_label = "Sales",
+  variant_label = "Unweighted count",
+  controls_terms = "property_type + old_new + duration",
+  spec_prefix = "S",
+  upstream_var = "upstream_count",
+  downstream_var = "downstream_count",
+  fe_var = "lsoa"
+)
+
+sales_direction_weighted_lsoa <- run_direction_panel(
+  data = dat_exposure_sales,
+  panel_label = "Sales",
+  variant_label = "Distance-weighted count",
+  controls_terms = "property_type + old_new + duration",
+  spec_prefix = "S",
+  upstream_var = "upstream_count_exposure",
+  downstream_var = "downstream_count_exposure",
+  fe_var = "lsoa"
+)
+
+rental_direction_unweighted_lsoa <- run_direction_panel(
+  data = dat_exposure_rentals,
+  panel_label = "Rentals",
+  variant_label = "Unweighted count",
+  controls_terms = "property_type + bedrooms + bathrooms",
+  spec_prefix = "R",
+  upstream_var = "upstream_count",
+  downstream_var = "downstream_count",
+  fe_var = "lsoa"
+)
+
+rental_direction_weighted_lsoa <- run_direction_panel(
+  data = dat_exposure_rentals,
+  panel_label = "Rentals",
+  variant_label = "Distance-weighted count",
+  controls_terms = "property_type + bedrooms + bathrooms",
+  spec_prefix = "R",
+  upstream_var = "upstream_count_exposure",
+  downstream_var = "downstream_count_exposure",
+  fe_var = "lsoa"
+)
+
+sales_direction_unweighted_msoa <- run_direction_panel(
+  data = dat_exposure_sales,
+  panel_label = "Sales",
+  variant_label = "Unweighted count",
+  controls_terms = "property_type + old_new + duration",
+  spec_prefix = "S",
+  upstream_var = "upstream_count",
+  downstream_var = "downstream_count",
+  fe_var = "msoa"
+)
+
+sales_direction_weighted_msoa <- run_direction_panel(
+  data = dat_exposure_sales,
+  panel_label = "Sales",
+  variant_label = "Distance-weighted count",
+  controls_terms = "property_type + old_new + duration",
+  spec_prefix = "S",
+  upstream_var = "upstream_count_exposure",
+  downstream_var = "downstream_count_exposure",
+  fe_var = "msoa"
+)
+
+rental_direction_unweighted_msoa <- run_direction_panel(
+  data = dat_exposure_rentals,
+  panel_label = "Rentals",
+  variant_label = "Unweighted count",
+  controls_terms = "property_type + bedrooms + bathrooms",
+  spec_prefix = "R",
+  upstream_var = "upstream_count",
+  downstream_var = "downstream_count",
+  fe_var = "msoa"
+)
+
+rental_direction_weighted_msoa <- run_direction_panel(
+  data = dat_exposure_rentals,
+  panel_label = "Rentals",
+  variant_label = "Distance-weighted count",
+  controls_terms = "property_type + bedrooms + bathrooms",
+  spec_prefix = "R",
+  upstream_var = "upstream_count_exposure",
+  downstream_var = "downstream_count_exposure",
+  fe_var = "msoa"
+)
+
+all_direction_results <- dplyr::bind_rows(
+  dplyr::mutate(sales_direction_unweighted_lsoa, geo_fe = "lsoa"),
+  dplyr::mutate(sales_direction_weighted_lsoa, geo_fe = "lsoa"),
+  dplyr::mutate(rental_direction_unweighted_lsoa, geo_fe = "lsoa"),
+  dplyr::mutate(rental_direction_weighted_lsoa, geo_fe = "lsoa"),
+  dplyr::mutate(sales_direction_unweighted_msoa, geo_fe = "msoa"),
+  dplyr::mutate(sales_direction_weighted_msoa, geo_fe = "msoa"),
+  dplyr::mutate(rental_direction_unweighted_msoa, geo_fe = "msoa"),
+  dplyr::mutate(rental_direction_weighted_msoa, geo_fe = "msoa")
+)
+```
+
+## Directional Table Helpers
+
+```{r}
+format_direction_results <- function(df, fe_label) {
+  obs_check <- df |>
+    dplyr::group_by(spec_id) |>
+    dplyr::summarise(obs_unique = dplyr::n_distinct(n), .groups = "drop")
+
+  if (any(obs_check$obs_unique > 1L)) {
+    warning(
+      "Observation counts differ between upstream and downstream models for some specifications."
+    )
+  }
+
+  spec_meta <- df |>
+    dplyr::group_by(spec_id, spec_num, lsoa_fe, month_fe, property_controls) |>
+    dplyr::summarise(Observations = dplyr::first(n), .groups = "drop")
+
+  share_wide <- df |>
+    dplyr::mutate(
+      variable = paste0("Residual variation share (", variable, ")")
+    ) |>
+    dplyr::select(spec_id, variable, residual_share) |>
+    tidyr::pivot_wider(names_from = variable, values_from = residual_share)
+
+  out <- spec_meta |>
+    dplyr::left_join(share_wide, by = "spec_id") |>
+    dplyr::arrange(spec_num) |>
+    dplyr::transmute(
+      Specification = spec_id,
+      fe_status = dplyr::if_else(lsoa_fe, "Yes", "No"),
+      `Month FE` = dplyr::if_else(month_fe, "Yes", "No"),
+      `Property controls` = dplyr::if_else(property_controls, "Yes", "No"),
+      Observations = Observations,
+      `Residual variation share (Upstream)` = `Residual variation share (Upstream)`,
+      `Residual variation share (Downstream)` = `Residual variation share (Downstream)`
+    )
+
+  names(out)[names(out) == "fe_status"] <- fe_label
+  out
+}
+
+make_direction_styled_table <- function(df, title, fe_label) {
+  gt::gt(df) |>
+    gt::tab_header(title = gt::md(paste0("**", title, "**"))) |>
+    gt::cols_align(
+      align = "center",
+      columns = tidyselect::all_of(c(fe_label, "Month FE", "Property controls"))
+    ) |>
+    gt::cols_align(
+      align = "right",
+      columns = c(
+        Observations,
+        `Residual variation share (Upstream)`,
+        `Residual variation share (Downstream)`
+      )
+    ) |>
+    gt::fmt_integer(columns = c(Observations), sep_mark = ",") |>
+    gt::fmt_number(
+      columns = c(
+        `Residual variation share (Upstream)`,
+        `Residual variation share (Downstream)`
+      ),
+      decimals = 3
+    ) |>
+    gt::opt_row_striping() |>
+    gt::tab_options(
+      table.width = gt::pct(100),
+      data_row.padding = gt::px(5),
+      column_labels.font.weight = "bold",
+      column_labels.font.size = gt::px(12),
+      table.font.size = gt::px(12)
+    )
+}
+```
+
+## Upstream/Downstream Tables: Unweighted Count (LSOA FE)
+
+### Sales Table
+
+```{r}
+sales_direction_unweighted_table_lsoa <- format_direction_results(
+  sales_direction_unweighted_lsoa,
+  fe_label = "LSOA FE"
+)
+make_direction_styled_table(
+  sales_direction_unweighted_table_lsoa,
+  "Sales: Upstream/Downstream Residual Spill-Count Variation Shares (Unweighted, LSOA FE)",
+  fe_label = "LSOA FE"
+)
+```
+
+### Rentals Table
+
+```{r}
+rental_direction_unweighted_table_lsoa <- format_direction_results(
+  rental_direction_unweighted_lsoa,
+  fe_label = "LSOA FE"
+)
+make_direction_styled_table(
+  rental_direction_unweighted_table_lsoa,
+  "Rentals: Upstream/Downstream Residual Spill-Count Variation Shares (Unweighted, LSOA FE)",
+  fe_label = "LSOA FE"
+)
+```
+
+## Upstream/Downstream Tables: Distance-Weighted Count (LSOA FE)
+
+### Sales Table
+
+```{r}
+sales_direction_weighted_table_lsoa <- format_direction_results(
+  sales_direction_weighted_lsoa,
+  fe_label = "LSOA FE"
+)
+make_direction_styled_table(
+  sales_direction_weighted_table_lsoa,
+  "Sales: Upstream/Downstream Residual Spill-Count Variation Shares (Distance-Weighted, LSOA FE)",
+  fe_label = "LSOA FE"
+)
+```
+
+### Rentals Table
+
+```{r}
+rental_direction_weighted_table_lsoa <- format_direction_results(
+  rental_direction_weighted_lsoa,
+  fe_label = "LSOA FE"
+)
+make_direction_styled_table(
+  rental_direction_weighted_table_lsoa,
+  "Rentals: Upstream/Downstream Residual Spill-Count Variation Shares (Distance-Weighted, LSOA FE)",
+  fe_label = "LSOA FE"
+)
+```
+
+## Upstream/Downstream Tables: Unweighted Count (MSOA FE)
+
+### Sales Table
+
+```{r}
+sales_direction_unweighted_table_msoa <- format_direction_results(
+  sales_direction_unweighted_msoa,
+  fe_label = "MSOA FE"
+)
+make_direction_styled_table(
+  sales_direction_unweighted_table_msoa,
+  "Sales: Upstream/Downstream Residual Spill-Count Variation Shares (Unweighted, MSOA FE)",
+  fe_label = "MSOA FE"
+)
+```
+
+### Rentals Table
+
+```{r}
+rental_direction_unweighted_table_msoa <- format_direction_results(
+  rental_direction_unweighted_msoa,
+  fe_label = "MSOA FE"
+)
+make_direction_styled_table(
+  rental_direction_unweighted_table_msoa,
+  "Rentals: Upstream/Downstream Residual Spill-Count Variation Shares (Unweighted, MSOA FE)",
+  fe_label = "MSOA FE"
+)
+```
+
+## Upstream/Downstream Tables: Distance-Weighted Count (MSOA FE)
+
+### Sales Table
+
+```{r}
+sales_direction_weighted_table_msoa <- format_direction_results(
+  sales_direction_weighted_msoa,
+  fe_label = "MSOA FE"
+)
+make_direction_styled_table(
+  sales_direction_weighted_table_msoa,
+  "Sales: Upstream/Downstream Residual Spill-Count Variation Shares (Distance-Weighted, MSOA FE)",
+  fe_label = "MSOA FE"
+)
+```
+
+### Rentals Table
+
+```{r}
+rental_direction_weighted_table_msoa <- format_direction_results(
+  rental_direction_weighted_msoa,
+  fe_label = "MSOA FE"
+)
+make_direction_styled_table(
+  rental_direction_weighted_table_msoa,
+  "Rentals: Upstream/Downstream Residual Spill-Count Variation Shares (Distance-Weighted, MSOA FE)",
+  fe_label = "MSOA FE"
+)
+```

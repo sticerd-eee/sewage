@@ -388,7 +388,7 @@ Scripts for generating descriptive visualisations of spill patterns, price relat
     - **Output:** `output/figures/google_trends_article_counts_combined.pdf`.
 
 **`spill_maps.R`**
-    - **Input:** `data/processed/agg_spill_stats/agg_spill_yr.parquet`, `data/processed/agg_spill_stats/agg_spill_dry_yr.parquet`, `data/processed/unique_spill_sites.parquet`, `data/raw/shapefiles/MSOA_BCG/`, `data/raw/shapefiles/MSOA_population/sapemsoasyoatablefinal.xlsx`.
+    - **Input:** `data/processed/agg_spill_stats/agg_spill_yr.parquet`, `data/processed/agg_spill_stats/agg_spill_dry_yr.parquet`, `data/processed/unique_spill_sites.parquet`, `data/raw/shapefiles/msoa_bcg_2021/`, `data/raw/shapefiles/msoa_population_2021/sapemsoasyoatablefinal.xlsx`.
     - **Description:** MSOA-level choropleth maps of log spill counts (total and dry) for 2021-2023.
     - **Output:** `output/figures/maps/spill_total_count_2021_2023.pdf`, `output/figures/maps/dry_spill_total_count_2021_2023.pdf`.
 
