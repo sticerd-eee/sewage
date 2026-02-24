@@ -1,0 +1,427 @@
+---
+title: "London vs Total Shares: Households, Spill Sites, and Spills"
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Setup
+
+```{r}
+required_packages <- c(
+  "arrow",
+  "dplyr",
+  "tidyr",
+  "sf",
+  "stringr",
+  "here",
+  "gt",
+  "readr",
+  "tibble"
+)
+
+install_if_missing <- function(packages) {
+  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+  if (length(new_packages) > 0) {
+    install.packages(new_packages)
+  }
+  invisible(lapply(packages, library, character.only = TRUE))
+}
+install_if_missing(required_packages)
+
+sf::sf_use_s2(FALSE)
+
+YEARS <- 2021:2023
+RAD <- 250L
+WRITE_CSV <- TRUE
+
+path_house <- here::here("data", "processed", "house_price.parquet")
+path_unique_sites <- here::here("data", "processed", "unique_spill_sites.parquet")
+path_agg_yr <- here::here("data", "processed", "agg_spill_stats", "agg_spill_yr.parquet")
+path_cross_sales_prior <- here::here(
+  "data", "processed", "cross_section", "sales", "prior_to_sale"
+)
+path_lad <- here::here(
+  "data", "raw", "shapefiles", "local_authorities_uk_buc",
+  "Local_Authority_Districts_(May_2025)_Boundaries_UK_BUC.shp"
+)
+
+load_lad_boundaries <- function(path_lad) {
+  sf::st_read(path_lad, quiet = TRUE) |>
+    dplyr::mutate(is_london = stringr::str_starts(LAD25CD, "E09")) |>
+    dplyr::select(LAD25CD, LAD25NM, is_london, geometry)
+}
+
+classify_points_to_london <- function(df, x_col, y_col, lad_sf) {
+  df_tagged <- df |>
+    dplyr::mutate(
+      has_valid_coords = !is.na(.data[[x_col]]) & !is.na(.data[[y_col]])
+    )
+
+  coord_lookup <- df_tagged |>
+    dplyr::filter(has_valid_coords) |>
+    dplyr::distinct(dplyr::across(dplyr::all_of(c(x_col, y_col))))
+
+  if (nrow(coord_lookup) == 0) {
+    return(df_tagged |>
+      dplyr::mutate(
+        lad25cd = NA_character_,
+        lad25nm = NA_character_,
+        is_london = FALSE,
+        is_matched = FALSE
+      ))
+  }
+
+  points_sf <- sf::st_as_sf(
+    coord_lookup,
+    coords = c(x_col, y_col),
+    crs = 27700,
+    remove = FALSE
+  )
+
+  joined_lookup <- sf::st_join(
+    points_sf,
+    lad_sf,
+    left = TRUE,
+    join = sf::st_within
+  ) |>
+    sf::st_drop_geometry() |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(c(x_col, y_col)))) |>
+    dplyr::slice_head(n = 1) |>
+    dplyr::ungroup() |>
+    dplyr::transmute(
+      dplyr::across(dplyr::all_of(c(x_col, y_col))),
+      lad25cd = LAD25CD,
+      lad25nm = LAD25NM,
+      is_london = is_london,
+      is_matched = !is.na(LAD25CD)
+    )
+
+  df_tagged |>
+    dplyr::left_join(joined_lookup, by = c(x_col, y_col)) |>
+    dplyr::mutate(
+      is_london = tidyr::replace_na(is_london, FALSE),
+      is_matched = tidyr::replace_na(is_matched, FALSE)
+    )
+}
+
+make_share_row <- function(metric, london_numerator, total_denominator) {
+  tibble::tibble(
+    metric = metric,
+    london_numerator = london_numerator,
+    total_denominator = total_denominator,
+    share_london = dplyr::if_else(total_denominator > 0, london_numerator / total_denominator, NA_real_)
+  )
+}
+```
+
+## Load Data and Classify London
+
+```{r}
+lad_sf <- load_lad_boundaries(path_lad)
+
+# Households base: sales transactions (2021-2023 cleaned sample)
+house_sales <- arrow::open_dataset(path_house) |>
+  dplyr::select(
+    house_id, price, lsoa, property_type, old_new, duration,
+    easting, northing
+  ) |>
+  dplyr::collect()
+
+house_sales_geo <- classify_points_to_london(
+  house_sales,
+  x_col = "easting",
+  y_col = "northing",
+  lad_sf = lad_sf
+)
+
+# Spill sites base: unique site list
+spill_sites <- arrow::open_dataset(path_unique_sites) |>
+  dplyr::select(site_id, water_company, easting, northing) |>
+  dplyr::collect() |>
+  dplyr::distinct(water_company, site_id, .keep_all = TRUE)
+
+spill_sites_geo <- classify_points_to_london(
+  spill_sites,
+  x_col = "easting",
+  y_col = "northing",
+  lad_sf = lad_sf
+)
+
+# Spill totals: annual site-level totals, summed over 2021-2023
+spill_yr <- arrow::open_dataset(path_agg_yr) |>
+  dplyr::filter(year %in% YEARS) |>
+  dplyr::select(water_company, site_id, year, spill_count_yr, spill_hrs_yr) |>
+  dplyr::collect()
+
+spill_yr_geo <- spill_yr |>
+  dplyr::left_join(
+    spill_sites_geo |>
+      dplyr::select(
+        water_company, site_id, is_london, is_matched, has_valid_coords
+      ),
+    by = c("water_company", "site_id")
+  ) |>
+  dplyr::mutate(
+    is_london = tidyr::replace_na(is_london, FALSE),
+    is_matched = tidyr::replace_na(is_matched, FALSE),
+    has_valid_coords = tidyr::replace_na(has_valid_coords, FALSE)
+  )
+
+# Site-based metrics: drop missing/invalid coordinates only.
+# Valid but unmatched points are treated as outside London.
+spill_sites_geo_valid <- spill_sites_geo |>
+  dplyr::filter(has_valid_coords)
+
+spill_yr_geo_valid <- spill_yr_geo |>
+  dplyr::filter(has_valid_coords)
+```
+
+## Build Exact Hedonic Sales Sample Within 250m
+
+```{r}
+dat_cs_sales <- arrow::open_dataset(path_cross_sales_prior) |>
+  dplyr::filter(radius == RAD) |>
+  dplyr::filter(n_spill_sites > 0) |>
+  dplyr::collect()
+
+# Match hedonic_continuous_prior.R sample filters exactly for sales
+dat_sales_hedonic <- dat_cs_sales |>
+  dplyr::select(-dplyr::any_of("price")) |>
+  dplyr::inner_join(
+    house_sales_geo |>
+      dplyr::select(
+        house_id, price, lsoa, property_type, old_new, duration,
+        easting, northing, is_london, is_matched, has_valid_coords
+      ),
+    by = "house_id"
+  ) |>
+  dplyr::mutate(log_price = log(price)) |>
+  dplyr::filter(
+    !is.na(spill_count_daily_avg),
+    !is.na(spill_hrs_daily_avg),
+    !is.na(lsoa),
+    !is.na(property_type),
+    !is.na(old_new),
+    !is.na(duration)
+  )
+```
+
+## Compute Shares
+
+```{r}
+# 1) Households London / Total (whole sample)
+metric_households <- make_share_row(
+  metric = "Households (whole sample)",
+  london_numerator = sum(house_sales_geo$is_london, na.rm = TRUE),
+  total_denominator = nrow(house_sales_geo)
+)
+
+# 2) Spill sites London / Total (valid coordinates only)
+metric_sites <- make_share_row(
+  metric = "Spill sites (valid coordinates only)",
+  london_numerator = sum(spill_sites_geo_valid$is_london, na.rm = TRUE),
+  total_denominator = nrow(spill_sites_geo_valid)
+)
+
+# 3) Spills London / Total (2021-2023 totals; valid coordinates only)
+metric_spill_count <- make_share_row(
+  metric = "Spill count (2021-2023 total; valid coordinates only)",
+  london_numerator = sum(spill_yr_geo_valid$spill_count_yr[spill_yr_geo_valid$is_london], na.rm = TRUE),
+  total_denominator = sum(spill_yr_geo_valid$spill_count_yr, na.rm = TRUE)
+)
+
+metric_spill_hours <- make_share_row(
+  metric = "Spill hours (2021-2023 total; valid coordinates only)",
+  london_numerator = sum(spill_yr_geo_valid$spill_hrs_yr[spill_yr_geo_valid$is_london], na.rm = TRUE),
+  total_denominator = sum(spill_yr_geo_valid$spill_hrs_yr, na.rm = TRUE)
+)
+
+# 4) Households within 250m used in hedonic regressions (exact sales sample)
+metric_hedonic_250 <- make_share_row(
+  metric = "Households within 250m (exact hedonic sales sample)",
+  london_numerator = sum(dat_sales_hedonic$is_london, na.rm = TRUE),
+  total_denominator = nrow(dat_sales_hedonic)
+)
+
+summary_shares <- dplyr::bind_rows(
+  metric_households,
+  metric_sites,
+  metric_spill_count,
+  metric_spill_hours,
+  metric_hedonic_250
+)
+
+summary_shares
+```
+
+## Main Summary Table
+
+```{r}
+summary_shares |>
+  gt::gt() |>
+  gt::fmt_number(
+    columns = c(london_numerator, total_denominator),
+    decimals = 2,
+    sep_mark = ","
+  ) |>
+  gt::fmt_percent(columns = share_london, decimals = 2) |>
+  gt::cols_label(
+    metric = "Metric",
+    london_numerator = "London Numerator",
+    total_denominator = "Total Denominator",
+    share_london = "London Share"
+  ) |>
+  gt::tab_header(
+    title = "London / Total Shares",
+    subtitle = "Households, spill sites, spill counts/hours, and 250m hedonic sales sample"
+  )
+```
+
+## Classification Audit
+
+```{r}
+audit_stats <- tibble::tibble(
+  dataset = c(
+    "Households (whole sample)",
+    "Spill sites (whole sample)",
+    "Spill-year rows (for metric 3)",
+    "Hedonic sales sample within 250m"
+  ),
+  n_total = c(
+    nrow(house_sales_geo),
+    nrow(spill_sites_geo),
+    nrow(spill_yr_geo),
+    nrow(dat_sales_hedonic)
+  ),
+  n_with_valid_coords = c(
+    sum(house_sales_geo$has_valid_coords, na.rm = TRUE),
+    sum(spill_sites_geo$has_valid_coords, na.rm = TRUE),
+    sum(spill_yr_geo$has_valid_coords, na.rm = TRUE),
+    sum(dat_sales_hedonic$has_valid_coords, na.rm = TRUE)
+  ),
+  n_lad_matched = c(
+    sum(house_sales_geo$is_matched, na.rm = TRUE),
+    sum(spill_sites_geo$is_matched, na.rm = TRUE),
+    sum(spill_yr_geo$is_matched, na.rm = TRUE),
+    sum(dat_sales_hedonic$is_matched, na.rm = TRUE)
+  ),
+  n_missing_or_invalid_coords = c(
+    sum(!house_sales_geo$has_valid_coords, na.rm = TRUE),
+    sum(!spill_sites_geo$has_valid_coords, na.rm = TRUE),
+    sum(!spill_yr_geo$has_valid_coords, na.rm = TRUE),
+    sum(!dat_sales_hedonic$has_valid_coords, na.rm = TRUE)
+  ),
+  n_valid_but_unmatched = c(
+    sum(house_sales_geo$has_valid_coords & !house_sales_geo$is_matched, na.rm = TRUE),
+    sum(spill_sites_geo$has_valid_coords & !spill_sites_geo$is_matched, na.rm = TRUE),
+    sum(spill_yr_geo$has_valid_coords & !spill_yr_geo$is_matched, na.rm = TRUE),
+    sum(dat_sales_hedonic$has_valid_coords & !dat_sales_hedonic$is_matched, na.rm = TRUE)
+  )
+)
+
+audit_stats |>
+  gt::gt() |>
+  gt::fmt_number(columns = where(is.numeric), decimals = 0, sep_mark = ",") |>
+  gt::tab_header(
+    title = "Audit of London Classification Coverage",
+    subtitle = "Coordinate validity and LAD boundary match rates"
+  )
+```
+
+## Unmatched Spill Site Diagnostics
+
+```{r}
+unmatched_spill_sites <- spill_sites_geo |>
+  dplyr::filter(!is_matched)
+
+cat("Unmatched spill sites:", nrow(unmatched_spill_sites), "\n")
+cat(" - Missing/invalid coordinates:",
+    sum(!unmatched_spill_sites$has_valid_coords, na.rm = TRUE), "\n")
+cat(" - Valid coordinates but outside all LAD polygons:",
+    sum(unmatched_spill_sites$has_valid_coords, na.rm = TRUE), "\n")
+
+unmatched_by_company <- unmatched_spill_sites |>
+  dplyr::count(water_company, sort = TRUE)
+
+unmatched_by_company |>
+  gt::gt() |>
+  gt::fmt_number(columns = n, decimals = 0, sep_mark = ",") |>
+  gt::tab_header(
+    title = "Unmatched Spill Sites by Water Company"
+  )
+
+unmatched_valid <- unmatched_spill_sites |>
+  dplyr::filter(has_valid_coords)
+
+if (nrow(unmatched_valid) > 0) {
+  unmatched_valid_sf <- sf::st_as_sf(
+    unmatched_valid,
+    coords = c("easting", "northing"),
+    crs = 27700,
+    remove = FALSE
+  )
+
+  nearest_idx <- sf::st_nearest_feature(unmatched_valid_sf, lad_sf)
+  nearest_lad <- lad_sf[nearest_idx, c("LAD25CD", "LAD25NM")]
+  nearest_dist_km <- as.numeric(
+    sf::st_distance(
+      unmatched_valid_sf,
+      lad_sf[nearest_idx, ],
+      by_element = TRUE
+    )
+  ) / 1000
+
+  unmatched_nearest <- unmatched_valid |>
+    dplyr::mutate(
+      nearest_lad25cd = nearest_lad$LAD25CD,
+      nearest_lad25nm = nearest_lad$LAD25NM,
+      nearest_lad_dist_km = nearest_dist_km
+    )
+
+  unmatched_distance_bins <- unmatched_nearest |>
+    dplyr::mutate(
+      distance_band = cut(
+        nearest_lad_dist_km,
+        breaks = c(-Inf, 0.1, 1, 5, 20, Inf),
+        labels = c("<=0.1km", "0.1-1km", "1-5km", "5-20km", ">20km")
+      )
+    ) |>
+    dplyr::count(distance_band, sort = FALSE)
+
+  unmatched_distance_bins |>
+    gt::gt() |>
+    gt::fmt_number(columns = n, decimals = 0, sep_mark = ",") |>
+    gt::tab_header(
+      title = "Distance of Unmatched Spill Sites to Nearest LAD"
+    )
+
+  unmatched_nearest |>
+    dplyr::count(nearest_lad25cd, nearest_lad25nm, sort = TRUE) |>
+    dplyr::slice_head(n = 20) |>
+    gt::gt() |>
+    gt::fmt_number(columns = n, decimals = 0, sep_mark = ",") |>
+    gt::tab_header(
+      title = "Top Nearest LADs for Unmatched Spill Sites"
+    )
+}
+```
+
+## Export Summary Table
+
+```{r}
+if (WRITE_CSV) {
+  out_csv <- here::here(
+    "output", "tables", "london_total_shares_houses_spills.csv"
+  )
+  dir.create(dirname(out_csv), recursive = TRUE, showWarnings = FALSE)
+  readr::write_csv(summary_shares, out_csv)
+  cat("Wrote:", out_csv, "\n")
+}
+```

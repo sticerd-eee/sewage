@@ -1,0 +1,664 @@
+---
+title: "Missing Annual Observation Patterns (2021-2023)"
+format:
+  html:
+    toc: true
+    number-sections: true
+params:
+  sample_mode: false
+  sample_n_sites: 1500
+  seed: 123
+  output_dir: "output/tables/missing_data_patterns"
+  figure_dir: "output/figures/missing_data_patterns"
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Setup
+
+```{r}
+required_packages <- c(
+  "arrow",
+  "dplyr",
+  "tidyr",
+  "stringr",
+  "ggplot2",
+  "readr",
+  "purrr",
+  "here",
+  "forcats",
+  "scales"
+)
+
+invisible(lapply(required_packages, function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop("Missing required package: ", pkg)
+  }
+  library(pkg, character.only = TRUE)
+}))
+
+set.seed(params$seed)
+
+options(dplyr.summarise.inform = FALSE)
+
+output_dir <- here::here(params$output_dir)
+figure_dir <- here::here(params$figure_dir)
+
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r}
+years <- 2021:2023
+
+first_non_na <- function(x) {
+  idx <- which(!is.na(x))
+  if (length(idx) == 0) {
+    return(x[NA_integer_][1])
+  }
+  x[idx[1]]
+}
+
+commission_bucket <- function(x) {
+  y <- as.integer(format(as.Date(x), "%Y"))
+  case_when(
+    is.na(x) ~ "missing",
+    !is.na(y) & y <= 2020 ~ "<=2020",
+    !is.na(y) & y == 2021 ~ "2021",
+    !is.na(y) & y == 2022 ~ "2022",
+    !is.na(y) & y >= 2023 ~ "2023+",
+    TRUE ~ "missing"
+  )
+}
+
+stratified_sample_sites <- function(data, n_target, seed = 123) {
+  stopifnot(all(c("site_id", "pattern", "water_company") %in% names(data)))
+  data <- data %>% distinct(site_id, pattern, water_company)
+
+  n_total <- nrow(data)
+  if (n_total <= n_target) {
+    return(data %>% mutate(sampled = TRUE))
+  }
+
+  strata <- data %>%
+    count(pattern, water_company, name = "n_stratum") %>%
+    arrange(desc(n_stratum), pattern, water_company)
+
+  n_strata <- nrow(strata)
+  strata <- strata %>% mutate(alloc = 0L)
+
+  if (n_target >= n_strata) {
+    base_alloc <- floor(n_target * strata$n_stratum / sum(strata$n_stratum))
+    strata$alloc <- pmax(1L, as.integer(base_alloc))
+  } else {
+    strata$alloc[seq_len(n_target)] <- 1L
+  }
+
+  strata$alloc <- pmin(strata$alloc, strata$n_stratum)
+  current <- sum(strata$alloc)
+
+  if (current < n_target) {
+    room <- strata$n_stratum - strata$alloc
+    while (current < n_target && any(room > 0)) {
+      idx <- which.max(room)
+      strata$alloc[idx] <- strata$alloc[idx] + 1L
+      room[idx] <- room[idx] - 1L
+      current <- current + 1L
+    }
+  }
+
+  if (current > n_target) {
+    reducible <- which(strata$alloc > 1L)
+    while (current > n_target && length(reducible) > 0) {
+      idx <- reducible[1]
+      strata$alloc[idx] <- strata$alloc[idx] - 1L
+      current <- current - 1L
+      reducible <- which(strata$alloc > 1L)
+    }
+  }
+
+  stopifnot(sum(strata$alloc) == n_target)
+
+  set.seed(seed)
+  sampled <- strata %>%
+    select(pattern, water_company, alloc) %>%
+    left_join(data, by = c("pattern", "water_company")) %>%
+    group_by(pattern, water_company, alloc) %>%
+    mutate(rand = runif(n())) %>%
+    arrange(rand, site_id, .by_group = TRUE) %>%
+    mutate(rn = row_number()) %>%
+    filter(rn <= alloc) %>%
+    ungroup() %>%
+    select(site_id, pattern, water_company) %>%
+    mutate(sampled = TRUE)
+
+  sampled
+}
+
+map_annual_to_canonical_sites <- function(annual_data, lookup_data, years = 2021:2023) {
+  id_cols <- paste0("site_id_", years)
+
+  lookup_long <- lookup_data %>%
+    select(site_id, any_of(id_cols)) %>%
+    pivot_longer(
+      cols = any_of(id_cols),
+      names_to = "id_year_col",
+      values_to = "year_site_id"
+    ) %>%
+    mutate(year = as.integer(readr::parse_number(id_year_col))) %>%
+    filter(year %in% years, !is.na(year_site_id)) %>%
+    group_by(year, year_site_id) %>%
+    summarise(site_id = first_non_na(site_id), .groups = "drop")
+
+  annual_long <- annual_data %>%
+    filter(year %in% years) %>%
+    select(
+      year,
+      water_company,
+      spill_hrs_ea,
+      spill_count_ea,
+      edm_operation_reason,
+      edm_operation_percent,
+      any_of(id_cols)
+    ) %>%
+    pivot_longer(
+      cols = any_of(id_cols),
+      names_to = "id_year_col",
+      values_to = "year_site_id"
+    ) %>%
+    mutate(id_year = as.integer(readr::parse_number(id_year_col))) %>%
+    filter(year == id_year, !is.na(year_site_id)) %>%
+    select(-id_year_col, -id_year) %>%
+    left_join(lookup_long, by = c("year", "year_site_id")) %>%
+    mutate(site_id = coalesce(as.integer(site_id), as.integer(year_site_id)))
+
+  annual_long %>%
+    select(
+      site_id,
+      year,
+      water_company,
+      spill_hrs_ea,
+      spill_count_ea,
+      edm_operation_reason,
+      edm_operation_percent
+    ) %>%
+    group_by(site_id, year) %>%
+    summarise(
+      water_company_annual = first_non_na(water_company),
+      spill_hrs_ea = first_non_na(spill_hrs_ea),
+      spill_count_ea = first_non_na(spill_count_ea),
+      annual_reason = first_non_na(edm_operation_reason),
+      annual_operation_percent = first_non_na(edm_operation_percent),
+      annual_rows = n(),
+      .groups = "drop"
+    )
+}
+```
+
+## Data Load
+
+```{r}
+unique_sites <- arrow::read_parquet(
+  here::here("data", "processed", "unique_spill_sites.parquet")
+)
+
+annual_return <- arrow::read_parquet(
+  here::here("data", "processed", "annual_return_edm.parquet")
+)
+
+annual_lookup <- arrow::read_parquet(
+  here::here("data", "processed", "annual_return_lookup.parquet")
+)
+
+required_unique_cols <- c(
+  "site_id",
+  "water_company",
+  "edm_commission_date",
+  "available_year_2021",
+  "available_year_2022",
+  "available_year_2023",
+  "edm_operation_percent_2021",
+  "edm_operation_percent_2022",
+  "edm_operation_percent_2023",
+  "edm_operation_reason_2021",
+  "edm_operation_reason_2022",
+  "edm_operation_reason_2023"
+)
+
+missing_cols <- setdiff(required_unique_cols, names(unique_sites))
+if (length(missing_cols) > 0) {
+  stop("Missing columns in unique_spill_sites: ", paste(missing_cols, collapse = ", "))
+}
+```
+
+## Cohort Definition
+
+```{r}
+site_status <- unique_sites %>%
+  mutate(
+    across(starts_with("available_year_"), ~ replace_na(as.logical(.x), FALSE)),
+    n_obs = as.integer(available_year_2021) +
+      as.integer(available_year_2022) +
+      as.integer(available_year_2023),
+    pattern = paste0(
+      as.integer(available_year_2021),
+      as.integer(available_year_2022),
+      as.integer(available_year_2023)
+    ),
+    cohort = case_when(
+      n_obs == 0 ~ "all_missing",
+      n_obs == 3 ~ "all_observed",
+      n_obs %in% c(1, 2) ~ "mixed",
+      TRUE ~ "other"
+    ),
+    commission_bucket = commission_bucket(edm_commission_date)
+  )
+
+mixed_sites_all <- site_status %>% filter(cohort == "mixed")
+
+if (params$sample_mode) {
+  sampled_sites <- stratified_sample_sites(
+    data = mixed_sites_all %>% select(site_id, pattern, water_company),
+    n_target = params$sample_n_sites,
+    seed = params$seed
+  )
+
+  mixed_sites <- mixed_sites_all %>%
+    inner_join(sampled_sites %>% select(site_id), by = "site_id")
+} else {
+  mixed_sites <- mixed_sites_all
+}
+
+site_pattern_counts <- site_status %>%
+  count(cohort, pattern, name = "n_sites") %>%
+  arrange(cohort, desc(n_sites))
+
+readr::write_csv(
+  site_pattern_counts,
+  file.path(output_dir, "site_pattern_counts.csv")
+)
+```
+
+```{r}
+# Integrity checks for cohort logic
+stopifnot(
+  nrow(site_status) ==
+    sum(site_status$cohort == "mixed") +
+    sum(site_status$cohort == "all_missing") +
+    sum(site_status$cohort == "all_observed")
+)
+
+if (params$sample_mode) {
+  stopifnot(nrow(mixed_sites) <= params$sample_n_sites)
+  stopifnot(all(mixed_sites$site_id %in% mixed_sites_all$site_id))
+
+  strata_all <- mixed_sites_all %>%
+    count(pattern, water_company, name = "n_all")
+  strata_sample <- mixed_sites %>%
+    count(pattern, water_company, name = "n_sample")
+
+  if (params$sample_n_sites >= nrow(strata_all)) {
+    stopifnot(
+      nrow(anti_join(strata_all, strata_sample, by = c("pattern", "water_company"))) == 0
+    )
+  }
+}
+```
+
+In-scope sites:
+
+```{r}
+tibble(
+  mode = ifelse(params$sample_mode, "sample", "full"),
+  total_sites = nrow(site_status),
+  mixed_sites_all = nrow(mixed_sites_all),
+  mixed_sites_used = nrow(mixed_sites),
+  all_missing_sites = sum(site_status$cohort == "all_missing"),
+  all_observed_sites = sum(site_status$cohort == "all_observed")
+)
+```
+
+## Missing Site-Year Panel
+
+```{r}
+missing_panel <- mixed_sites %>%
+  select(
+    site_id,
+    water_company,
+    commission_bucket,
+    n_obs,
+    pattern,
+    starts_with("available_year_"),
+    starts_with("edm_operation_reason_"),
+    starts_with("edm_operation_percent_")
+  ) %>%
+  pivot_longer(
+    cols = starts_with("available_year_"),
+    names_to = "avail_col",
+    values_to = "available"
+  ) %>%
+  mutate(
+    year = as.integer(str_remove(avail_col, "available_year_")),
+    reason_y = case_when(
+      year == 2021 ~ edm_operation_reason_2021,
+      year == 2022 ~ edm_operation_reason_2022,
+      year == 2023 ~ edm_operation_reason_2023
+    ),
+    reason_y_minus1 = case_when(
+      year == 2021 ~ NA_character_,
+      year == 2022 ~ edm_operation_reason_2021,
+      year == 2023 ~ edm_operation_reason_2022
+    ),
+    op_pct_y = case_when(
+      year == 2021 ~ edm_operation_percent_2021,
+      year == 2022 ~ edm_operation_percent_2022,
+      year == 2023 ~ edm_operation_percent_2023
+    ),
+    op_pct_y_minus1 = case_when(
+      year == 2021 ~ NA_real_,
+      year == 2022 ~ edm_operation_percent_2021,
+      year == 2023 ~ edm_operation_percent_2022
+    )
+  ) %>%
+  filter(!available) %>%
+  mutate(
+    reason_y_present = !is.na(reason_y) & reason_y != "",
+    reason_y_minus1_present = !is.na(reason_y_minus1) & reason_y_minus1 != "",
+    op_pct_y_present = !is.na(op_pct_y),
+    op_pct_y_minus1_present = !is.na(op_pct_y_minus1)
+  ) %>%
+  select(
+    site_id,
+    year,
+    water_company,
+    commission_bucket,
+    n_obs,
+    pattern,
+    reason_y,
+    reason_y_minus1,
+    reason_y_present,
+    reason_y_minus1_present,
+    op_pct_y,
+    op_pct_y_minus1,
+    op_pct_y_present,
+    op_pct_y_minus1_present
+  )
+
+annual_context <- map_annual_to_canonical_sites(
+  annual_data = annual_return,
+  lookup_data = annual_lookup,
+  years = years
+)
+
+missing_panel <- missing_panel %>%
+  left_join(
+    annual_context,
+    by = c("site_id", "year")
+  ) %>%
+  mutate(
+    spill_hrs_ea_missing = is.na(spill_hrs_ea),
+    spill_count_ea_missing = is.na(spill_count_ea),
+    annual_reason_present = !is.na(annual_reason) & annual_reason != "",
+    annual_operation_percent_present = !is.na(annual_operation_percent)
+  )
+```
+
+```{r}
+# Integrity checks for missing panel
+expected_rows <- mixed_sites %>%
+  summarise(n = sum(3L - n_obs)) %>%
+  pull(n)
+
+stopifnot(nrow(missing_panel) == expected_rows)
+stopifnot(nrow(missing_panel) == nrow(distinct(missing_panel, site_id, year)))
+stopifnot(all(is.na(missing_panel$reason_y_minus1[missing_panel$year == 2021])))
+```
+
+## Key Tables
+
+```{r}
+missing_year_reason_presence <- missing_panel %>%
+  count(year, reason_y_present, reason_y_minus1_present, name = "n_missing_site_years") %>%
+  group_by(year) %>%
+  mutate(share = n_missing_site_years / sum(n_missing_site_years)) %>%
+  ungroup() %>%
+  arrange(year, desc(n_missing_site_years))
+
+reason_prev_when_y_missing <- missing_panel %>%
+  filter(!reason_y_present, reason_y_minus1_present) %>%
+  count(year, reason_y_minus1, name = "n_missing_site_years") %>%
+  group_by(year) %>%
+  mutate(share = n_missing_site_years / sum(n_missing_site_years)) %>%
+  ungroup() %>%
+  arrange(year, desc(n_missing_site_years))
+
+core_covariate_summary <- bind_rows(
+  missing_panel %>%
+    count(year, water_company, name = "n_missing_site_years") %>%
+    group_by(year) %>%
+    mutate(share = n_missing_site_years / sum(n_missing_site_years)) %>%
+    ungroup() %>%
+    transmute(year, variable = "water_company", level = water_company, n_missing_site_years, share),
+  missing_panel %>%
+    count(year, commission_bucket, name = "n_missing_site_years") %>%
+    group_by(year) %>%
+    mutate(share = n_missing_site_years / sum(n_missing_site_years)) %>%
+    ungroup() %>%
+    transmute(year, variable = "commission_bucket", level = commission_bucket, n_missing_site_years, share),
+  missing_panel %>%
+    mutate(level = if_else(op_pct_y_present, "present", "missing")) %>%
+    count(year, level, name = "n_missing_site_years") %>%
+    group_by(year) %>%
+    mutate(share = n_missing_site_years / sum(n_missing_site_years)) %>%
+    ungroup() %>%
+    transmute(year, variable = "op_pct_y", level, n_missing_site_years, share),
+  missing_panel %>%
+    mutate(level = if_else(op_pct_y_minus1_present, "present", "missing")) %>%
+    count(year, level, name = "n_missing_site_years") %>%
+    group_by(year) %>%
+    mutate(share = n_missing_site_years / sum(n_missing_site_years)) %>%
+    ungroup() %>%
+    transmute(year, variable = "op_pct_y_minus1", level, n_missing_site_years, share),
+  missing_panel %>%
+    mutate(level = if_else(spill_hrs_ea_missing, "missing", "present")) %>%
+    count(year, level, name = "n_missing_site_years") %>%
+    group_by(year) %>%
+    mutate(share = n_missing_site_years / sum(n_missing_site_years)) %>%
+    ungroup() %>%
+    transmute(year, variable = "annual_spill_hrs_ea", level, n_missing_site_years, share),
+  missing_panel %>%
+    mutate(level = if_else(spill_count_ea_missing, "missing", "present")) %>%
+    count(year, level, name = "n_missing_site_years") %>%
+    group_by(year) %>%
+    mutate(share = n_missing_site_years / sum(n_missing_site_years)) %>%
+    ungroup() %>%
+    transmute(year, variable = "annual_spill_count_ea", level, n_missing_site_years, share)
+)
+
+readr::write_csv(
+  missing_year_reason_presence,
+  file.path(output_dir, "missing_year_reason_presence.csv")
+)
+readr::write_csv(
+  reason_prev_when_y_missing,
+  file.path(output_dir, "reason_y_minus1_when_y_missing.csv")
+)
+readr::write_csv(
+  core_covariate_summary,
+  file.path(output_dir, "core_covariate_summary.csv")
+)
+```
+
+### Site Pattern Counts
+
+```{r}
+site_pattern_counts %>%
+  mutate(share = n_sites / sum(n_sites)) %>%
+  arrange(desc(n_sites))
+```
+
+### Missing Year Reason Presence
+
+```{r}
+missing_year_reason_presence
+```
+
+### Top Previous-Year Reasons When Reason in Y Is Missing
+
+```{r}
+reason_prev_when_y_missing %>%
+  group_by(year) %>%
+  slice_head(n = 12) %>%
+  ungroup()
+```
+
+### Core Covariate Summary
+
+```{r}
+core_covariate_summary
+```
+
+## Figures
+
+```{r}
+mixed_pattern_plot <- site_status %>%
+  filter(cohort == "mixed") %>%
+  count(pattern, name = "n_sites") %>%
+  mutate(pattern = forcats::fct_reorder(pattern, n_sites, .desc = TRUE)) %>%
+  ggplot(aes(x = pattern, y = n_sites)) +
+  geom_col(fill = "#2C7FB8") +
+  labs(
+    x = "Availability pattern (2021-2023)",
+    y = "Number of mixed sites",
+    title = "Mixed-site availability patterns"
+  ) +
+  theme_minimal(base_size = 12)
+
+ggsave(
+  filename = file.path(figure_dir, "availability_pattern_bar.png"),
+  plot = mixed_pattern_plot,
+  width = 8,
+  height = 4.5,
+  dpi = 300
+)
+
+mixed_pattern_plot
+```
+
+```{r}
+reason_presence_heatmap_data <- missing_year_reason_presence %>%
+  mutate(
+    state = paste0(
+      "reason_Y=",
+      if_else(reason_y_present, "present", "missing"),
+      ", reason_Y-1=",
+      if_else(reason_y_minus1_present, "present", "missing")
+    )
+  )
+
+reason_presence_heatmap <- ggplot(
+  reason_presence_heatmap_data,
+  aes(x = factor(year), y = state, fill = share)
+) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = scales::percent(share, accuracy = 0.1)), size = 3.5) +
+  scale_fill_gradient(low = "#F7FBFF", high = "#08519C", labels = scales::percent) +
+  labs(
+    x = "Year with missing observation",
+    y = "Reason availability state",
+    fill = "Share",
+    title = "Reason completeness for missing site-years"
+  ) +
+  theme_minimal(base_size = 12)
+
+ggsave(
+  filename = file.path(figure_dir, "reason_presence_heatmap.png"),
+  plot = reason_presence_heatmap,
+  width = 9,
+  height = 4.8,
+  dpi = 300
+)
+
+reason_presence_heatmap
+```
+
+```{r}
+top_reason_prev_plot_data <- reason_prev_when_y_missing %>%
+  group_by(year) %>%
+  slice_head(n = 8) %>%
+  ungroup() %>%
+  mutate(reason_y_minus1 = forcats::fct_reorder(reason_y_minus1, n_missing_site_years))
+
+top_reason_prev_plot <- ggplot(
+  top_reason_prev_plot_data,
+  aes(x = reason_y_minus1, y = n_missing_site_years, fill = factor(year))
+) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~ year, scales = "free_y") +
+  labs(
+    x = "Reason in Y-1",
+    y = "Missing site-years in Y",
+    title = "Top previous-year reasons when reason in Y is missing"
+  ) +
+  theme_minimal(base_size = 12)
+
+ggsave(
+  filename = file.path(figure_dir, "top_reason_prev_bar.png"),
+  plot = top_reason_prev_plot,
+  width = 10,
+  height = 6,
+  dpi = 300
+)
+
+top_reason_prev_plot
+```
+
+## Findings Summary
+
+```{r}
+n_total_sites <- nrow(site_status)
+n_mixed_all <- nrow(mixed_sites_all)
+n_mixed_used <- nrow(mixed_sites)
+n_missing_rows <- nrow(missing_panel)
+
+dominant_pattern <- site_status %>%
+  filter(cohort == "mixed") %>%
+  count(pattern, sort = TRUE) %>%
+  slice_head(n = 1)
+
+dominant_prev_reason <- reason_prev_when_y_missing %>%
+  group_by(year) %>%
+  slice_head(n = 1) %>%
+  ungroup()
+
+reason_absence_by_year <- missing_panel %>%
+  group_by(year) %>%
+  summarise(
+    share_reason_y_missing = mean(!reason_y_present),
+    share_reason_y_minus1_missing = mean(!reason_y_minus1_present),
+    share_spill_hrs_missing = mean(spill_hrs_ea_missing),
+    share_spill_count_missing = mean(spill_count_ea_missing)
+  )
+```
+
+- Mode: `r ifelse(params$sample_mode, "sample", "full")`
+- Sites in `unique_spill_sites`: `r scales::comma(n_total_sites)`
+- Mixed sites (`n_obs` in {1,2}): `r scales::comma(n_mixed_all)`; used in this run: `r scales::comma(n_mixed_used)`
+- Missing site-year rows analysed: `r scales::comma(n_missing_rows)`
+- Most common mixed availability pattern: `r dominant_pattern$pattern` (`r scales::comma(dominant_pattern$n)` sites)
+
+```{r}
+reason_absence_by_year %>%
+  mutate(
+    across(starts_with("share_"), ~ scales::percent(.x, accuracy = 0.1))
+  )
+```
+
+Top previous-year reason when the current-year reason is missing:
+
+```{r}
+dominant_prev_reason
+```
