@@ -287,7 +287,7 @@ plot_static_spill_map <- function(data, value_col) {
     geom_sf(
       data = data_for_map,
       aes(fill = plot_value),
-      color = "white",
+      color = NA,
       linewidth = 0.0001
     ) +
     # Color scale
@@ -329,7 +329,7 @@ plot_static_dry_spill_map <- function(data, value_col) {
     geom_sf(
       data = data_for_map,
       aes(fill = plot_value),
-      color = "white",
+      color = NA,
       linewidth = 0.0001
     ) +
     # Color scale
