@@ -95,8 +95,8 @@ docs/lit_review/sewage_literature_review/
 # Folder to be integrated
 DD_work/
 
-# Large output files
-output/maps/
+# Generated analysis outputs
+/output/*
 lma/
 
 # Python virtual environments
