@@ -1,0 +1,16 @@
+book/_freeze/
+book/_site/
+book/_old/
+data/
+output/
+docs/
+RiverNetworks/
+upstream_downstream/
+sources/
+news_lexisnexis/
+tables/
+raw_to_final/
+_old/
+DD_work/
+lma/
+renv/

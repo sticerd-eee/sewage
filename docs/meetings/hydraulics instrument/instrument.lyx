@@ -1,0 +1,1909 @@
+#LyX 2.4 created this file. For more info see https://www.lyx.org/
+\lyxformat 620
+\begin_document
+\begin_header
+\save_transient_properties true
+\origin unavailable
+\textclass amsart
+\use_default_options true
+\begin_removed_modules
+theorems-ams
+\end_removed_modules
+\begin_modules
+eqs-within-sections
+figs-within-sections
+theorems-ams-bytype
+\end_modules
+\maintain_unincluded_children no
+\language english
+\language_package default
+\inputencoding auto-legacy
+\fontencoding auto
+\font_roman "times" "default"
+\font_sans "default" "default"
+\font_typewriter "default" "default"
+\font_math "auto" "auto"
+\font_default_family default
+\use_non_tex_fonts false
+\font_sc false
+\font_roman_osf false
+\font_sans_osf false
+\font_typewriter_osf false
+\font_sf_scale 100 100
+\font_tt_scale 100 100
+\use_microtype false
+\use_dash_ligatures true
+\graphics default
+\default_output_format default
+\output_sync 0
+\bibtex_command default
+\index_command default
+\float_placement class
+\float_alignment class
+\paperfontsize 11
+\spacing single
+\use_hyperref false
+\papersize default
+\use_geometry true
+\use_package amsmath 1
+\use_package amssymb 1
+\use_package cancel 1
+\use_package esint 1
+\use_package mathdots 1
+\use_package mathtools 1
+\use_package mhchem 1
+\use_package stackrel 1
+\use_package stmaryrd 1
+\use_package undertilde 1
+\cite_engine jurabib
+\cite_engine_type authoryear
+\biblio_style jurabib
+\use_bibtopic false
+\use_indices false
+\paperorientation portrait
+\suppress_date false
+\justification true
+\use_refstyle 0
+\use_formatted_ref 0
+\use_minted 0
+\use_lineno 0
+\index Index
+\shortcut idx
+\color #008000
+\end_index
+\secnumdepth 3
+\tocdepth 3
+\paragraph_separation indent
+\paragraph_indentation default
+\is_math_indent 0
+\math_numbering_side default
+\quotes_style english
+\dynamic_quotes 0
+\papercolumns 1
+\papersides 1
+\paperpagestyle default
+\tablestyle default
+\bullet 0 0 6 -1
+\tracking_changes false
+\output_changes false
+\change_bars false
+\postpone_fragile_content false
+\html_math_output 0
+\html_css_as_file 0
+\html_be_strict false
+\docbook_table_output 0
+\docbook_mathml_prefix 1
+\end_header
+
+\begin_body
+
+\begin_layout Section
+Overview 
+\end_layout
+
+\begin_layout Subsection
+Objective
+\end_layout
+
+\begin_layout Standard
+We estimate the capitalization effect of local sewage spill exposure on house prices.
+\end_layout
+
+\begin_layout Standard
+The key empirical challenge is that CSO spill behaviour is highly persistent.
+ Some CSOs spill frequently and others rarely do,
+ meaning most variation is cross-sectional.
+ Houses near chronically bad CSOs are always cheaper.
+ This makes it difficult to distinguish spill effects from unobserved neighbourhood quality.
+\end_layout
+
+\begin_layout Standard
+Our strategy generates plausibly exogenous within-area,
+ over-time variation in spill exposure using rainfall shocks and predetermined hydraulic constraints.
+\end_layout
+
+\begin_layout Subsection
+Identification Logic
+\end_layout
+
+\begin_layout Standard
+The strategy combines three components:
+\end_layout
+
+\begin_layout Enumerate
+Rainfall shocks (exogenous time variation)
+\end_layout
+
+\begin_deeper
+\begin_layout Enumerate
+Rainfall provides plausibly exogenous shocks to sewer systems.
+ 
+\end_layout
+
+\begin_layout Enumerate
+On its own,
+ rainfall affects all areas,
+ but it does not translate uniformly into spills.
+\end_layout
+
+\end_deeper
+\begin_layout Enumerate
+Predetermined hydraulic constraints (supply-side heterogeneity).
+ Whether rainfall causes spills depends on hydraulic stress:
+\end_layout
+
+\begin_deeper
+\begin_layout Enumerate
+Wastewater treatment works (WwTW) loading relative to design capacity
+\end_layout
+
+\begin_layout Enumerate
+CSO baseline hydraulic sensitivity.
+ Or,
+ elevation-based hydraulic slack within the interceptor system
+\end_layout
+
+\begin_layout Enumerate
+These constraints are predetermined by historical engineering design and long-run infrastructure capacity.
+\end_layout
+
+\begin_layout Enumerate
+Rainfall × hydraulic stress generates differential spill responses across systems.
+\end_layout
+
+\end_deeper
+\begin_layout Enumerate
+River-network exposure (demand-side mapping).
+ 
+\end_layout
+
+\begin_deeper
+\begin_layout Enumerate
+Once a CSO spills,
+ sewage enters the river network and travels downstream.
+ 
+\end_layout
+
+\begin_layout Enumerate
+Exposure depends on:
+\end_layout
+
+\begin_deeper
+\begin_layout Enumerate
+Whether a house lies downstream of the CSO,
+\end_layout
+
+\begin_layout Enumerate
+Distance along the river network,
+\end_layout
+
+\begin_layout Enumerate
+Tidal conditions.
+\end_layout
+
+\end_deeper
+\begin_layout Enumerate
+We construct house-level spill exposure by aggregating CSO-level spills using downstream river-distance weights.
+\end_layout
+
+\end_deeper
+\begin_layout Subsection
+Empirical Implementation
+\end_layout
+
+\begin_layout Standard
+
+\series bold
+Step 1:
+ First Stage (CSO-level)
+\end_layout
+
+\begin_layout Standard
+We estimate how rainfall shocks interacting with predetermined hydraulic stress affect CSO spill intensity,
+ including CSO fixed effects and time fixed effects.
+\end_layout
+
+\begin_layout Standard
+Identification comes from differential translation of rainfall into spills across systems with different hydraulic constraints —
+ not from baseline spill levels.
+\begin_inset Newline newline
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\noindent
+\align block
+
+\series bold
+Step 2:
+ Exposure Mapping
+\end_layout
+
+\begin_layout Standard
+Predicted CSO spills are aggregated to the house level using river-network connectivity weights.
+ Only downstream exposure enters the baseline specification.
+\begin_inset Newline newline
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\noindent
+
+\series bold
+Step 3:
+ House Price Equation
+\end_layout
+
+\begin_layout Standard
+We estimate:
+\end_layout
+
+\begin_layout Standard
+* Log house price on recent downstream spill exposure,
+\end_layout
+
+\begin_layout Standard
+* Controlling flexibly for rainfall in the same window,
+\end_layout
+
+\begin_layout Standard
+* Including neighbourhood fixed effects and quarter-time fixed effects.
+\end_layout
+
+\begin_layout Standard
+Identification comes from within-neighbourhood,
+ within-time variation in spill exposure induced by rainfall × hydraulic constraints.
+\end_layout
+
+\begin_layout Standard
+Rainfall is controlled for directly,
+ so the instrument operates only through the spill channel.
+\end_layout
+
+\begin_layout Subsection
+Exclusion Restriction
+\end_layout
+
+\begin_layout Standard
+Conditional on neighbourhood fixed effects and rainfall controls:
+\end_layout
+
+\begin_layout Standard
+* Hydraulic stress affects house prices only through CSO spill intensity.
+\end_layout
+
+\begin_layout Standard
+* It does not directly alter flood risk,
+ schools,
+ transport,
+ or other amenities.
+\end_layout
+
+\begin_layout Standard
+* River-network exposure is mechanically determined by geography.
+ 
+\end_layout
+
+\begin_layout Subsection
+Alternative Instruments and Robustness
+\end_layout
+
+\begin_layout Standard
+We consider:
+\end_layout
+
+\begin_layout Standard
+
+\series bold
+Alternative instruments
+\end_layout
+
+\begin_layout Standard
+* Hydraulic slack (elevation gradient relative to WwTW),
+\end_layout
+
+\begin_layout Standard
+* Soil permeability (geological runoff capacity),
+\end_layout
+
+\begin_layout Standard
+* WwTW loading ratios.
+\end_layout
+
+\begin_layout Standard
+These are predetermined engineering or geological features and enter only through interaction with rainfall shocks.
+\end_layout
+
+\begin_layout Standard
+
+\series bold
+Time Aggregation
+\end_layout
+
+\begin_layout Standard
+Buyers may capitalize long-run spill expectations rather than single events.
+\end_layout
+
+\begin_layout Standard
+We therefore examine:
+\end_layout
+
+\begin_layout Standard
+* Short-run spill exposure windows (salience effects),
+\end_layout
+
+\begin_layout Standard
+* Annual or rolling averages (long-run expectations).
+\end_layout
+
+\begin_layout Standard
+Short-run windows provide sharper quasi-experimental variation;
+ longer windows capture belief formation.
+\end_layout
+
+\begin_layout Section
+Baseline 
+\end_layout
+
+\begin_layout Standard
+We exploit exogenous rainfall shocks interacting with predetermined hydraulic constraints at the wastewater treatment works and CSO level to generate differential variation in spill intensity.
+ House-level exposure varies mechanically according to downstream river connectivity.
+ Within-neighbourhood,
+ within-time variation in predicted spill exposure identifies the capitalization effect.
+\end_layout
+
+\begin_layout Standard
+Our identification combines (i) exogenous rainfall shocks,
+ (ii) predetermined hydraulic constraints that govern how rainfall translates into CSO spills,
+ and (iii) river-network connectivity that determines which houses are exposed once spills occur.
+ The strategy proceeds in three steps:
+ first,
+ we estimate how rainfall interacting with hydraulic stress predicts CSO-level spill intensity;
+ second,
+ we map predicted spills to houses using downstream river connectivity;
+ third,
+ we estimate the capitalization of this predicted spill exposure in house prices within neighbourhood and time fixed effects.
+\end_layout
+
+\begin_layout Standard
+Rainfall shocks × predetermined hydraulic constraints → differential spill intensity → river-based house exposure → capitalization in house prices.
+\end_layout
+
+\begin_layout Standard
+Notation
+\end_layout
+
+\begin_layout Itemize
+house 
+\begin_inset Formula $h$
+\end_inset
+
+,
+ quarter 
+\begin_inset Formula $q$
+\end_inset
+
+,
+ year 
+\begin_inset Formula $t$
+\end_inset
+
+ in MSOA 
+\begin_inset Formula $m\left(h\right)$
+\end_inset
+
+
+\end_layout
+
+\begin_layout Itemize
+CSO 
+\begin_inset Formula $c$
+\end_inset
+
+ in Waste-water Treatment Works catchment area 
+\begin_inset Formula $w\left(c\right)$
+\end_inset
+
+ 
+\end_layout
+
+\begin_layout Itemize
+\begin_inset Formula $\alpha$
+\end_inset
+
+ are fixed effects
+\end_layout
+
+\begin_deeper
+\begin_layout Itemize
+\begin_inset Formula $m\left(h\right)$
+\end_inset
+
+ is neighbourhood 
+\begin_inset Formula $m$
+\end_inset
+
+ of house 
+\begin_inset Formula $h$
+\end_inset
+
+ (that could be defined as catchment area,
+ MSOA or the house itself at the very finest)
+\end_layout
+
+\begin_layout Itemize
+\begin_inset Formula $m\left(c\right)$
+\end_inset
+
+ is the local area 
+\begin_inset Formula $m$
+\end_inset
+
+ if CSO 
+\begin_inset Formula $c$
+\end_inset
+
+ (that is defined as the wastewater treatment works catchment area because it keeps the sewage system across CSOs constant)
+\end_layout
+
+\end_deeper
+\begin_layout Itemize
+\begin_inset Formula $\varepsilon$
+\end_inset
+
+ and 
+\begin_inset Formula $\eta$
+\end_inset
+
+ are usual random error terms 
+\end_layout
+
+\begin_layout Standard
+We are interested in identifying the capitalization effect of local sewage spill exposure on house prices.
+ The key econometric challenge is that spills are highly persistent at a given CSO —
+ meaning some CSOs consistently spill a lot and others rarely do.
+ Most of the identifying variation is cross-sectional and we would expect:
+ houses near bad CSOs are always cheaper,
+ houses near good CSOs are always more expensive.
+ With transaction-level data and house fixed effects,
+ all that cross-sectional variation is wiped out,
+ and the effect of sewage spills on house prices β is identified only from within-CSO changes in spill intensity over time,
+ which may be limited.
+ But without house fixed effects,
+ there is a risk of confounding neighbourhood quality with sewage spills —
+ the CSOs that spill most are probably in older,
+ denser,
+ poorer urban areas.
+ 
+\end_layout
+
+\begin_layout Standard
+To address this,
+ the empirical strategy exploits exogenous rainfall shocks interacting with predetermined wastewater treatment works capacity constraints to generate differential variation in CSO spill intensity that then translate into heterogeneous house-level exposure depending on downstream river connectivity of the house to each CSO.
+ The main instrument is the interaction with stress on the wastewater treatment works and a second instrument is the interaction with baseline CSO spill propensity,
+ that will also be discussed later in the alternative section.
+ 
+\end_layout
+
+\begin_layout Standard
+The Waste-water Treatment Works (WwTW) catchment boundary is relevant for the supply side of spills —
+ whether a CSO activates at all.
+ When a combined sewer surcharges and the WwTW is at capacity,
+ dry weather flow can no longer be routed to treatment,
+ and the CSO opens to relieve pressure.
+ So the propensity to spill is a function of the whole catchment's hydraulic load relative to the WwTW's treatment capacity.
+ We measure this with stress on the WwTW,
+ along with other stress factors such as catchment imperviousness and sewer vintage.
+ CSO spilling is specified as 
+\begin_inset Formula 
+\begin{alignat*}{1}
+Spill_{ct}=π_{1}​(R_{ct}​×Stress_{w0}​)+π_{2}​(R_{ct}​×Spillc_{c0})+π_{3}​R_{ct}​+\alpha_{c}​+\alpha_{t}​+\eta_{ct}
+\end{alignat*}
+
+\end_inset
+
+where 
+\begin_inset Formula $0$
+\end_inset
+
+ denotes initial period mean and rainfall 
+\begin_inset Formula $R_{ct}$
+\end_inset
+
+ is the time-varying shock.
+ The inflow arriving at a specific CSO node depends primarily on rainfall in its upstream drainage area.
+ This is spatially local to the CSO.
+ Even if local inflow rises,
+ whether the CSO spills depends on how full the interceptor sewer is,
+ whether upstream CSOs already relieved pressure.
+ If the WwTW is near or above dry-weather capacity,
+ additional inflow cannot be treated,
+ interceptor surcharge rises,
+ CSOs open to relieve pressure.
+ This part is catchment-wide.
+ The aggregate hydraulic burden on the treatment work is
+\begin_inset Formula 
+\[
+Stress_{w0}=ActualPE_{w0}/DesignPE_{w0},
+\]
+
+\end_inset
+
+the load on the wastewater treatment works relative to the designated load that it can carry (see more in the WwTW sub-section later).
+ The interaction term captures differential translation of rainfall shocks into spill intensity across systems with different predetermined capacity constraints,
+ not just precipitation.
+ It accounts for spatial variation in runoff coefficients that rainfall alone does not,
+ and is directly measured at the works,
+ and not just inferred from a weather station.
+ 
+\end_layout
+
+\begin_layout Standard
+\begin_inset Formula $Spill_{c0}$
+\end_inset
+
+ is the initial spill frequency of the CSO that captures its local hydraulic signature.
+ Because baseline propensity and stress may be correlated with neighbourhood characteristics,
+ CSO fixed effects are included,
+ so that only the interaction matters.
+ Identification comes from how rainfall shocks translate into spill intensity differentially across systems with different predetermined capacity stress,
+ not from baseline levels.
+\end_layout
+
+\begin_layout Standard
+The watercourse or river network is relevant for the demand side of exposure —
+ which houses are actually affected once a CSO spills.
+ The discharged sewage enters the watercourse and flows downstream,
+ so exposure is a function of where the house is relative to the receiving water body,
+ not where it is relative to the WwTW.
+ Houses along the river downstream of a CSO outfall are exposed;
+ houses in the same WwTW catchment but draining to a different watercourse may not be at all.
+\end_layout
+
+\begin_layout Standard
+We construct a house-specific spill exposure measure by aggregating CSO-level spills using river-network distance weights.
+ How much a spill at a given CSO affects a house is primarily through its distance along the river network from the CSO outfall point to the closest point on river near the house,
+ 
+\begin_inset Formula $d_{hc}$
+\end_inset
+
+.
+ This can differ based on downstream-upstream direction in the directed river graph,
+ denoted by an indicator 
+\begin_inset Formula $Downstream_{hc}$
+\end_inset
+
+.
+ Upstream impacts from a point discharge are usually limited to extreme storm events and to rivers with tidal reversals that make backflows feasible.
+ We account for this and define exposure 
+\begin_inset Formula $f_{hc}$
+\end_inset
+
+ flexibly as a function of these characteristics to obtain the house-specific spill variable as a sum over all relevant CSOs that the house could be exposed to:
+\end_layout
+
+\begin_layout Standard
+\begin_inset Formula 
+\begin{alignat*}{1}
+Spill_{ht}=\sum_{c\in C\left(h\right)}\underbrace{f\left(d_{hc},Downstream_{hc},Tidal_{hc}\right)}_{f_{hc}}Spill_{ct}
+\end{alignat*}
+
+\end_inset
+
+The function 
+\begin_inset Formula $f_{hc}$
+\end_inset
+
+ can be defined as different distance bins that are allowed to vary by downstream-upstream and tidal-non tidal rivers or parametrically as 
+\begin_inset Formula $Downstream_{hc}\times\exp\left(-d_{hc}/\kappa\right)\times\left(1-Tidal_{hc}\right)$
+\end_inset
+
+ for an exponential decay function (with decay parameter 
+\begin_inset Formula $\kappa$
+\end_inset
+
+) and 
+\begin_inset Formula $Downstream_{hc}\times\left(1+d_{hc}/\kappa\right)^{-\rho}\times\left(1-Tidal_{hc}\right)$
+\end_inset
+
+ for the usual power law form.
+ Similarly,
+ 
+\begin_inset Formula $C\left(h\right)$
+\end_inset
+
+ can refer to all CSOs in the MSOA or to a subset that are within a certain river distance or a certain upstream river distance of the house.
+ 
+\end_layout
+
+\begin_layout Standard
+Within the same micro-area and same time,
+ the house price equation is specified as follows to capture whether houses sold after more recent nearby downstream CSO discharge sell for less/more,
+ holding rainfall conditions fixed:
+\begin_inset Formula 
+\begin{alignat*}{1}
+\ln Price_{ht}= & β\sum_{k=1}^{L}Spill_{h,t-k}+\sum_{k=1}^{L}\pi_{k}R_{h,t-k}+Γ′X_{ht}​+α_{m(h)}​+\alpha_{qt}​+ε_{ht}
+\end{alignat*}
+
+\end_inset
+
+The predicted CSO-level spills from the first stage are aggregated to the house level using 
+\begin_inset Formula $f_{hc}$
+\end_inset
+
+ weights to form the second stage regressor 
+\begin_inset Formula $Spill_{ht}$
+\end_inset
+
+.
+ Identification comes from within-neighbourhood,
+ within-quarter variation in recent spill exposure.
+ The coefficient β captures the semi-elasticity of house prices with respect to recent downstream spill exposure.
+\end_layout
+
+\begin_layout Standard
+Rainfall 
+\begin_inset Formula $R_{h,t-k}$
+\end_inset
+
+ in the 
+\begin_inset Formula $L$
+\end_inset
+
+-period window is included to allow for direct effects.
+ Rainfall affects house prices through flood risk and amenity directly,
+ and partialling it out means the instrument only works through the spill channel.
+ Because rainfall in the same window is included,
+ identification comes from variation in spill exposure induced by rainfall × hydraulic constraints,
+ beyond any direct effect of rainfall on house prices.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Formula $X_{ht}$
+\end_inset
+
+ consists of house attributes (type,
+ size,
+ bedrooms,
+ new build,
+ tenure,
+ EPC band,
+ etc.) and other area characteristics.
+ Along with the controls,
+ we include neighbourhood (MSOA/OA) fixed effects 
+\begin_inset Formula $\alpha_{m\left(h\right)}$
+\end_inset
+
+ and 
+\begin_inset Formula $\alpha_{qt}$
+\end_inset
+
+ are quarter-time fixed effects to compare house prices within neighbourhoods and in the same time period.
+ 
+\end_layout
+
+\begin_layout Standard
+Alternatively,
+ the two steps can be combined by defining 
+\begin_inset Formula $Spill_{ht}=\sum_{c\in C\left(h\right)}\underbrace{f\left(d_{hc},Downstream_{hc},Tidal_{hc}\right)}_{f_{hc}}Spill_{ct}$
+\end_inset
+
+ and clustering standard errors at the WwTW level to estimate the following system of equations:
+\end_layout
+
+\begin_layout Standard
+\begin_inset Formula 
+\begin{alignat*}{1}
+\ln Price_{ht}= & βSpill_{ht}+\pi R_{ht}+Γ′X_{ht}​+α_{m(h)}​+\alpha_{qt}​+ε_{ht}\\
+Spill_{ht}= & \delta_{1}\sum_{c\in C\left(h\right)}f_{hc}\left(R_{ct}×Stress_{w0}\right)+\delta_{2}\sum_{c\in C\left(h\right)}f_{hc}\left(R_{ct}×Spill_{c0}\right)\\
+ & +\zeta R_{ht}+\Upsilon′X_{ht}+α_{m(h)}+\alpha_{qt}+\eta_{ht}
+\end{alignat*}
+
+\end_inset
+
+Given that the instruments vary at the WwTW/CSO level but the regression is at the house level,
+ standard errors need to be cluster at the WwTW/CSO level at minimum.
+ With spatial data,
+ considering whether there is residual spatial autocorrelation across nearby WwTW catchments that requires two-way clustering or Conley standard errors.
+\end_layout
+
+\begin_layout Standard
+Conditional on neighbourhood fixed effects and rainfall controls,
+ the interaction between rainfall shocks and predetermined hydraulic stress affects house prices only through CSO spill intensity.
+ Hydraulic stress does not directly alter flood risk,
+ school quality,
+ transport access,
+ or other amenities.
+ Rainfall itself is controlled flexibly.
+ Once we have a strong first stage,
+ the spatial correlation can also be explored in more detail.
+ Rainfall shocks are spatially correlated.
+ River networks connect across WwTWs.
+ Housing markets spill over.
+\end_layout
+
+\begin_layout Section
+Alternative
+\end_layout
+
+\begin_layout Subsubsection*
+CSO Hydraulics
+\end_layout
+
+\begin_layout Standard
+The baseline uses 
+\begin_inset Formula $Spill_{c0}$
+\end_inset
+
+ because it is likely to be a strong predictor of future spills.
+ But baseline spill propensity reflects long-run infrastructure quality,
+ which correlates with neighbourhood quality.
+ To strengthen the instrument,
+ we can also consider interactions of rainfall shocks with CSO-level impervious surface,
+ soil impermeability,
+ elevation relative to river and WwTW,
+ distance to WwTW and density of CSOs in the local area,
+ that are more underlying determinants of 
+\begin_inset Formula $Spill_{c0}$
+\end_inset
+
+.
+ 
+\end_layout
+
+\begin_layout Subsubsection*
+Elevation-based hydraulic slack
+\end_layout
+
+\begin_layout Standard
+The main hydraulically-determined characteristic that determines how much flow a CSO can pass before spilling is CSO elevation relative to the treatment works that it conveys the flows into.
+ Let 
+\begin_inset Formula $c$
+\end_inset
+
+ denote a CSO,
+ belonging to waste treatment plant catchment area 
+\begin_inset Formula $w$
+\end_inset
+
+.
+ Ground elevation at CSO location is 
+\begin_inset Formula $z_{c}$
+\end_inset
+
+ and at the treatment works inlet is 
+\begin_inset Formula $z_{w}$
+\end_inset
+
+,
+ with the distance between the CSO and the treatment inlet given by 
+\begin_inset Formula $L_{cw}$
+\end_inset
+
+.
+ A CSO at high elevation relative to the treatment works has a steep available gradient that can more readily achieve self-cleansing velocity relative to a CSO at low elevation (near treatment works elevation) that has a shallow available gradient.
+ High elevation CSOs have greater propensity to convey flows onwards to the treatment works without spilling.
+ Flow from a CSO to the treatment works travels through the interceptor sewer.
+ The interceptor must maintain a minimum gradient to flow by gravity.
+ The elevation difference between the CSO and the treatment works,
+ divided by the pipe distance between them,
+ determines the available hydraulic gradient 
+\begin_inset Formula $\left(z_{c}-z_{w}\right)/L_{cw}$
+\end_inset
+
+.
+ 
+\end_layout
+
+\begin_layout Standard
+The hydraulic slack at each CSO —
+ how much spare capacity the interceptor has at the point where the CSO's feeder meets it is 
+\begin_inset Formula $S_{cw}-S_{\min}\equiv\left(z_{c}-z_{w}\right)/L_{cw}-S_{\min}$
+\end_inset
+
+where 
+\begin_inset Formula $S_{\min}$
+\end_inset
+
+ is the minimum slope needed to achieve self-cleansing velocity (≈ 1/500 for a typical Victorian combined sewer).
+ Within a treatment works catchment,
+ a CSO that sits 20 metres higher than the works has a fundamentally different hydraulic situation from one that sits at the same elevation.
+ 
+\begin_inset Formula $S_{cw}$
+\end_inset
+
+ is positive when the available gradient exceeds the minimum needed to convey flow —
+ i.e.,
+ the system has hydraulic slack.
+ It is negative when the gradient is insufficient —
+ the system is already constrained,
+ and pumping or surcharge is likely.
+ The instrument normalises each CSO's elevation disadvantage relative to the worst-positioned CSO in the catchment of a treatment works:
+ 
+\begin_inset Formula 
+\begin{alignat*}{1}
+E_{cw}\equiv & \max\left(0,S_{\min}-S_{cw}\right)/\max_{c\in w\left(c\right)}\left(\max\left(0,S_{\min}-S_{cw}\right)\right)
+\end{alignat*}
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Within-treatment-works fixed effects absorb the historical siting of the works;
+ identification comes from cross-CSO variation in relative elevation within the same sewer system.
+ A CSO with positive slack 
+\begin_inset Formula $S_{cw}>S_{\min}$
+\end_inset
+
+ has 
+\begin_inset Formula $E_{cw}=0$
+\end_inset
+
+;
+ a CSO with negative slack has 
+\begin_inset Formula $E_{cw}>0$
+\end_inset
+
+,
+ proportional to how hydraulically constrained it is.
+ The variation in the instrument is hydraulically meaningful because it determines whether additional flow causes a CSO to tip over into spilling.
+ It is pre-determined by Victorian interceptor routing (terrain-constrained) and treatment works location (historically fixed).
+ It can be measured from OS Terrain 5 DEM (
+\begin_inset Formula $z_{c},z_{w}$
+\end_inset
+
+) and Hoffmann et al.
+ (2025) catchment data (
+\begin_inset Formula $L_{cw}$
+\end_inset
+
+ approximated by straight-line × 1.3 urban tortuosity factor,
+ with sensitivity for 1.2-1.4).
+ 
+\end_layout
+
+\begin_layout Standard
+Conditional on treatment works catchment fixed effects,
+ the elevation of a specific CSO location relative to the treatment works elevation is determined by the topography of the terrain (geological),
+ the historical decision about where to site the treatment works (pre-modern),
+ and where the Victorian interceptor was routed (pre-modern,
+ terrain-constrained).
+ CSO elevation relative to the works may correlate with floodplain or valley location;
+ this is absorbed by micro-area fixed effects in the price equation and WwTW fixed effects in the first stage.
+ Additionally,
+ we can add house elevation in the price equation.
+ Identification comes from cross-CSO variation in relative elevation within the same sewer system,
+ not from cross-area elevation differences.
+ 
+\end_layout
+
+\begin_layout Subsubsection*
+Pumping provisions Soil permeability
+\end_layout
+
+\begin_layout Standard
+Network distance and elevation together are the two components of the available hydraulic gradient —
+ the instrument gains strength by using both.
+ Additional considerations to strengthen the instrument include pumping provisions at the time of construction and local sub-catchment surface imperviousness.
+ A CSO below treatment works elevation requires pumping,
+ and Victorian designs accounted for this in the construction of the sewage system.
+ More impervious sub-catchment area upstream of a CSO results in higher runoff for a given rainfall event and causes more frequent spilling.
+ However,
+ imperviousness reflects urban density and land use,
+ which also directly affects house prices (denser areas,
+ more urban character).
+ To address this,
+ we focus on the geologically-determined component of imperviousness.
+ In areas with permeable soils (high infiltration capacity),
+ less rainfall becomes runoff and there is less spilling.
+ In areas with clay-rich impermeable soils,
+ more rainfall becomes direct runoff,
+ causing more spilling.
+ Soil permeability is correlated with Victorian-era development patterns - permeable soils tend to be in less developed,
+ less dense areas —
+ and this is absorbed by modern land use controls.
+ 
+\end_layout
+
+\begin_layout Standard
+We can refine the exposure earlier to add 
+\begin_inset Formula $E_{cw}^{pump}=E_{cw}\times\left(1-Pump_{c}\right)$
+\end_inset
+
+ and 
+\begin_inset Formula $Pump_{c}\times Tidal_{w}$
+\end_inset
+
+ that indicates whether Victorian engineering provided for pumping facilities at the CSO,
+ that is particularly important for tidal waters,
+ if available.
+\end_layout
+
+\begin_layout Standard
+Further,
+ we can add soil permeability:
+ 
+\begin_inset Formula $E_{cw}^{soil}=E_{cw}\times(1-permeability_{c})/\max_{c'\in w}(1-permeability_{c'})$
+\end_inset
+
+ were 
+\begin_inset Formula $permeability_{c}$
+\end_inset
+
+ is the soil class,
+ with clay soils (impermeable) normalized to receiving value 1.
+ Impermeable soils generate more direct surface runoff,
+ increasing storm inflow to the combined sewer system.
+ This is also predetermined because soil type is geological and predates all human activity.
+ However,
+ soil type correlates with agricultural land use history,
+ which correlates with when an area was developed,
+ which correlates with housing stock vintage and quality that need to be controlled for if using this instrument.
+ The correlation can be controlled for —
+ either by including housing age controls or by interacting soil type with construction era to isolate the geological component.
+ Soil type enters only through its interaction with rainfall shocks.
+ The Centre for Ecology and Hydrology HOST classification covers all areas in Britain.
+\end_layout
+
+\begin_layout Standard
+We are not using the upstream/downstream network position of the CSO.
+ Network order alone is not a valid instrument because its direction of effect on spill intensity is theoretically ambiguous.
+ If upstream CSO weir height is low,
+ upstream CSO fires early and relieves the interceptor so that the downstream CSO fires later or not at all.
+ In contrast,
+ if the upstream CSO weir is high the interceptor fills faster downstream and downstream spill frequency is greater than upstream spill frequency.
+ However,
+ conditional on the elevation instrument and WwTW fixed effects,
+ network position could still enter as a control variable rather than an instrument.
+\end_layout
+
+\begin_layout Subsubsection*
+WwTW Hydraulics
+\end_layout
+
+\begin_layout Standard
+The UWWTR dataset gives annual designated Population Equivalent (PE) —
+ the standard regulatory measure of sewage load —
+ for all treatment works above 2,000 PE in England.
+ Designated PE measures the regulatory design size of a wastewater treatment works in terms of organic load (BOD₅).
+ Because volume of sewage per capita per day and its BOD concentration are fairly predictable,
+ the designated PE measures the flow the treatment works was designed to receive in dry weather —
+ essentially the engineering benchmark.
+ Designated PE is largely fixed over time,
+ mostly changing when capital upgrades are made.
+\begin_inset Foot
+status collapsed
+
+\begin_layout Plain Layout
+Alternatively,
+ Flow to Full Treatment (FFT) is a measure of how much wastewater a treatment works must be able to treat.
+ FFT is normally calculated as three times the maximum dry weather flow (DWF).
+ Expected DWF = Consented FFT / 3 and FFT permits are held in the EA's environmental permit database.
+\end_layout
+
+\end_inset
+
+ The UWWTR dataset also gives the generated load (actual sewage load received).
+ It is defined specifically as the maximum average weekly BOD load entering the treatment plant during the year,
+ excluding unusual situations such as those due to heavy rain.
+ From the designated and generated loads,
+ the the fraction of design capacity actually being used is the loading ratio:
+ 
+\begin_inset Formula 
+\[
+Stress_{wt}=Actual\,PE_{wt}/Designated\,PE_{wt}
+\]
+
+\end_inset
+
+(or its initial mean).
+ When the loading ratio exceeds 1,
+ the works is overloaded —
+ CSOs are more likely to spill.
+ When it approaches 1 from below,
+ marginal increases in load have disproportionate effects on hydraulically constrained CSOs.
+ 
+\end_layout
+
+\begin_layout Standard
+Actual and Designated PE are time-varying and changes to Actual PE largely reflect rainfall shocks or population/industry growth,
+ while changes to Designated PE mostly come from upgrades to the system.
+ In principle,
+ the time variation can be exploited but with additional controls for population or industrial growth and WwTW-time fixed effects.
+ Interacting the loading ratio with rainfall shocks then gives a refined shift measure:
+\begin_inset Formula 
+\begin{alignat*}{1}
+Stress_{wt}\times\left(Rainfall_{wt}-\mu_{w}\right)/\sigma_{w}
+\end{alignat*}
+
+\end_inset
+
+for long-run mean 
+\begin_inset Formula $\mu_{w}$
+\end_inset
+
+ and standard deviation 
+\begin_inset Formula $\sigma_{w}$
+\end_inset
+
+.
+ These storm inflow shocks are common across the catchment (not CSO-specific),
+ interact differentially with hydraulic components and are plausibly exogenous to house prices within the catchment,
+ once the rainfall mean/shock itself is controlled for.
+ 
+\end_layout
+
+\begin_layout Standard
+Rainfall enters the combined sewer system locally through runoff from impervious surfaces,
+ road drainage,
+ roof connections,
+ and infiltration into pipes.
+ At each CSO node,
+ inflow therefore depends on rainfall in its upstream drainage area.
+ However,
+ whether a CSO ultimately activates depends not only on local inflow but also on system-wide hydraulic conditions.
+ Once rainfall-induced flows accumulate in the interceptor network and reach the wastewater treatment works (WwTW),
+ spill activation depends on whether the works has available treatment capacity.
+ When the WwTW is near or above its dry-weather design capacity,
+ additional inflow generates backpressure in the interceptor sewer,
+ increasing the likelihood that upstream CSOs open to relieve hydraulic load.
+\end_layout
+
+\begin_layout Standard
+This two-stage process implies that spill activation depends on both local rainfall and catchment-wide hydraulic stress.
+ In practice,
+ because rainfall is highly spatially correlated within WwTW catchments and because treatment capacity constraints operate at the works level,
+ catchment-wide rainfall provides a natural measure of the hydraulic shock that interacts with predetermined WwTW stress.
+ 
+\end_layout
+
+\begin_layout Standard
+While local rainfall shocks translate into spills more strongly in stressed systems,
+ catchment rainfall determines the aggregate hydraulic burden on the treatment works.
+ If spill activation is driven largely by catchment-wide inflow exceeding WwTW capacity,
+ then the relevant instrument is catchment rainfall that could be used as an instrument 
+\begin_inset Formula $R_{wt}\times Stress_{w0}\times Spill_{c0}$
+\end_inset
+
+.
+ 
+\end_layout
+
+\begin_layout Subsubsection*
+Unit of Time
+\end_layout
+
+\begin_layout Standard
+For the unit of time in the shifts,
+ we might use annual or a moving average of three years.
+ House prices capitalize expected future service flows,
+ not current conditions.
+ A buyer purchasing near a CSO is discounting based on their belief about long-run spill frequency —
+ a belief formed from cumulative local experience,
+ word of mouth,
+ published summary statistics,
+ and heuristics —
+ "this area is near an old Victorian sewer" as a general signal.
+ The emphasis is on expectations based on experience,
+ not on any single event.
+ This is directly analogous to the crime literature,
+ where it is the annual crime rate that is capitalized,
+ not whether a crime happened on the day of exchange.
+ 
+\end_layout
+
+\begin_layout Standard
+The implication is that annual aggregation is the right frequency,
+ and a 3-year rolling average is probably better still.
+ Although daily rainfall and sometimes even daily sewage flows may be available,
+ daily data adds noise without signal because it introduces enormous day-to-day variance (a CSO might generate very different flow readings on a wet November Monday versus a dry July Tuesday) that buyers don't observe or respond to.
+ The buyer's information set is about cumulated signals —
+ the smell from the river last summer,
+ the news story about sewage spills in the local paper,
+ the EA annual data release.
+\end_layout
+
+\begin_layout Standard
+Annual or three-year averaging also helps with measurement error in EDM data,
+ since individual spill events may be misrecorded or reflect equipment failures rather than true hydraulic overflows.
+ But it comes with one big econometric problem.
+ Annual aggregation reduces identifying variation and weakens the quasi-experimental rainfall × stress design by leaving slow-moving variation that may correlate with neighbourhood trends.
+\end_layout
+
+\begin_layout Standard
+The best approach might be to examine both.
+ Buyers update beliefs from cumulative recent experience;
+ short-window exposure captures salience effects,
+ while annual aggregation captures longer-run expectations.
+ 
+\end_layout
+
+\begin_layout Standard
+\begin_inset Note Note
+status collapsed
+
+\begin_layout Plain Layout
+Instrument
+\end_layout
+
+\begin_layout Plain Layout
+The setting has a natural Bartik structure - location features determines the hydraulic exposure of a property to each CSO and common sewage shocks to CSOs in catchment areas interact with these differential exposures to determine the intensity of spills experienced by each property.
+ Even when the common shocks are not randomly assigned across catchment areas,
+ the composition of exposure (of CSOs and houses) is predetermined,
+ and the shocks (sewage growth rates) hit CSOs within a catchment area differentially based on that predetermined composition.
+\end_layout
+
+\begin_layout Plain Layout
+The first stage is at the CSO-year level,
+ and identifies whether high-slack CSOs respond more to common shocks.
+ The cross-sectional variation in shares (different CSOs within the same catchment have different slack deficits) is combined with common shifts in spillage (same catchment,
+ same year).
+ The second stage takes the predicted spill intensity from this first stage —
+ attributed to houses through distance and elevation weighting —
+ in a house-level regression with neighbourhood fixed effects.
+ The identifying variation in the second stage comes from the first-stage instrument (which exploits cross-CSO variation),
+ not from the raw correlation between CSO position and neighbourhood quality.
+\begin_inset Note Note
+status collapsed
+
+\begin_layout Plain Layout
+If hydraulically constrained areas are systematically gentrifying or declining at a different rate than less constrained areas for non-CSO reasons,
+ including the direct interaction with a time trend 
+\begin_inset Formula $s_{wc}Time_{t}$
+\end_inset
+
+ absorbs the linear component of any differential trend.
+\end_layout
+
+\begin_layout Plain Layout
+House fixed effects absorb all time-invariant unobserved heterogeneity —
+ including any correlated Victorian neighbourhood character,
+ Victorian poverty,
+ and all the sorting channels that were the hardest threats to defend against.
+ Year fixed effects absorb all aggregate trends.
+ What remains is the interaction of a structurally predetermined share with an annual rainfall shock.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Subsection
+Hydraulics
+\end_layout
+
+\begin_layout Plain Layout
+Notation
+\end_layout
+
+\begin_layout Itemize
+house 
+\begin_inset Formula $h$
+\end_inset
+
+,
+ quarter 
+\begin_inset Formula $q$
+\end_inset
+
+,
+ year 
+\begin_inset Formula $t$
+\end_inset
+
+ in MSOA 
+\begin_inset Formula $m\left(h\right)$
+\end_inset
+
+
+\end_layout
+
+\begin_layout Itemize
+CSO 
+\begin_inset Formula $c$
+\end_inset
+
+ in Wastewater treatment works catchment area 
+\begin_inset Formula $w\left(c\right)$
+\end_inset
+
+ 
+\end_layout
+
+\begin_layout Itemize
+Price 
+\begin_inset Formula $P$
+\end_inset
+
+,
+ 
+\begin_inset Formula $Spills$
+\end_inset
+
+ can be count or duration,
+ 
+\begin_inset Formula $X$
+\end_inset
+
+ are controls
+\end_layout
+
+\begin_layout Itemize
+\begin_inset Formula $\alpha$
+\end_inset
+
+ are fixed effects
+\end_layout
+
+\begin_deeper
+\begin_layout Itemize
+\begin_inset Formula $m\left(h\right)$
+\end_inset
+
+ is neighbourhood 
+\begin_inset Formula $m$
+\end_inset
+
+ of house 
+\begin_inset Formula $h$
+\end_inset
+
+ (that could be defined as catchment area,
+ MSOA or the house itself at the very finest)
+\end_layout
+
+\begin_layout Itemize
+\begin_inset Formula $m\left(c\right)$
+\end_inset
+
+ is the local area 
+\begin_inset Formula $m$
+\end_inset
+
+ if CSO 
+\begin_inset Formula $c$
+\end_inset
+
+ (that is defined as the wastewater treatment works catchment area because it keeps the sewage system across CSOs constant)
+\end_layout
+
+\end_deeper
+\begin_layout Itemize
+\begin_inset Formula $\varepsilon$
+\end_inset
+
+ and 
+\begin_inset Formula $\eta$
+\end_inset
+
+ are usual random error terms
+\end_layout
+
+\begin_layout Itemize
+\begin_inset Formula $E_{c}\equiv\sum_{h'}E_{h'c}$
+\end_inset
+
+ and 
+\begin_inset Formula $E_{w}\equiv\sum_{c'}E_{c'w}$
+\end_inset
+
+are the sums of the exposure variables 
+\begin_inset Formula $E_{hc}$
+\end_inset
+
+ and 
+\begin_inset Formula $E_{cw}$
+\end_inset
+
+.
+ 
+\end_layout
+
+\begin_layout Plain Layout
+\begin_inset Formula 
+\begin{alignat*}{1}
+\ln P_{hqt}= & α_{m\left(h\right)}+α_{qt}+β·\sum_{c\in C}\frac{E_{hc}}{E_{c}}\times Spills_{ct}+γ^{SS}·X_{hqt}^{SS}+ε_{hqt}\\
+Spills_{ct}= & α_{w\left(c\right)}+\alpha_{t}+δ·\left(\frac{E_{cw}}{E_{w}}\times G_{wt}\right)+γ^{FS}·X_{ct}^{FS}+η_{ct}
+\end{alignat*}
+
+\end_inset
+
+We need to define exposure variables 
+\begin_inset Formula $E_{hc},E_{cw}$
+\end_inset
+
+ and the shift instrument 
+\begin_inset Formula $G_{wt}$
+\end_inset
+
+.
+ The fundamental insight that the instrument will draw on is that CSO spill propensity is predetermined by physical and engineering characteristics of each CSO's position within the sewer network (from Victorian times) along with the stress that gets put on the network over time such as through increased load from storm inflows.
+ Some of the cross-sectional and time-series characteristics also directly affect house prices (e.g.
+ elevation that affects views and flooding).
+ But others are quasi-exogenous —
+ they are determined by geography and engineering decisions made over 150 years ago,
+ and have no direct modern house price channel,
+ after controlling for similar geographical features of the house itself.
+\end_layout
+
+\begin_layout Subsection
+CSO Exposure
+\end_layout
+
+\begin_layout Plain Layout
+To strengthen the instrument,
+ we also consider interactions of rainfall shocks with CSO-level impervious surface,
+ soil impermeability,
+ elevation relative to river and WwTW,
+ distance to WwTW and density of CSOs in the local area.
+ 
+\end_layout
+
+\begin_layout Plain Layout
+The main hydraulically-determined characteristic that determines how much flow a CSO can pass before spilling is 
+\series bold
+CSO elevation relative to the treatment works
+\series default
+ that it conveys the flows into.
+ Let 
+\begin_inset Formula $c$
+\end_inset
+
+ denote a CSO,
+ belonging to waste treatment plant catchment area 
+\begin_inset Formula $w$
+\end_inset
+
+.
+ Ground elevation at CSO location is 
+\begin_inset Formula $z_{c}$
+\end_inset
+
+ and at the treatment works inlet is 
+\begin_inset Formula $z_{w}$
+\end_inset
+
+,
+ with the distance between the CSO and the treatment inlet given by 
+\begin_inset Formula $L_{cw}$
+\end_inset
+
+.
+ A CSO at high elevation relative to the treatment works has a steep available gradient that can more readily achieve self-cleansing velocity relative to a CSO at low elevation (near treatment works elevation) that has a shallow available gradient.
+ High elevation CSOs have greater propensity to convey flows onwards to the treatment works without spilling.
+ Flow from a CSO to the treatment works travels through the interceptor sewer.
+ The interceptor must maintain a minimum gradient to flow by gravity.
+ The elevation difference between the CSO and the treatment works,
+ divided by the pipe distance between them,
+ determines the available hydraulic gradient 
+\begin_inset Formula $\left(z_{c}-z_{w}\right)/L_{cw}$
+\end_inset
+
+.
+ 
+\end_layout
+
+\begin_layout Plain Layout
+The hydraulic slack at each CSO —
+ how much spare capacity the interceptor has at the point where the CSO's feeder meets it is 
+\begin_inset Formula $S_{cw}-S_{\min}\equiv\left(z_{c}-z_{w}\right)/L_{cw}-S_{\min}$
+\end_inset
+
+where 
+\begin_inset Formula $S_{\min}$
+\end_inset
+
+ is the minimum slope needed to achieve self-cleansing velocity (≈ 1/500 for a typical Victorian combined sewer).
+ Within a treatment works catchment,
+ a CSO that sits 20 metres higher than the works has a fundamentally different hydraulic situation from one that sits at the same elevation.
+ 
+\begin_inset Formula $S_{cw}$
+\end_inset
+
+ is positive when the available gradient exceeds the minimum needed to convey flow —
+ i.e.,
+ the system has hydraulic slack.
+ It is negative when the gradient is insufficient —
+ the system is already constrained,
+ and pumping or surcharge is likely.
+ The instrument normalises each CSO's elevation disadvantage relative to the worst-positioned CSO in the catchment of a treatment works:
+ 
+\begin_inset Formula 
+\begin{alignat*}{1}
+E_{cw}\equiv & \max\left(0,S_{\min}-S_{cw}\right)/\max_{c\in w\left(c\right)}\left(\max\left(0,S_{\min}-S_{cw}\right)\right)
+\end{alignat*}
+
+\end_inset
+
+A CSO with positive slack 
+\begin_inset Formula $S_{cw}>S_{\min}$
+\end_inset
+
+ has 
+\begin_inset Formula $E_{cw}=0$
+\end_inset
+
+;
+ a CSO with negative slack has 
+\begin_inset Formula $E_{cw}>0$
+\end_inset
+
+,
+ proportional to how hydraulically constrained it is.
+ The variation in the instrument is hydraulically meaningful because it determines whether additional flow causes a CSO to tip over into spilling.
+ It is pre-determined by Victorian interceptor routing (terrain-constrained) and treatment works location (historically fixed).
+ It can be measured from OS Terrain 5 DEM (
+\begin_inset Formula $z_{c},z_{w}$
+\end_inset
+
+) and Hoffmann et al.
+ (2025) catchment data (
+\begin_inset Formula $L_{cw}$
+\end_inset
+
+ approximated by straight-line × 1.3 urban tortuosity factor).
+ Within a treatment works catchment,
+ a CSO that sits 20 metres higher than the works has a fundamentally different hydraulic situation from one that sits at the same elevation.Conditional on treatment works catchment fixed effects,
+ the elevation of a specific CSO location relative to the treatment works elevation is determined by the topography of the terrain (geological),
+ the historical decision about where to site the treatment works (pre-modern),
+ and where the Victorian interceptor was routed (pre-modern,
+ terrain-constrained).
+\end_layout
+
+\begin_layout Subsubsection
+Other hydraulic features
+\end_layout
+
+\begin_layout Plain Layout
+Network distance and elevation together are the two components of the available hydraulic gradient —
+ the instrument gains strength by using both.
+ Additional considerations to strengthen the instrument include pumping provisions at the time of construction and local sub-catchment surface imperviousness.
+ A CSO below treatment works elevation requires pumping,
+ and Victorian designs accounted for this in the construction of the sewage system.
+ More impervious sub-catchment area upstream of a CSO results in higher runoff for a given rainfall event and causes more frequent spilling.
+ However,
+ imperviousness reflects urban density and land use,
+ which also directly affects house prices (denser areas,
+ more urban character).
+ To address this,
+ we focus on the geologically-determined component of imperviousness.
+ In areas with permeable soils (high infiltration capacity),
+ less rainfall becomes runoff and there is less spilling.
+ In areas with clay-rich impermeable soils,
+ more rainfall becomes direct runoff,
+ causing more spilling.
+ Soil permeability is correlated with Victorian-era development patterns - permeable soils tend to be in less developed,
+ less dense areas —
+ and this is absorbed by modern land use controls.
+ 
+\end_layout
+
+\begin_layout Plain Layout
+We can refine the exposure earlier to add 
+\begin_inset Formula $E_{cw}^{pump}=E_{cw}\times\left(1-Pump_{c}\right)$
+\end_inset
+
+ and 
+\begin_inset Formula $Pump_{c}\times Tidal_{w}$
+\end_inset
+
+ that indicates whether Victorian engineering provided for pumping facilities at the CSO,
+ that is particularly important for tidal waters.
+ Further,
+ we can add soil permeability:
+ 
+\begin_inset Formula $E_{cw}^{soil}=E_{cw}\times(1-permeability_{c})/\max_{c'\in w}(1-permeability_{c'})$
+\end_inset
+
+ were 
+\begin_inset Formula $permeability_{c}$
+\end_inset
+
+ is the soil class,
+ with clay soils (impermeable) normalized to receiving value 1.
+ Impermeable soils generate more direct surface runoff,
+ increasing storm inflow to the combined sewer system.
+ This is also predetermined because soil type is geological and predates all human activity.
+ However,
+ soil type correlates with agricultural land use history,
+ which correlates with when an area was developed,
+ which correlates with housing stock vintage and quality that need to be controlled for if using this instrument.
+ The Centre for Ecology and Hydrology HOST classification covers all areas in Britain.
+\end_layout
+
+\begin_layout Plain Layout
+We are not using the upstream/downstream network position of the CSO.
+ Network order alone is not a valid instrument because its direction of effect on spill intensity is theoretically ambiguous.
+ If upstream CSO weir height is low,
+ upstream CSO fires early and relieves the interceptor so that the downstream CSO fires later or not at all.
+ In contrast,
+ if the upstream CSO weir is high the interceptor fills faster downstream and downstream spill frequency is greater than upstream spill frequency.
+\end_layout
+
+\begin_layout Subsection
+Instrument Shifts
+\end_layout
+
+\begin_layout Plain Layout
+The shock 
+\begin_inset Formula $G_{wt}$
+\end_inset
+
+ captures what common pressure entered the combined sewer system across the catchment.
+ Total spills of the catchment area is a natural candidate.
+ As more total sewage enters the network,
+ the interceptor runs fuller and more spills occur.
+ CSOs with less hydraulic slack tip into spilling sooner and more often.
+ A CSO with zero slack is unaffected by moderate volume increases —
+ it already has headroom.
+ A CSO with maximum slack deficit responds immediately to any volume increase —
+ it is already at the margin.
+ Then 
+\begin_inset Formula $\left(E_{cw}/E_{w}\right)G_{wt}$
+\end_inset
+
+ generates the differential-response-to-common-shock structure where 
+\begin_inset Formula 
+\begin{alignat*}{1}
+G_{wt}= & Spills_{wt}
+\end{alignat*}
+
+\end_inset
+
+is the catchment area spill that is obtained from the EDM data by aggregating across CSOs within a wastewater treatment works catchment area,
+ defined by Hoffman et al.
+ (2025).
+\begin_inset Foot
+status collapsed
+
+\begin_layout Plain Layout
+Typically,
+ CSOs only receive overflows from their own wastewater treatment works catchment area and therefore 
+\begin_inset Formula $\sum_{w'}\left(E_{cw'}/E_{w'}\right)G_{w't}=\left(E_{cw}/E_{w}\right)G_{wt}$
+\end_inset
+
+ in practice.
+\end_layout
+
+\end_inset
+
+ Then the reduced form for house prices is
+\begin_inset Formula 
+\begin{alignat*}{1}
+\ln P_{hqt}= & α_{m\left(h\right)}+\alpha_{w}+α_{qt}+β^{RF}·\sum_{c\in w}\left(\frac{E_{hcw}}{E_{cw}}\times\frac{E_{cw}}{E_{w}}\times Spills_{wt}\right)+γ^{SS}·X_{hqt}^{SS}+ε_{hqt}
+\end{alignat*}
+
+\end_inset
+
+where the additional subscript 
+\begin_inset Formula $w$
+\end_inset
+
+ on house exposure explicitly shows that the house belongs to catchment area 
+\begin_inset Formula $w$
+\end_inset
+
+.
+ And we will examine whether the share of spills from a given CSO is systematically predicted by its relative elevation exposure:
+ 
+\begin_inset Formula 
+\begin{alignat*}{1}
+Spills_{ct}/Spills_{wt}= & α_{w\left(c\right)}+\alpha_{t}+δ·\left(\frac{E_{cw}}{E_{w}}\right)+γ^{FS}·X_{ct}^{FS}+η_{ct}.
+\end{alignat*}
+
+\end_inset
+
+ 
+\end_layout
+
+\begin_layout Plain Layout
+The cleanest candidate is average annual rainfall in the catchment – after controlling for rainfall itself,
+ rainfall only affects prices differentially across areas through CSO susceptibility.
+ More rainfall leads to more storm inflow into the combined sewers that then increases total flow and hence the likelihood of CSOs with less slack spilling over.
+ Conditional on the long-run mean (which is absorbed as a control),
+ annual deviations are genuinely random and there is also substantial variation in the shock —
+ UK annual rainfall varies by ±30% around the mean.
+\begin_inset Foot
+status collapsed
+
+\begin_layout Plain Layout
+Rainfall data is available from the Met Office HadUK-Grid (1km resolution,
+ 1891–present) and the Centre for Ecology & Hydrology NRFA.
+\end_layout
+
+\end_inset
+
+ The concern about the level of rainfall affecting house prices (through other channels such as damp areas,
+ flood risk) is absorbed by controlling for mean annual rainfall directly.
+ 
+\end_layout
+
+\begin_layout Plain Layout
+The rainfall shock can be strengthened by taking its implications for total sewage volume entering a treatment works catchment.
+ Using rainfall shocks directly is equivalent to assuming a fixed rainfall-to-runoff conversion.
+ Sewage volume and designed load data for each wastewater treatment plant enables a refinement of the rainfall shift to variation in stress on the treatment works.
+ The deviation of the actual generated load received by the works from its designated load reflects structural pressure on the treatment works and predicts spill responsiveness to rainfall shocks.
+ 
+\end_layout
+
+\begin_layout Plain Layout
+The UWWTR dataset gives annual designated Population Equivalent (PE) —
+ the standard regulatory measure of sewage load —
+ for all treatment works above 2,000 PE in England.
+ Designated PE measures the regulatory design size of a wastewater treatment works in terms of organic load (BOD₅).
+ Because volume of sewage per capita per day and its BOD concentration are fairly predictable,
+ the designated PE measures the flow the treatment works was designed to receive in dry weather —
+ essentially the engineering benchmark.
+ Designated PE is largely fixed over time,
+ mostly changing when capital upgrades are made.
+\begin_inset Foot
+status collapsed
+
+\begin_layout Plain Layout
+Alternatively,
+ Flow to Full Treatment (FFT) is a measure of how much wastewater a treatment works must be able to treat.
+ FFT is normally calculated as three times the maximum dry weather flow (DWF).
+ Expected DWF = Consented FFT / 3 and FFT permits are held in the EA's environmental permit database.
+\end_layout
+
+\end_inset
+
+ The UWWTR dataset also gives the generated load (actual sewage load received).
+ It is defined specifically as the maximum average weekly BOD load entering the treatment plant during the year,
+ excluding unusual situations such as those due to heavy rain.
+ From the designated and generated loads,
+ the the fraction of design capacity actually being used is the loading ratio:
+ 
+\begin_inset Formula 
+\[
+L_{wt}=Actual\,PE_{wt}/Designated\,PE_{wt}
+\]
+
+\end_inset
+
+(or its initial mean).
+ When the loading ratio exceeds 1,
+ the works is overloaded —
+ CSOs are more likely to spill.
+ When it approaches 1 from below,
+ marginal increases in load have disproportionate effects on hydraulically constrained CSOs.
+ Interacting the loading ratio with rainfall shocks then gives a refined shift measure:
+\begin_inset Formula 
+\begin{alignat*}{1}
+g_{wt}= & L_{wt}\times\left(Rainfall_{wt}-\mu_{w}\right)/\sigma_{w}
+\end{alignat*}
+
+\end_inset
+
+for long-run mean 
+\begin_inset Formula $\mu_{w}$
+\end_inset
+
+ and standard deviation 
+\begin_inset Formula $\sigma_{w}$
+\end_inset
+
+.
+ These storm inflow shocks are common across the catchment (not CSO-specific),
+ interact differentially with hydraulic components and are plausibly exogenous to house prices within the catchment,
+ once the rainfall mean/shock itself is controlled for.
+ They are better than rainfall as a shift because they measure actual flow experienced by the system,
+ not just precipitation.
+ They therefore also account for spatial variation in runoff coefficients that rainfall alone does not.
+ They are directly measured at the works,
+ and not just inferred from a weather station.
+ 
+\end_layout
+
+\begin_layout Plain Layout
+For the unit of time in the shifts,
+ we use annual or a moving average of three years.
+ House prices capitalize expected future service flows,
+ not current conditions.
+ A buyer purchasing near a CSO is discounting based on their belief about long-run spill frequency —
+ a belief formed from cumulative local experience,
+ word of mouth,
+ published summary statistics,
+ and heuristics —
+ "this area is near an old Victorian sewer" as a general signal.
+ The emphasis is on expectations based on experience,
+ not on any single event.
+ This is directly analogous to the crime literature,
+ where it is the annual crime rate that is capitalized,
+ not whether a crime happened on the day of exchange.
+ The implication is that annual aggregation is the right frequency,
+ and a 3-year rolling average is probably better still.
+ Although daily rainfall and sometimes even daily sewage flows may be available,
+ daily data adds noise without signal because it introduces enormous day-to-day variance (a CSO might generate very different flow readings on a wet November Monday versus a dry July Tuesday) that buyers don't observe or respond to.
+ The buyer's information set is about cumulated signals —
+ the smell from the river last summer,
+ the news story about sewage spills in the local paper,
+ the EA annual data release.
+\end_layout
+
+\begin_layout Subsection
+Property Exposure
+\end_layout
+
+\begin_layout Plain Layout
+The biggest driver is distance downstream/upstream of a CSO discharge point and how the river dilutes/flushes.
+ The exposure of a house is a predetermined geographical measure of CSO/sewage-spill risk.
+ Distance of the house to a CSO 
+\begin_inset Formula $D_{hc}$
+\end_inset
+
+ and its relative elevation 
+\family roman
+\series medium
+\shape up
+\size normal
+\emph off
+\nospellcheck off
+\bar no
+\strikeout off
+\xout off
+\uuline off
+\uwave off
+\noun off
+\color none
+
+\begin_inset Formula $z_{h}-z_{c}$
+\end_inset
+
+
+\family default
+\series default
+\shape default
+\size default
+\emph default
+\nospellcheck default
+\bar default
+\strikeout default
+\xout default
+\uuline default
+\uwave default
+\noun default
+\color inherit
+ measure how strongly a property is physically connected to,
+ and likely to be affected by,
+ a given CSO during wet-weather stress.
+ Distance captures spatial attenuation of impacts such as odor,
+ visible discharge,
+ localized contamination,
+ or sewer surcharge propagation,
+ while relative elevation proxies the likelihood that storm-driven hydraulic pressure transmits toward (or away from) a parcel within a gravity-based sewer network.
+ When used as smooth weights rather than hard cutoffs—
+e.g.,
+ declining in distance and increasing gradually in upstream elevation—
+these variables approximate the underlying engineering and hydrological mechanisms that determine which homes are most exposed to spill events.
+ In this setting,
+ combining distance and relative elevation allows the exposure share to reflect infrastructure connectivity and physical flow potential:
+\end_layout
+
+\begin_layout Plain Layout
+\begin_inset Formula 
+\[
+E_{hc}=f\left(D_{hc}\right)×g\left(z_{h}-z_{c}\right)
+\]
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Plain Layout
+The logic of the instrument and controls is that the instrument shifts CSO spill intensity while the controls absorb the direct effects of the same underlying geography on house prices.
+ The concern is that the CSO's elevation relative to the treatment works might correlate with the house's own elevation —
+ both the CSO and nearby houses sit at similar elevations because they are in the same terrain.
+ If high-elevation areas have higher house prices (views,
+ lower flood risk),
+ and high-elevation CSOs spill less,
+ then CSO elevation would spuriously predict higher house prices even without any causal effect.
+ Controlling directly for house elevation,
+ the residual variation in CSO elevation —
+ specifically,
+ the elevation of the CSO relative to the treatment works within the same terrain zone —
+ is no longer correlated with house prices through the terrain channel.
+ What remains is the hydraulic channel:
+ how much available gradient the CSO has.
+ Formally,
+ the instrument is not 
+\begin_inset Formula $z_{c}$
+\end_inset
+
+ alone but contains 
+\begin_inset Formula $z_{c}-z_{w}$
+\end_inset
+
+,
+ the differential.
+ This differential is what determines available gradient,
+ and it varies across CSOs within the same terrain zone because treatment works are sited at specific,
+ historically fixed locations that differ from the average elevation of each CSO's terrain.
+ Conditional on controlling for the ground elevation of the property directly (
+\begin_inset Formula $z_{h}$
+\end_inset
+
+ to control for flood risk,
+ views,
+ terrain effects on prices),
+ its distance to the treatment works (
+\begin_inset Formula $L_{hw}$
+\end_inset
+
+ to control for any treatment works proximity disamenity) and the catchment fixed effects (to control for all between-catchment variation),
+ the available hydraulic gradient 
+\begin_inset Formula $S_{cw}$
+\end_inset
+
+ is unlikely to have direct effects on modern house prices.
+ 
+\end_layout
+
+\begin_layout Plain Layout
+\begin_inset Note Note
+status collapsed
+
+\begin_layout Plain Layout
+With transaction-level data,
+ a repeat sales sample can be constructed to address neighbourhood quality confounding —
+ houses that transact at least twice —
+ and difference out the house fixed effect properly.
+ The question is whether there is enough within-house variation in nearby spill intensity between the two sale dates to identify β.
+ The panel is short so there need not be enough transactions and it would need the rainfall-driven variation in spills to be large relative to the persistent component.
+\end_layout
+
+\begin_layout Plain Layout
+First,
+ a cross-sectional hedonic using time-averaged spill rates per CSO,
+ with rich neighbourhood controls and WwTW-time fixed effects,
+ comparing houses across CSOs within the same catchment in the same year.
+ This gives the full capitalisation effect but is still vulnerable to sorting bias.
+\end_layout
+
+\begin_layout Plain Layout
+Second,
+ a first-differences or repeat-sales specification using changes in spill intensity between sale years,
+ instrumented with changes in rainfall interacted with PE stress.
+ This is clean but may have weak first stage if spills don't move much.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_body
+\end_document

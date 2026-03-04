@@ -965,7 +965,7 @@ for (var_name in names(plot_specs)) {
     ggsave(
       filename = here("book", "book_figs", file_name),
       plot = p,
-      width = 1.618*8,
+      width = 1.618 * 8,
       height = 8,
       dpi = 300
     )
