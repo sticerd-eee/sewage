@@ -5,7 +5,8 @@
 # Purpose: Estimate the effect of sewage spills on property values using
 #          quartile-binned daily average measures (spill count and hours).
 #          Panel A: Sales (log house prices), Panel B: Rentals (log rental
-#          prices). Each panel includes OLS, FE, and FE + Controls.
+#          prices). Each panel includes OLS, MSOA FE, MSOA FE + Controls,
+#          LSOA FE, and LSOA FE + Controls.
 #
 # Author: Jacopo Olivieri
 # Date: 2024-12-24
@@ -138,6 +139,7 @@ dat_sales_clean <- dat_cs_sales |>
     spill_hrs_daily_avg_bin = forcats::fct_relevel(spill_hrs_daily_avg_bin, "0 spills"),
     spill_hrs_daily_avg_bin = forcats::fct_drop(spill_hrs_daily_avg_bin),
     lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
     property_type = forcats::fct_drop(property_type),
     old_new = forcats::fct_drop(old_new),
     duration = forcats::fct_drop(duration)
@@ -203,6 +205,7 @@ dat_rental_clean <- dat_cs_rentals |>
     spill_hrs_daily_avg_bin = forcats::fct_relevel(spill_hrs_daily_avg_bin, "0 spills"),
     spill_hrs_daily_avg_bin = forcats::fct_drop(spill_hrs_daily_avg_bin),
     lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
     property_type = forcats::fct_drop(property_type)
   )
 
@@ -232,6 +235,18 @@ model_sales_count_3 <- fixest::feols(
   vcov = "hetero"
 )
 
+model_sales_count_4 <- fixest::feols(
+  log_price ~ spill_count_daily_avg_bin | msoa,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
+model_sales_count_5 <- fixest::feols(
+  log_price ~ spill_count_daily_avg_bin + property_type + old_new + duration | msoa,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
 # Rental Models
 model_rental_count_1 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin,
@@ -247,6 +262,18 @@ model_rental_count_2 <- fixest::feols(
 
 model_rental_count_3 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin + property_type + bedrooms + bathrooms | lsoa,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
+model_rental_count_4 <- fixest::feols(
+  log_price ~ spill_count_daily_avg_bin | msoa,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
+model_rental_count_5 <- fixest::feols(
+  log_price ~ spill_count_daily_avg_bin + property_type + bedrooms + bathrooms | msoa,
   data = dat_rental_clean,
   vcov = "hetero"
 )
@@ -275,6 +302,18 @@ model_sales_hrs_3 <- fixest::feols(
   vcov = "hetero"
 )
 
+model_sales_hrs_4 <- fixest::feols(
+  log_price ~ spill_hrs_daily_avg_bin | msoa,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
+model_sales_hrs_5 <- fixest::feols(
+  log_price ~ spill_hrs_daily_avg_bin + property_type + old_new + duration | msoa,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
 # Rental Models
 model_rental_hrs_1 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin,
@@ -290,6 +329,18 @@ model_rental_hrs_2 <- fixest::feols(
 
 model_rental_hrs_3 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin + property_type + bedrooms + bathrooms | lsoa,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
+model_rental_hrs_4 <- fixest::feols(
+  log_price ~ spill_hrs_daily_avg_bin | msoa,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
+model_rental_hrs_5 <- fixest::feols(
+  log_price ~ spill_hrs_daily_avg_bin + property_type + bedrooms + bathrooms | msoa,
   data = dat_rental_clean,
   vcov = "hetero"
 )
@@ -331,20 +382,26 @@ gof_map <- tibble::tribble(
 panels_count <- list(
   "House Sales" = list(
     "(1)" = model_sales_count_1,
-    "(2)" = model_sales_count_2,
-    "(3)" = model_sales_count_3
+    "(2)" = model_sales_count_4,
+    "(3)" = model_sales_count_5,
+    "(4)" = model_sales_count_2,
+    "(5)" = model_sales_count_3
   ),
   "House Rentals" = list(
-    "(4)" = model_rental_count_1,
-    "(5)" = model_rental_count_2,
-    "(6)" = model_rental_count_3
+    "(6)" = model_rental_count_1,
+    "(7)" = model_rental_count_4,
+    "(8)" = model_rental_count_5,
+    "(9)" = model_rental_count_2,
+    "(10)" = model_rental_count_3
   )
 )
 
-# Add rows for fixed effects
+# Add rows for fixed effects and controls
 add_rows <- tibble::tribble(
-  ~term     , ~`(1)` , ~`(2)` , ~`(3)` , ~`(4)` , ~`(5)` , ~`(6)` ,
-  "LSOA FE" , "No"   , "Yes"  , "Yes"  , "No"   , "Yes"  , "Yes"
+  ~term                , ~`(1)` , ~`(2)` , ~`(3)` , ~`(4)` , ~`(5)` , ~`(6)` , ~`(7)` , ~`(8)` , ~`(9)` , ~`(10)`,
+  "Property controls"  , "No"   , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "No"   , "Yes"  , "No"   , "Yes"  ,
+  "Location FE"        , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" ,
+  "Time FE"            , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"
 )
 attr(add_rows, "position") <- "coef_end"
 
@@ -407,13 +464,17 @@ coef_labels_hrs <- c(
 panels_hrs <- list(
   "House Sales" = list(
     "(1)" = model_sales_hrs_1,
-    "(2)" = model_sales_hrs_2,
-    "(3)" = model_sales_hrs_3
+    "(2)" = model_sales_hrs_4,
+    "(3)" = model_sales_hrs_5,
+    "(4)" = model_sales_hrs_2,
+    "(5)" = model_sales_hrs_3
   ),
   "House Rentals" = list(
-    "(4)" = model_rental_hrs_1,
-    "(5)" = model_rental_hrs_2,
-    "(6)" = model_rental_hrs_3
+    "(6)" = model_rental_hrs_1,
+    "(7)" = model_rental_hrs_4,
+    "(8)" = model_rental_hrs_5,
+    "(9)" = model_rental_hrs_2,
+    "(10)" = model_rental_hrs_3
   )
 )
 

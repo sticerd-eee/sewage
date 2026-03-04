@@ -5,7 +5,8 @@
 # Purpose: Estimate the effect of sewage spills on property values using
 #          cumulative spill measures (count and hours).
 #          Panel A: Sales (log house prices), Panel B: Rentals (log rental
-#          prices). Each panel includes OLS, Controls, FE, and FE + Controls.
+#          prices). Each panel includes OLS, Controls, MSOA FE, MSOA FE +
+#          Controls, LSOA FE, and LSOA FE + Controls.
 #
 # Author: Jacopo Olivieri
 # Date: 2024-10-15
@@ -176,6 +177,7 @@ dat_sales_clean <- sales |>
     spill_hrs_bin = forcats::fct_relevel(spill_hrs_bin, "0 spills"),
     spill_hrs_bin = forcats::fct_drop(spill_hrs_bin),
     lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
     property_type = forcats::fct_drop(property_type),
     old_new = forcats::fct_drop(old_new),
     duration = forcats::fct_drop(duration)
@@ -258,6 +260,7 @@ dat_rental_clean <- rentals |>
     spill_hrs_bin = forcats::fct_relevel(spill_hrs_bin, "0 spills"),
     spill_hrs_bin = forcats::fct_drop(spill_hrs_bin),
     lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
     property_type = forcats::fct_drop(property_type)
   )
 
@@ -294,6 +297,18 @@ model_sales_count_3 <- fixest::feols(
   vcov = "hetero"
 )
 
+model_sales_count_4 <- fixest::feols(
+  log_price ~ spill_count_bin | msoa,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
+model_sales_count_5 <- fixest::feols(
+  log_price ~ spill_count_bin + property_type + old_new + duration | msoa,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
 # Rental Models
 model_rental_count_1 <- fixest::feols(
   log_price ~ spill_count_bin,
@@ -315,6 +330,18 @@ model_rental_count_2 <- fixest::feols(
 
 model_rental_count_3 <- fixest::feols(
   log_price ~ spill_count_bin + property_type + bedrooms + bathrooms | lsoa,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
+model_rental_count_4 <- fixest::feols(
+  log_price ~ spill_count_bin | msoa,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
+model_rental_count_5 <- fixest::feols(
+  log_price ~ spill_count_bin + property_type + bedrooms + bathrooms | msoa,
   data = dat_rental_clean,
   vcov = "hetero"
 )
@@ -350,6 +377,18 @@ model_sales_hrs_3 <- fixest::feols(
   vcov = "hetero"
 )
 
+model_sales_hrs_4 <- fixest::feols(
+  log_price ~ spill_hrs_bin | msoa,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
+model_sales_hrs_5 <- fixest::feols(
+  log_price ~ spill_hrs_bin + property_type + old_new + duration | msoa,
+  data = dat_sales_clean,
+  vcov = "hetero"
+)
+
 # Rental Models
 model_rental_hrs_1 <- fixest::feols(
   log_price ~ spill_hrs_bin,
@@ -371,6 +410,18 @@ model_rental_hrs_2 <- fixest::feols(
 
 model_rental_hrs_3 <- fixest::feols(
   log_price ~ spill_hrs_bin + property_type + bedrooms + bathrooms | lsoa,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
+model_rental_hrs_4 <- fixest::feols(
+  log_price ~ spill_hrs_bin | msoa,
+  data = dat_rental_clean,
+  vcov = "hetero"
+)
+
+model_rental_hrs_5 <- fixest::feols(
+  log_price ~ spill_hrs_bin + property_type + bedrooms + bathrooms | msoa,
   data = dat_rental_clean,
   vcov = "hetero"
 )
@@ -402,28 +453,33 @@ panels_count <- list(
   "House Sales" = list(
     "(1)" = model_sales_count_1,
     "(2)" = model_sales_count_1b,
-    "(3)" = model_sales_count_2,
-    "(4)" = model_sales_count_3
+    "(3)" = model_sales_count_4,
+    "(4)" = model_sales_count_5,
+    "(5)" = model_sales_count_2,
+    "(6)" = model_sales_count_3
   ),
   "House Rentals" = list(
-    "(5)" = model_rental_count_1,
-    "(6)" = model_rental_count_1b,
-    "(7)" = model_rental_count_2,
-    "(8)" = model_rental_count_3
+    "(7)" = model_rental_count_1,
+    "(8)" = model_rental_count_1b,
+    "(9)" = model_rental_count_4,
+    "(10)" = model_rental_count_5,
+    "(11)" = model_rental_count_2,
+    "(12)" = model_rental_count_3
   )
 )
 
 # Add rows for fixed effects and controls
 add_rows <- tibble::tribble(
-  ~term                , ~`(1)` , ~`(2)` , ~`(3)` , ~`(4)` , ~`(5)` , ~`(6)` , ~`(7)` , ~`(8)` ,
-  "LSOA FE"            , "No"   , "No"   , "Yes"  , "Yes"  , "No"   , "No"   , "Yes"  , "Yes"  ,
-  "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"
+  ~term                , ~`(1)` , ~`(2)` , ~`(3)` , ~`(4)` , ~`(5)` , ~`(6)` , ~`(7)` , ~`(8)` , ~`(9)` , ~`(10)`, ~`(11)`, ~`(12)`,
+  "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  ,
+  "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" ,
+  "Time FE"            , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"
 )
 attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes_count <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the total number of spill events (12/24 count) recorded across all overflows within 250m over the entire 2021--2023 period, classified into quartiles (Q1--Q4) based on the distribution of strictly positive exposure; the reference category is properties near overflows with zero recorded spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the total number of spill events (12/24 count) recorded across all overflows within 250m over the entire 2021--2023 period, classified into quartiles (Q1--Q4) based on the distribution of strictly positive exposure; the reference category is properties near overflows with zero recorded spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export table
@@ -489,20 +545,24 @@ panels_hrs <- list(
   "House Sales" = list(
     "(1)" = model_sales_hrs_1,
     "(2)" = model_sales_hrs_1b,
-    "(3)" = model_sales_hrs_2,
-    "(4)" = model_sales_hrs_3
+    "(3)" = model_sales_hrs_4,
+    "(4)" = model_sales_hrs_5,
+    "(5)" = model_sales_hrs_2,
+    "(6)" = model_sales_hrs_3
   ),
   "House Rentals" = list(
-    "(5)" = model_rental_hrs_1,
-    "(6)" = model_rental_hrs_1b,
-    "(7)" = model_rental_hrs_2,
-    "(8)" = model_rental_hrs_3
+    "(7)" = model_rental_hrs_1,
+    "(8)" = model_rental_hrs_1b,
+    "(9)" = model_rental_hrs_4,
+    "(10)" = model_rental_hrs_5,
+    "(11)" = model_rental_hrs_2,
+    "(12)" = model_rental_hrs_3
   )
 )
 
 # Notes
 custom_notes_hrs <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the total spill duration in hours recorded across all overflows within 250m over the entire 2021--2023 period, classified into quartiles (Q1--Q4) based on the distribution of strictly positive exposure; the reference category is properties near overflows with zero recorded spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the total spill duration in hours recorded across all overflows within 250m over the entire 2021--2023 period, classified into quartiles (Q1--Q4) based on the distribution of strictly positive exposure; the reference category is properties near overflows with zero recorded spills. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export table
