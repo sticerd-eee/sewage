@@ -184,13 +184,13 @@ msoa_population <- readxl::read_excel(
 
 ### Context {#sec-04-01-01-context}
 
-The earliest sewer systems in England, built during the Victorian era, were **combined systems**, using a single pipe to carry both wastewater from homes and businesses and stormwater from rainfall. Since the 1960s, however, new sewer networks have been constructed as separate systems, with one pipe for sewage and another for surface water in built-up areas. Today, **around 20% of England’s sewer network remains combined**.
+Much of England's sewer network was built in the Victorian era as a **combined system**, with a single pipe carrying both wastewater from homes and businesses and runoff from rainfall. Since the 1960s, new networks have generally been built as separate systems, with sewage and surface water carried in different pipes. Even so, **around 20% of England's sewer network remains combined**.
 
-In most cases, wastewater is transported through the sewer network to treatment works, where it is processed and then released into rivers or the sea. However, in certain circumstances, such as periods of heavy rainfall, water companies are permitted to discharge untreated sewage into inland waters through storm overflows to prevent the system from being overwhelmed.
+Under normal conditions, wastewater is carried through the network to treatment works before being released into rivers or the sea. During periods of heavy rainfall, water companies are permitted to use storm overflows to discharge untreated sewage into inland waters so that the network does not back up.
 
 ![](book_figs/when_do_dry_spills_occur.png){width=60%}
 
-The deliberate discharge of sewage in dry conditions, known as a *dry spill*, is prohibited under environmental law. Because no rainfall is available to dilute the sewage, dry spills pose a particularly high risk of environmental harm to receiving waters and ecosystems.
+A *dry spill* is the discharge of sewage in dry conditions, and it is prohibited under environmental law. Because there is no rainfall to dilute the sewage, dry spills pose a particularly high risk to receiving waters and ecosystems.
 
 ### Definitions {#sec-04-01-02-definitions}
 
@@ -395,29 +395,577 @@ final_output_ea <- tags$div(table_title, reactable_table_ea, table_notes)
 final_output_bbc <- tags$div(table_title, reactable_table_bbc, table_notes)
 ```
 
-We estimate dry spills using alternative methodologies and validate these against the figures reported by the EA^[https://environmentagency.blog.gov.uk/2024/10/10/regulating-the-water-industry-our-approach-what-were-changing-and-new-powers-in-the-water-bill/] and the BBC^[https://www.bbc.co.uk/news/articles/c4nn46rjej6o].
+We estimate dry spills using several alternative methods and compare them with the figures reported by the EA^[https://environmentagency.blog.gov.uk/2024/10/10/regulating-the-water-industry-our-approach-what-were-changing-and-new-powers-in-the-water-bill/] and the BBC^[https://www.bbc.co.uk/news/articles/c4nn46rjej6o].
 
 We present two versions of the dry-spill totals to reflect differences in published samples:
 
 - **EA sample**: aggregates across all companies and sites.
-- **BBC sample**: excludes Welsh Water entirely and discounts *"more than one-third of United Utilities' overflows"* where *“the discharge data provided to the EA did not correspond to their 2022 annual report summarising this data.”* 
+- **BBC sample**: excludes Welsh Water and removes the subset of United Utilities sites whose discharge data appear inconsistent with the 2022 annual report summary.
 
-The EA reports **20,000 dry spills in 2022** and **18,000 in 2023**. Our closest estimates use the criterion of no measurable rainfall (≥0.25 mm) in the preceding two days within either a $km^2$ (column 1) or a 9 $km^2$ buffer (column 2). We prefer the latter, as it is slightly more conservative.
+The EA reports **20,000 dry spills in 2022** and **18,000 in 2023**. Our closest estimates use the criterion of no measurable rainfall (≥0.25 mm) in the preceding two days within either a 1 $km^2$ grid cell (column 1) or a 9 $km^2$ buffer (column 2). We prefer the latter because it is slightly more conservative.
 
 ```{r ea}
 final_output_ea
 ```
 
-The BBC—using a more conservative methodology—reports **6,000 dry spills in 2022**. To create a comparable sample, we exclude Welsh Water and remove any United Utilities overflow site where the annual spill count exceeds 25% of the EA’s published total for that site.^[https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac] (see also @sec-02-02-incorrect-spill_data). This adjustment removes 36% of United Utilities' sites, broadly matching the BBC’s approach.
+The BBC uses a more conservative methodology and reports **6,000 dry spills in 2022**. To create a comparable sample, we exclude Welsh Water and remove any United Utilities overflow site where the annual spill count exceeds 25% of the EA's published total for that site.^[https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac] (see also @sec-02-02-incorrect-spill_data). This adjustment removes 36% of United Utilities' sites, broadly matching the BBC's approach.
 
-Our closest estimates apply the criterion of no measurable rainfall (≥0.25 mm) in the preceding four days within a 9 $km^2$ buffer around each spill site with complete rainfall coverage (column 4). However, we prefer the version that allows for sites with missing rainfall data (column 5), since—as shown in the map below—missing data occurs almost exclusively along the coast, where excluding sites would not be meaningful.
+Our closest estimates apply the criterion of no measurable rainfall (≥0.25 mm) in the preceding four days within a 9 $km^2$ buffer around each spill site with complete rainfall coverage (column 4). We prefer the version that keeps sites with missing rainfall data (column 5), since the dry-spill site map in @sec-04-03-dry-spill-locations shows that missing data is concentrated almost entirely along the coast.
 
 ```{r bbc}
 final_output_bbc
 ```
 
-Going forward, we therefore report results using two definitions only: **(i) no measurable rainfall (≥0.25 mm) in the preceding two days within a 9 $km^2$ buffer, and (ii) no measurable rainfall in the preceding four days within a 9 $km^2$ buffer.**
+From this point on, we report results using two definitions only: **(i) no measurable rainfall (≥0.25 mm) in the preceding two days within a 9 $km^2$ buffer, and (ii) no measurable rainfall in the preceding four days within a 9 $km^2$ buffer.**
 
+## Daily Rainfall and Spill Probability {#sec-04-10-daily-rain-spill}
+
+At the daily site level, `spill_count` is binary (0/1), so the rainfall regressions focus on spill incidence (`spill_any`). We estimate distributed-lag logit models for the probability of a spill day and then use spill hours to show how intensity varies across rainfall regimes.
+
+```{r prepare-daily-panel}
+daily_path <- here::here(
+  "data",
+  "processed",
+  "agg_spill_stats",
+  "agg_spill_daily.parquet"
+)
+
+dat_daily <- arrow::read_parquet(
+  daily_path,
+  col_select = c(
+    "site_id",
+    "water_company",
+    "date",
+    "year",
+    "spill_count",
+    "spill_hrs",
+    "rainfall_r9_weak",
+    "site_missing"
+  )
+) |>
+  data.table::as.data.table()
+
+dat_daily <- dat_daily[
+  site_missing == FALSE &
+    !is.na(spill_count) &
+    !is.na(rainfall_r9_weak)
+]
+
+dat_daily[, spill_any := as.integer(spill_count == 1L)]
+data.table::setorder(dat_daily, site_id, date)
+
+dat_daily[, `:=`(
+  rain_t = rainfall_r9_weak,
+  rain_l1 = data.table::shift(rainfall_r9_weak, 1L),
+  rain_l2 = data.table::shift(rainfall_r9_weak, 2L),
+  rain_l3 = data.table::shift(rainfall_r9_weak, 3L),
+  rain_l4 = data.table::shift(rainfall_r9_weak, 4L),
+  rain_l5 = data.table::shift(rainfall_r9_weak, 5L),
+  rain_l6 = data.table::shift(rainfall_r9_weak, 6L),
+  rain_l7 = data.table::shift(rainfall_r9_weak, 7L)
+), by = site_id]
+
+dat_daily[, `:=`(
+  dry_t = as.integer(rain_t < 0.25),
+  dry_l1 = as.integer(rain_l1 < 0.25),
+  dry_l2 = as.integer(rain_l2 < 0.25),
+  dry_l3 = as.integer(rain_l3 < 0.25),
+  dry_l4 = as.integer(rain_l4 < 0.25),
+  dry_l5 = as.integer(rain_l5 < 0.25),
+  dry_l6 = as.integer(rain_l6 < 0.25),
+  dry_l7 = as.integer(rain_l7 < 0.25)
+)]
+
+dat_daily_lag4 <- dat_daily[!is.na(rain_l4)]
+dat_daily_lag7 <- dat_daily[!is.na(rain_l7)]
+
+binary_check <- dat_daily[, .N, by = spill_count][order(spill_count)]
+knitr::kable(binary_check, caption = "Daily spill_count is binary in the estimation sample")
+```
+
+### Distributed-Lag Regressions (Logit) {#sec-04-10-01-distributed-lag}
+
+To quantify how rainfall at different horizons predicts spill incidence, we estimate distributed-lag logit models where the dependent variable is a binary indicator for whether a spill occurred on a given site-day. We include contemporaneous rainfall and up to four or seven daily lags, clustering standard errors at the site level to account for serial correlation within overflow sites.
+
+```{r daily-distributed-lag-models}
+mod_daily_lag4 <- fixest::feglm(
+  spill_any ~ rain_t + rain_l1 + rain_l2 + rain_l3 + rain_l4,
+  data = dat_daily_lag4,
+  family = "binomial",
+  vcov = ~site_id
+)
+
+mod_daily_lag7 <- fixest::feglm(
+  spill_any ~ rain_t + rain_l1 + rain_l2 + rain_l3 + rain_l4 + rain_l5 + rain_l6 + rain_l7,
+  data = dat_daily_lag7,
+  family = "binomial",
+  vcov = ~site_id
+)
+
+coef_map_rain <- c(
+  rain_t = "Rain (t)",
+  rain_l1 = "Rain (t-1)",
+  rain_l2 = "Rain (t-2)",
+  rain_l3 = "Rain (t-3)",
+  rain_l4 = "Rain (t-4)",
+  rain_l5 = "Rain (t-5)",
+  rain_l6 = "Rain (t-6)",
+  rain_l7 = "Rain (t-7)"
+)
+
+modelsummary::modelsummary(
+  list(
+    "Logit: Lags 0-4" = mod_daily_lag4,
+    "Logit: Lags 0-7" = mod_daily_lag7
+  ),
+  coef_map = coef_map_rain,
+  estimate = "{estimate}{stars}",
+  statistic = "({std.error})",
+  gof_omit = "AIC|BIC|Log.Lik|F|RMSE|Pseudo|Within|R2",
+  stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+  output = "markdown"
+)
+```
+
+All coefficients are highly significant and positive, confirming that rainfall raises the probability of a spill. The effect is heavily front-loaded: contemporaneous rainfall has the largest coefficient (≈0.099 in log-odds), with the first lag nearly as large (≈0.092). By the second day the coefficient drops by roughly two-thirds, and it continues to decay gradually through lags 3–7. Even at lag 7, the effect remains statistically significant (≈0.009), suggesting that antecedent moisture conditions matter for at least a week—consistent with the time required for stormwater to percolate through catchments and reach the sewer network.
+
+The 7-lag specification yields only a modestly higher pseudo-$R^2$ (0.174 vs. 0.172), indicating that the first five days capture most of the predictive content. This supports the short look-back windows used by the EA and the BBC (see @sec-04-01-02-definitions).
+
+#### Distributed-Lag Coefficient Plot {#sec-04-10-01-plot}
+
+```{r daily-distributed-lag-coef-plot}
+extract_lag_plot_data <- function(model, model_label, prefix = "rain_") {
+  coef_vec <- stats::coef(model)
+  vcov_mat <- stats::vcov(model)
+  se_vec <- sqrt(diag(vcov_mat))
+
+  out <- data.table::data.table(
+    term = names(coef_vec),
+    estimate = as.numeric(coef_vec),
+    std_error = as.numeric(se_vec[names(coef_vec)]),
+    model = model_label
+  )
+
+  out <- out[grepl(paste0("^", prefix), term)]
+
+  prefix_base <- sub("_$", "", prefix)
+  term_t <- paste0(prefix_base, "_t")
+  term_l <- paste0(prefix_base, "_l")
+
+  out[, lag := ifelse(term == term_t, 0L, as.integer(sub(term_l, "", term)))]
+  out[, `:=`(
+    ci_low = estimate - 1.96 * std_error,
+    ci_high = estimate + 1.96 * std_error
+  )]
+  out[order(lag)]
+}
+
+lag_plot_data <- data.table::rbindlist(
+  list(
+    extract_lag_plot_data(mod_daily_lag4, "Lags 0-4"),
+    extract_lag_plot_data(mod_daily_lag7, "Lags 0-7")
+  ),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+ggplot(
+  lag_plot_data,
+  aes(x = lag, y = estimate, color = model, group = model)
+) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  geom_errorbar(
+    aes(ymin = ci_low, ymax = ci_high),
+    width = 0.15,
+    alpha = 0.8
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 0:7) +
+  scale_color_viridis_d(option = "magma", end = 0.8) +
+  labs(
+    title = "Distributed-Lag Rainfall Effects on Spill Probability (Logit Coefficients)",
+    x = "Lag (days)",
+    y = "Coefficient on rainfall (log-odds scale)",
+    color = "Specification"
+  ) +
+  theme_pref
+```
+
+The coefficient plot makes the decay structure visually apparent: the effect of rainfall on spill probability is concentrated in the first two days, with a sharp drop-off between lag 1 and lag 2. The two specifications overlap closely for lags 0–4, while the additional lags 5–7 remain positive but small, with confidence intervals narrowing toward zero.
+
+### 0.25 mm Threshold Models {#sec-04-10-02-threshold}
+
+The continuous-rainfall specifications above show a clear positive relationship between rainfall and spills. A related question is whether the dry-day rule itself, defined using the 0.25 mm threshold in @sec-04-01-02-definitions, predicts lower spill probability. That is the rule that underpins our dry-spill counts. We therefore replace the continuous rainfall lags with dry-day indicators ($\mathbb{1}[\text{rain} < 0.25\text{mm}]$) at each lag.
+
+```{r daily-threshold-models}
+mod_threshold_2day <- fixest::feglm(
+  spill_any ~ dry_t + dry_l1,
+  data = dat_daily[!is.na(dry_l1)],
+  family = "binomial",
+  vcov = ~site_id
+)
+
+mod_threshold_7day <- fixest::feglm(
+  spill_any ~ dry_t + dry_l1 + dry_l2 + dry_l3 + dry_l4 + dry_l5 + dry_l6 + dry_l7,
+  data = dat_daily_lag7,
+  family = "binomial",
+  vcov = ~site_id
+)
+
+coef_map_dry <- c(
+  dry_t = "Dry day (t < 0.25mm)",
+  dry_l1 = "Dry day (t-1)",
+  dry_l2 = "Dry day (t-2)",
+  dry_l3 = "Dry day (t-3)",
+  dry_l4 = "Dry day (t-4)",
+  dry_l5 = "Dry day (t-5)",
+  dry_l6 = "Dry day (t-6)",
+  dry_l7 = "Dry day (t-7)"
+)
+
+modelsummary::modelsummary(
+  list(
+    "Threshold: 2-day (t,t-1)" = mod_threshold_2day,
+    "Threshold: 8-day (t...t-7)" = mod_threshold_7day
+  ),
+  coef_map = coef_map_dry,
+  estimate = "{estimate}{stars}",
+  statistic = "({std.error})",
+  gof_omit = "AIC|BIC|Log.Lik|F|RMSE|Pseudo|Within|R2",
+  stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+  output = "markdown"
+)
+```
+
+All dry-day coefficients are large, negative, and highly significant, confirming that dry conditions substantially reduce the odds of a spill. Contemporaneous dryness has the strongest effect (≈−1.17 in log-odds in the 8-day specification), followed closely by the first lag (≈−0.99). The magnitude drops sharply at lag 2 (≈−0.36) and stabilises around −0.11 to −0.15 for lags 3–7. This mirrors the continuous-rainfall results: the first two days carry the most information, with diminishing but non-negligible effects persisting through the week.
+
+The two-day specification—using only $t$ and $t{-}1$—captures the dominant share of the dry-day signal, providing empirical support for the EA's two-day look-back window. The four-day window used by the BBC adds further conservatism but only modest additional explanatory power.
+
+```{r daily-threshold-coef-plot}
+threshold_plot_data <- extract_lag_plot_data(
+  mod_threshold_7day,
+  "Dry-day threshold lags",
+  prefix = "dry_"
+)
+
+threshold_plot_data[, lag_label := paste0("t-", lag)]
+threshold_plot_data[lag == 0, lag_label := "t"]
+
+ggplot(
+  threshold_plot_data,
+  aes(x = lag, y = estimate)
+) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  geom_errorbar(
+    aes(ymin = ci_low, ymax = ci_high),
+    width = 0.15,
+    color = viridis::viridis(1, option = "magma", end = 0.8)
+  ) +
+  geom_line(color = viridis::viridis(1, option = "magma", end = 0.8), linewidth = 0.8) +
+  geom_point(color = viridis::viridis(1, option = "magma", end = 0.8), size = 2) +
+  scale_x_continuous(
+    breaks = 0:7,
+    labels = c("t", "t-1", "t-2", "t-3", "t-4", "t-5", "t-6", "t-7")
+  ) +
+  labs(
+    title = "0.25mm Dry-Day Threshold Effects on Spill Probability",
+    x = "Lag (days)",
+    y = "Coefficient on dry-day indicator (log-odds scale)"
+  ) +
+  theme_pref
+```
+
+The coefficient plot reinforces the step-function pattern: the dry-day effect is strongest at lags 0 and 1, drops abruptly at lag 2, and flattens thereafter. This suggests that the 0.25 mm threshold effectively separates "wet" from "dry" conditions for the purpose of spill classification, and that the most informative look-back is two days. The persistence of small but significant effects at longer lags is consistent with slow drainage in some catchments, but the marginal predictive gain from extending the window beyond four days is limited.
+
+### Spill-Hours Distribution by Rain Regime {#sec-04-10-03-distribution}
+
+The logit models above focus on whether a spill happens. This section turns to *intensity*, measured in spill hours, across four rainfall regimes: dry day (≤0.25 mm), moderate rain (>0.25-10 mm), heavy rain (>10-20 mm), and very heavy rain (>20 mm).
+
+```{r daily-rain-regimes}
+rain_regime_levels <- c(
+  "Dry day (0-0.25 mm)",
+  "Moderate (0.25-10 mm)",
+  "Heavy (10-20 mm)",
+  "Very heavy (>20 mm)"
+)
+
+dat_daily[, rain_regime := cut(
+  rain_t,
+  breaks = c(-Inf, 0.25, 10, 20, Inf),
+  labels = rain_regime_levels,
+  right = TRUE,
+  include.lowest = TRUE
+)]
+
+regime_summary <- dat_daily[
+  !is.na(rain_regime),
+  .(
+    obs_site_days = .N,
+    spill_days = sum(spill_any, na.rm = TRUE),
+    share_spill_days = mean(spill_any, na.rm = TRUE),
+    mean_spill_hrs = mean(spill_hrs, na.rm = TRUE),
+    p10_spill_hrs = as.numeric(stats::quantile(spill_hrs, probs = 0.10, na.rm = TRUE)),
+    p25_spill_hrs = as.numeric(stats::quantile(spill_hrs, probs = 0.25, na.rm = TRUE)),
+    p50_spill_hrs = as.numeric(stats::quantile(spill_hrs, probs = 0.50, na.rm = TRUE)),
+    p75_spill_hrs = as.numeric(stats::quantile(spill_hrs, probs = 0.75, na.rm = TRUE)),
+    p90_spill_hrs = as.numeric(stats::quantile(spill_hrs, probs = 0.90, na.rm = TRUE))
+  ),
+  by = rain_regime
+]
+
+regime_summary[, rain_regime := factor(rain_regime, levels = rain_regime_levels)]
+data.table::setorder(regime_summary, rain_regime)
+
+reactable(
+  regime_summary,
+  columns = list(
+    rain_regime = colDef(
+      name = "Daily Rainfall",
+      minWidth = 150
+    ),
+    obs_site_days = colDef(
+      name = "N",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    spill_days = colDef(
+      name = "# Spill Days",
+      format = colFormat(separators = TRUE, digits = 0)
+    ),
+    share_spill_days = colDef(
+      name = "Share Spill Days",
+      format = colFormat(percent = TRUE, digits = 1)
+    ),
+    mean_spill_hrs = colDef(
+      name = "Mean (hrs)",
+      format = colFormat(separators = TRUE, digits = 2)
+    ),
+    p10_spill_hrs = colDef(
+      name = "P10",
+      format = colFormat(separators = TRUE, digits = 2)
+    ),
+    p25_spill_hrs = colDef(
+      name = "P25",
+      format = colFormat(separators = TRUE, digits = 2)
+    ),
+    p50_spill_hrs = colDef(
+      name = "P50",
+      format = colFormat(separators = TRUE, digits = 2)
+    ),
+    p75_spill_hrs = colDef(
+      name = "P75",
+      format = colFormat(separators = TRUE, digits = 2)
+    ),
+    p90_spill_hrs = colDef(
+      name = "P90",
+      format = colFormat(separators = TRUE, digits = 2)
+    )
+  ),
+  columnGroups = list(
+    colGroup(
+      name = "Observations",
+      columns = c("obs_site_days")
+    ),
+    colGroup(
+      name = "Spill Days",
+      columns = c("spill_days", "share_spill_days")
+    ),
+    colGroup(
+      name = "Spill Hours Distribution",
+      columns = c(
+        "mean_spill_hrs",
+        "p10_spill_hrs",
+        "p25_spill_hrs",
+        "p50_spill_hrs",
+        "p75_spill_hrs",
+        "p90_spill_hrs"
+      )
+    )
+  ),
+  defaultColDef = colDef(
+    headerStyle = list(
+      fontSize = "0.8em",
+      whiteSpace = "wrap"
+    ),
+    style = list(
+      fontSize = "0.75em"
+    ),
+    minWidth = 80
+  ),
+  resizable = TRUE,
+  filterable = FALSE,
+  defaultPageSize = 10,
+  compact = TRUE,
+  style = list(maxWidth = "100%", overflowX = "auto")
+)
+```
+
+The gradient across regimes remains steep and monotonic under this broader classification. Dry days are associated with the lowest spill incidence and shortest events, while moderate, heavy, and very heavy rainfall days show progressively higher spill probabilities and longer spill durations. The upper tail of the spill-hours distribution also thickens as rainfall intensifies, indicating that both the likelihood and duration of spills increase materially once daily rainfall rises above the dry-day threshold.
+
+```{r daily-ecdf-spill-hours-unconditional}
+set.seed(123)
+ecdf_unconditional <- dat_daily[
+  !is.na(rain_regime),
+  .SD[sample.int(.N, min(.N, 150000L))],
+  by = rain_regime
+]
+
+ggplot(
+  ecdf_unconditional,
+  aes(x = spill_hrs, color = rain_regime)
+) +
+  stat_ecdf(linewidth = 0.8) +
+  scale_color_viridis_d(option = "magma", end = 0.9) +
+  scale_x_continuous(trans = "log1p") +
+  labs(
+    title = "ECDF of Spill Hours by Rainfall Regime (All Site-Days)",
+    x = "Spill hours (log1p scale)",
+    y = "Cumulative share of site-days",
+    color = "Daily Rainfall"
+  ) +
+  theme_pref
+```
+
+The empirical CDFs confirm that the dry-day distribution is stacked heavily at zero: the curve rises almost vertically near the origin for the `Dry day (0-0.25 mm)` regime, indicating that the vast majority of dry site-days record no spill at all. Wetter regimes shift the distribution rightward, with the `Very heavy (>20 mm)` curve notably flatter and reaching higher spill-hour values before converging to 1. The separation between regimes is clearest in the lower tail, suggesting that rainfall primarily affects whether a spill occurs rather than its duration conditional on occurrence.
+
+```{r daily-spill-hours-conditional-violin}
+set.seed(123)
+spill_pos <- dat_daily[
+  spill_any == 1 & !is.na(rain_regime),
+  .SD[sample.int(.N, min(.N, 100000L))],
+  by = rain_regime
+]
+
+ggplot(
+  spill_pos,
+  aes(x = rain_regime, y = log1p(spill_hrs), fill = rain_regime)
+) +
+  geom_violin(trim = FALSE, alpha = 0.7, scale = "width") +
+  geom_boxplot(width = 0.12, fill = "white", outlier.shape = NA) +
+  scale_fill_viridis_d(option = "magma", end = 0.9) +
+  labs(
+    title = "Distribution of Spill Hours on Spill Days by Rainfall Regime",
+    x = "Daily Rainfall",
+    y = "log(1 + spill hours)"
+  ) +
+  theme_pref +
+  theme(legend.position = "none")
+```
+
+The violin plots, restricted to site-days where a spill did occur, show that even conditional on spilling, wetter regimes produce longer events. The median spill duration increases with rainfall, and the upper tails of the distributions stretch progressively further. However, the overlap between regimes is substantial: short spills occur even under heavy rainfall, and long spills occasionally arise on relatively dry days. This dispersion likely reflects heterogeneity in sewer capacity, catchment size, and local drainage conditions.
+
+Overall, the evidence lines up well with the rainfall-based dry-spill classification. Contemporaneous and one-day-lagged rainfall are the dominant predictors of spill incidence, the 0.25 mm threshold cleanly separates spill-prone from low-risk conditions, and spill intensity rises steadily across rainfall regimes. The two-day look-back window captures most of the rainfall signal, while extending to four days adds conservatism with only limited extra predictive power, consistent with the choices validated in @sec-04-02-estimating-dry-spills.
+
+## Dry Spill vs Rainfall {#sec-04-06-dry-vs-rain}
+
+The daily models above use day-level data. The monthly plots below show the same relationship at a coarser level and make it easier to see how dry-spill counts, hours, and dry-spill shares vary with rainfall.
+
+```{r prepare-dry-rain}
+dat_mo_rain <- left_join(
+  dat_mo, rainfall_mo, 
+  by = join_by(site_id, water_company, month_id)
+)
+
+# Build reusable site-month dataset with rainfall and dry spill metrics
+dat_mo_rain_df <- dat_mo_rain |>
+  dplyr::mutate(
+    dry_rate = dplyr::if_else(
+      spill_count_mo > 0,
+      dry_spill_count_mo_r1_d01_weak / spill_count_mo,
+      NA_real_
+    )
+  ) |>
+  dplyr::filter(!is.na(rainfall_r9_mo))
+```
+
+### Scatter with Marginal Distributions {#sec-04-06-01-scatter}
+
+```{r scatter-marginals}
+base_point_col <- viridis::viridis(1, option = "magma")
+
+# Scatter: Count
+p_scatter_count <- ggplot(
+  dat_mo_rain_df,
+  aes(x = rainfall_r9_mo, y = dry_spill_count_mo_r1_d01_weak)) +
+  geom_point(alpha = 0.2, size = 0.7, color = base_point_col) +
+  labs(
+    title = "Rainfall vs Dry Spill Count (Site-Month)",
+    x = "Monthly Rainfall (mm, 9-cell)",
+    y = "Dry Spill Count"
+  ) +
+  theme_pref
+
+plot_scatter_count_marg <- ggExtra::ggMarginal(
+  p_scatter_count,
+  type = "histogram",
+  fill = "grey70",
+  alpha = 0.6,
+  bins = 40
+)
+
+# Scatter: Duration
+p_scatter_hrs <- ggplot(
+  dat_mo_rain_df,
+  aes(x = rainfall_r9_mo, y = dry_spill_hrs_mo_r1_d01_weak)
+) +
+  geom_point(alpha = 0.2, size = 0.7, color = base_point_col) +
+  labs(
+    title = "Rainfall vs Dry Spill Duration (Site-Month)",
+    x = "Monthly Rainfall (mm, 9-cell)",
+    y = "Dry Spill Duration (hours)"
+  ) +
+  theme_pref
+
+plot_scatter_hrs_marg <- ggExtra::ggMarginal(
+  p_scatter_hrs,
+  type = "histogram",
+  fill = "grey70",
+  alpha = 0.6,
+  bins = 40
+)
+
+# Scatter: Rate (dry/total)
+p_scatter_rate <- ggplot(
+  dplyr::filter(dat_mo_rain_df, !is.na(dry_rate) & is.finite(dry_rate)),
+  aes(x = rainfall_r9_mo, y = dry_rate)
+) +
+  geom_point(alpha = 0.25, size = 0.7, color = base_point_col) +
+  labs(
+    title = "Rainfall vs Share of Dry/All Spills (Site-Month)",
+    x = "Monthly Rainfall (mm, 9-cell)",
+    y = "Dry Spills / Total Spills"
+  ) +
+  theme_pref
+
+plot_scatter_rate_marg <- ggExtra::ggMarginal(
+  p_scatter_rate,
+  type = "histogram",
+  fill = "grey70",
+  alpha = 0.6,
+  bins = 40
+)
+```
+
+::: panel-tabset
+#### Count
+
+```{r show-scatter-marg-count}
+plot_scatter_count_marg
+```
+
+#### Duration
+
+```{r show-scatter-marg-hrs}
+plot_scatter_hrs_marg
+```
+
+#### Rate
+
+```{r show-scatter-marg-rate}
+plot_scatter_rate_marg
+```
+
+:::
 
 ## Location of Dry Spills {#sec-04-03-dry-spill-locations}
 
@@ -924,9 +1472,9 @@ walk2(
 
 ### Total Dry Spills {#sec-04-04-01-total}
 
-The maps below display the total number of dry spills, aggregated at the Middle Layer Super Output Area (MSOA)---a standard statistical geography in England designed to represent areas with roughly similar population sizes (~8000 people or ~3000 households).
+The maps below show the total number of dry spills aggregated to Middle Layer Super Output Areas (MSOAs), a standard statistical geography in England designed to cover areas with broadly similar population sizes (~8000 people or ~3000 households).
 
-Because MSOAs differ considerably in land area, it's difficult to draw conclusions. Still, relative to the overall spill distribution (see @sec-03-03-01-total), dry spills are concentrated in a smaller set of MSOAs. Within this subset, spill activity is particularly pronounced in the North and South West.
+MSOAs vary a lot in land area, so raw totals need to be read with care. Even so, relative to the overall spill distribution (see @sec-03-03-01-total), dry spills are concentrated in a smaller set of MSOAs, with especially high activity in the North and South West.
 
 ::: panel-tabset
 #### Count
@@ -942,358 +1490,9 @@ Because MSOAs differ considerably in land area, it's difficult to draw conclusio
 ```
 :::
 
-## Daily Rainfall and Spill Probability {#sec-04-10-daily-rain-spill}
-
-At the daily site level, `spill_count` is binary (0/1), so the relevant outcome for rainfall regressions is spill incidence (`spill_any`). We therefore estimate distributed-lag logit models for the probability of a spill day and use spill hours to describe intensity distributions across rainfall regimes.
-
-```{r prepare-daily-panel}
-daily_path <- here::here(
-  "data",
-  "processed",
-  "agg_spill_stats",
-  "agg_spill_daily.parquet"
-)
-
-dat_daily <- arrow::read_parquet(
-  daily_path,
-  col_select = c(
-    "site_id",
-    "water_company",
-    "date",
-    "year",
-    "spill_count",
-    "spill_hrs",
-    "rainfall_r9_weak",
-    "site_missing"
-  )
-) |>
-  data.table::as.data.table()
-
-dat_daily <- dat_daily[
-  site_missing == FALSE &
-    !is.na(spill_count) &
-    !is.na(rainfall_r9_weak)
-]
-
-dat_daily[, spill_any := as.integer(spill_count == 1L)]
-data.table::setorder(dat_daily, site_id, date)
-
-dat_daily[, `:=`(
-  rain_t = rainfall_r9_weak,
-  rain_l1 = data.table::shift(rainfall_r9_weak, 1L),
-  rain_l2 = data.table::shift(rainfall_r9_weak, 2L),
-  rain_l3 = data.table::shift(rainfall_r9_weak, 3L),
-  rain_l4 = data.table::shift(rainfall_r9_weak, 4L),
-  rain_l5 = data.table::shift(rainfall_r9_weak, 5L),
-  rain_l6 = data.table::shift(rainfall_r9_weak, 6L),
-  rain_l7 = data.table::shift(rainfall_r9_weak, 7L)
-), by = site_id]
-
-dat_daily[, `:=`(
-  dry_t = as.integer(rain_t < 0.25),
-  dry_l1 = as.integer(rain_l1 < 0.25),
-  dry_l2 = as.integer(rain_l2 < 0.25),
-  dry_l3 = as.integer(rain_l3 < 0.25),
-  dry_l4 = as.integer(rain_l4 < 0.25),
-  dry_l5 = as.integer(rain_l5 < 0.25),
-  dry_l6 = as.integer(rain_l6 < 0.25),
-  dry_l7 = as.integer(rain_l7 < 0.25)
-)]
-
-dat_daily_lag4 <- dat_daily[!is.na(rain_l4)]
-dat_daily_lag7 <- dat_daily[!is.na(rain_l7)]
-
-binary_check <- dat_daily[, .N, by = spill_count][order(spill_count)]
-knitr::kable(binary_check, caption = "Daily spill_count is binary in the estimation sample")
-```
-
-### Distributed-Lag Regressions (Logit) {#sec-04-10-01-distributed-lag}
-
-To quantify how rainfall at different horizons predicts spill incidence, we estimate distributed-lag logit models where the dependent variable is a binary indicator for whether a spill occurred on a given site-day. We include contemporaneous rainfall and up to four or seven daily lags, clustering standard errors at the site level to account for serial correlation within overflow sites.
-
-```{r daily-distributed-lag-models}
-mod_daily_lag4 <- fixest::feglm(
-  spill_any ~ rain_t + rain_l1 + rain_l2 + rain_l3 + rain_l4,
-  data = dat_daily_lag4,
-  family = "binomial",
-  vcov = ~site_id
-)
-
-mod_daily_lag7 <- fixest::feglm(
-  spill_any ~ rain_t + rain_l1 + rain_l2 + rain_l3 + rain_l4 + rain_l5 + rain_l6 + rain_l7,
-  data = dat_daily_lag7,
-  family = "binomial",
-  vcov = ~site_id
-)
-
-coef_map_rain <- c(
-  rain_t = "Rain (t)",
-  rain_l1 = "Rain (t-1)",
-  rain_l2 = "Rain (t-2)",
-  rain_l3 = "Rain (t-3)",
-  rain_l4 = "Rain (t-4)",
-  rain_l5 = "Rain (t-5)",
-  rain_l6 = "Rain (t-6)",
-  rain_l7 = "Rain (t-7)"
-)
-
-modelsummary::modelsummary(
-  list(
-    "Logit: Lags 0-4" = mod_daily_lag4,
-    "Logit: Lags 0-7" = mod_daily_lag7
-  ),
-  coef_map = coef_map_rain,
-  estimate = "{estimate}{stars}",
-  statistic = "({std.error})",
-  gof_omit = "AIC|BIC|Log.Lik|F|RMSE|Pseudo|Within|R2",
-  stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  output = "markdown"
-)
-```
-
-All coefficients are highly significant and positive, confirming that rainfall raises the probability of a spill. The effect is heavily front-loaded: contemporaneous rainfall has the largest coefficient (≈0.099 in log-odds), with the first lag nearly as large (≈0.092). By the second day the coefficient drops by roughly two-thirds, and it continues to decay gradually through lags 3–7. Even at lag 7, the effect remains statistically significant (≈0.009), suggesting that antecedent moisture conditions matter for at least a week—consistent with the time required for stormwater to percolate through catchments and reach the sewer network.
-
-The 7-lag specification yields only a modestly higher pseudo-$R^2$ (0.174 vs. 0.172), indicating that the first five days capture the bulk of the predictive content. This supports the use of short look-back windows (2–4 days) for dry-spill classification, as adopted by the EA and BBC (see @sec-04-01-dry-spill-definitions).
-
-#### Distributed-Lag Coefficient Plot {#sec-04-10-01-plot}
-
-```{r daily-distributed-lag-coef-plot}
-extract_lag_plot_data <- function(model, model_label, prefix = "rain_") {
-  coef_vec <- stats::coef(model)
-  vcov_mat <- stats::vcov(model)
-  se_vec <- sqrt(diag(vcov_mat))
-
-  out <- data.table::data.table(
-    term = names(coef_vec),
-    estimate = as.numeric(coef_vec),
-    std_error = as.numeric(se_vec[names(coef_vec)]),
-    model = model_label
-  )
-
-  out <- out[grepl(paste0("^", prefix), term)]
-
-  prefix_base <- sub("_$", "", prefix)
-  term_t <- paste0(prefix_base, "_t")
-  term_l <- paste0(prefix_base, "_l")
-
-  out[, lag := ifelse(term == term_t, 0L, as.integer(sub(term_l, "", term)))]
-  out[, `:=`(
-    ci_low = estimate - 1.96 * std_error,
-    ci_high = estimate + 1.96 * std_error
-  )]
-  out[order(lag)]
-}
-
-lag_plot_data <- data.table::rbindlist(
-  list(
-    extract_lag_plot_data(mod_daily_lag4, "Lags 0-4"),
-    extract_lag_plot_data(mod_daily_lag7, "Lags 0-7")
-  ),
-  use.names = TRUE,
-  fill = TRUE
-)
-
-ggplot(
-  lag_plot_data,
-  aes(x = lag, y = estimate, color = model, group = model)
-) +
-  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
-  geom_errorbar(
-    aes(ymin = ci_low, ymax = ci_high),
-    width = 0.15,
-    alpha = 0.8
-  ) +
-  geom_line(linewidth = 0.8) +
-  geom_point(size = 2) +
-  scale_x_continuous(breaks = 0:7) +
-  scale_color_viridis_d(option = "magma", end = 0.8) +
-  labs(
-    title = "Distributed-Lag Rainfall Effects on Spill Probability (Logit Coefficients)",
-    x = "Lag (days)",
-    y = "Coefficient on rainfall (log-odds scale)",
-    color = "Specification"
-  ) +
-  theme_pref
-```
-
-The coefficient plot makes the decay structure visually apparent: the effect of rainfall on spill probability is concentrated in the first two days, with a sharp drop-off between lag 1 and lag 2. The two specifications overlap closely for lags 0–4, while the additional lags 5–7 remain positive but small, with confidence intervals narrowing toward zero.
-
-### 0.25 mm Threshold Models {#sec-04-10-02-threshold}
-
-The continuous rainfall specifications above confirm that more rain means more spills. We now ask a complementary question: does the *absence* of rain—defined using the 0.25 mm threshold from @sec-04-01-dry-spill-definitions—predict lower spill probability? This directly tests the binary classification that underlies our dry-spill counts. We replace the continuous rainfall lags with dry-day indicators ($\mathbb{1}[\text{rain} < 0.25\text{mm}]$) at each lag.
-
-```{r daily-threshold-models}
-mod_threshold_2day <- fixest::feglm(
-  spill_any ~ dry_t + dry_l1,
-  data = dat_daily[!is.na(dry_l1)],
-  family = "binomial",
-  vcov = ~site_id
-)
-
-mod_threshold_7day <- fixest::feglm(
-  spill_any ~ dry_t + dry_l1 + dry_l2 + dry_l3 + dry_l4 + dry_l5 + dry_l6 + dry_l7,
-  data = dat_daily_lag7,
-  family = "binomial",
-  vcov = ~site_id
-)
-
-coef_map_dry <- c(
-  dry_t = "Dry day (t < 0.25mm)",
-  dry_l1 = "Dry day (t-1)",
-  dry_l2 = "Dry day (t-2)",
-  dry_l3 = "Dry day (t-3)",
-  dry_l4 = "Dry day (t-4)",
-  dry_l5 = "Dry day (t-5)",
-  dry_l6 = "Dry day (t-6)",
-  dry_l7 = "Dry day (t-7)"
-)
-
-modelsummary::modelsummary(
-  list(
-    "Threshold: 2-day (t,t-1)" = mod_threshold_2day,
-    "Threshold: 8-day (t...t-7)" = mod_threshold_7day
-  ),
-  coef_map = coef_map_dry,
-  estimate = "{estimate}{stars}",
-  statistic = "({std.error})",
-  gof_omit = "AIC|BIC|Log.Lik|F|RMSE|Pseudo|Within|R2",
-  stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  output = "markdown"
-)
-```
-
-All dry-day coefficients are large, negative, and highly significant, confirming that dry conditions substantially reduce the odds of a spill. Contemporaneous dryness has the strongest effect (≈−1.17 in log-odds in the 8-day specification), followed closely by the first lag (≈−0.99). The magnitude drops sharply at lag 2 (≈−0.36) and stabilises around −0.11 to −0.15 for lags 3–7. This mirrors the continuous-rainfall results: the first two days carry the most information, with diminishing but non-negligible effects persisting through the week.
-
-The two-day specification—using only $t$ and $t{-}1$—captures the dominant share of the dry-day signal, providing empirical support for the EA's two-day look-back window. The four-day window used by the BBC adds further conservatism but only modest additional explanatory power.
-
-```{r daily-threshold-coef-plot}
-threshold_plot_data <- extract_lag_plot_data(
-  mod_threshold_7day,
-  "Dry-day threshold lags",
-  prefix = "dry_"
-)
-
-threshold_plot_data[, lag_label := paste0("t-", lag)]
-threshold_plot_data[lag == 0, lag_label := "t"]
-
-ggplot(
-  threshold_plot_data,
-  aes(x = lag, y = estimate)
-) +
-  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
-  geom_errorbar(
-    aes(ymin = ci_low, ymax = ci_high),
-    width = 0.15,
-    color = viridis::viridis(1, option = "magma", end = 0.8)
-  ) +
-  geom_line(color = viridis::viridis(1, option = "magma", end = 0.8), linewidth = 0.8) +
-  geom_point(color = viridis::viridis(1, option = "magma", end = 0.8), size = 2) +
-  scale_x_continuous(
-    breaks = 0:7,
-    labels = c("t", "t-1", "t-2", "t-3", "t-4", "t-5", "t-6", "t-7")
-  ) +
-  labs(
-    title = "0.25mm Dry-Day Threshold Effects on Spill Probability",
-    x = "Lag (days)",
-    y = "Coefficient on dry-day indicator (log-odds scale)"
-  ) +
-  theme_pref
-```
-
-The coefficient plot reinforces the step-function pattern: the dry-day effect is strongest at lags 0 and 1, drops abruptly at lag 2, and flattens thereafter. This suggests that the 0.25 mm threshold effectively separates "wet" from "dry" conditions for the purpose of spill classification, and that the most informative look-back is two days. The persistence of small but significant effects at longer lags is consistent with slow drainage in some catchments, but the marginal predictive gain from extending the window beyond four days is limited.
-
-### Spill-Hours Distribution by Rain Regime {#sec-04-10-03-distribution}
-
-The logit models above analyse whether a spill occurs; they say nothing about how long it lasts. We now examine the *intensity* of spills, measured in hours, across four rainfall regimes: dry day (≤0.25 mm), moderate rain (>0.25-10 mm), heavy rain (>10-20 mm), and very heavy rain (>20 mm).
-
-```{r daily-rain-regimes}
-dat_daily[, rain_regime := cut(
-  rain_t,
-  breaks = c(-Inf, 0.25, 10, 20, Inf),
-  labels = c("Dry day <=0.25", "Moderate 0.25-10", "Heavy 10-20", "Very heavy >20"),
-  right = TRUE,
-  include.lowest = TRUE
-)]
-
-regime_summary <- dat_daily[,
-  .(
-    n_days = .N,
-    spill_day_share = mean(spill_any, na.rm = TRUE),
-    mean_spill_hrs = mean(spill_hrs, na.rm = TRUE),
-    median_spill_hrs = median(spill_hrs, na.rm = TRUE),
-    p90_spill_hrs = stats::quantile(spill_hrs, probs = 0.9, na.rm = TRUE),
-    p95_spill_hrs = stats::quantile(spill_hrs, probs = 0.95, na.rm = TRUE),
-    zero_spill_hrs_share = mean(spill_hrs == 0, na.rm = TRUE)
-  ),
-  by = rain_regime
-][order(rain_regime)]
-
-knitr::kable(
-  regime_summary,
-  digits = 3,
-  caption = "Daily spill incidence and spill-hours moments by rainfall regime"
-)
-```
-
-The gradient across regimes remains steep and monotonic under this broader classification. Dry days are associated with the lowest spill incidence and shortest events, while moderate, heavy, and very heavy rainfall days show progressively higher spill probabilities and longer spill durations. The upper tail of the spill-hours distribution also thickens as rainfall intensifies, indicating that both the likelihood and duration of spills increase materially once daily rainfall rises above the dry-day threshold.
-
-```{r daily-ecdf-spill-hours-unconditional}
-set.seed(123)
-ecdf_unconditional <- dat_daily[
-  !is.na(rain_regime),
-  .SD[sample.int(.N, min(.N, 150000L))],
-  by = rain_regime
-]
-
-ggplot(
-  ecdf_unconditional,
-  aes(x = spill_hrs, color = rain_regime)
-) +
-  stat_ecdf(linewidth = 0.8) +
-  scale_color_viridis_d(option = "magma", end = 0.9) +
-  scale_x_continuous(trans = "log1p") +
-  labs(
-    title = "ECDF of Spill Hours by Rainfall Regime (All Site-Days)",
-    x = "Spill hours (log1p scale)",
-    y = "Cumulative share of site-days",
-    color = "Rain regime (mm/day)"
-  ) +
-  theme_pref
-```
-
-The empirical CDFs confirm that the dry-day distribution is stacked heavily at zero: the curve rises almost vertically near the origin for the `Dry day <=0.25` regime, indicating that the vast majority of dry site-days record no spill at all. Wetter regimes shift the distribution rightward, with the `Very heavy >20` curve notably flatter and reaching higher spill-hour values before converging to 1. The separation between regimes is clearest in the lower tail, suggesting that rainfall primarily affects whether a spill occurs rather than its duration conditional on occurrence.
-
-```{r daily-spill-hours-conditional-violin}
-set.seed(123)
-spill_pos <- dat_daily[
-  spill_any == 1 & !is.na(rain_regime),
-  .SD[sample.int(.N, min(.N, 100000L))],
-  by = rain_regime
-]
-
-ggplot(
-  spill_pos,
-  aes(x = rain_regime, y = log1p(spill_hrs), fill = rain_regime)
-) +
-  geom_violin(trim = FALSE, alpha = 0.7, scale = "width") +
-  geom_boxplot(width = 0.12, fill = "white", outlier.shape = NA) +
-  scale_fill_viridis_d(option = "magma", end = 0.9) +
-  labs(
-    title = "Distribution of Spill Hours on Spill Days by Rainfall Regime",
-    x = "Rain regime (mm/day)",
-    y = "log(1 + spill hours)"
-  ) +
-  theme_pref +
-  theme(legend.position = "none")
-```
-
-The violin plots, restricted to site-days where a spill did occur, show that even conditional on spilling, wetter regimes produce longer events. The median spill duration increases with rainfall, and the upper tails of the distributions stretch progressively further. However, the overlap between regimes is substantial: short spills occur even under heavy rainfall, and long spills occasionally arise on relatively dry days. This dispersion likely reflects heterogeneity in sewer capacity, catchment size, and local drainage conditions.
-
-Taken together, the results in this section provide strong empirical support for rainfall-based dry-spill classification. Contemporaneous and one-day-lagged rainfall are the dominant predictors of spill incidence; the 0.25 mm threshold effectively discriminates between spill-prone and non-spill conditions; and spill intensity increases monotonically across rainfall regimes. The two-day look-back window captures the bulk of the rainfall signal, while extending to four days adds conservatism with only marginal predictive gain—consistent with the methodological choices validated in @sec-04-02-estimating-dry-spills.
-
 ### Population-Density Weighted Dry Spills {#sec-04-04-02-popdens}
 
-The maps below display the total number of dry spills, normalised by residents per square kilometre. Spill intensity appears to be higher in the North and the South West. From these maps alone, we cannot determine whether this reflects older sewer infrastructure, higher rainfall, or both.
+These maps scale dry spills by residents per square kilometre. The North and South West still stand out. On their own, however, the maps do not tell us whether that pattern reflects older sewer infrastructure, higher rainfall, or both.
 
 ::: panel-tabset
 #### Count
@@ -1309,284 +1508,9 @@ The maps below display the total number of dry spills, normalised by residents p
 ```
 :::
 
-## Dry vs All Spill Correlation {#sec-04-05-dry-all-corr}
-
-::: panel-tabset
-#### Spill Count
-
-```{r corr-dry-all-count}
-# Prepare data
-corr_dat <- dat_yr %>%
-  dplyr::select(
-    water_company,
-    year,
-    site_id,
-    spill_count_yr,
-    dry_spill_count_yr_r1_d01_weak
-  ) %>%
-  dplyr::mutate(
-    water_company = as.factor(water_company),
-    year = as.factor(year)
-  )
-
-# Correlation (complete cases)
-correlation_count <- cor(
-  corr_dat$spill_count_yr,
-  corr_dat$dry_spill_count_yr_r1_d01_weak,
-  use = "complete.obs"
-)
-
-# Scatter with 1:1 reference
-p_count <- ggplot(
-  corr_dat,
-  aes(
-    x = spill_count_yr,
-    y = dry_spill_count_yr_r1_d01_weak,
-    color = water_company,
-    shape = year,
-    text = paste(
-      "Water Company:", water_company,
-      "<br>Year:", year,
-      "<br>All Spill Count:", spill_count_yr,
-      "<br>Dry Spill Count:", dry_spill_count_yr_r1_d01_weak,
-      "<br>Site ID:", site_id
-    )
-  )
-) +
-  geom_point(alpha = 0.5, size = 1) +
-  geom_abline(slope = 1, intercept = 0, color = "black", linewidth = 0.1) +
-  labs(
-    title = "Dry vs All: Spill Count Correlation",
-    subtitle = paste0("r = ", round(correlation_count, 3)),
-    x = "All Spill Count (yearly)",
-    y = "Dry Spill Count (yearly, 9km², 2-day, partial)",
-    color = "Water Company",
-    shape = "Year"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(face = "bold", size = 12, hjust = 0),
-    plot.subtitle = element_text(hjust = 0, size = 11),
-    legend.title = element_text(face = "bold", size = 11),
-    legend.text = element_text(size = 10),
-    legend.position = "right"
-  )
-
-interactive_plot_count <- ggplotly(
-  p_count,
-  tooltip = "text",
-  dynamicTicks = TRUE
-) %>%
-  plotly::layout(
-    showlegend = FALSE,
-    title = list(
-      text = paste0(
-        "Dry vs All: Spill Count Correlation<br>",
-        "<sup>r = ", round(correlation_count, 3), "</sup>"
-      ),
-      x = 0.5,
-      font = list(size = 12, family = "Arial")
-    )
-  ) %>%
-  config(displayModeBar = FALSE)
-
-interactive_plot_count
-```
-
-#### Spill Duration
-
-```{r corr-dry-all-hrs}
-# Prepare data
-corr_dat_hrs <- dat_yr %>%
-  dplyr::select(
-    water_company,
-    year,
-    site_id,
-    spill_hrs_yr,
-    dry_spill_hrs_yr_r1_d01_weak
-  ) %>%
-  dplyr::mutate(
-    water_company = as.factor(water_company),
-    year = as.factor(year)
-  )
-
-# Correlation (complete cases)
-correlation_hrs <- cor(
-  corr_dat_hrs$spill_hrs_yr,
-  corr_dat_hrs$dry_spill_hrs_yr_r1_d01_weak,
-  use = "complete.obs"
-)
-
-# Scatter with 1:1 reference
-p_hrs <- ggplot(
-  corr_dat_hrs,
-  aes(
-    x = spill_hrs_yr,
-    y = dry_spill_hrs_yr_r1_d01_weak,
-    color = water_company,
-    shape = year,
-    text = paste(
-      "Water Company:", water_company,
-      "<br>Year:", year,
-      "<br>All Spill Hours:", spill_hrs_yr,
-      "<br>Dry Spill Hours:", dry_spill_hrs_yr_r1_d01_weak,
-      "<br>Site ID:", site_id
-    )
-  )
-) +
-  geom_point(alpha = 0.5, size = 1) +
-  geom_abline(slope = 1, intercept = 0, color = "black", linewidth = 0.1) +
-  labs(
-    title = "Dry vs All: Spill Duration Correlation",
-    subtitle = paste0("r = ", round(correlation_hrs, 3)),
-    x = "All Spill Duration (hours, yearly)",
-    y = "Dry Spill Duration (hours, yearly, 9km², 2-day, partial)",
-    color = "Water Company",
-    shape = "Year"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(face = "bold", size = 12, hjust = 0),
-    plot.subtitle = element_text(hjust = 0, size = 11),
-    legend.title = element_text(face = "bold", size = 11),
-    legend.text = element_text(size = 10),
-    legend.position = "right"
-  )
-
-interactive_plot_hrs <- ggplotly(
-  p_hrs,
-  tooltip = "text",
-  dynamicTicks = TRUE
-) %>%
-  plotly::layout(
-    showlegend = FALSE,
-    title = list(
-      text = paste0(
-        "Dry vs All: Spill Duration Correlation<br>",
-        "<sup>r = ", round(correlation_hrs, 3), "</sup>"
-      ),
-      x = 0.5,
-      font = list(size = 12, family = "Arial")
-    )
-  ) %>%
-  config(displayModeBar = FALSE)
-
-interactive_plot_hrs
-```
-:::
-
-## Dry Spill vs Rainfall {#sec-04-06-dry-vs-rain}
-
-```{r prepare-dry-rain}
-dat_mo_rain <- left_join(
-  dat_mo, rainfall_mo, 
-  by = join_by(site_id, water_company, month_id)
-)
-
-# Build reusable site-month dataset with rainfall and dry spill metrics
-dat_mo_rain_df <- dat_mo_rain |>
-  dplyr::mutate(
-    dry_rate = dplyr::if_else(
-      spill_count_mo > 0,
-      dry_spill_count_mo_r1_d01_weak / spill_count_mo,
-      NA_real_
-    )
-  ) |>
-  dplyr::filter(!is.na(rainfall_r9_mo))
-```
-
-### Scatter with Marginal Distributions {#sec-04-06-01-scatter}
-
-```{r scatter-marginals}
-base_point_col <- viridis::viridis(1, option = "magma")
-
-# Scatter: Count
-p_scatter_count <- ggplot(
-  dat_mo_rain_df,
-  aes(x = rainfall_r9_mo, y = dry_spill_count_mo_r1_d01_weak)) +
-  geom_point(alpha = 0.2, size = 0.7, color = base_point_col) +
-  labs(
-    title = "Rainfall vs Dry Spill Count (Site-Month)",
-    x = "Monthly Rainfall (mm, 9-cell)",
-    y = "Dry Spill Count"
-  ) +
-  theme_pref
-
-plot_scatter_count_marg <- ggExtra::ggMarginal(
-  p_scatter_count,
-  type = "histogram",
-  fill = "grey70",
-  alpha = 0.6,
-  bins = 40
-)
-
-# Scatter: Duration
-p_scatter_hrs <- ggplot(
-  dat_mo_rain_df,
-  aes(x = rainfall_r9_mo, y = dry_spill_hrs_mo_r1_d01_weak)
-) +
-  geom_point(alpha = 0.2, size = 0.7, color = base_point_col) +
-  labs(
-    title = "Rainfall vs Dry Spill Duration (Site-Month)",
-    x = "Monthly Rainfall (mm, 9-cell)",
-    y = "Dry Spill Duration (hours)"
-  ) +
-  theme_pref
-
-plot_scatter_hrs_marg <- ggExtra::ggMarginal(
-  p_scatter_hrs,
-  type = "histogram",
-  fill = "grey70",
-  alpha = 0.6,
-  bins = 40
-)
-
-# Scatter: Rate (dry/total)
-p_scatter_rate <- ggplot(
-  dplyr::filter(dat_mo_rain_df, !is.na(dry_rate) & is.finite(dry_rate)),
-  aes(x = rainfall_r9_mo, y = dry_rate)
-) +
-  geom_point(alpha = 0.25, size = 0.7, color = base_point_col) +
-  labs(
-    title = "Rainfall vs Share of Dry/All Spills (Site-Month)",
-    x = "Monthly Rainfall (mm, 9-cell)",
-    y = "Dry Spills / Total Spills"
-  ) +
-  theme_pref
-
-plot_scatter_rate_marg <- ggExtra::ggMarginal(
-  p_scatter_rate,
-  type = "histogram",
-  fill = "grey70",
-  alpha = 0.6,
-  bins = 40
-)
-```
-
-::: panel-tabset
-#### Count
-
-```{r show-scatter-marg-count}
-plot_scatter_count_marg
-```
-
-#### Duration
-
-```{r show-scatter-marg-hrs}
-plot_scatter_hrs_marg
-```
-
-#### Rate
-
-```{r show-scatter-marg-rate}
-plot_scatter_rate_marg
-```
-
-:::
-
 ## Frequency and Duration of Dry Spills {#sec-04-07-frequency-duration}
 
-Both the summary tables and the histograms show that dry-spill frequency and duration are very positively skewed. As with all right-skewed outcomes bounded at zero, log transforms help visualise the distribution.
+The summary tables and histograms show strong right-skew in both dry-spill frequency and duration. As with other non-negative variables, log transforms make the distribution easier to read.
 
 ### Summary Tables {#sec-04-07-01-summary-tables}
 
@@ -1754,7 +1678,7 @@ plot_hist_norm_dry(
 
 ## Temporal Dry Spill Distribution {#sec-04-08-temporal}
 
-Dry spills also show seasonality. Monthly totals tend to be higher in the wetter months (roughly October–March). However, the difference is not as great as one would expect given the differences in rainfall.
+Dry spills are also seasonal. Monthly totals tend to be higher in the wetter months, roughly October to March, though the contrast is smaller than the rainfall patterns alone would suggest.
 
 ```{r clean-dry-data-mo}
 # Build monthly dry-spill panel (r1_d01_weak)
@@ -1918,7 +1842,7 @@ plot_monthly_bars(
 
 ## Dry Spill Distribution by Water Company {#sec-04-09-company}
 
-The violin plots and bar charts below show the dry spill count and duration, normalised by the number of active spill sites (i.e., averages across sites) for each water company. Patterns mirror overall spill activity: some companies show heavier right tails and higher average levels.
+The violin plots and bar charts below show dry-spill count and duration by water company, normalised by the number of active spill sites. The broad pattern mirrors overall spill activity, with some companies showing both heavier right tails and higher averages.
 
 ### Violin Plots {#sec-04-09-01-violin}
 
@@ -2047,4 +1971,172 @@ plots_list_dry_bar[[2]]
 plots_list_dry_bar[[3]]
 ```
 
+:::
+
+## Dry vs All Spill Correlation {#sec-04-05-dry-all-corr}
+
+The plots below show how closely dry spills track overall spill activity at the site-year level. They are a useful comparison, but they sit after the main dry-spill results because they are descriptive rather than part of the dry-spill definition itself.
+
+::: panel-tabset
+#### Spill Count
+
+```{r corr-dry-all-count}
+# Prepare data
+corr_dat <- dat_yr %>%
+  dplyr::select(
+    water_company,
+    year,
+    site_id,
+    spill_count_yr,
+    dry_spill_count_yr_r1_d01_weak
+  ) %>%
+  dplyr::mutate(
+    water_company = as.factor(water_company),
+    year = as.factor(year)
+  )
+
+# Correlation (complete cases)
+correlation_count <- cor(
+  corr_dat$spill_count_yr,
+  corr_dat$dry_spill_count_yr_r1_d01_weak,
+  use = "complete.obs"
+)
+
+# Scatter with 1:1 reference
+p_count <- ggplot(
+  corr_dat,
+  aes(
+    x = spill_count_yr,
+    y = dry_spill_count_yr_r1_d01_weak,
+    color = water_company,
+    shape = year,
+    text = paste(
+      "Water Company:", water_company,
+      "<br>Year:", year,
+      "<br>All Spill Count:", spill_count_yr,
+      "<br>Dry Spill Count:", dry_spill_count_yr_r1_d01_weak,
+      "<br>Site ID:", site_id
+    )
+  )
+) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_abline(slope = 1, intercept = 0, color = "black", linewidth = 0.1) +
+  labs(
+    title = "Dry vs All: Spill Count Correlation",
+    subtitle = paste0("r = ", round(correlation_count, 3)),
+    x = "All Spill Count (yearly)",
+    y = "Dry Spill Count (yearly, 9km², 2-day, partial)",
+    color = "Water Company",
+    shape = "Year"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0),
+    plot.subtitle = element_text(hjust = 0, size = 11),
+    legend.title = element_text(face = "bold", size = 11),
+    legend.text = element_text(size = 10),
+    legend.position = "right"
+  )
+
+interactive_plot_count <- ggplotly(
+  p_count,
+  tooltip = "text",
+  dynamicTicks = TRUE
+) %>%
+  plotly::layout(
+    showlegend = FALSE,
+    title = list(
+      text = paste0(
+        "Dry vs All: Spill Count Correlation<br>",
+        "<sup>r = ", round(correlation_count, 3), "</sup>"
+      ),
+      x = 0.5,
+      font = list(size = 12, family = "Arial")
+    )
+  ) %>%
+  config(displayModeBar = FALSE)
+
+interactive_plot_count
+```
+
+#### Spill Duration
+
+```{r corr-dry-all-hrs}
+# Prepare data
+corr_dat_hrs <- dat_yr %>%
+  dplyr::select(
+    water_company,
+    year,
+    site_id,
+    spill_hrs_yr,
+    dry_spill_hrs_yr_r1_d01_weak
+  ) %>%
+  dplyr::mutate(
+    water_company = as.factor(water_company),
+    year = as.factor(year)
+  )
+
+# Correlation (complete cases)
+correlation_hrs <- cor(
+  corr_dat_hrs$spill_hrs_yr,
+  corr_dat_hrs$dry_spill_hrs_yr_r1_d01_weak,
+  use = "complete.obs"
+)
+
+# Scatter with 1:1 reference
+p_hrs <- ggplot(
+  corr_dat_hrs,
+  aes(
+    x = spill_hrs_yr,
+    y = dry_spill_hrs_yr_r1_d01_weak,
+    color = water_company,
+    shape = year,
+    text = paste(
+      "Water Company:", water_company,
+      "<br>Year:", year,
+      "<br>All Spill Hours:", spill_hrs_yr,
+      "<br>Dry Spill Hours:", dry_spill_hrs_yr_r1_d01_weak,
+      "<br>Site ID:", site_id
+    )
+  )
+) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_abline(slope = 1, intercept = 0, color = "black", linewidth = 0.1) +
+  labs(
+    title = "Dry vs All: Spill Duration Correlation",
+    subtitle = paste0("r = ", round(correlation_hrs, 3)),
+    x = "All Spill Duration (hours, yearly)",
+    y = "Dry Spill Duration (hours, yearly, 9km², 2-day, partial)",
+    color = "Water Company",
+    shape = "Year"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0),
+    plot.subtitle = element_text(hjust = 0, size = 11),
+    legend.title = element_text(face = "bold", size = 11),
+    legend.text = element_text(size = 10),
+    legend.position = "right"
+  )
+
+interactive_plot_hrs <- ggplotly(
+  p_hrs,
+  tooltip = "text",
+  dynamicTicks = TRUE
+) %>%
+  plotly::layout(
+    showlegend = FALSE,
+    title = list(
+      text = paste0(
+        "Dry vs All: Spill Duration Correlation<br>",
+        "<sup>r = ", round(correlation_hrs, 3), "</sup>"
+      ),
+      x = 0.5,
+      font = list(size = 12, family = "Arial")
+    )
+  ) %>%
+  config(displayModeBar = FALSE)
+
+interactive_plot_hrs
+```
 :::

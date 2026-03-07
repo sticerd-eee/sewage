@@ -83,6 +83,9 @@ scripts/R/09_analysis/05_news/did_articles_lag4_prior.R
 
 # 06_upstream_downstream
 #scripts/R/09_analysis/06_upstream_downstream/upstream_downstream.R
+
+# 07_dry_spills
+scripts/R/09_analysis/07_dry_spills/daily_rain_regimes_table.R
 EOF
 )
 
