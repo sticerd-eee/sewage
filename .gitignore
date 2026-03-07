@@ -30,6 +30,12 @@ upstream_downstream/
 !upstream_downstream/**/docker-compose*.yml
 !upstream_downstream/**/.dockerignore
 
+# old
+_old/
+
+# Overleaf
+docs/overleaf/
+
 *.csv
 *.xlsx
 *.xlsb

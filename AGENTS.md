@@ -12,6 +12,10 @@ This repository is a research pipeline centered on sewage-spill and housing anal
 - `output/`: generated tables, figures, logs, and model artifacts.
 - `scripts/stata/` and `raw_to_final/`: Stata conversion/finalization workflows.
 
+## Related Project Paths
+- Paper LaTeX repository: `/Users/jacopoolivieri/Library/CloudStorage/Dropbox/Apps/Overleaf/Sewage in Our Waters`
+- Use that Overleaf-synced repository for manuscript `.tex`, bibliography, and paper-figure/table tasks; do not assume the LaTeX paper source lives in this analysis repository.
+
 ## Build, Test, and Development Commands
 - `R -q -e "renv::restore()"`: install/lock R dependencies from `renv.lock`.
 - `Rscript scripts/R/02_data_cleaning/clean_lr_house_price_data.R`: run a single pipeline step.

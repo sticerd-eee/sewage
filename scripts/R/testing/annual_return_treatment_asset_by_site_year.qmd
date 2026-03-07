@@ -1,0 +1,1019 @@
+---
+title: "Treatment and Asset Types Across Years"
+subtitle: "A compact canonical site-level note from annual EDM returns"
+format:
+  html:
+    toc: true
+    number-sections: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  fig-width: 9
+  fig-asp: 0.62
+  fig-align: center
+params:
+  years: [2021, 2022, 2023, 2024]
+  output_tables_dir: "scripts/R/testing/output/tables/treatment_asset_options"
+  output_figures_dir: "scripts/R/testing/output/figures/treatment_asset_options"
+---
+
+```{r}
+#| label: setup
+#| include: false
+required_packages <- c(
+  "arrow",
+  "dplyr",
+  "tidyr",
+  "stringr",
+  "purrr",
+  "readr",
+  "here",
+  "scales",
+  "gt",
+  "ggplot2"
+)
+
+invisible(lapply(required_packages, function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop("Missing required package: ", pkg)
+  }
+  library(pkg, character.only = TRUE)
+}))
+
+options(dplyr.summarise.inform = FALSE)
+
+analysis_years <- as.integer(params$years)
+output_tables_dir <- here::here(params$output_tables_dir)
+output_figures_dir <- here::here(params$output_figures_dir)
+dir.create(output_tables_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(output_figures_dir, recursive = TRUE, showWarnings = FALSE)
+
+theme_note <- ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold", size = 12),
+    axis.title = ggplot2::element_text(face = "bold", size = 11),
+    axis.text = ggplot2::element_text(size = 10),
+    panel.grid.minor = ggplot2::element_blank(),
+    panel.grid.major.x = ggplot2::element_blank(),
+    panel.grid.major.y = ggplot2::element_line(color = "grey90"),
+    legend.position = "bottom",
+    legend.title = ggplot2::element_blank(),
+    legend.text = ggplot2::element_text(size = 10),
+    plot.margin = ggplot2::margin(10, 10, 10, 10)
+  )
+
+fmt_pct <- function(x, accuracy = 0.1) {
+  scales::percent(x, accuracy = accuracy)
+}
+
+pct_range <- function(x, accuracy = 0.1) {
+  x <- x[!is.na(x)]
+  if (!length(x)) {
+    return("n/a")
+  }
+
+  low <- fmt_pct(min(x), accuracy = accuracy)
+  high <- fmt_pct(max(x), accuracy = accuracy)
+
+  if (identical(low, high)) low else paste0(low, " to ", high)
+}
+
+num_range <- function(x) {
+  x <- x[!is.na(x)]
+  if (!length(x)) {
+    return("n/a")
+  }
+
+  low <- scales::comma(min(x))
+  high <- scales::comma(max(x))
+
+  if (identical(low, high)) low else paste0(low, "-", high)
+}
+
+backtick_list <- function(x) {
+  x <- unique(x[!is.na(x)])
+
+  if (!length(x)) {
+    return("none")
+  }
+
+  x <- paste0("`", x, "`")
+
+  if (length(x) == 1) {
+    return(x)
+  }
+
+  if (length(x) == 2) {
+    return(paste(x, collapse = " and "))
+  }
+
+  paste0(paste(x[-length(x)], collapse = ", "), ", and ", x[length(x)])
+}
+
+count_share_label <- function(n, share, accuracy = 0.1) {
+  paste0(scales::comma(n), " (", fmt_pct(share, accuracy = accuracy), ")")
+}
+
+style_gt_table <- function(tbl, left_cols = NULL) {
+  out <- tbl %>%
+    gt::opt_row_striping() %>%
+    gt::tab_options(
+      table.width = gt::pct(100),
+      table.font.size = gt::px(13),
+      data_row.padding = gt::px(4),
+      heading.align = "left"
+    )
+
+  if (!is.null(left_cols)) {
+    out <- out %>%
+      gt::cols_align(align = "left", columns = dplyr::all_of(left_cols))
+  }
+
+  out
+}
+
+build_distribution_summary <- function(data, value_col, missing_label = "Missing") {
+  data %>%
+    transmute(
+      year,
+      category = dplyr::coalesce({{ value_col }}, missing_label)
+    ) %>%
+    count(year, category, name = "n_site_year") %>%
+    group_by(year) %>%
+    mutate(share = n_site_year / sum(n_site_year)) %>%
+    ungroup()
+}
+
+make_compact_distribution_table <- function(summary_data, category_label = "Category") {
+  if (is.factor(summary_data$category)) {
+    order_tbl <- tibble(
+      category = levels(summary_data$category),
+      sort_order = seq_along(levels(summary_data$category))
+    )
+  } else {
+    order_tbl <- summary_data %>%
+      distinct(category) %>%
+      mutate(sort_order = row_number())
+  }
+
+  wide <- summary_data %>%
+    mutate(category = as.character(category)) %>%
+    complete(
+      category = order_tbl$category,
+      year = analysis_years,
+      fill = list(n_site_year = 0, share = 0)
+    ) %>%
+    mutate(
+      cell = paste0(
+        scales::comma(n_site_year),
+        " (",
+        fmt_pct(share, accuracy = 0.1),
+        ")"
+      )
+    ) %>%
+    select(category, year, cell) %>%
+    pivot_wider(names_from = year, values_from = cell) %>%
+    left_join(order_tbl, by = "category") %>%
+    arrange(sort_order, category) %>%
+    select(-sort_order)
+
+  style_gt_table(
+    gt::gt(wide) %>%
+      gt::cols_label(category = category_label),
+    left_cols = "category"
+  )
+}
+
+make_share_plot <- function(summary_data, palette_map) {
+  palette_values <- palette_map[levels(summary_data$category)]
+  missing_palette <- is.na(palette_values)
+
+  if (any(missing_palette)) {
+    palette_values[missing_palette] <- grDevices::hcl.colors(
+      sum(missing_palette),
+      palette = "Temps"
+    )
+  }
+
+  ggplot2::ggplot(
+    summary_data,
+    ggplot2::aes(x = factor(year), y = share, fill = category)
+  ) +
+    ggplot2::geom_col(width = 0.72, color = "white", linewidth = 0.25) +
+    ggplot2::scale_y_continuous(
+      labels = scales::label_percent(accuracy = 1),
+      expand = ggplot2::expansion(mult = c(0, 0.02))
+    ) +
+    ggplot2::scale_fill_manual(values = palette_values, drop = FALSE) +
+    ggplot2::labs(
+      x = NULL,
+      y = "Share of canonical site-years"
+    ) +
+    theme_note +
+    ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE))
+}
+
+write_plot <- function(plot_obj, filename, width = 8.5, height = 5) {
+  ggplot2::ggsave(
+    filename = file.path(output_figures_dir, filename),
+    plot = plot_obj,
+    width = width,
+    height = height,
+    dpi = 300
+  )
+
+  plot_obj
+}
+```
+
+```{r}
+#| label: helpers
+#| include: false
+first_non_na <- function(x) {
+  idx <- which(!is.na(x))
+  if (length(idx) == 0) {
+    return(x[NA_integer_][1])
+  }
+  x[idx[1]]
+}
+
+clean_option <- function(x) {
+  x <- as.character(x)
+  x <- stringr::str_squish(x)
+  x[x == ""] <- NA_character_
+  x
+}
+
+collapse_or_none <- function(x) {
+  x <- sort(unique(x))
+  if (length(x) == 0) "<none>" else paste(x, collapse = " | ")
+}
+
+resolve_site_year_option <- function(data, value_col, out_name) {
+  data %>%
+    mutate(.value = clean_option({{ value_col }})) %>%
+    group_by(site_id, year) %>%
+    summarise(
+      n_source_rows = n(),
+      n_non_missing_values = n_distinct(.value[!is.na(.value)]),
+      value = case_when(
+        n_non_missing_values == 0L ~ NA_character_,
+        n_non_missing_values == 1L ~ first_non_na(.value),
+        TRUE ~ "MULTIPLE_VALUES"
+      ),
+      conflicting_values = if_else(
+        n_non_missing_values > 1L,
+        collapse_or_none(.value[!is.na(.value)]),
+        NA_character_
+      ),
+      .groups = "drop"
+    ) %>%
+    rename(!!out_name := value)
+}
+
+compute_similarity <- function(data, value_col) {
+  option_sets <- data %>%
+    transmute(
+      year,
+      option = {{ value_col }}
+    ) %>%
+    filter(!is.na(option), option != "MULTIPLE_VALUES") %>%
+    group_by(year) %>%
+    summarise(
+      options = list(sort(unique(option))),
+      .groups = "drop"
+    ) %>%
+    arrange(year)
+
+  get_options <- function(y) {
+    option_sets$options[[match(y, option_sets$year)]]
+  }
+
+  tidyr::expand_grid(
+    year_1 = option_sets$year,
+    year_2 = option_sets$year
+  ) %>%
+    mutate(
+      set_1 = purrr::map(year_1, get_options),
+      set_2 = purrr::map(year_2, get_options),
+      n_intersection = purrr::map2_int(set_1, set_2, ~ length(intersect(.x, .y))),
+      n_union = purrr::map2_int(set_1, set_2, ~ length(union(.x, .y))),
+      jaccard = if_else(n_union == 0L, NA_real_, n_intersection / n_union)
+    ) %>%
+    select(year_1, year_2, jaccard)
+}
+
+normalize_asset_type <- function(x) {
+  raw <- clean_option(x)
+  lower <- stringr::str_to_lower(raw)
+
+  with_treatment <- dplyr::case_when(
+    is.na(lower) ~ NA_character_,
+    stringr::str_detect(lower, "with treatment") ~ "yes",
+    TRUE ~ "no"
+  )
+
+  core <- lower %>%
+    stringr::str_replace("\\s*-\\s*with treatment\\s*$", "") %>%
+    stringr::str_replace_all("\\bcso\\b", "so") %>%
+    stringr::str_replace("\\s*\\([^)]*\\)\\s*$", "") %>%
+    stringr::str_squish()
+
+  group <- dplyr::case_when(
+    is.na(core) ~ NA_character_,
+    core == "so on sewer network" ~ "SO on sewer network",
+    core == "storm discharge at pumping station" ~ "Storm discharge at pumping station",
+    core == "inlet so at wwtw" ~ "Inlet SO at WwTW",
+    core == "storm tank at wwtw" ~ "Storm tank at WwTW",
+    core == "other storm discharge asset type" ~ "Other storm discharge asset type",
+    TRUE ~ "Unclassified / other"
+  )
+
+  tibble(
+    asset_type_group = group,
+    asset_with_treatment = with_treatment
+  )
+}
+
+combine_asset_label <- function(group, with_treatment) {
+  dplyr::case_when(
+    is.na(group) ~ NA_character_,
+    group == "MULTIPLE_VALUES" | with_treatment == "MULTIPLE_VALUES" ~ "MULTIPLE_VALUES",
+    is.na(with_treatment) ~ group,
+    TRUE ~ paste0(group, " | with treatment = ", with_treatment)
+  )
+}
+
+collapse_asset_group_for_note <- function(x) {
+  dplyr::case_when(
+    is.na(x) ~ "Missing",
+    x %in% c("Other storm discharge asset type", "Unclassified / other") ~ "Other / rare",
+    TRUE ~ x
+  )
+}
+
+is_designated_water <- function(x) {
+  !is.na(x) & !x %in% c("No", "Not Applicable", "0", "MULTIPLE_VALUES")
+}
+```
+
+```{r}
+#| label: build-analysis
+#| include: false
+annual_return <- arrow::read_parquet(
+  here::here("data", "processed", "annual_return_edm.parquet")
+)
+
+annual_lookup <- arrow::read_parquet(
+  here::here("data", "processed", "annual_return_lookup.parquet")
+)
+
+unique_sites <- arrow::read_parquet(
+  here::here("data", "processed", "unique_spill_sites.parquet")
+)
+
+lookup_long <- annual_lookup %>%
+  select(site_id, starts_with("site_id_")) %>%
+  pivot_longer(
+    cols = starts_with("site_id_"),
+    names_to = "id_year_col",
+    values_to = "year_site_id"
+  ) %>%
+  mutate(
+    year = as.integer(readr::parse_number(id_year_col)),
+    year_site_id = as.integer(year_site_id),
+    site_id_lookup = as.integer(site_id)
+  ) %>%
+  filter(year %in% analysis_years, !is.na(year_site_id)) %>%
+  select(year, year_site_id, site_id_lookup)
+
+lookup_dupes <- lookup_long %>%
+  count(year, year_site_id, name = "n") %>%
+  filter(n > 1)
+
+if (nrow(lookup_dupes) > 0) {
+  warning("Duplicate year_site_id mappings found in annual_return_lookup; using first non-missing site_id per (year, year_site_id).")
+  lookup_long <- lookup_long %>%
+    group_by(year, year_site_id) %>%
+    summarise(site_id_lookup = first_non_na(site_id_lookup), .groups = "drop")
+}
+
+annual_prepped <- annual_return %>%
+  filter(year %in% analysis_years) %>%
+  mutate(
+    year_site_id = case_when(
+      year == 2021L ~ as.integer(site_id_2021),
+      year == 2022L ~ as.integer(site_id_2022),
+      year == 2023L ~ as.integer(site_id_2023),
+      year == 2024L ~ as.integer(site_id_2024),
+      TRUE ~ NA_integer_
+    ),
+    unique_id = clean_option(unique_id),
+    treatment_type = clean_option(treatment_type),
+    asset_type = clean_option(asset_type),
+    shellfish_water = clean_option(shellfish_water),
+    bathing_water = clean_option(bathing_water)
+  ) %>%
+  left_join(lookup_long, by = c("year", "year_site_id")) %>%
+  mutate(
+    site_id = coalesce(site_id_lookup, year_site_id),
+    id_source = case_when(
+      !is.na(site_id_lookup) ~ "annual_return_lookup",
+      is.na(site_id_lookup) & !is.na(year_site_id) ~ "fallback_year_site_id",
+      TRUE ~ "missing_site_id"
+    )
+  ) %>%
+  filter(!is.na(site_id)) %>%
+  select(
+    site_id,
+    year,
+    water_company,
+    unique_id,
+    treatment_type,
+    asset_type,
+    shellfish_water,
+    bathing_water,
+    id_source
+  )
+
+annual_prepped_asset <- annual_prepped %>%
+  bind_cols(normalize_asset_type(annual_prepped$asset_type))
+
+treatment_site_year <- resolve_site_year_option(
+  annual_prepped,
+  treatment_type,
+  "treatment_type_site_year"
+)
+
+asset_group_site_year <- resolve_site_year_option(
+  annual_prepped_asset,
+  asset_type_group,
+  "asset_type_group_site_year"
+)
+
+asset_treatment_status_site_year <- resolve_site_year_option(
+  annual_prepped_asset,
+  asset_with_treatment,
+  "asset_with_treatment_site_year"
+)
+
+asset_site_year <- asset_group_site_year %>%
+  select(
+    site_id,
+    year,
+    asset_type_group_site_year,
+    n_source_rows,
+    n_non_missing_values_group = n_non_missing_values,
+    conflicting_values_group = conflicting_values
+  ) %>%
+  left_join(
+    asset_treatment_status_site_year %>%
+      select(
+        site_id,
+        year,
+        asset_with_treatment_site_year,
+        n_non_missing_values_treatment = n_non_missing_values,
+        conflicting_values_treatment = conflicting_values
+      ),
+    by = c("site_id", "year")
+  ) %>%
+  mutate(
+    asset_group_with_treatment_site_year = combine_asset_label(
+      asset_type_group_site_year,
+      asset_with_treatment_site_year
+    )
+  )
+
+asset_type_mapping_table <- annual_prepped_asset %>%
+  filter(!is.na(asset_type)) %>%
+  count(asset_type, asset_type_group, asset_with_treatment, sort = TRUE) %>%
+  arrange(desc(n), asset_type)
+
+treatment_wide <- treatment_site_year %>%
+  select(site_id, year, treatment_type_site_year) %>%
+  mutate(treatment_type_site_year = coalesce(treatment_type_site_year, "<NA>")) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = treatment_type_site_year,
+    names_prefix = "year_"
+  ) %>%
+  arrange(site_id)
+
+asset_wide <- asset_site_year %>%
+  select(site_id, year, asset_group_with_treatment_site_year) %>%
+  mutate(asset_group_with_treatment_site_year = coalesce(asset_group_with_treatment_site_year, "<NA>")) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = asset_group_with_treatment_site_year,
+    names_prefix = "year_"
+  ) %>%
+  arrange(site_id)
+
+readr::write_csv(
+  treatment_wide,
+  file.path(output_tables_dir, "treatment_type_by_site_id_year.csv")
+)
+
+readr::write_csv(
+  asset_wide,
+  file.path(output_tables_dir, "asset_type_by_site_id_year.csv")
+)
+
+readr::write_csv(
+  asset_type_mapping_table,
+  file.path(output_tables_dir, "asset_type_raw_to_group_mapping.csv")
+)
+
+site_year_meta <- annual_prepped %>%
+  group_by(site_id, year) %>%
+  summarise(
+    unique_id_populated = any(!is.na(unique_id)),
+    lookup_based = all(id_source == "annual_return_lookup"),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    treatment_site_year %>%
+      transmute(
+        site_id,
+        year,
+        treatment_populated = !is.na(treatment_type_site_year),
+        treatment_conflict = dplyr::coalesce(
+          treatment_type_site_year == "MULTIPLE_VALUES",
+          FALSE
+        )
+      ),
+    by = c("site_id", "year")
+  ) %>%
+  left_join(
+    asset_site_year %>%
+      transmute(
+        site_id,
+        year,
+        asset_populated = !is.na(asset_type_group_site_year),
+        asset_conflict = dplyr::coalesce(
+          asset_type_group_site_year == "MULTIPLE_VALUES" |
+            asset_with_treatment_site_year == "MULTIPLE_VALUES",
+          FALSE
+        )
+      ),
+    by = c("site_id", "year")
+  )
+
+shellfish_site_year <- resolve_site_year_option(
+  annual_prepped,
+  shellfish_water,
+  "shellfish_water_site_year"
+)
+
+bathing_site_year <- resolve_site_year_option(
+  annual_prepped,
+  bathing_water,
+  "bathing_water_site_year"
+)
+
+site_panel_diagnostics <- site_year_meta %>%
+  group_by(year) %>%
+  summarise(
+    n_site_year = n(),
+    unique_id_populated = mean(unique_id_populated),
+    lookup_based = mean(lookup_based),
+    treatment_populated = mean(treatment_populated),
+    asset_populated = mean(asset_populated),
+    any_conflict = mean(treatment_conflict | asset_conflict),
+    .groups = "drop"
+  )
+
+site_panel_diagnostics_display <- site_panel_diagnostics %>%
+  transmute(
+    year,
+    `Canonical site-years` = scales::comma(n_site_year),
+    `Unique ID populated` = fmt_pct(unique_id_populated),
+    `Lookup based` = fmt_pct(lookup_based),
+    `treatment_type populated` = fmt_pct(treatment_populated),
+    `asset_type populated` = fmt_pct(asset_populated),
+    `Any conflicting site-year values` = fmt_pct(any_conflict)
+  )
+
+treatment_summary <- build_distribution_summary(
+  treatment_site_year,
+  treatment_type_site_year
+)
+
+treatment_order <- treatment_summary %>%
+  group_by(category) %>%
+  summarise(overall_n = sum(n_site_year), .groups = "drop") %>%
+  arrange(desc(overall_n), category) %>%
+  pull(category)
+
+treatment_order <- c(
+  setdiff(treatment_order, "Missing"),
+  intersect("Missing", treatment_order)
+)
+
+treatment_summary_note <- treatment_summary %>%
+  mutate(category = factor(category, levels = treatment_order))
+
+asset_group_summary_note <- asset_site_year %>%
+  transmute(
+    year,
+    category = collapse_asset_group_for_note(asset_type_group_site_year)
+  ) %>%
+  count(year, category, name = "n_site_year") %>%
+  group_by(year) %>%
+  mutate(share = n_site_year / sum(n_site_year)) %>%
+  ungroup()
+
+asset_order <- asset_group_summary_note %>%
+  group_by(category) %>%
+  summarise(overall_n = sum(n_site_year), .groups = "drop") %>%
+  arrange(desc(overall_n), category) %>%
+  pull(category)
+
+asset_order <- c(
+  setdiff(asset_order, c("Other / rare", "Missing")),
+  intersect("Other / rare", asset_order),
+  intersect("Missing", asset_order)
+)
+
+asset_group_summary_note <- asset_group_summary_note %>%
+  mutate(category = factor(category, levels = asset_order))
+
+asset_treatment_status_summary <- build_distribution_summary(
+  asset_site_year,
+  asset_with_treatment_site_year
+)
+
+treatment_similarity <- compute_similarity(
+  treatment_site_year,
+  treatment_type_site_year
+)
+
+asset_group_similarity <- compute_similarity(
+  asset_site_year,
+  asset_type_group_site_year
+)
+
+option_set_for <- function(similarity_tbl, target_year) {
+  similarity_tbl %>%
+    filter(year_1 == target_year, year_2 == target_year) %>%
+    pull(jaccard)
+}
+
+treatment_non_missing_years <- treatment_site_year %>%
+  filter(!is.na(treatment_type_site_year)) %>%
+  distinct(year) %>%
+  arrange(year) %>%
+  pull(year)
+
+treatment_not_applicable_share <- treatment_summary %>%
+  filter(category == "Not Applicable", year %in% treatment_non_missing_years) %>%
+  pull(share)
+
+treatment_reed_bed_share <- treatment_summary %>%
+  filter(category == "Reed bed", year %in% treatment_non_missing_years) %>%
+  pull(share)
+
+treatment_uv_count <- treatment_summary %>%
+  filter(category == "UV (Ultraviolet)", year %in% treatment_non_missing_years) %>%
+  pull(n_site_year)
+
+observed_non_missing_treatments <- treatment_summary %>%
+  filter(category != "Missing", n_site_year > 0) %>%
+  distinct(category) %>%
+  pull(category)
+
+treatment_jaccard_2022_onward <- treatment_similarity %>%
+  filter(
+    year_1 < year_2,
+    year_1 %in% treatment_non_missing_years,
+    year_2 %in% treatment_non_missing_years
+  ) %>%
+  pull(jaccard)
+
+treatment_stability_text <- if (
+  length(treatment_jaccard_2022_onward) > 0 &&
+    all(treatment_jaccard_2022_onward == 1)
+) {
+  "The non-missing option set is identical from 2022 onward."
+} else {
+  "The non-missing option set changes only modestly across populated years."
+}
+
+designation_heterogeneity <- treatment_site_year %>%
+  left_join(
+    shellfish_site_year %>%
+      select(site_id, year, shellfish_water_site_year),
+    by = c("site_id", "year")
+  ) %>%
+  left_join(
+    bathing_site_year %>%
+      select(site_id, year, bathing_water_site_year),
+    by = c("site_id", "year")
+  ) %>%
+  mutate(
+    shellfish_designated = is_designated_water(shellfish_water_site_year),
+    bathing_designated = is_designated_water(bathing_water_site_year),
+    either_designated = shellfish_designated | bathing_designated
+  ) %>%
+  filter(
+    year >= 2022,
+    !is.na(treatment_type_site_year),
+    treatment_type_site_year != "MULTIPLE_VALUES"
+  )
+
+designation_by_treatment <- designation_heterogeneity %>%
+  group_by(treatment_type_site_year) %>%
+  summarise(
+    n_site_year = n(),
+    shellfish_n = sum(shellfish_designated),
+    shellfish_share = mean(shellfish_designated),
+    bathing_n = sum(bathing_designated),
+    bathing_share = mean(bathing_designated),
+    either_n = sum(either_designated),
+    either_share = mean(either_designated),
+    .groups = "drop"
+  )
+
+designation_treated_total <- designation_by_treatment %>%
+  filter(treatment_type_site_year != "Not Applicable") %>%
+  summarise(
+    treatment_type_site_year = "All treated",
+    n_site_year = sum(n_site_year),
+    shellfish_n = sum(shellfish_n),
+    shellfish_share = shellfish_n / n_site_year,
+    bathing_n = sum(bathing_n),
+    bathing_share = bathing_n / n_site_year,
+    either_n = sum(either_n),
+    either_share = either_n / n_site_year
+  )
+
+designation_table_display <- bind_rows(
+  designation_by_treatment %>%
+    filter(treatment_type_site_year == "Not Applicable"),
+  designation_treated_total,
+  designation_by_treatment %>%
+    filter(treatment_type_site_year != "Not Applicable") %>%
+    arrange(desc(n_site_year), treatment_type_site_year)
+) %>%
+  mutate(
+    treatment_group = factor(
+      treatment_type_site_year,
+      levels = c(
+        "Not Applicable",
+        "All treated",
+        setdiff(treatment_type_site_year, c("Not Applicable", "All treated"))
+      )
+    )
+  ) %>%
+  arrange(treatment_group) %>%
+  transmute(
+    `Treatment group` = as.character(treatment_group),
+    `Site-years` = scales::comma(n_site_year),
+    `Shellfish water` = count_share_label(shellfish_n, shellfish_share),
+    `Bathing water` = count_share_label(bathing_n, bathing_share),
+    `Either designation` = count_share_label(either_n, either_share)
+  )
+
+treated_total_site_years <- designation_treated_total$n_site_year[[1]]
+treated_year_counts <- designation_heterogeneity %>%
+  filter(treatment_type_site_year != "Not Applicable") %>%
+  count(year, name = "n_site_year")
+
+treated_year_count_text <- paste(
+  paste0(treated_year_counts$year, ": ", scales::comma(treated_year_counts$n_site_year)),
+  collapse = "; "
+)
+
+not_applicable_designation_share <- designation_by_treatment %>%
+  filter(treatment_type_site_year == "Not Applicable") %>%
+  pull(either_share)
+
+all_treated_designation_share <- designation_treated_total$either_share[[1]]
+
+reed_bed_designation_share <- designation_by_treatment %>%
+  filter(treatment_type_site_year == "Reed bed") %>%
+  pull(either_share)
+
+uv_shellfish_share <- designation_by_treatment %>%
+  filter(treatment_type_site_year == "UV (Ultraviolet)") %>%
+  pull(shellfish_share)
+
+uv_bathing_share <- designation_by_treatment %>%
+  filter(treatment_type_site_year == "UV (Ultraviolet)") %>%
+  pull(bathing_share)
+
+uv_designation_share <- designation_by_treatment %>%
+  filter(treatment_type_site_year == "UV (Ultraviolet)") %>%
+  pull(either_share)
+
+uv_site_years <- designation_by_treatment %>%
+  filter(treatment_type_site_year == "UV (Ultraviolet)") %>%
+  pull(n_site_year)
+
+asset_so_share <- asset_group_summary_note %>%
+  filter(category == "SO on sewer network") %>%
+  pull(share)
+
+asset_pumping_share <- asset_group_summary_note %>%
+  filter(category == "Storm discharge at pumping station") %>%
+  pull(share)
+
+asset_storm_tank_share <- asset_group_summary_note %>%
+  filter(category == "Storm tank at WwTW") %>%
+  pull(share)
+
+asset_inlet_share <- asset_group_summary_note %>%
+  filter(category == "Inlet SO at WwTW") %>%
+  pull(share)
+
+asset_top4_share <- asset_group_summary_note %>%
+  filter(category %in% c(
+    "SO on sewer network",
+    "Storm discharge at pumping station",
+    "Storm tank at WwTW",
+    "Inlet SO at WwTW"
+  )) %>%
+  group_by(year) %>%
+  summarise(share = sum(share), .groups = "drop") %>%
+  pull(share)
+
+asset_yes_share <- asset_treatment_status_summary %>%
+  filter(category == "yes", year >= 2022) %>%
+  pull(share)
+
+asset_unclassified_2021_count <- asset_site_year %>%
+  filter(year == 2021L, asset_type_group_site_year == "Unclassified / other") %>%
+  nrow()
+
+asset_group_jaccard_2022_onward <- asset_group_similarity %>%
+  filter(year_1 < year_2, year_1 >= 2022, year_2 >= 2022) %>%
+  pull(jaccard)
+
+asset_stability_text <- if (
+  length(asset_group_jaccard_2022_onward) > 0 &&
+    all(asset_group_jaccard_2022_onward == 1)
+) {
+  "The grouped asset menu is identical from 2022 to 2024."
+} else {
+  "The grouped asset menu is highly stable from 2022 onward."
+}
+
+treatment_palette <- c(
+  "Not Applicable" = "#1b4332",
+  "Reed bed" = "#40916c",
+  "UV (Ultraviolet)" = "#74c69d",
+  "Missing" = "#ced4da"
+)
+
+asset_palette <- c(
+  "SO on sewer network" = "#1b4332",
+  "Storm discharge at pumping station" = "#2d6a4f",
+  "Storm tank at WwTW" = "#577590",
+  "Inlet SO at WwTW" = "#90be6d",
+  "Other / rare" = "#adb5bd",
+  "Missing" = "#dee2e6"
+)
+
+treatment_plot <- make_share_plot(
+  treatment_summary_note,
+  treatment_palette
+)
+
+asset_plot <- make_share_plot(
+  asset_group_summary_note,
+  asset_palette
+)
+
+write_plot(
+  treatment_plot,
+  "treatment_type_share_by_year.png"
+)
+
+write_plot(
+  asset_plot,
+  "asset_type_group_share_by_year.png"
+)
+
+n_canonical_sites <- nrow(unique_sites)
+n_site_year_rows <- nrow(site_year_meta)
+unique_id_complete_years <- site_panel_diagnostics %>%
+  filter(unique_id_populated > 0.95) %>%
+  pull(year)
+```
+
+## What This Note Shows
+
+This note asks a narrow question: once the annual returns are aligned to canonical `site_id`, how much substantive cross-year information do `treatment_type` and `asset_type` actually add? The goal is to make the main empirical message easy to see, while keeping the detailed audit trail in exported files rather than in the main body of the document.
+
+::: {.callout-note appearance="simple"}
+## Main Takeaway
+
+The canonical panel is clean: it covers `r scales::comma(n_canonical_sites)` sites and `r scales::comma(n_site_year_rows)` site-years, all mapped through `annual_return_lookup`, with no within-site-year conflicts. The substantive asymmetry is that `treatment_type` adds almost no variation once it becomes populated, whereas grouped `asset_type` provides a stable site typology: the same four core asset groups account for `r pct_range(asset_top4_share)` of site-years in every year.
+:::
+
+## Building a Comparable Site-Year Panel
+
+Cross-year comparison is done at canonical `site_id`, not raw `unique_id`. That choice matters because `unique_id` is unavailable in the early annual returns and only becomes near-complete in `r paste(unique_id_complete_years, collapse = " and ")`. The table below therefore focuses on the information needed to judge whether the site-year panel is trustworthy for interpretation.
+
+```{r}
+#| label: tbl-panel-diagnostics
+#| tbl-cap: "Canonical site-panel diagnostics by year."
+style_gt_table(
+  gt::gt(site_panel_diagnostics_display) %>%
+    gt::cols_label(year = "Year"),
+  left_cols = "year"
+)
+```
+
+The panel diagnostics show two things clearly. First, the canonical site mapping is not the weak point here: every site-year is lookup based, and neither `treatment_type` nor `asset_type` produces conflicting non-missing values within the same site-year. Second, the real coverage issue sits in `treatment_type`, which is entirely missing in 2021, while grouped `asset_type` is effectively complete throughout.
+
+## `treatment_type`: Mostly a Near-Constant Metadata Field
+
+The `treatment_type` field is permit metadata. It records whether the permit assigns an additional treatment label over and above baseline storm-tank settlement or screening; it should not be read as an event-level measure of actual treatment intensity or water quality.
+
+```{r}
+#| label: fig-treatment-type-share
+#| fig-cap: "Share of canonical site-years by `treatment_type`."
+treatment_plot
+```
+
+Figure @fig-treatment-type-share makes the main point quickly. The 2021 column is entirely a coverage gap. Once the field becomes populated, it is overwhelmingly `r backtick_list("Not Applicable")`: that category accounts for `r pct_range(treatment_not_applicable_share)` of site-years in `r min(treatment_non_missing_years)`-`r max(treatment_non_missing_years)`. The only other observed non-missing labels are `r backtick_list(setdiff(observed_non_missing_treatments, "Not Applicable"))`, with `Reed bed` staying below `r fmt_pct(max(treatment_reed_bed_share), accuracy = 0.1)` and `UV (Ultraviolet)` appearing at only `r num_range(treatment_uv_count)` site-years per year. `r treatment_stability_text`
+
+```{r}
+#| label: tbl-treatment-type-summary
+#| tbl-cap: "Counts and shares of canonical site-years by `treatment_type`."
+make_compact_distribution_table(
+  treatment_summary_note,
+  category_label = "Treatment type"
+)
+```
+
+For interpretation, the crux is not subtle category turnover. It is that `treatment_type` offers very little usable variation for cross-year descriptive work: 2021 is unusable because the field is missing, and from 2022 onward the field is almost entirely a single label. In practice, this means `treatment_type` is best treated as a limited permit-classification field rather than as a rich treatment-status measure.
+
+### Designated Waters Heterogeneity
+
+Because the treated subsample is so small, the designated-waters comparison is best read descriptively rather than inferentially. Here a site-year counts as positive for shellfish-water or bathing-water exposure only when the annual-return field carries a named designated water, rather than placeholder values such as `Not Applicable` or `0`.
+
+The treated sample contains `r scales::comma(treated_total_site_years)` site-years across 2022-2024 (`r treated_year_count_text`). The table below shows that treated site-years overall are not more likely than `Not Applicable` site-years to sit in designated waters (`r fmt_pct(all_treated_designation_share)` versus `r fmt_pct(not_applicable_designation_share)`). But that pooled comparison hides the real heterogeneity: `Reed bed` never appears in designated waters in this sample (`r fmt_pct(reed_bed_designation_share)` on the `either` measure), while `UV (Ultraviolet)` is concentrated in designated sites (`r fmt_pct(uv_shellfish_share)` shellfish, `r fmt_pct(uv_bathing_share)` bathing, `r fmt_pct(uv_designation_share)` either, based on `r scales::comma(uv_site_years)` site-years).
+
+```{r}
+#| label: tbl-treatment-designated-water
+#| tbl-cap: "Shellfish-water and bathing-water exposure by treatment group, using canonical site-years in 2022-2024."
+style_gt_table(
+  gt::gt(designation_table_display),
+  left_cols = "Treatment group"
+)
+```
+
+The implication is narrow but useful. There is no broad treated-versus-untreated designated-water effect in these data. The pattern is instead `UV`-specific, which is more consistent with targeted permit differentiation at a tiny subset of sites than with a general tendency for treated discharges to be located at designated waters.
+
+## `asset_type`: Stable and Substantively Informative
+
+For `asset_type`, the key step is to harmonise mild label variation before interpreting the results. The note collapses spelling and case differences, standardises `CSO` versus `SO`, and keeps the `- with treatment` suffix as a separate flag rather than letting it dominate the main typology.
+
+```{r}
+#| label: fig-asset-type-share
+#| fig-cap: "Share of canonical site-years by grouped `asset_type`."
+asset_plot
+```
+
+Unlike `treatment_type`, grouped `asset_type` carries clear structure. `SO on sewer network` alone accounts for `r pct_range(asset_so_share)` of site-years across the period, followed by `Storm discharge at pumping station` (`r pct_range(asset_pumping_share)`), `Storm tank at WwTW` (`r pct_range(asset_storm_tank_share)`), and `Inlet SO at WwTW` (`r pct_range(asset_inlet_share)`). Together, these four groups cover `r pct_range(asset_top4_share)` of site-years in every year. `r asset_stability_text` Relative to later years, 2021 only adds a single `Unclassified / other` observation (`r scales::comma(asset_unclassified_2021_count)` site-year), which is why the cross-year story is stability rather than reclassification.
+
+```{r}
+#| label: tbl-asset-type-summary
+#| tbl-cap: "Counts and shares of canonical site-years by grouped `asset_type`."
+make_compact_distribution_table(
+  asset_group_summary_note,
+  category_label = "Grouped asset type"
+)
+```
+
+For the main groups, the labels can be read directly as a site typology:
+
+- `SO on sewer network`: storm overflow on the sewer network, not associated with a pumping station.
+- `Storm discharge at pumping station`: storm overflow on the network at a pumping station.
+- `Storm tank at WwTW`: storm overflow via a storm tank associated with a treatment works.
+- `Inlet SO at WwTW`: direct overflow permitted as part of a treatment-works permit, excluding storm-tank routes.
+
+The `- with treatment` suffix remains secondary. From 2022 onward, labels carrying that suffix account for only `r pct_range(asset_yes_share)` of site-years, so it is more useful as an auxiliary flag than as the main organising dimension for the results.
+
+## What Matters for Interpretation
+
+- Use canonical `site_id` for cross-year work. The early annual returns do not support `unique_id` as the core panel identifier.
+- Treat `treatment_type` as a narrow permit metadata field. In this panel it is missing in 2021 and almost entirely `Not Applicable` thereafter.
+- The small amount of treatment-designation heterogeneity is `UV`-specific. `Reed bed` contributes almost all treated site-years but none of the designated-water cases, while `UV` is concentrated in designated sites on a very small base.
+- Treat grouped `asset_type` as the more informative descriptive variable. After light harmonisation, its distribution is stable and dominated by the same four categories in every year.
+- Keep the `- with treatment` suffix separate if needed, but do not let it obscure the core asset typology: it is rare in the data and does not drive the main pattern.
+
+## Exported Audit Outputs
+
+The rendered note keeps the main story short, but the detailed audit trail is still written to disk:
+
+- `r file.path(params$output_tables_dir, "treatment_type_by_site_id_year.csv")`
+- `r file.path(params$output_tables_dir, "asset_type_by_site_id_year.csv")`
+- `r file.path(params$output_tables_dir, "asset_type_raw_to_group_mapping.csv")`
+- `r file.path(params$output_figures_dir, "treatment_type_share_by_year.png")`
+- `r file.path(params$output_figures_dir, "asset_type_group_share_by_year.png")`
+
+Those files preserve the full site-by-year panels and the raw-to-group asset mapping, which is where the detailed audit detail belongs.
