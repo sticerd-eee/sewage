@@ -70,6 +70,54 @@ split_monthly_records <- function(df) {
   return(out[])
 }
 
+#' Split records that cross day boundaries into separate daily records
+#'
+#' This function handles spills that span multiple days by creating separate
+#' records for each day portion, with start/end times clamped to day boundaries.
+#' Modelled on split_monthly_records().
+#'
+#' @param df Data frame containing spill records with start_time and end_time
+#' @return data.table with split records for cross-day spills, plus a date column
+#' @export
+split_daily_records <- function(df) {
+  dt <- as.data.table(df)[end_time > start_time]
+
+  if (nrow(dt) == 0) {
+    return(data.table(start_time = as.POSIXct(character()),
+                      end_time = as.POSIXct(character()),
+                      date = as.Date(character())))
+  }
+
+  # 1. Build a "calendar" of all day-windows covering the data
+  all_days <- seq(
+    as.Date(min(dt$start_time)),
+    as.Date(max(dt$end_time)),
+    by = "day"
+  )
+  cal <- data.table(
+    day_start = as.POSIXct(all_days, tz = "UTC"),
+    day_end   = as.POSIXct(all_days + 1L, tz = "UTC") - 1
+  )
+
+  # 2. Key both tables for an interval-overlap join
+  setkey(dt,  start_time, end_time)
+  setkey(cal, day_start,  day_end)
+
+  # 3. Join then clamp each record to its day-slice
+  out <- foverlaps(dt, cal, nomatch = 0L)
+  out[, `:=`(
+    start_time = pmax(start_time, day_start),
+    end_time   = pmin(end_time,   day_end),
+    date       = as.Date(day_start)
+  )]
+  out[, c("day_start", "day_end") := NULL]
+
+  # 5. Drop zero-duration slivers
+  out <- out[end_time > start_time]
+
+  return(out[])
+}
+
 #' Prepare spill data for aggregation by handling year/month boundaries
 #'
 #' Prepares spill data for temporal aggregation by truncating spills that cross
