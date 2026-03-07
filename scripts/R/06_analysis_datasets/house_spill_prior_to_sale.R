@@ -391,7 +391,7 @@ export_data <- function(data) {
   tryCatch(
     {
       output_path <- here::here(
-        "data", "processed", "cross_section", "sales", "prior_to_sale", "house_site"
+        "data", "processed", "cross_section", "sales", "prior_to_sale_house_site"
       )
       
       logger::log_info("Exporting prior-to-sale data to parquet")

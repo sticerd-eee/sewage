@@ -1639,63 +1639,7 @@ modelsummary::datasummary_skim(dat_yr_dry_list[[2]], fmt = 2)
 modelsummary::datasummary_skim(dat_yr_dry_list[[3]], fmt = 2)
 ```
 
-::: 
-
-### Conditional Distribution by Rainfall Category {#sec-04-07-rain-category-summary}
-
-The table below pools site-years across 2021--2023 and reports the distribution of spill counts and spill hours within each rainfall category for our preferred method: a 9 $km^2$ rainfall window over the spill day and previous day, allowing partial rainfall coverage. Because the summaries are conditional on rainfall category rather than on positive spill outcomes, zeros are retained within each category.
-
-```{r build-rain-category-summary-table}
-P10 <- function(x) stats::quantile(x, probs = 0.10, na.rm = TRUE)
-P25 <- function(x) stats::quantile(x, probs = 0.25, na.rm = TRUE)
-P50 <- function(x) stats::quantile(x, probs = 0.50, na.rm = TRUE)
-P75 <- function(x) stats::quantile(x, probs = 0.75, na.rm = TRUE)
-P90 <- function(x) stats::quantile(x, probs = 0.90, na.rm = TRUE)
-
-rain_category_map <- list(
-  "Dry day <0.25" = c(
-    count = "rain_cat_count_yr_r1_d01_weak_dry_day",
-    hrs = "rain_cat_hrs_yr_r1_d01_weak_dry_day"
-  ),
-  "Moderate 0.25-10" = c(
-    count = "rain_cat_count_yr_r1_d01_weak_moderate",
-    hrs = "rain_cat_hrs_yr_r1_d01_weak_moderate"
-  ),
-  "Heavy 10-20" = c(
-    count = "rain_cat_count_yr_r1_d01_weak_heavy",
-    hrs = "rain_cat_hrs_yr_r1_d01_weak_heavy"
-  ),
-  "Very heavy >20" = c(
-    count = "rain_cat_count_yr_r1_d01_weak_very_heavy",
-    hrs = "rain_cat_hrs_yr_r1_d01_weak_very_heavy"
-  )
-)
-
-rain_cat_summary_dat <- purrr::imap_dfr(
-  rain_category_map,
-  function(cols, label) {
-    dat_yr %>%
-      dplyr::transmute(
-        `Rainfall Category` = label,
-        `Spill Count` = .data[[cols["count"]]],
-        `Spill Hours` = .data[[cols["hrs"]]]
-      )
-  }
-) %>%
-  dplyr::mutate(
-    `Rainfall Category` = factor(
-      `Rainfall Category`,
-      levels = names(rain_category_map)
-    )
-  )
-
-modelsummary::datasummary(
-  Factor(`Rainfall Category`) * (`Spill Count` + `Spill Hours`) ~
-    Mean + P10 + P25 + P50 + P75 + P90,
-  data = rain_cat_summary_dat,
-  fmt = function(x) scales::number(x, accuracy = 0.01, big.mark = ",")
-)
-```
+:::
 
 ### Histogram in 2023 {#sec-04-07-02-histogram}
 
