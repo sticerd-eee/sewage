@@ -53,6 +53,7 @@ initialise_environment <- function() {
   )
   
   invisible(lapply(required_packages, library, character.only = TRUE))
+  source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
 }
 
 #' Set up logging configuration
@@ -130,10 +131,7 @@ process_spill_dates <- function(spills_dt) {
   
   # Extract date from start_time and add temporal offsets
   spills_dt[, spill_date := as.Date(start_time)]
-  spills_dt[, date_0 := spill_date]
-  spills_dt[, date_minus1 := spill_date - 1]
-  spills_dt[, date_minus2 := spill_date - 2] 
-  spills_dt[, date_minus3 := spill_date - 3]
+  spills_dt <- add_standard_rainfall_offsets(spills_dt, "spill_date")
   
   return(spills_dt)
 }
@@ -142,14 +140,10 @@ process_spill_dates <- function(spills_dt) {
 #' @param spills_dt data.table with date offset columns
 #' @return vector of unique dates
 get_required_rainfall_dates <- function(spills_dt) {
+  offset_cols <- get_standard_rainfall_offset_cols()
   
   # Collect all dates from all offset columns
-  all_dates <- c(
-    spills_dt$date_0,
-    spills_dt$date_minus1, 
-    spills_dt$date_minus2,
-    spills_dt$date_minus3
-  )
+  all_dates <- unlist(spills_dt[, ..offset_cols], use.names = FALSE)
   
   unique_dates <- sort(unique(all_dates))
   
@@ -203,53 +197,10 @@ calculate_rainfall_metrics <- function(matched_data) {
   # Create spill identifier (use available columns)
   matched_data[, spill_id := paste(site_id, start_time, sep = "_")]
   
-  # Calculate metrics by grouping (simplified approach)
-  rainfall_metrics <- matched_data[, {
-    # Helper to compute both NA-handling variants
-    calc_max_both <- function(v) {
-      # Empty vector → both NA
-      if (length(v) == 0) return(list(na_rm = NA_real_, strict = NA_real_))
-      # NA-ignoring variant
-      v_na_rm <- suppressWarnings(max(v, na.rm = TRUE))
-      if (is.infinite(v_na_rm)) v_na_rm <- NA_real_
-      # Strict variant: NA if any NA present
-      v_strict <- if (any(is.na(v))) NA_real_ else suppressWarnings(max(v, na.rm = FALSE))
-      if (is.infinite(v_strict)) v_strict <- NA_real_
-      list(na_rm = v_na_rm, strict = v_strict)
-    }
-
-    # 1. Rainfall on closest grid cell across t0 and t-1 (requested: rainfall_1cell_d01)
-    v_closest_d01 <- rainfall[is_center == TRUE & time_offset %in% c("date_0", "date_minus1")]
-    if (length(v_closest_d01) == 0) v_closest_d01 <- NA_real_
-    closest_d01_both <- calc_max_both(v_closest_d01)
-
-    # 2. Max rainfall across 9 cells (days 0 and -1)
-    v_9cell_d01 <- rainfall[time_offset %in% c("date_0", "date_minus1")]
-    max_d01_both <- calc_max_both(v_9cell_d01)
-
-    # 3. Max rainfall across 9 cells (days 0, -1, -2, -3)
-    v_9cell_d0123 <- rainfall[time_offset %in% c("date_0", "date_minus1", "date_minus2", "date_minus3")]
-    max_d0123_both <- calc_max_both(v_9cell_d0123)
-
-    # Compute explicit NA-handling variants
-    rainfall_1cell_d01_na_rm <- closest_d01_both$na_rm
-    rainfall_1cell_d01_strict <- closest_d01_both$strict
-    rainfall_max_9cell_d01_na_rm <- max_d01_both$na_rm
-    rainfall_max_9cell_d01_strict <- max_d01_both$strict
-    rainfall_max_9cell_d0123_na_rm <- max_d0123_both$na_rm
-    rainfall_max_9cell_d0123_strict <- max_d0123_both$strict
-
-    list(
-      # Explicit NA-handling variants only
-      rainfall_1cell_d01_na_rm = rainfall_1cell_d01_na_rm,
-      rainfall_1cell_d01_strict = rainfall_1cell_d01_strict,
-      rainfall_max_9cell_d01_na_rm = rainfall_max_9cell_d01_na_rm,
-      rainfall_max_9cell_d01_strict = rainfall_max_9cell_d01_strict,
-      rainfall_max_9cell_d0123_na_rm = rainfall_max_9cell_d0123_na_rm,
-      rainfall_max_9cell_d0123_strict = rainfall_max_9cell_d0123_strict
-    )
-
-  }, by = spill_id]
+  rainfall_metrics <- calculate_standard_rainfall_indicators(
+    matched_data,
+    by_cols = "spill_id"
+  )
   
   # Add back spill metadata (get first occurrence of each spill_id)
   spill_metadata <- matched_data[, .SD[1], by = spill_id,
@@ -443,11 +394,7 @@ process_years_sequential <- function(spills_dt, available_years, site_grid_looku
 filter_dry_spills <- function(final_results, dry_threshold_mm = CONFIG$dry_threshold_mm) {
   
   # Consider the six explicit rainfall columns
-  rainfall_cols <- c(
-    "rainfall_1cell_d01_na_rm", "rainfall_1cell_d01_strict",
-    "rainfall_max_9cell_d01_na_rm", "rainfall_max_9cell_d01_strict", 
-    "rainfall_max_9cell_d0123_na_rm", "rainfall_max_9cell_d0123_strict"
-  )
+  rainfall_cols <- get_standard_rainfall_indicator_cols()
   
   # Row-wise minimum across indicators (any < threshold ⇒ min < threshold)
   final_results[, min_rainfall := do.call(pmin, c(.SD, na.rm = TRUE)), .SDcols = rainfall_cols]
@@ -473,9 +420,7 @@ export_dry_spills <- function(dry_spills_data, output_path = CONFIG$dry_spills_e
   # Reorder columns for readability
   preferred_order <- c(
     "site_id", "year", "water_company", "ngr", "start_time", "end_time",
-    "rainfall_1cell_d01_na_rm", "rainfall_1cell_d01_strict",
-    "rainfall_max_9cell_d01_na_rm", "rainfall_max_9cell_d01_strict",
-    "rainfall_max_9cell_d0123_na_rm", "rainfall_max_9cell_d0123_strict"
+    get_standard_rainfall_indicator_cols()
   )
   existing <- intersect(preferred_order, names(dry_spills_data))
   remaining <- setdiff(names(dry_spills_data), existing)

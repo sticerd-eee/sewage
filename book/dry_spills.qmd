@@ -439,7 +439,7 @@ dat_daily <- arrow::read_parquet(
     "year",
     "spill_count",
     "spill_hrs",
-    "rainfall_r9_weak",
+    "rainfall_max_9cell_d0_na_rm",
     "site_missing"
   )
 ) |>
@@ -448,21 +448,21 @@ dat_daily <- arrow::read_parquet(
 dat_daily <- dat_daily[
   site_missing == FALSE &
     !is.na(spill_count) &
-    !is.na(rainfall_r9_weak)
+    !is.na(rainfall_max_9cell_d0_na_rm)
 ]
 
 dat_daily[, spill_any := as.integer(spill_count == 1L)]
 data.table::setorder(dat_daily, site_id, date)
 
 dat_daily[, `:=`(
-  rain_t = rainfall_r9_weak,
-  rain_l1 = data.table::shift(rainfall_r9_weak, 1L),
-  rain_l2 = data.table::shift(rainfall_r9_weak, 2L),
-  rain_l3 = data.table::shift(rainfall_r9_weak, 3L),
-  rain_l4 = data.table::shift(rainfall_r9_weak, 4L),
-  rain_l5 = data.table::shift(rainfall_r9_weak, 5L),
-  rain_l6 = data.table::shift(rainfall_r9_weak, 6L),
-  rain_l7 = data.table::shift(rainfall_r9_weak, 7L)
+  rain_t = rainfall_max_9cell_d0_na_rm,
+  rain_l1 = data.table::shift(rainfall_max_9cell_d0_na_rm, 1L),
+  rain_l2 = data.table::shift(rainfall_max_9cell_d0_na_rm, 2L),
+  rain_l3 = data.table::shift(rainfall_max_9cell_d0_na_rm, 3L),
+  rain_l4 = data.table::shift(rainfall_max_9cell_d0_na_rm, 4L),
+  rain_l5 = data.table::shift(rainfall_max_9cell_d0_na_rm, 5L),
+  rain_l6 = data.table::shift(rainfall_max_9cell_d0_na_rm, 6L),
+  rain_l7 = data.table::shift(rainfall_max_9cell_d0_na_rm, 7L)
 ), by = site_id]
 
 dat_daily[, `:=`(

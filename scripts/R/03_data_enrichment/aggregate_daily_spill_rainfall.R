@@ -36,7 +36,7 @@ initialise_environment <- function() {
     library(pkg, character.only = TRUE)
   }))
 
-  # Source shared utilities for split_daily_records() and calculate_spill_hours()
+  # Source shared utilities for spill aggregation and rainfall indicators.
   source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
 }
 
@@ -70,6 +70,7 @@ CONFIG <- list(
   start_date = as.Date("2021-01-01"),
   end_date   = as.Date("2023-12-31"),
   study_years = 2021:2023,
+  rainfall_lookback_days = 3L,
 
   # Memory management
   sites_per_chunk = 500
@@ -113,7 +114,10 @@ load_rainfall_data <- function() {
   rainfall_dt <- arrow::read_parquet(CONFIG$rainfall_path) |>
     as.data.table()
 
-  rainfall_dt <- rainfall_dt[date >= CONFIG$start_date & date <= CONFIG$end_date]
+  rainfall_dt <- rainfall_dt[
+    date >= (CONFIG$start_date - CONFIG$rainfall_lookback_days) &
+      date <= CONFIG$end_date
+  ]
 
   logger::log_info("Loaded rainfall data: {nrow(rainfall_dt)} records")
   return(rainfall_dt)
@@ -175,7 +179,7 @@ aggregate_daily_spills <- function(events_dt) {
 #' @param chunk_sites data.table with sites in current chunk
 #' @param rainfall_dt data.table with rainfall data
 #' @param lookup_dt data.table with site-grid mappings
-#' @return data.table with site_id, date, rainfall_r1, rainfall_r9_weak, rainfall_r9_strict
+#' @return data.table with site_id, date, and daily-panel rainfall indicator columns
 calculate_chunk_rainfall <- function(chunk_sites, rainfall_dt, lookup_dt) {
   chunk_ngrs <- chunk_sites$ngr
   chunk_lookup <- lookup_dt[ngr %in% chunk_ngrs]
@@ -191,34 +195,28 @@ calculate_chunk_rainfall <- function(chunk_sites, rainfall_dt, lookup_dt) {
     sorted = FALSE
   )
   chunk_grid <- chunk_sites[, .(site_id, ngr)][chunk_grid, on = "site_id"]
+  chunk_grid <- add_standard_rainfall_offsets(chunk_grid, "date")
 
-  # Join site-day grid with spatial lookup (each site → 9 cells)
-  expanded_grid <- chunk_grid[chunk_lookup, on = "ngr", allow.cartesian = TRUE]
+  # Expand site-day observations across the shared time offsets and lookup cells.
+  rainfall_long <- data.table::melt(
+    chunk_grid,
+    id.vars = c("site_id", "date", "ngr"),
+    measure.vars = get_standard_rainfall_offset_cols(),
+    variable.name = "time_offset",
+    value.name = "rainfall_date"
+  )
+  expanded_grid <- rainfall_long[chunk_lookup, on = "ngr", allow.cartesian = TRUE]
 
-  # Join with rainfall observations
+  # Join with rainfall observations for the required cell-date combinations.
   rainfall_joined <- expanded_grid[chunk_rainfall,
-                                   on = c("x_idx", "y_idx", "date"),
+                                   on = c("x_idx", "y_idx", "rainfall_date" = "date"),
                                    nomatch = 0]
 
-  # Aggregate: centre cell (r1), 9-cell max weak and strict (r9)
-  rainfall_indicators <- rainfall_joined[, {
-    # Centre cell (r1)
-    r1_val <- rainfall[is_center == TRUE][1]
-
-    # 9-cell neighbourhood (r9) — weak and strict variants
-    v_r9 <- rainfall
-    r9_weak <- suppressWarnings(max(v_r9, na.rm = TRUE))
-    if (is.infinite(r9_weak)) r9_weak <- NA_real_
-
-    r9_strict <- if (any(is.na(v_r9))) NA_real_ else suppressWarnings(max(v_r9, na.rm = FALSE))
-    if (is.infinite(r9_strict)) r9_strict <- NA_real_
-
-    .(rainfall_r1        = r1_val,
-      rainfall_r9_weak   = r9_weak,
-      rainfall_r9_strict = r9_strict)
-  }, by = .(site_id, date)]
-
-  return(rainfall_indicators)
+  calculate_standard_rainfall_indicators(
+    rainfall_joined,
+    by_cols = c("site_id", "date"),
+    include_same_day_max_9cell_na_rm = TRUE
+  )
 }
 
 #' Build per-year missingness flags for a chunk of sites
@@ -349,9 +347,20 @@ main <- function() {
   panel <- rbindlist(successful, use.names = TRUE, fill = TRUE)
 
   # Select and order final columns
-  panel <- panel[, .(site_id, water_company, date, year,
-                     spill_count, spill_hrs,
-                     rainfall_r1, rainfall_r9_weak, rainfall_r9_strict, site_missing)]
+  panel <- panel[
+    ,
+    c(
+      "site_id",
+      "water_company",
+      "date",
+      "year",
+      "spill_count",
+      "spill_hrs",
+      get_daily_panel_rainfall_indicator_cols(),
+      "site_missing"
+    ),
+    with = FALSE
+  ]
   data.table::setorder(panel, site_id, date)
 
   # Export

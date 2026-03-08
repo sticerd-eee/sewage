@@ -254,6 +254,158 @@ calculate_spill_hours <- function(start_times, end_times) {
   )
 }
 
+#' Return standard rainfall offset column names
+#'
+#' These offsets are shared across daily-panel and spill-level rainfall matching.
+#'
+#' @return Character vector of standard rainfall offset column names
+#' @export
+get_standard_rainfall_offset_cols <- function() {
+  c("date_0", "date_minus1", "date_minus2", "date_minus3")
+}
+
+#' Add standard rainfall offset columns relative to a base date column
+#'
+#' @param data Data frame or data.table containing a base date column
+#' @param date_col Character scalar naming the base date column
+#' @return data.table with date_0, date_minus1, date_minus2, and date_minus3 added
+#' @export
+add_standard_rainfall_offsets <- function(data, date_col) {
+  dt <- as.data.table(data)
+
+  if (!date_col %in% names(dt)) {
+    stop(sprintf("Column '%s' not found in data.", date_col))
+  }
+
+  base_dates <- as.Date(dt[[date_col]])
+  dt[, `:=`(
+    date_0 = base_dates,
+    date_minus1 = base_dates - 1L,
+    date_minus2 = base_dates - 2L,
+    date_minus3 = base_dates - 3L
+  )]
+
+  dt[]
+}
+
+#' Return the shared rainfall indicator column names
+#'
+#' @return Character vector of rainfall indicator column names
+#' @export
+get_standard_rainfall_indicator_cols <- function() {
+  c(
+    "rainfall_1cell_d01_na_rm",
+    "rainfall_1cell_d01_strict",
+    "rainfall_max_9cell_d01_na_rm",
+    "rainfall_max_9cell_d01_strict",
+    "rainfall_max_9cell_d0123_na_rm",
+    "rainfall_max_9cell_d0123_strict"
+  )
+}
+
+#' Return rainfall indicator columns used in the daily site-day panel
+#'
+#' Keeps the same-day 9-cell measure separate from the dry-spill indicator set,
+#' so spill-level dry-spill outputs are not widened unintentionally.
+#'
+#' @return Character vector of daily-panel rainfall indicator column names
+#' @export
+get_daily_panel_rainfall_indicator_cols <- function() {
+  c(
+    "rainfall_max_9cell_d0_na_rm",
+    get_standard_rainfall_indicator_cols()
+  )
+}
+
+#' Calculate the shared rainfall indicators from matched long-form rainfall data
+#'
+#' The input must already be matched to rainfall observations and include:
+#' - `time_offset`: one of date_0, date_minus1, date_minus2, date_minus3
+#' - `rainfall`: rainfall value
+#' - `is_center`: TRUE for the centre cell, FALSE for neighbouring cells
+#'
+#' @param matched_data data.table with matched rainfall observations
+#' @param by_cols Character vector of grouping columns
+#' @param include_same_day_max_9cell_na_rm Logical; when TRUE, also returns
+#'   `rainfall_max_9cell_d0_na_rm` for same-day daily-panel analysis.
+#' @return data.table with the shared rainfall indicators
+#' @export
+calculate_standard_rainfall_indicators <- function(
+    matched_data,
+    by_cols,
+    include_same_day_max_9cell_na_rm = FALSE) {
+  dt <- as.data.table(matched_data)
+  required_cols <- c(by_cols, "time_offset", "rainfall", "is_center")
+  missing_cols <- setdiff(required_cols, names(dt))
+
+  if (length(missing_cols) > 0) {
+    stop(
+      sprintf(
+        "Missing required rainfall columns: %s",
+        paste(missing_cols, collapse = ", ")
+      )
+    )
+  }
+
+  if (nrow(dt) == 0L) {
+    empty <- dt[0, ..by_cols]
+    indicator_cols <- if (isTRUE(include_same_day_max_9cell_na_rm)) {
+      get_daily_panel_rainfall_indicator_cols()
+    } else {
+      get_standard_rainfall_indicator_cols()
+    }
+    for (col in indicator_cols) {
+      empty[, (col) := numeric()]
+    }
+    return(empty[])
+  }
+
+  calc_max_both <- function(v) {
+    if (length(v) == 0L) {
+      return(list(na_rm = NA_real_, strict = NA_real_))
+    }
+
+    v_na_rm <- suppressWarnings(max(v, na.rm = TRUE))
+    if (is.infinite(v_na_rm)) v_na_rm <- NA_real_
+
+    v_strict <- if (any(is.na(v))) NA_real_ else suppressWarnings(max(v, na.rm = FALSE))
+    if (is.infinite(v_strict)) v_strict <- NA_real_
+
+    list(na_rm = v_na_rm, strict = v_strict)
+  }
+
+  dt[, {
+    max_d0_both <- calc_max_both(
+      rainfall[time_offset == "date_0"]
+    )
+    closest_d01_both <- calc_max_both(
+      rainfall[is_center == TRUE & time_offset %in% c("date_0", "date_minus1")]
+    )
+    max_d01_both <- calc_max_both(
+      rainfall[time_offset %in% c("date_0", "date_minus1")]
+    )
+    max_d0123_both <- calc_max_both(
+      rainfall[time_offset %in% c("date_0", "date_minus1", "date_minus2", "date_minus3")]
+    )
+
+    out <- list(
+      rainfall_1cell_d01_na_rm = closest_d01_both$na_rm,
+      rainfall_1cell_d01_strict = closest_d01_both$strict,
+      rainfall_max_9cell_d01_na_rm = max_d01_both$na_rm,
+      rainfall_max_9cell_d01_strict = max_d01_both$strict,
+      rainfall_max_9cell_d0123_na_rm = max_d0123_both$na_rm,
+      rainfall_max_9cell_d0123_strict = max_d0123_both$strict
+    )
+    if (isTRUE(include_same_day_max_9cell_na_rm)) {
+      out <- c(
+        list(rainfall_max_9cell_d0_na_rm = max_d0_both$na_rm),
+        out
+      )
+    }
+    out
+  }, by = by_cols]
+}
+
 #' Validate spill data for aggregation
 #'
 #' Performs basic validation checks on spill data before aggregation.

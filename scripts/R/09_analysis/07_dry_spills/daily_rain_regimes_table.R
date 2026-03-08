@@ -37,96 +37,83 @@ TABLE_LABEL <- "tbl:dry-spill-daily-rain-regimes"
 # ==============================================================================
 # 2. Package Management
 # ==============================================================================
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
-
 required_packages <- c(
   "arrow",
   "data.table",
   "here"
 )
 
-install_if_missing <- function(packages) {
-  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
-  if (length(new_packages) > 0) {
-    install.packages(new_packages)
-  }
-  invisible(sapply(packages, library, character.only = TRUE))
+missing_packages <- required_packages[
+  !vapply(required_packages, requireNamespace, logical(1L), quietly = TRUE)
+]
+
+if (length(missing_packages) > 0L) {
+  stop(
+    "Missing required packages: ",
+    paste(missing_packages, collapse = ", "),
+    ". Run renv::restore() before running this script.",
+    call. = FALSE
+  )
 }
-install_if_missing(required_packages)
 
 
 # ==============================================================================
 # 3. Setup
 # ==============================================================================
 output_dir <- here::here("output", "tables")
-if (!dir.exists(output_dir)) {
-  dir.create(output_dir, recursive = TRUE)
-}
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
 output_file <- file.path(output_dir, "dry_spill_daily_rain_regimes.tex")
 
-format_latex_int <- function(x) {
-  if (length(x) != 1L) {
-    return(vapply(x, format_latex_int, character(1L)))
+format_latex_num <- function(x, digits = 2L, scale = 1, suffix = "") {
+  out <- rep.int("", length(x))
+  ok <- !is.na(x)
+
+  if (any(ok)) {
+    out[ok] <- paste0(
+      "\\num{",
+      formatC(scale * x[ok], format = "f", digits = digits),
+      "}",
+      suffix
+    )
   }
 
-  if (is.na(x)) {
-    return("")
-  }
-
-  paste0("\\num{", formatC(round(x), format = "f", digits = 0), "}")
-}
-
-format_latex_num <- function(x, digits = 2L) {
-  if (length(x) != 1L) {
-    return(vapply(x, format_latex_num, character(1L), digits = digits))
-  }
-
-  if (is.na(x)) {
-    return("")
-  }
-
-  paste0("\\num{", formatC(x, format = "f", digits = digits), "}")
-}
-
-format_latex_pct <- function(x, digits = 1L) {
-  if (length(x) != 1L) {
-    return(vapply(x, format_latex_pct, character(1L), digits = digits))
-  }
-
-  if (is.na(x)) {
-    return("")
-  }
-
-  paste0("\\num{", formatC(100 * x, format = "f", digits = digits), "}\\%")
+  out
 }
 
 format_latex_total <- function(x) {
-  if (length(x) != 1L) {
-    return(vapply(x, format_latex_total, character(1L)))
+  out <- rep.int("", length(x))
+  ok <- !is.na(x)
+
+  if (!any(ok)) {
+    return(out)
   }
 
-  if (is.na(x)) {
-    return("")
-  }
+  x_ok <- x[ok]
+  x_round <- round(x_ok)
+  is_int <- abs(x_ok - x_round) < 1e-9
 
-  if (isTRUE(all.equal(x, round(x), tolerance = 1e-9))) {
-    return(format_latex_int(round(x)))
-  }
+  out[ok] <- ifelse(
+    is_int,
+    format_latex_num(x_round, digits = 0L),
+    format_latex_num(x_ok, digits = 1L)
+  )
 
-  format_latex_num(x, digits = 1L)
+  out
 }
 
-safe_quantile <- function(x, prob) {
+format_latex_pct <- function(x, digits = 1L) {
+  format_latex_num(x, digits = digits, scale = 100, suffix = "\\%")
+}
+
+safe_quantile <- function(x, probs) {
   x <- x[!is.na(x)]
 
   if (length(x) == 0L) {
     return(NA_real_)
   }
 
-  as.numeric(stats::quantile(x, probs = prob, na.rm = TRUE, names = FALSE))
+  as.numeric(stats::quantile(x, probs = probs, na.rm = TRUE, names = FALSE))
 }
 
 
@@ -149,7 +136,7 @@ dat_daily <- arrow::read_parquet(
     "date",
     "spill_count",
     "spill_hrs",
-    "rainfall_r9_weak",
+    "rainfall_max_9cell_d01_na_rm",
     "site_missing"
   )
 ) |>
@@ -159,18 +146,18 @@ dat_daily <- dat_daily[
   site_missing == FALSE &
     !is.na(date) &
     !is.na(spill_count) &
-    !is.na(rainfall_r9_weak)
+    !is.na(rainfall_max_9cell_d01_na_rm)
 ]
 
 dat_daily[, `:=`(
   date = as.Date(date),
-  spill_any = as.integer(spill_count == 1L)
+  year = data.table::year(date)
 )]
 
 dat_daily[, rainfall_category := data.table::fcase(
-  rainfall_r9_weak < 0.25, RAINFALL_LABELS[1L],
-  rainfall_r9_weak <= 10, RAINFALL_LABELS[2L],
-  rainfall_r9_weak <= 20, RAINFALL_LABELS[3L],
+  rainfall_max_9cell_d01_na_rm < 0.25, RAINFALL_LABELS[1L],
+  rainfall_max_9cell_d01_na_rm <= 10, RAINFALL_LABELS[2L],
+  rainfall_max_9cell_d01_na_rm <= 20, RAINFALL_LABELS[3L],
   default = RAINFALL_LABELS[4L]
 )]
 
@@ -181,7 +168,6 @@ dat_daily[, rainfall_category := factor(
 
 sample_start_year <- format(min(dat_daily$date, na.rm = TRUE), "%Y")
 sample_end_year <- format(max(dat_daily$date, na.rm = TRUE), "%Y")
-sample_year_count <- data.table::uniqueN(format(dat_daily$date, "%Y"))
 sample_period <- if (identical(sample_start_year, sample_end_year)) {
   sample_start_year
 } else {
@@ -197,15 +183,25 @@ cat(sprintf("  Sample period: %s\n", sample_period))
 # ==============================================================================
 cat("Computing rainfall-category summary...\n")
 
-category_summary <- dat_daily[
-  !is.na(rainfall_category),
+n_site_years <- data.table::uniqueN(dat_daily[, .(site_id, year)])
+
+category_days_summary <- dat_daily[
+  ,
+  .(
+    days_per_overflow_year = .N / n_site_years,
+    spill_days_per_overflow_year = sum(spill_count, na.rm = TRUE) / n_site_years,
+    spill_days_share = sum(spill_count, na.rm = TRUE) / .N
+  ),
+  by = rainfall_category
+]
+
+category_hours_summary <- dat_daily[
+  ,
   {
-    spill_hours_all_days <- data.table::fifelse(spill_any == 1L, spill_hrs, 0)
-    spill_hours_on_spill_days <- spill_hrs[spill_any == 1L & !is.na(spill_hrs)]
+    spill_hours_all_days <- data.table::fifelse(spill_count == 1L, spill_hrs, 0)
+    spill_hours_on_spill_days <- spill_hrs[spill_count == 1L & !is.na(spill_hrs)]
 
     list(
-      spill_days_annual_total = sum(spill_any, na.rm = TRUE) / sample_year_count,
-      spill_days_share = mean(spill_any, na.rm = TRUE),
       spill_hours_uncond_mean = mean(spill_hours_all_days, na.rm = TRUE),
       spill_hours_uncond_p25 = safe_quantile(spill_hours_all_days, 0.25),
       spill_hours_uncond_p50 = safe_quantile(spill_hours_all_days, 0.50),
@@ -225,15 +221,32 @@ category_summary <- dat_daily[
   by = rainfall_category
 ]
 
-category_summary[, rainfall_category := factor(
-  rainfall_category,
-  levels = RAINFALL_LABELS
-)]
+category_summary <- data.table::data.table(
+  rainfall_category = factor(RAINFALL_LABELS, levels = RAINFALL_LABELS)
+)
+
+category_summary <- merge(
+  category_summary,
+  category_days_summary,
+  by = "rainfall_category",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+category_summary <- merge(
+  category_summary,
+  category_hours_summary,
+  by = "rainfall_category",
+  all.x = TRUE,
+  sort = FALSE
+)
+
 data.table::setorder(category_summary, rainfall_category)
 
 table_rows <- category_summary[, .(
   rainfall = as.character(rainfall_category),
-  spill_days_annual_total = format_latex_total(spill_days_annual_total),
+  days_per_overflow_year = format_latex_total(days_per_overflow_year),
+  spill_days_per_overflow_year = format_latex_total(spill_days_per_overflow_year),
   spill_days_share = format_latex_pct(spill_days_share, digits = 1L),
   spill_hours_uncond_mean = format_latex_num(spill_hours_uncond_mean, digits = 1L),
   spill_hours_uncond_p25 = format_latex_num(spill_hours_uncond_p25, digits = 1L),
@@ -251,38 +264,20 @@ table_note <- paste0(
   "\\footnotesize{\\textbf{Notes:} This table presents daily spill statistics ",
   "by rainfall category for storm overflow sites in England, ",
   sample_period,
-  ". The sample includes overflow-days with usable daily spill and rainfall ",
-  "information. For each overflow-day, rainfall is defined as the highest ",
-  "daily rainfall observed across the 3x3 km grid surrounding the overflow. ",
-  "Annual total reports the average number of spill days per year in each ",
-  "rainfall category. Share reports the fraction of days in that rainfall ",
-  "category on which a spill occurs. Columns under Spill hours summarise ",
-  "spill duration across all overflow-days in the category, so days without ",
-  "a spill enter as zeroes. Columns under Spill hours $\\mid$ spill day ",
-  "summarise spill duration only on days when a spill occurs. Dry, moderate, ",
-  "heavy, and very heavy rainfall categories correspond to $<0.25$ mm, ",
-  "0.25--10 mm, 10--20 mm, and $>20$ mm respectively.}"
+  ". For each overflow on each calendar day, rainfall is measured as the ",
+  "maximum daily rainfall recorded within the surrounding 3~$\\times$~3\\,km ",
+  "grid on that day or the previous day. Total days reports the average ",
+  "number of days per year in each rainfall category; spill days the average ",
+  "number of spill days,and Share the proportion of those days with a spill.",
+  "Spill hours reports daily spill duration across all days in the category, ",
+  "including zeroes on days without a spill. Spill hours $\\mid$ spill day ",
+  "reports daily spill duration conditional on a spill occurring.}"
 )
 
-body_lines <- apply(table_rows, 1L, function(row) {
-  paste(
-    row[["rainfall"]],
-    row[["spill_days_annual_total"]],
-    row[["spill_days_share"]],
-    row[["spill_hours_uncond_mean"]],
-    row[["spill_hours_uncond_p25"]],
-    row[["spill_hours_uncond_p50"]],
-    row[["spill_hours_uncond_p75"]],
-    row[["spill_hours_uncond_p90"]],
-    row[["spill_hours_cond_mean"]],
-    row[["spill_hours_cond_p25"]],
-    row[["spill_hours_cond_p50"]],
-    row[["spill_hours_cond_p75"]],
-    row[["spill_hours_cond_p90"]],
-    sep = " & "
-  )
-})
-body_lines <- paste0(body_lines, " \\\\")
+body_lines <- paste0(
+  do.call(paste, c(as.list(table_rows), sep = " & ")),
+  " \\\\"
+)
 
 
 # ==============================================================================
@@ -302,22 +297,22 @@ latex_lines <- c(
   "colsep=4pt,",
   "rowsep=0pt,",
   "cells={font=\\fontsize{11pt}{12pt}\\selectfont, valign=m},",
-  "colspec={Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]},",
-  "hline{1}={1-13}{solid, black, 0.1em},",
-  "hline{2}={2-3}{solid, black, 0.05em},",
-  "hline{2}={4-8}{solid, black, 0.05em},",
-  "hline{2}={9-13}{solid, black, 0.05em},",
-  "hline{2}={3}{solid, black, 0.05em, r=-0.5},",
-  "hline{2}={4}{solid, black, 0.05em, l=-0.5},",
-  "hline{2}={8}{solid, black, 0.05em, r=-0.5},",
-  "hline{2}={9}{solid, black, 0.05em, l=-0.5},",
-  "hline{3}={1-13}{solid, black, 0.05em},",
-  "hline{7}={1-13}{solid, black, 0.1em},",
+  "colspec={Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]},",
+  "hline{1}={1-14}{solid, black, 0.1em},",
+  "hline{2}={2-4}{solid, black, 0.05em},",
+  "hline{2}={5-9}{solid, black, 0.05em},",
+  "hline{2}={10-14}{solid, black, 0.05em},",
+  "hline{2}={4}{solid, black, 0.05em, r=-0.5},",
+  "hline{2}={5}{solid, black, 0.05em, l=-0.5},",
+  "hline{2}={9}{solid, black, 0.05em, r=-0.5},",
+  "hline{2}={10}{solid, black, 0.05em, l=-0.5},",
+  "hline{3}={1-14}{solid, black, 0.05em},",
+  "hline{7}={1-14}{solid, black, 0.1em},",
   "column{1}={}{halign=l},",
-  "column{2-13}={}{halign=c}",
+  "column{2-14}={}{halign=c}",
   "}",
-  "& \\SetCell[c=2]{c} Spill days & & \\SetCell[c=5]{c} Spill hours & & & & & \\SetCell[c=5]{c} Spill hours $\\mid$ spill day & & & & \\\\",
-  "{Rainfall \\\\ Category} & {Annual \\\\ total} & Share & Mean & P25 & P50 & P75 & P90 & Mean & P25 & P50 & P75 & P90 \\\\",
+  "& \\SetCell[c=3]{c} Days / overflow & & & \\SetCell[c=5]{c} Spill hours & & & & & \\SetCell[c=5]{c} Spill hours $\\mid$ spill day & & & & \\\\",
+  "{Rainfall \\\\ Category} & {Total \\\\ Days} & {Spill \\\\ Days} & Share & Mean & P25 & P50 & P75 & P90 & Mean & P25 & P50 & P75 & P90 \\\\",
   body_lines,
   "\\end{talltblr}",
   "\\end{table}"
