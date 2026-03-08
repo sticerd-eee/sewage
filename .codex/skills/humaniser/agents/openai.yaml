@@ -1,0 +1,4 @@
+interface:
+  display_name: "Humaniser"
+  short_description: "Humanise academic prose conservatively"
+  default_prompt: "Use $humaniser to revise this passage so it reads less formulaic and less AI-written while preserving meaning, citations, and structure."

@@ -40,3 +40,14 @@ This repository is a research pipeline centered on sewage-spill and housing anal
 - Follow existing history style: concise, imperative summaries (for example `fix: ...`, `refactor: ...`, `Added ...`).
 - Keep commits scoped to one logical pipeline or analysis change.
 - PRs should include what changed and why, impacted scripts/paths, rerun commands, output evidence (table/figure paths and screenshots for Quarto/book changes), and a linked issue/task when available.
+
+## Skills
+Repository-local Codex skills for this project live under `.codex/skills/`.
+
+### Available skills
+- `humaniser`: Remove AI-sounding or overly formulaic patterns from academic and research prose while preserving meaning, citations, and document structure. Use for `.qmd`, `.Rmd`, `.md`, `.txt`, and prose sections of `.tex` files when text reads generic, over-signposted, or obviously LLM-written. (file: `/Users/jacopoolivieri/Library/CloudStorage/Dropbox/01_projects/sewage/.codex/skills/humaniser/SKILL.md`)
+
+### How to use skills
+- Trigger this skill when the user names `$humaniser` or asks to humanise, de-AI, de-slop, or make prose sound less machine-written.
+- Prefer this repo-local skill over similarly named skills elsewhere.
+- Apply it only to prose. Do not rewrite code, equations, chunk options, YAML frontmatter, citations, labels, or generated outputs unless the user explicitly asks.
