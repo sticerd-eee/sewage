@@ -86,6 +86,9 @@ scripts/R/09_analysis/05_news/did_articles_lag4_prior.R
 
 # 07_dry_spills
 scripts/R/09_analysis/07_dry_spills/daily_rain_regimes_table.R
+scripts/R/09_analysis/07_dry_spills/dry_spill_logit_ame_table.R
+scripts/R/09_analysis/07_dry_spills/dry_spill_method_figure.R
+scripts/R/09_analysis/07_dry_spills/dry_wet_spill_correlation_plot.R
 EOF
 )
 
