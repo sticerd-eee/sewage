@@ -111,10 +111,12 @@ load_data <- function() {
 #' @return List with aggregated yearly and monthly spill statistics
 aggregate_spills <- function(data) {
   prepared_data <- prepare_spill_data(data)
-  dt_yearly  <- prepared_data$yearly
-  dt_monthly <- prepared_data$monthly
+  dt_yearly    <- prepared_data$yearly
+  dt_monthly   <- prepared_data$monthly
+  dt_quarterly <- prepared_data$quarterly
   dt_monthly[, month_id := (year - CONFIG$base_year) * 12 + month]
   dt_monthly[, qtr_id := (year - CONFIG$base_year) * 4 + quarter]
+  dt_quarterly[, qtr_id := (year - CONFIG$base_year) * 4 + quarter]
 
   # Combinations to ensure zero-row outputs are created where needed
   yearly_combinations <- expand_grid(
@@ -195,14 +197,14 @@ aggregate_spills <- function(data) {
     }
   )
 
-  # ---- Quarterly -------------------------------------------------
+  # ---- Quarterly (D13: uses quarter-split data) ----------------
   quarterly_combinations <- expand_grid(
-    water_company = unique(dt_monthly$water_company),
+    water_company = unique(dt_quarterly$water_company),
     year          = CONFIG$years,
     quarter       = 1:4
   ) %>%
     mutate(qtr_id = (year - CONFIG$base_year) * 4 + quarter)
-  
+
   quarterly_result <- pmap(
     list(
       quarterly_combinations$water_company,
@@ -211,7 +213,7 @@ aggregate_spills <- function(data) {
       quarterly_combinations$qtr_id
     ),
     function(wc, yr, qt, qid) {
-      cur <- dt_monthly[water_company == wc & year == yr & quarter == qt]
+      cur <- dt_quarterly[water_company == wc & year == yr & quarter == qt]
       if (nrow(cur) == 0) {
         return(data.table(
           water_company   = wc,
