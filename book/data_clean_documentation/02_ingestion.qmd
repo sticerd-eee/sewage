@@ -24,7 +24,7 @@ The ingestion layer is responsible for acquiring raw data and preparing it for d
 Within this project, the ingestion layer is only required for the two sources of data:
 
 1. **EDM 2021–2023:** Individual spill data obtained via a Freedom of Information request, received in a variety of file formats from water companies.
-2. **EDM 2024-present:** Individual spill data  obtained from ArcGIS API endpoints provided by Water UK.^[As of July 2025, the API data for 2024 is excluded from the analysis due to major gaps—fewer than 2,000 spill records are available, compared to an expected 450,000. The ingestion infrastructure is ready to incorporate this data once it becomes complete.]
+2. **EDM 2024-present:** Individual spill data obtained from the ArcGIS API endpoints used by Water UK's National Storm Overflows Hub for the nine England companies.^[As of July 2025, the API data for 2024 is excluded from the analysis due to major gaps—fewer than 2,000 spill records are available, compared to an expected 450,000. The ingestion infrastructure is ready to incorporate this data once it becomes complete. Welsh Water maintains a separate public storm-overflow map and is not part of this live API pipeline.]
 
 
 
@@ -38,10 +38,10 @@ It extracts files from `.zip` archives, identifies those with `.csv`, .`xlsx`, o
 
 ## 2024-Present EDM Data Ingestion {#sec-02-03-edm-data-ingestion-2024}
 
-Individual EDM data for 2024 onwards is available via ArcGIS API endpoints provided by Water UK. This data is ingested through a two-script pipeline designed for incremental, timestamped updates as new spill records are released.
+Individual EDM data for 2024 onwards is available via the ArcGIS API endpoints used by Water UK's National Storm Overflows Hub. In this project, the live API path is explicitly England-only: it covers the nine companies in that feed, while Welsh Water remains outside scope unless a separate source contract is added. The data is ingested through a two-script pipeline designed for incremental, timestamped updates as new spill records are released.
 
-1. **Automated Retrieval:** `Script fetch_edm_api_data_2024_onwards.R` queries API endpoints for each water company, as defined in an external configuration file. It handles pagination, consolidates results into a single JSON object, and saves a timestamped, compressed file (e.g., 250405_1030_thames_water.json.gz). Each retrieval is logged in a persistent CSV.
-2. **Incremental Processing** Script `process_edm_api_json_to_parquet_2024_onwards.R` identifies unprocessed .json.gz files and extracts the relevant features array from each.
+1. **Automated Retrieval:** `fetch_edm_api_data_2024_onwards.R` queries the configured England-only company endpoints, handles pagination, consolidates results into a single JSON object, and saves a timestamped compressed file (for example `250405_1030_thames_water.json.gz`) under `data/raw/edm_data/raw_api_responses/<company>/`. Each retrieval is logged in a persistent CSV.
+2. **Incremental Processing:** `process_edm_api_json_to_parquet_2024_onwards.R` identifies unprocessed `.json.gz` files and extracts the relevant `features` array from each snapshot.
 3. **Standardisation:** Extracted records are cleaned by standardising column names to snake_case and tagging each entry with a water_company identifier.
-4. **Deduplication and Update:** New records are appquarto publish gh-pagesended to the company’s master Parquet file. The combined dataset is de-duplicated to ensure all entries are unique.
+4. **Deduplication and Update:** New records are appended to the relevant company's master Parquet file in `data/processed/edm_api_data/`. The combined dataset is de-duplicated to ensure all entries are unique.
 5. **Archiving:** After processing, source .json.gz files are moved to a processed subdirectory to prevent reprocessing.

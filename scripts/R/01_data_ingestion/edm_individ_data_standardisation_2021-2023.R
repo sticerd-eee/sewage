@@ -8,25 +8,34 @@
 #
 # Author: Jacopo Olivieri
 # Date: 2024-12-01
+# Date Modified: 2026-03-10
 #
 # Inputs:
 #   - data/raw/edm_data/EDM*.zip - Raw FOI EDM archives from water companies
 #
 # Outputs:
 #   - data/raw/edm_data/{year}_{company}_edm.{extension} - Standardised files
-#   - output/log/01_edm_individ_data_standardisation_2021-2023.log
-#
-# Key Invariants:
-#   - Output filename contract is "{year}_{company}_edm.{extension}"
-#   - Supported extensions are csv, xlsx, and xlsb only
-#   - Archives extract into data/raw/edm_data/temp_edm_extract during processing
-#   - Company regex order matters: first match wins
-#
-# Notes:
-#   - This script standardises filenames only; it does not harmonise contents.
-#   - Temporary extraction artifacts are cleaned up on exit.
+#   - output/log/edm_individ_data_standardisation_2021-2023.log
 #
 # ==============================================================================
+
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first, e.g. `renv::restore()`.",
+    call. = FALSE
+  )
+}
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c("dplyr", "fs", "here", "logger", "purrr", "stringr", "tibble")
+LOG_FILE <- here::here(
+  "output", "log",
+  "edm_individ_data_standardisation_2021-2023.log"
+)
+
+check_required_packages(REQUIRED_PACKAGES)
 
 VALID_EXTENSIONS <- c("csv", "xlsx", "xlsb")
 
@@ -43,17 +52,6 @@ COMPANY_PATTERNS <- c(
   "yorkshire" = "yorkshire_water",
   "all water and sewerage companies" = "annual_return"
 )
-
-setup_logging <- function() {
-  log_path <- here::here(
-    "output", "log",
-    "01_edm_individ_data_standardisation_2021-2023.log"
-  )
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-}
 
 match_company <- function(filename, company_patterns = COMPANY_PATTERNS) {
   filename_lower <- tolower(filename)
@@ -190,7 +188,8 @@ main <- function(data_path = here::here()) {
 
   tryCatch(
     {
-      setup_logging()
+      setup_logging(LOG_FILE)
+      logger::log_info("Script started at {Sys.time()}")
       logger::log_info("Starting EDM file standardisation process")
 
       extract_edm_archives(data_path, temp_dir)

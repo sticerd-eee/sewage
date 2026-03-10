@@ -377,7 +377,7 @@ load_data(year) %>%
   mutate(year = year) %>% 
   pull(year_data_start) %>% unique()
 
-for (i in seq(10)) {
+for (i in seq_along(x24)) {
   x24[[i]] %>%
   clean_data() %>% 
   pull(year_data_start) %>% unique() %>% print()

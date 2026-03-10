@@ -67,7 +67,7 @@ The project is organised as follows:
 
 | Data Directory                  | Source                            | Notes                                                                                                                                                                                                                                                                           | Citation                                                                                                        |
 | ------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `data/raw/edm_data/`            | UK Government: Environment Agency | **Event Duration Monitoring (2021–2024+):** Individual sewage spill events across all 10 WaSCs in England. Includes historical Excel files (2021-2023) and live API data (2024+)                                                                                                | [Environment Agency EDM](https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac)          |
+| `data/raw/edm_data/`            | UK Government: Environment Agency | **Event Duration Monitoring (2021–2024+):** Historical company EDM files (2021-2023) plus live API snapshots for the nine England companies in the National Storm Overflows Hub feed (2024+)                                                                                      | [Environment Agency EDM](https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac)          |
 | `data/raw/ea_consents/`         | UK Government: Environment Agency | **Consented Discharges to Controlled Waters with Conditions:** Site locations, permit details, and discharge consent information under Environmental Permit Regulations                                                                                                         | [EA Consents Data](https://www.data.gov.uk/dataset/55b8eaa8-60df-48a8-929a-060891b7a109)                        |
 | `data/raw/haduk_rainfall_data/` | UK Government: Met Office         | **HadUK-Grid Rainfall Data (2020–2023):** Daily precipitation totals on 60km grid across UK from nationally consistent observational dataset. Used to identify "dry spills" occurring during minimal rainfall periods. Monthly NetCDF files with transverse mercator projection | [Met Office HadUK-Grid](https://www.metoffice.gov.uk/research/climate/maps-and-data/data/haduk-grid/haduk-grid) |
 | `data/raw/lr_house_price/`      | UK Government: HM Land Registry   | **Land Registry House Prices:** Complete property transaction records for England and Wales (2021-2024+) including sale prices, addresses, and property characteristics                                                                                                         | [Price Paid Data](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads)                |
@@ -79,7 +79,7 @@ The project is organised as follows:
 - **Source:** [UK Government: Environment Agency](https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac)  
 - **Format:** XLSX, XLSB, CSV (historical), JSON (API)  
 - **Coverage:** 2021-2024+ individual sewage overflow events  
-- **Notes:** Comprehensive logs of sewage spill events across all 10 Water and Sewerage Companies (WaSCs) in England. Historical data (2021-2023) sourced from annual zip archives containing individual company files. Current data (2024+) obtained via live API. Location data merged from annual return files. The project includes robust data processing pipeline to standardise formats across companies and time periods.
+- **Notes:** Historical data (2021-2023) comes from annual EDM archives containing company files. Live API snapshots (2024+) come from the England-only National Storm Overflows Hub feed for nine companies and are stored under `data/raw/edm_data/raw_api_responses/`; Welsh Water's separate public map is not part of this live API pipeline. Location data is merged from annual return files, and the project standardises formats across years before integration.
 
 #### Consented Discharges to Controlled Waters with Conditions
 
@@ -141,9 +141,8 @@ Scripts for collecting and standardising raw data from historical EDM files, liv
 
 **`fetch_edm_api_data_2024_onwards.R`**  
    - **Input:** Environment Agency real-time API endpoints for each water company.
-   - Fetches live sewage overflow data via REST API calls for all 10 WaSCs.  
-   - Handles pagination, rate limiting, and error recovery for robust data collection.
-   - **Output:** Raw JSON API responses saved to `data/processed/edm_api_data/` by company.
+   - Fetches live sewage overflow data via REST API calls for the nine England companies in the National Storm Overflows Hub feed.  
+   - **Output:** Raw JSON API responses saved to `data/raw/edm_data/raw_api_responses/` by company.
 
 #### 02_data_cleaning/ - Data Cleaning & Standardisation Layer
 
@@ -175,9 +174,9 @@ Scripts for cleaning, standardising, and converting raw data into consistent for
    - **Output:** Consolidated annual return dataset saved to `data/processed/annual_return_edm.parquet`.
 
 **`combine_api_edm_data_2024_onwards.R`**  
-   - **Input:** Processed API data Parquet files for all companies.
+   - **Input:** Processed API data Parquet files for the nine in-scope live API companies.
    - Combines all company API data into single dataset with consistent schema.
-   - **Output:** Unified API dataset saved to `data/processed/combined_api_data.parquet`.
+   - **Output:** Unified API dataset saved to `data/processed/edm_api_data/combined_api_data.parquet`.
 
 **`combine_individ_edm_data_2021-2023.R`**  
    - **Input:** RData list object (`data/processed/individual_edm_by_company.RData`) containing raw individual company spill data.
@@ -191,10 +190,10 @@ Scripts for cleaning, standardising, and converting raw data into consistent for
    - **Output:** Single RData file (`data/processed/individual_edm_by_company.RData`) containing list object with raw data frames for each company and year.
 
 **`process_edm_api_json_to_parquet_2024_onwards.R`**  
-   - **Input:** Raw JSON API responses from `data/processed/edm_api_data/` directory.
+   - **Input:** Raw JSON API responses from `data/raw/edm_data/raw_api_responses/` by-company directories.
    - Processes and standardises JSON data to match historical data schema.
    - Converts timestamps, standardises location formats, and validates data quality.
-   - **Output:** Processed API data in Parquet format for efficient analysis.
+   - **Output:** Processed API data in company-level Parquet files under `data/processed/edm_api_data/`.
 
 **`clean_rainfall_data.R`**  
     - **Input:** Raw UK Met Office HadUK-Grid NetCDF files (`rainfall_YYYY_MM.nc`) from `data/raw/haduk_rainfall_data/` and unique spill sites (`data/processed/unique_spill_sites.parquet`).
@@ -211,7 +210,7 @@ Scripts for aggregating raw data into statistics, creating lookup tables, and en
     - **Input:** Individual spill data merged with location information.
     - Aggregates individual sewage overflow events into site-level statistics (counts and durations).  
     - Implements 12/24 counting methodology and handles events crossing month boundaries.  
-    - **Output:** Aggregated site-level spill statistics for yearly and monthly analysis saved to `data/processed/agg_spill_stats/`.
+    - **Output:** Aggregated site-level spill statistics for yearly, monthly, and quarterly analysis saved to `data/processed/agg_spill_stats/`.
 
 **`create_annual_return_lookup.R`**  
    - **Input:** Combined annual return data from data cleaning layer.
@@ -230,16 +229,14 @@ Scripts for aggregating raw data into statistics, creating lookup tables, and en
     - Chunked processing for memory efficiency; logs to `output/log/aggregate_rainfall_stats.log`.
     - **Output:** `data/processed/rainfall/rainfall_agg_yr.parquet`, `rainfall_agg_mo.parquet`, `rainfall_agg_qtr.parquet`.
 
-**`identify_dry_spills.R`**  
+**`identify_dry_spills.R`**
     - **Input:** Individual spill data (`data/processed/matched_events_annual_data/matched_events_annual_data.parquet`), cleaned rainfall data (`data/processed/rainfall/rainfall_data_cleaned.parquet`), and spill site to grid cell lookup table (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
-    - Identifies "dry spills" using six independent rainfall indicators combining spatial (1-cell vs 9-cell analysis), temporal (days 0-1 vs days 0-3), and NA handling (strict vs lenient) methodologies.
-    - Applies 0.25mm rainfall threshold and implements chunked parallel processing with memory optimisation for large dataset analysis.
-    - Generates rainfall metrics for each spill including single grid cell analysis and 9-cell neighbourhood maximum rainfall calculations.
-    - **Output:** Filtered dry spills dataset with rainfall classifications saved to `data/processed/rainfall/dry_spills.parquet`.
+    - Builds 12/24 counted spill blocks for yearly, monthly, and quarterly periods, then matches each block to rainfall using its start date.
+    - **Output:** Block-level parquets with rainfall indicators saved to `data/processed/rainfall/spill_blocks_rainfall_{yr|mo|qt}.parquet`.
 
-**`aggregate_dry_spill_stats.R`**  
-    - **Input:** Dry spills dataset with rainfall metrics (`data/processed/rainfall/dry_spills.parquet`) and existing spill aggregation files (`data/processed/agg_spill_stats/agg_spill_{yr|mo|qtr}.parquet`).
-    - Aggregates dry spill events into temporal statistics (yearly, monthly, quarterly) for each of the six rainfall indicators independently.
+**`aggregate_dry_spill_stats.R`**
+    - **Input:** Block-level parquets with rainfall indicators (`data/processed/rainfall/spill_blocks_rainfall_{yr|mo|qt}.parquet`) and existing spill aggregation files (`data/processed/agg_spill_stats/agg_spill_{yr|mo|qtr}.parquet`).
+    - Classifies each counted block as dry/wet per indicator, then aggregates by counting dry blocks and summing their raw hours.
     - Creates standardised column naming convention and integrates dry spill metrics with existing aggregation datasets.
     - Implements zero imputation for periods with no dry spills and maintains compatibility with general spill analysis workflows.
     - **Output:** Integrated aggregation datasets with dry spill statistics saved to `data/processed/agg_spill_stats/agg_spill_dry_{yr|mo|qtr}.parquet`.
@@ -362,7 +359,7 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
 ### Utilities
 
 - `scripts/R/utils/postcode_processing_utils.R`: Postcode geocoding utilities using PostcodesioR with retry/backoff, batch processing, shared cache management (`get_postcode_data`, `process_postcodes`, `cleanup_postcode_cache`).
-- `scripts/R/utils/spill_aggregation_utils.R`: Shared spill aggregation helpers including `split_monthly_records`, `prepare_spill_data`, 12/24 counting via `count_spills`, and `calculate_spill_hours`.
+- `scripts/R/utils/spill_aggregation_utils.R`: Shared spill aggregation helpers including `split_monthly_records`, `split_quarterly_records`, `prepare_spill_data`, 12/24 counting via `count_spills`, block construction via `build_spill_blocks`, and `calculate_spill_hours`.
 
 ### Analysis Scripts (09_analysis)
 
@@ -534,7 +531,7 @@ The following sequence removes circular dependencies and includes all scripts in
 #### Layer 04: Feature Engineering
 20. **`10km_site_house_sale_match.R`** — House-to-site spatial matching (requires steps 4, 14)
 21. **`10km_site_rental_match.R`** — Rental-to-site spatial matching (requires steps 5, 14)
-22. **`compute_spill_stats.R`** — Enhanced spill statistics (requires step 11)
+22. **`compute_spill_stats.R`** — Enhanced spill statistics (requires step 19)
 
 #### Layer 05: Data Integration
 • Note: Integration scripts are executed earlier for dependency reasons — see steps 11–12.

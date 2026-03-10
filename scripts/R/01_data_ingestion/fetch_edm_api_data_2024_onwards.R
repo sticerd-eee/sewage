@@ -1,53 +1,39 @@
-############################################################
+# ==============================================================================
 # EDM API Data Batch Downloader
-# Project: Sewage
-# Date: 2025-04-05
+# ==============================================================================
+#
+# Purpose: Download raw EDM data from ArcGIS Feature/Map Server endpoints for
+#          2024 onwards, handle pagination, reconstruct complete JSON payloads,
+#          and save timestamped compressed responses for downstream processing.
+#
 # Author: Jacopo Olivieri
-############################################################
+# Date: 2025-04-05
+# Date Modified: 2026-03-10
+#
+# Inputs:
+#   - scripts/config/api_config.R - API endpoint definitions and query params
+#
+# Outputs:
+#   - data/raw/edm_data/raw_api_responses/{company}/{timestamp}_{company}.json.gz
+#   - output/log/edm_api_download_log.csv
+#   - output/log/fetch_edm_api_data_2024_onwards.log
+#
+# ==============================================================================
 
-#' Downloads and processes data from ArcGIS Feature/Map Server endpoints
-#'
-#' This script handles pagination, JSON reconstruction, and file organization
-#' for large environmental datasets from the EDM API.
-
-# Setup Functions
-############################################################
-
-#' Initialize required packages and environment settings
-initialise_environment <- function() {
-  # Package management with renv
-  if (!requireNamespace("renv", quietly = TRUE)) {
-    install.packages("renv")
-    renv::init()
-  }
-
-  # Define required packages
-  required_packages <- c(
-    "httr", "jsonlite", "dplyr", "lubridate", "here", "logger", "glue", "fs"
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first, e.g. `renv::restore()`.",
+    call. = FALSE
   )
-
-  # Install and load packages
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
-    }
-    library(pkg, character.only = TRUE)
-  }))
 }
 
-#' Configure logging system
-setup_logging <- function() {
-  log_path <- here::here(
-    "output", "log",
-    "04_fetch_edm_api_data_2024_onwards.log"
-  )
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
-  logger::log_info("Script started at {Sys.time()}")
-}
+REQUIRED_PACKAGES <- c("dplyr", "fs", "here", "httr", "jsonlite", "logger", "lubridate")
+LOG_FILE <- here::here("output", "log", "fetch_edm_api_data_2024_onwards.log")
+
+check_required_packages(REQUIRED_PACKAGES)
 
 # Configuration
 ############################################################
@@ -69,6 +55,134 @@ CONFIG <- list(
 # API Download Functions
 ############################################################
 
+#' Normalize ArcGIS service URLs to the layer root
+#'
+#' @param base_url ArcGIS service URL, optionally including `/query` and params
+#' @return Service-root URL without a query string
+normalise_arcgis_service_url <- function(base_url) {
+  if (!is.character(base_url) || length(base_url) != 1 || is.na(base_url) || !nzchar(base_url)) {
+    stop("`base_url` must be a single non-empty character string.")
+  }
+
+  parsed_url <- httr::parse_url(base_url)
+
+  if (is.null(parsed_url$scheme) || is.null(parsed_url$hostname) || is.null(parsed_url$path)) {
+    stop("`base_url` is not a valid URL: ", base_url)
+  }
+
+  parsed_url$query <- NULL
+  parsed_url$params <- NULL
+  parsed_url$fragment <- NULL
+  parsed_url$path <- sub("/query/?$", "", parsed_url$path)
+
+  httr::build_url(parsed_url)
+}
+
+#' Build the ArcGIS query endpoint from a service URL
+#'
+#' @param base_url ArcGIS service URL
+#' @return Query endpoint URL
+build_query_url <- function(base_url) {
+  paste0(normalise_arcgis_service_url(base_url), "/query")
+}
+
+#' Return the first value unless it is NULL
+#'
+#' @param value Primary value
+#' @param default Default used when `value` is NULL
+#' @return `value` or `default`
+coalesce_null <- function(value, default) {
+  if (is.null(value)) {
+    return(default)
+  }
+
+  value
+}
+
+#' Format ArcGIS error objects into a readable string
+#'
+#' @param error_object Parsed ArcGIS error object
+#' @return Character string describing the error
+format_arcgis_error <- function(error_object) {
+  if (is.null(error_object)) {
+    return("Unknown ArcGIS error")
+  }
+
+  details <- error_object$details
+  detail_text <- NULL
+  if (!is.null(details)) {
+    details <- as.character(unlist(details, use.names = FALSE))
+    details <- details[nzchar(details)]
+    if (length(details) > 0) {
+      detail_text <- paste(details, collapse = " | ")
+    }
+  }
+
+  parts <- c(
+    if (!is.null(error_object$code)) paste0("code ", error_object$code),
+    coalesce_null(error_object$message, "Unknown ArcGIS error"),
+    detail_text
+  )
+
+  paste(parts[nzchar(parts)], collapse = " - ")
+}
+
+#' Validate that a parsed response matches the ArcGIS feature-query contract
+#'
+#' @param response_data Parsed ArcGIS response
+#' @param api_name Human-readable API name for errors
+#' @param offset Pagination offset for errors
+validate_arcgis_response <- function(response_data, api_name, offset) {
+  if (!is.list(response_data)) {
+    stop("ArcGIS response for ", api_name, " at offset ", offset, " was not a JSON object.")
+  }
+
+  if (!is.null(response_data$error)) {
+    stop(
+      "ArcGIS returned an error for ", api_name, " at offset ", offset, ": ",
+      format_arcgis_error(response_data$error)
+    )
+  }
+
+  if (!"features" %in% names(response_data)) {
+    stop(
+      "ArcGIS response for ", api_name, " at offset ", offset,
+      " did not contain a `features` element."
+    )
+  }
+
+  invisible(TRUE)
+}
+
+#' Coerce ArcGIS `features` payloads into a data frame
+#'
+#' @param page_features Parsed `features` element from an ArcGIS response
+#' @param api_name Human-readable API name for errors
+#' @param offset Pagination offset for errors
+#' @return Data frame of features
+coerce_arcgis_features <- function(page_features, api_name, offset) {
+  if (is.null(page_features)) {
+    stop("ArcGIS response for ", api_name, " at offset ", offset, " had `features = NULL`.")
+  }
+
+  if (is.data.frame(page_features)) {
+    return(page_features)
+  }
+
+  if (is.list(page_features) && length(page_features) == 0) {
+    return(data.frame())
+  }
+
+  if (is.list(page_features)) {
+    return(dplyr::bind_rows(page_features))
+  }
+
+  stop(
+    "ArcGIS response for ", api_name, " at offset ", offset,
+    " returned an unsupported `features` structure."
+  )
+}
+
 #' Fetch data using pagination from ArcGIS Server endpoints
 #'
 #' @param api_config List containing API endpoint details
@@ -78,9 +192,9 @@ fetch_paginated_data <- function(api_config, default_max_records) {
   logger::log_info("Starting download for: {api_config$name}")
 
   base_url <- api_config$base_url
-  query_url <- paste0(base_url, "/query")
+  query_url <- build_query_url(base_url)
   base_params <- api_config$query_params
-  max_records <- api_config$max_records_per_request %||% default_max_records
+  max_records <- coalesce_null(api_config$max_records_per_request, default_max_records)
 
   # Initialize pagination variables
   offset <- 0
@@ -105,6 +219,13 @@ fetch_paginated_data <- function(api_config, default_max_records) {
 
         response_text <- httr::content(response, "text", encoding = "UTF-8")
         response_data <- jsonlite::fromJSON(response_text, flatten = TRUE)
+        validate_arcgis_response(response_data, api_config$name, offset)
+
+        page_features <- coerce_arcgis_features(
+          response_data$features,
+          api_config$name,
+          offset
+        )
 
         # Preserve metadata structure from first page
         if (is.null(first_response_metadata)) {
@@ -112,8 +233,7 @@ fetch_paginated_data <- function(api_config, default_max_records) {
           first_response_metadata$features <- NULL
         }
 
-        page_features <- response_data$features
-        if (!is.null(page_features) && nrow(page_features) > 0) {
+        if (nrow(page_features) > 0) {
           num_received <- nrow(page_features)
           logger::log_debug("Received {num_received} features")
           all_features[[length(all_features) + 1]] <- page_features
@@ -163,7 +283,7 @@ fetch_paginated_data <- function(api_config, default_max_records) {
       combined_features = data.frame(),
       total_records = 0,
       limit_exceeded = FALSE,
-      metadata_template = first_response_metadata %||% list()
+      metadata_template = coalesce_null(first_response_metadata, list())
     ))
   } else {
     logger::log_warn("No features collected, and loop finished unexpectedly")
@@ -230,7 +350,7 @@ process_single_api <- function(api_id, api_config) {
       fetch_result <- fetch_paginated_data(api_config, CONFIG$default_max_records_per_request)
 
       if (!fetch_result$success) {
-        stop(fetch_result$error_message %||% "Unknown error during data fetch.")
+        stop(coalesce_null(fetch_result$error_message, "Unknown error during data fetch."))
       }
 
       # Prepare file location and name
@@ -247,8 +367,8 @@ process_single_api <- function(api_id, api_config) {
         datetime_str_filename, "_",
         safe_company_name_filename,
         ".json"
-      ) %>%
-        tolower()
+      )
+      output_filename_base <- tolower(output_filename_base)
       output_filename_gz <- file.path(company_subdir, paste0(output_filename_base, ".gz"))
 
       # Reconstruct complete JSON object
@@ -312,8 +432,8 @@ process_single_api <- function(api_id, api_config) {
 main <- function(refresh_config = FALSE) {
   tryCatch({
     # Setup
-    initialise_environment()
-    setup_logging()
+    setup_logging(LOG_FILE)
+    logger::log_info("Script started at {Sys.time()}")
 
     logger::log_info("===== Starting EDM Batch Download Process =====")
 
