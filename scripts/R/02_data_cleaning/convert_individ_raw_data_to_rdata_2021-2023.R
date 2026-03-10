@@ -36,13 +36,9 @@ REQUIRED_PACKAGES <- c(
   "arrow",
   "dplyr",
   "fs",
-  "furrr",
-  "future",
   "glue",
   "janitor",
   "logger",
-  "memuse",
-  "parallelly",
   "purrr",
   "readxlsb",
   "rio",
@@ -65,25 +61,6 @@ initialise_environment <- function() {
   invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
     library(pkg, character.only = TRUE)
   }))
-}
-
-#' Configure parallel processing for improved performance
-#' @return NULL
-setup_parallel <- function() {
-  # Get number of CPU cores
-  n_cores <- parallelly::availableCores()
-  percentage_cores <- 0.8 # Increase to 1 if needed
-  n_workers <- max(1, n_cores * percentage_cores)
-
-  # Memory options
-  machine_ram <- memuse::Sys.meminfo()$totalram
-  percentage_ram <- 0.7
-  ram_limit <- as.numeric(percentage_ram * machine_ram)
-  options(future.globals.maxSize = ram_limit)
-
-  # Set up parallel processing
-  future::plan(future::multisession, workers = n_workers)
-  logger::log_info("Parallel processing initialized with {n_workers} workers")
 }
 
 #' Initialise logging for this script
@@ -170,14 +147,12 @@ load_data <- function(year) {
     # For united utilities in 2021-2022 (only files in xlsb format)
     if (grepl("\\.xlsb$", file_path)) {
       sheet_names <- c("Jan to April", "May to August", "September to December")
-      furrr::future_map(sheet_names, function(sheet_name) {
+      purrr::map(sheet_names, function(sheet_name) {
         readxlsb::read_xlsb(file_path, ,
           sheet = sheet_name,
           col_names = TRUE
         )
-      },
-      .options = furrr::furrr_options(seed = TRUE)
-      ) %>%
+      }) %>%
         bind_rows() %>%
         as_tibble() %>%
         filter(!is.na(.[[1]]))
@@ -196,35 +171,8 @@ load_data <- function(year) {
   # Return a list of data frames for all water companies for a given year
   logger::log_info("Processing {length(file_paths)} company files for {year}")
 
-  furrr::future_map(file_paths, import_data,
-    .options = furrr::furrr_options(seed = TRUE)
-  )
+  purrr::map(file_paths, import_data)
 }
-
-#' #' Export processed data to RData format
-#' #' @param data List of data frames by company to export
-#' #' @return NULL
-#' #' @throws error if export fails
-#' export_to_rdata <- function(data) {
-#'   tryCatch(
-#'     {
-#'       # File path
-#'       rdata_file <- file.path(CONFIG$output_dir, "individual_edm_by_company.Rdata")
-#'       dir.create(dirname(rdata_file), recursive = TRUE, showWarnings = FALSE)
-#' 
-#'       # Save data
-#'       edm_data <- data
-#'       save(edm_data, file = rdata_file)
-#' 
-#'       file_size_kb <- round(file.info(rdata_file)$size / 1024, 2)
-#'       logger::log_info("Data exported to {rdata_file} ({file_size_kb} KB)")
-#'     },
-#'     error = function(e) {
-#'       logger::log_error("Error exporting data: {e$message}")
-#'       stop(glue::glue("Failed to export data: {e$message}"))
-#'     }
-#'   )
-#' }
 
 
 #' Export processed data to Parquet format
@@ -238,34 +186,6 @@ export_to_parquet <- function(data) {
       fs::dir_create(output_dir)
 
       logger::log_info("Exporting data to Parquet format")
-
-      # Process each year
-      for (year in names(data)) {
-        year_data <- data[[year]]
-
-        # Process each company
-        for (company in names(year_data)) {
-          company_data <- year_data[[company]]
-          company_clean_name <- janitor::make_clean_names(company)
-
-          # Create file path
-          parquet_file <- file.path(
-            output_dir,
-            glue::glue("{year}_{company_clean_name}.parquet")
-          )
-
-          # Export to parquet
-          arrow::write_parquet(company_data, parquet_file)
-
-          file_size_kb <- round(fs::file_info(parquet_file)$size / 1024, 2)
-          logger::log_info("Exported {company} data for {year} to {parquet_file} ({file_size_kb} KB)")
-        }
-
-        logger::log_info("Completed export for year {year}")
-      }
-
-      # Also create a combined file for all years
-      combined_data <- list()
 
       # Function to standardise date columns to character
       standardise_date_columns <- function(df) {
@@ -298,41 +218,58 @@ export_to_parquet <- function(data) {
         return(df)
       }
 
-      # Flatten the nested list structure with standardised columns
+      created_yearly_files <- 0L
+
+      # Write company parquet files and the corresponding combined yearly parquet
       for (year in names(data)) {
-        for (company in names(data[[year]])) {
-          company_data <- data[[year]][[company]]
+        year_data <- data[[year]]
+        company_names <- names(year_data)
+        year_combined <- vector("list", length(year_data))
 
-          # Standardise date columns to character format
-          company_data <- standardise_date_columns(company_data)
+        logger::log_info("Preparing to combine {length(year_data)} datasets for {year}")
 
-          # Add metadata
-          company_data$year <- as.integer(year)
-          company_data$water_company <- company
+        for (company_index in seq_along(company_names)) {
+          company <- company_names[[company_index]]
+          company_data <- year_data[[company]]
+          company_clean_name <- janitor::make_clean_names(company)
 
-          combined_data[[length(combined_data) + 1]] <- company_data
+          parquet_file <- file.path(
+            output_dir,
+            glue::glue("{year}_{company_clean_name}.parquet")
+          )
+
+          arrow::write_parquet(company_data, parquet_file)
+
+          file_size_kb <- round(fs::file_info(parquet_file)$size / 1024, 2)
+          logger::log_info("Exported {company} data for {year} to {parquet_file} ({file_size_kb} KB)")
+
+          company_combined_data <- standardise_date_columns(company_data)
+          company_combined_data$year <- as.integer(year)
+          company_combined_data$water_company <- company
+          year_combined[[company_index]] <- company_combined_data
         }
-      }
 
-      # Log column types for debug purposes
-      logger::log_info("Preparing to combine {length(combined_data)} datasets")
-
-      # Create separate parquet files for combined data by year
-      for (year in names(data)) {
-        year_combined <- combined_data[grep(paste0("year = ", year), sapply(combined_data, function(df) as.character(df$year[1])))]
+        logger::log_info("Completed export for year {year}")
 
         if (length(year_combined) > 0) {
           year_all_data <- dplyr::bind_rows(year_combined)
           year_combined_file <- file.path(output_dir, glue::glue("combined_edm_data_{year}.parquet"))
 
           arrow::write_parquet(year_all_data, year_combined_file)
+          created_yearly_files <- created_yearly_files + 1L
 
           file_size_mb <- round(fs::file_info(year_combined_file)$size / (1024 * 1024), 2)
           logger::log_info("Created combined dataset for {year} with {nrow(year_all_data)} records: {year_combined_file} ({file_size_mb} MB)")
+        } else {
+          logger::log_warn("No combined dataset found for {year}; skipping year-specific parquet export")
         }
       }
 
-      logger::log_info("Successfully created year-specific combined datasets")
+      if (created_yearly_files > 0) {
+        logger::log_info("Successfully created {created_yearly_files} year-specific combined datasets")
+      } else {
+        logger::log_warn("No year-specific combined datasets were created")
+      }
 
       # Instead of attempting to create one big combined file, note that we've created year-specific files
       logger::log_info("Note: To avoid column type inconsistencies, data has been exported as separate year-specific combined files")
