@@ -92,6 +92,7 @@ Thumbs.db
 /book/.quarto/
 /book/_site/
 /book/book_figs/
+/book/book_regs/
 /book/test_files/
 /book/tinytable_assets/
 
@@ -104,6 +105,8 @@ DD_work/
 # Generated analysis outputs
 /output/*
 lma/
+/scripts/R/testing/*.html
+/scripts/R/testing/output/
 
 # Python virtual environments
 scripts/python/.venv/
