@@ -5,9 +5,7 @@
 # Author: Jacopo Olivieri
 ############################################################
 
-#' Shared functions for processing UK postcodes using the PostcodesioR API.
-#' Contains robust postcode geocoding functionality with retry logic, batch
-#' processing, and caching for use across multiple data cleaning scripts.
+#' Shared functions for processing UK postcodes via local ONS lookups.
 
 # Dependencies
 ############################################################
@@ -17,9 +15,6 @@ required_packages <- c(
   "tidyverse",   # tibble/dplyr utilities
   "logger",      # logging
   "glue",        # string interpolation
-  "here",        # paths
-  "fs",          # file ops
-  "PostcodesioR",# postcode API client
   "data.table"   # efficient rbindlist
 )
 
@@ -31,248 +26,370 @@ invisible(lapply(required_packages, function(pkg) {
 # Configuration
 ############################################################
 
-# Standard postcode variables to extract from PostcodesioR API
-POSTCODE_VARS <- c(
-  "postcode", # Full UK postcode
-  "quality", # Positional quality (1-9)
-  "eastings", # OS grid reference Easting
-  "northings", # OS grid reference Northing
-  "country", # Constituent country of UK/Channel Islands/Isle of Man
-  "nhs_ha", # Strategic Health Authority code
-  "longitude", # WGS84 longitude
-  "latitude", # WGS84 latitude
-  "region", # Region code (formerly GOR)
-  "lsoa", # 2011 Census lower layer super output area
-  "msoa", # 2011 Census middle layer super output area
-  "admin_county", # County
-  "admin_ward" # Administrative/electoral ward
+LOCAL_POSTCODE_NUMERIC_VARS <- c(
+  "quality",
+  "easting",
+  "northing",
+  "longitude",
+  "latitude"
+)
+
+LOCAL_POSTCODE_LABEL_VARS <- c(
+  "country",
+  "nhs_ha",
+  "region",
+  "lsoa",
+  "msoa",
+  "admin_county",
+  "admin_ward"
+)
+
+LOCAL_POSTCODE_OUTPUT_VARS <- c(
+  "quality",
+  "easting",
+  "northing",
+  "longitude",
+  "latitude",
+  "country",
+  "nhs_ha",
+  "region",
+  "lsoa",
+  "msoa",
+  "admin_county",
+  "admin_ward"
+)
+
+LOCAL_POSTCODE_CODE_VARS <- c(
+  "ctry25cd",
+  "hlth19cd",
+  "rgn25cd",
+  "lsoa11cd",
+  "msoa11cd",
+  "cty25cd",
+  "wd25cd"
+)
+
+LOCAL_POSTCODE_LABEL_SPECS <- list(
+  country = list(
+    source_col = "ctry25cd",
+    file_name = "CTRY Country names and codes UK as at 05_25.csv",
+    code_col = "CTRY25CD",
+    name_col = "CTRY25NM"
+  ),
+  nhs_ha = list(
+    source_col = "hlth19cd",
+    file_name = "HLTH health authority names and codes UK as at 04_19 (OSHLTHAU).csv",
+    code_col = "HLTHAUCD",
+    name_col = "HLTHAUNM"
+  ),
+  region = list(
+    source_col = "rgn25cd",
+    file_name = "RGN Region names and codes EN as at 05_25.csv",
+    code_col = "RGN25CD",
+    name_col = "RGN25NM"
+  ),
+  lsoa = list(
+    source_col = "lsoa11cd",
+    file_name = "LSOA (2011) names and codes UK as at 12_12.csv",
+    code_col = "LSOA11CD",
+    name_col = "LSOA11NM"
+  ),
+  msoa = list(
+    source_col = "msoa11cd",
+    file_name = "MSOA (2011) names and codes UK as at 12_12.csv",
+    code_col = "MSOA11CD",
+    name_col = "MSOA11NM"
+  ),
+  admin_county = list(
+    source_col = "cty25cd",
+    file_name = "CTY County names and codes UK as at 05_25.csv",
+    code_col = "CTY25CD",
+    name_col = "CTY25NM"
+  ),
+  admin_ward = list(
+    source_col = "wd25cd",
+    file_name = "WD Ward names and codes UK as at 05_25.csv",
+    code_col = "WD25CD",
+    name_col = "WD25NM"
+  )
 )
 
 # Functions
 ############################################################
 
-#' Process postcode data using the PostcodesioR API with retry logic
-#'
-#' Robust function for geocoding UK postcodes using the PostcodesioR API.
-#' Includes exponential backoff retry logic, batch processing, intermediate
-#' saves, and resume capability for handling large postcode datasets.
-#'
-#' @param postcodes Vector of postcodes to process
-#' @param batch_size Number of postcodes to process in each batch (default: 50)
-#' @param max_tries Maximum number of retry attempts (default: 5)
-#' @param initial_backoff Initial backoff time in seconds (default: 1)
-#' @param resume_from Optional path to a previously saved intermediate result to resume from
-#' @return Tibble containing postcode data with coordinates and geographic variables
+#' Normalise UK postcode strings to a consistent join key
+#' @param x Character vector of postcodes
+#' @return Character vector with whitespace removed and uppercase applied
 #' @export
-process_postcodes <- function(postcodes, batch_size = 50, max_tries = 5, initial_backoff = 1, resume_from = NULL) {
-  # Retry wrapper with exponential backoff to handle transient API errors
-  retry_with_backoff <- function(expr, tries = max_tries, backoff = initial_backoff) {
-    attempt <- 1
-    while (attempt <= tries) {
-      result <- tryCatch(
-        {
-          expr()
-        },
-        error = function(e) {
-          if (attempt == tries) {
-            logger::log_error("All retry attempts failed. Last error: {e$message}")
-            stop(e)
-          }
-          backoff_time <- backoff * 2^(attempt - 1)
-          logger::log_warn("API request failed: {e$message}. Retrying in {backoff_time} seconds. Attempt {attempt}/{tries}")
-          Sys.sleep(backoff_time)
-          NULL
-        }
-      )
-      if (!is.null(result)) {
-        return(result)
-      }
-      attempt <- attempt + 1
-    }
+normalise_postcode <- function(x) {
+  x <- as.character(x)
+  x <- stringr::str_trim(x)
+  x <- stringr::str_replace_all(x, "\\s+", "")
+  x <- stringr::str_to_upper(x)
+  x[x %in% c("", "NA")] <- NA_character_
+  x
+}
+
+#' Load the local ONS postcode lookup keyed by normalised postcode
+#' @param lookup_path Path to the ONS postcode CSV
+#' @return Tibble keyed by normalised postcode
+#' @export
+load_local_postcode_lookup <- function(lookup_path) {
+  if (!file.exists(lookup_path)) {
+    stop(glue::glue("Local postcode lookup not found: {lookup_path}"), call. = FALSE)
   }
 
-  # Optional resume from a previous partial run
-  if (!is.null(resume_from) && file.exists(resume_from)) {
-    logger::log_info("Resuming from {resume_from}")
-    processed_data <- readRDS(resume_from)
-    processed_postcodes <- processed_data$postcode
-    postcodes <- postcodes[!postcodes %in% processed_postcodes]
-
-    if (length(postcodes) == 0) {
-      logger::log_info("All postcodes already processed")
-      return(processed_data)
-    }
-    logger::log_info("{length(postcodes)} postcodes remain to be processed")
-  }
-
-  n_batches <- ceiling(length(postcodes) / batch_size)
-  # Split into batches to keep payload modest
-  batch_indices <- split(
-    seq_along(postcodes),
-    ceiling(seq_along(postcodes) / batch_size)
+  lookup_cols <- c(
+    "pcds",
+    "pcd8",
+    "gridind",
+    "east1m",
+    "north1m",
+    "lat",
+    "long",
+    "ctry25cd",
+    "hlth19cd",
+    "rgn25cd",
+    "lsoa11cd",
+    "msoa11cd",
+    "cty25cd",
+    "wd25cd"
   )
 
-  # Process batches sequentially with retry logic
-  logger::log_info(
-    "Processing {length(postcodes)} postcodes in {n_batches} batches"
-  )
+  logger::log_info("Loading local postcode lookup from {lookup_path}")
 
-  results <- purrr::map(
-    seq_along(batch_indices),
-    function(i) {
-      idx <- batch_indices[[i]] # Fixed batch indexing
-      logger::log_info("Processing batch {i}/{n_batches} (postcodes {min(idx)}-{max(idx)})")
-
-      # Small inter-batch delay to be gentle to the API
-      Sys.sleep(0.2)
-
-      batch_postcodes <- list(postcodes = postcodes[idx])
-
-      # Use retry logic for the API call
-      batch_result <- retry_with_backoff(function() {
-        PostcodesioR::bulk_postcode_lookup(batch_postcodes)
-      })
-
-      # Keep requested fields and drop NULLs
-      results <- purrr::map(batch_result, function(x) {
-        if (is.null(x) || is.null(x$result)) {
-          logger::log_warn("Empty result for a postcode in batch {i}")
-          return(NULL)
-        }
-        res <- x$result
-        res <- res[names(res) %in% POSTCODE_VARS]
-        res
-      })
-
-      # Remove NULL results
-      results <- Filter(Negate(is.null), results)
-
-      return(results)
-    },
-    .progress = TRUE
-  )
-
-  # Save intermediate results every 10 batches
-  save_interval <- 10
-  for (i in seq_along(results)) {
-    if (i %% save_interval == 0 || i == length(results)) {
-      logger::log_info("Saving intermediate results after batch {i}/{length(results)}")
-      intermediate_path <- here::here("data", "temp", glue::glue("postcode_data_intermediate_{i}.rds"))
-
-      # Ensure temp directory exists
-      temp_dir <- dirname(intermediate_path)
-      if (!dir.exists(temp_dir)) {
-        dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
-      }
-
-      # Combine results so far
-      intermediate_results <- data.table::rbindlist(
-        unlist(results[1:i], recursive = FALSE),
-        fill = TRUE,
-        use.names = TRUE
-      )
-
-      saveRDS(intermediate_results, intermediate_path)
-    }
-  }
-
-  # Combine results and standardise minimal fields
-  logger::log_info("Combining results into single data frame")
-  final_results <- data.table::rbindlist(
-    unlist(results, recursive = FALSE),
-    fill = TRUE,
-    use.names = TRUE
+  lookup_data <- data.table::fread(
+    lookup_path,
+    select = lookup_cols,
+    na.strings = c("", "NA"),
+    showProgress = interactive()
   ) %>%
     tibble::as_tibble() %>%
-    suppressWarnings() %>%
-    dplyr::filter(!is.na(eastings) & !is.na(northings)) %>%
-    dplyr::mutate(
-      postcode = stringr::str_remove_all(postcode, stringr::fixed(" "))
+    dplyr::transmute(
+      postcode = normalise_postcode(dplyr::coalesce(.data[["pcds"]], .data[["pcd8"]])),
+      quality = suppressWarnings(as.integer(.data[["gridind"]])),
+      easting = suppressWarnings(as.integer(.data[["east1m"]])),
+      northing = suppressWarnings(as.integer(.data[["north1m"]])),
+      longitude = suppressWarnings(as.numeric(.data[["long"]])),
+      latitude = suppressWarnings(as.numeric(.data[["lat"]])),
+      ctry25cd = dplyr::na_if(.data[["ctry25cd"]], ""),
+      hlth19cd = dplyr::na_if(.data[["hlth19cd"]], ""),
+      rgn25cd = dplyr::na_if(.data[["rgn25cd"]], ""),
+      lsoa11cd = dplyr::na_if(.data[["lsoa11cd"]], ""),
+      msoa11cd = dplyr::na_if(.data[["msoa11cd"]], ""),
+      cty25cd = dplyr::na_if(.data[["cty25cd"]], ""),
+      wd25cd = dplyr::na_if(.data[["wd25cd"]], "")
     ) %>%
-    dplyr::rename(
-      northing = northings,
-      easting = eastings
+    dplyr::filter(
+      !is.na(postcode),
+      !is.na(easting),
+      !is.na(northing)
     )
 
-  # If resuming, combine with previous results
-  if (!is.null(resume_from) && file.exists(resume_from)) {
-    processed_data <- readRDS(resume_from)
-    final_results <- dplyr::bind_rows(processed_data, final_results)
+  duplicate_postcodes <- lookup_data %>%
+    dplyr::count(postcode, name = "n") %>%
+    dplyr::filter(n > 1)
+
+  if (nrow(duplicate_postcodes) > 0) {
+    sample_dupes <- duplicate_postcodes %>%
+      dplyr::slice_head(n = 10) %>%
+      dplyr::pull(postcode) %>%
+      paste(collapse = ", ")
+
+    stop(
+      glue::glue(
+        "Local postcode lookup contains duplicate normalised postcodes. ",
+        "Sample duplicates: {sample_dupes}"
+      ),
+      call. = FALSE
+    )
   }
 
-  logger::log_info("Postcode processing complete. Successfully processed {nrow(final_results)} postcodes")
-  return(final_results)
+  logger::log_info("Local postcode lookup loaded with {nrow(lookup_data)} unique postcode rows")
+
+  lookup_data
 }
 
-#' Get postcode data, either from cache or by fetching new data
-#'
-#' High-level function for obtaining postcode geocoding data with cache management.
-#' Uses a shared cache file that can be utilized across multiple scripts.
-#'
-#' @param df Data frame containing postcodes
-#' @param refresh Boolean indicating whether to force refresh of postcode data (default: FALSE)
-#' @param cache_path Optional custom cache path (defaults to shared location)
-#' @return Tibble containing postcode data with geographic variables
+#' Load one ONS code-to-name lookup table from the local postcode bundle
+#' @param documents_dir Directory containing ONS code/name tables
+#' @param file_name Lookup file name inside `documents_dir`
+#' @param code_col Code column name in the lookup file
+#' @param name_col Label column name in the lookup file
+#' @param output_col Output label column name
+#' @return Tibble with a `code` join key and a single label column
 #' @export
-get_postcode_data <- function(df, refresh = FALSE, cache_path = NULL) {
-  # Use shared cache in data/cache/postcodes if not specified
-  if (is.null(cache_path)) {
-    cache_path <- here::here("data", "cache", "postcodes", "postcode_data.rds")
-  }
-  
-  if (!refresh && file.exists(cache_path)) {
-    logger::log_info("Loading cached postcode data from {cache_path}")
-    return(readRDS(cache_path))
+load_ons_name_lookup <- function(documents_dir, file_name, code_col, name_col, output_col) {
+  lookup_path <- file.path(documents_dir, file_name)
+
+  if (!file.exists(lookup_path)) {
+    stop(glue::glue("ONS lookup not found: {lookup_path}"), call. = FALSE)
   }
 
-  logger::log_info("Fetching new postcode data")
-  unique_postcodes <- unique(df$postcode)
+  logger::log_info("Loading ONS label lookup from {lookup_path}")
 
-  postcode_data <- process_postcodes(unique_postcodes)
-  
-  # Ensure cache directory exists
-  cache_dir <- dirname(cache_path)
-  if (!dir.exists(cache_dir)) {
-    dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+  lookup_data <- utils::read.csv(
+    lookup_path,
+    check.names = FALSE,
+    fill = TRUE,
+    na.strings = c("", "NA"),
+    stringsAsFactors = FALSE
+  )
+
+  expected_cols <- c(code_col, name_col)
+  missing_cols <- setdiff(expected_cols, names(lookup_data))
+
+  if (length(missing_cols) > 0) {
+    available_cols <- names(lookup_data)
+    available_cols <- available_cols[available_cols != ""]
+
+    stop(
+      glue::glue(
+        "ONS lookup {lookup_path} is missing expected columns: ",
+        "{paste(missing_cols, collapse = ', ')}. ",
+        "Available named columns: {paste(available_cols, collapse = ', ')}"
+      ),
+      call. = FALSE
+    )
   }
-  
-  saveRDS(postcode_data, cache_path)
-  logger::log_info("Postcode data cached to {cache_path}")
 
-  postcode_data
+  lookup_data[expected_cols] %>%
+    tibble::as_tibble() %>%
+    dplyr::transmute(
+      code = dplyr::na_if(as.character(.data[[code_col]]), ""),
+      !!output_col := dplyr::na_if(as.character(.data[[name_col]]), "")
+    ) %>%
+    dplyr::filter(!is.na(code)) %>%
+    dplyr::distinct(code, .keep_all = TRUE)
 }
 
-#' Clean up postcode processing cache and temporary files
-#'
-#' Utility function to remove cache files and temporary intermediate results
-#' after successful completion of postcode processing.
-#'
-#' @param cache_path Path to cache file to remove (optional)
-#' @param remove_temp Boolean indicating whether to remove temp directory (default: TRUE)
-#' @return NULL (invisible)
+#' Build label-style geography fields from local ONS code lookups
+#' @param ons_lookup Tibble returned by `load_local_postcode_lookup`
+#' @param lookup_path Path to the ONS postcode CSV
+#' @return Tibble keyed by normalised postcode with label-style geography columns
 #' @export
-cleanup_postcode_cache <- function(cache_path = NULL, remove_temp = TRUE) {
-  # Remove main cache file
-  if (is.null(cache_path)) {
-    cache_path <- here::here("data", "cache", "postcodes", "postcode_data.rds")
+build_local_postcode_label_lookup <- function(ons_lookup, lookup_path) {
+  documents_dir <- file.path(dirname(lookup_path), "Documents")
+
+  if (!dir.exists(documents_dir)) {
+    stop(glue::glue("ONS lookup documents directory not found: {documents_dir}"), call. = FALSE)
   }
-  
-  if (file.exists(cache_path)) {
-    file.remove(cache_path)
-    logger::log_info("Removed postcode cache: {cache_path}")
+
+  postcode_labels <- ons_lookup %>%
+    dplyr::select(postcode, dplyr::all_of(LOCAL_POSTCODE_CODE_VARS))
+
+  for (output_col in names(LOCAL_POSTCODE_LABEL_SPECS)) {
+    spec <- LOCAL_POSTCODE_LABEL_SPECS[[output_col]]
+
+    name_lookup <- load_ons_name_lookup(
+      documents_dir = documents_dir,
+      file_name = spec$file_name,
+      code_col = spec$code_col,
+      name_col = spec$name_col,
+      output_col = output_col
+    )
+
+    postcode_labels <- postcode_labels %>%
+      dplyr::left_join(name_lookup, by = setNames("code", spec$source_col))
   }
-  
-  # Remove temporary intermediate files
-  if (remove_temp) {
-    temp_dir <- here::here("data", "temp")
-    if (dir.exists(temp_dir)) {
-      temp_files <- list.files(temp_dir, pattern = "postcode_data_intermediate_", full.names = TRUE)
-      if (length(temp_files) > 0) {
-        file.remove(temp_files)
-        logger::log_info("Removed {length(temp_files)} temporary postcode files")
-      }
-    }
+
+  postcode_labels <- postcode_labels %>%
+    dplyr::mutate(
+      admin_county = dplyr::if_else(
+        stringr::str_starts(admin_county, fixed("(pseudo)")),
+        NA_character_,
+        admin_county
+      )
+    )
+
+  postcode_labels %>%
+    dplyr::select(postcode, dplyr::all_of(LOCAL_POSTCODE_LABEL_VARS))
+}
+
+#' Build postcode enrichment for sales using the local ONS lookup
+#'
+#' @param df Sales data containing `postcode`
+#' @param lookup_path Path to the ONS postcode CSV
+#' @return List with `postcode_data` and `diagnostics`
+#' @export
+get_local_postcode_data_for_sales <- function(df, lookup_path) {
+  required_cols <- c("postcode")
+  missing_cols <- setdiff(required_cols, names(df))
+
+  if (length(missing_cols) > 0) {
+    stop(
+      glue::glue(
+        "Local postcode enrichment requires columns: {paste(required_cols, collapse = ', ')}. ",
+        "Missing: {paste(missing_cols, collapse = ', ')}"
+      ),
+      call. = FALSE
+    )
   }
-  
-  invisible(NULL)
+
+  sales_data <- df %>%
+    dplyr::transmute(postcode = normalise_postcode(postcode))
+
+  unique_postcodes <- sales_data %>%
+    dplyr::filter(!is.na(postcode)) %>%
+    dplyr::distinct(postcode)
+
+  ons_lookup <- load_local_postcode_lookup(lookup_path = lookup_path) %>%
+    dplyr::semi_join(unique_postcodes, by = "postcode")
+
+  label_lookup <- build_local_postcode_label_lookup(
+    ons_lookup = ons_lookup,
+    lookup_path = lookup_path
+  )
+
+  postcode_data <- ons_lookup %>%
+    dplyr::left_join(label_lookup, by = "postcode") %>%
+    dplyr::select(postcode, dplyr::all_of(LOCAL_POSTCODE_OUTPUT_VARS)) %>%
+    dplyr::distinct(postcode, .keep_all = TRUE)
+
+  postcode_misses <- unique_postcodes %>%
+    dplyr::anti_join(postcode_data %>% dplyr::distinct(postcode), by = "postcode")
+
+  missing_rows <- sales_data %>%
+    dplyr::semi_join(postcode_misses, by = "postcode")
+
+  label_missing_counts <- postcode_data %>%
+    dplyr::summarise(
+      dplyr::across(
+        dplyr::all_of(LOCAL_POSTCODE_LABEL_VARS),
+        ~ sum(is.na(.x)),
+        .names = "{.col}"
+      )
+    ) %>%
+    as.list()
+
+  diagnostics <- list(
+    total_rows = nrow(df),
+    distinct_postcodes = nrow(unique_postcodes),
+    ons_matched_postcodes = nrow(unique_postcodes) - nrow(postcode_misses),
+    ons_missing_postcodes = nrow(postcode_misses),
+    ons_missing_rows = nrow(missing_rows),
+    ons_missing_samples = head(postcode_misses$postcode, 10),
+    label_missing_counts = label_missing_counts
+  )
+
+  logger::log_info(
+    "Local postcode coverage: {diagnostics$ons_matched_postcodes}/{diagnostics$distinct_postcodes} distinct postcodes found in ONS"
+  )
+  logger::log_info(
+    "Local postcode misses: {diagnostics$ons_missing_postcodes} distinct postcodes covering {diagnostics$ons_missing_rows} rows"
+  )
+
+  if (length(diagnostics$ons_missing_samples) > 0) {
+    logger::log_warn(
+      "Sample ONS-missing postcodes: {paste(diagnostics$ons_missing_samples, collapse = ', ')}"
+    )
+  }
+
+  logger::log_info(
+    "Label-field NA counts among matched postcodes: {paste(names(diagnostics$label_missing_counts), unlist(diagnostics$label_missing_counts), sep = '=', collapse = ', ')}"
+  )
+
+  list(
+    postcode_data = postcode_data,
+    diagnostics = diagnostics
+  )
 }

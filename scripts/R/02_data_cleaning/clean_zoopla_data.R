@@ -13,10 +13,11 @@
 # Inputs:
 #   - data/raw/zoopla/rentals_safeguarded_2014-2022.csv
 #   - data/raw/zoopla/rentals_safeguarded_2023.csv
+#   - data/raw/uk_postcodes/2602_uk_postcodes.csv
 #   - scripts/R/utils/postcode_processing_utils.R
 #
 # Outputs:
-#   - data/processed/zoopla/zoopla_rental.parquet
+#   - data/processed/zoopla/zoopla_rentals.parquet
 #   - output/log/clean_zoopla_data.log
 #
 # Source:
@@ -40,15 +41,11 @@ REQUIRED_PACKAGES <- c(
   "dplyr",
   "fs",
   "glue",
-  "here",
   "logger",
   "lubridate",
-  "PostcodesioR",
-  "purrr",
   "rio",
   "stringr",
-  "tibble",
-  "tidyverse"
+  "tibble"
 )
 
 LOG_FILE <- here::here("output", "log", "clean_zoopla_data.log")
@@ -71,10 +68,13 @@ CONFIG <- list(
   keep_address_line_1 = TRUE,  # Toggle to FALSE to exclude address data
   # Input file paths
   input_dir = here::here("data", "raw", "zoopla"),
+  local_postcode_lookup_path = here::here(
+    "data", "raw", "uk_postcodes", "2602_uk_postcodes.csv"
+  ),
   
   # Output file paths
-  output_file = here::here(
-    "data", "processed", "zoopla", "zoopla_rental.parquet"
+  canonical_output_path = here::here(
+    "data", "processed", "zoopla", "zoopla_rentals.parquet"
   ),
   # Column renaming map: old_name = new_name
   column_name_mapping = c(
@@ -147,23 +147,23 @@ load_data <- function(file_path = CONFIG$input_dir) {
 
 #' Export Zoopla Rental Data to Parquet
 #'
-#' Builds a year-ranged filename when possible; writes to processed/zoopla.
+#' Writes the canonical rentals parquet to `data/processed/zoopla`.
 #'
 #' @param df Cleaned tibble from `clean_zoopla_data()`
-#' @param output_file Optional override of the default output path.
-#'   Defaults to `CONFIG$output_file`.
+#' @param output_path Optional override of the default output path.
+#'   Defaults to `CONFIG$canonical_output_path`.
 #' @return Full output file path (returned invisibly).
 export_zoopla_data <- function(
   df,
-  output_file = CONFIG$output_file
+  output_path = CONFIG$canonical_output_path
 ) {
   # Ensure output directory exists
-  dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
+  dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
 
-  logger::log_info("Exporting data to: {output_file}")
-  arrow::write_parquet(df, output_file)
+  logger::log_info("Exporting data to: {output_path}")
+  arrow::write_parquet(df, output_path)
 
-  invisible(output_file)
+  invisible(output_path)
 }
 
 #' Clean Zoopla Rental Data
@@ -229,13 +229,17 @@ clean_zoopla_data <- function(df) {
 #' Orchestrates the workflow: initialises environment, sets up logging,
 #' loads and cleans the Zoopla rental data, processes postcodes, and exports.
 #'
-#' @param refresh_postcodes Boolean indicating whether to refresh postcode data (default: FALSE)
-#' @return The combined tibble (invisibly) for interactive use.
+#' @param refresh_postcodes Boolean retained for compatibility but ignored
+#' @return List containing the output path and postcode diagnostics
 main <- function(refresh_postcodes = FALSE) {
   tryCatch({
     # Setup
     initialise_environment()
     initialise_logging()
+
+    logger::log_info(
+      "`refresh_postcodes` is ignored for Zoopla builds; local postcode files are used instead."
+    )
 
     # Load raw data
     df_raw <- load_data()
@@ -243,22 +247,31 @@ main <- function(refresh_postcodes = FALSE) {
     # Clean data
     df <- clean_zoopla_data(df_raw)
 
-    # Process postcode data
-    postcode_data <- get_postcode_data(df, refresh = refresh_postcodes)
+    # Build postcode enrichment using the local lookup keyed on postcode only
+    postcode_result <- get_local_postcode_data_for_sales(
+      df,
+      lookup_path = CONFIG$local_postcode_lookup_path
+    )
 
-    # Merge data
-    final_data <- left_join(df, postcode_data, by = join_by(postcode)) %>%
+    # Merge postcode attributes and add a stable rental identifier
+    final_data <- left_join(
+      df,
+      postcode_result$postcode_data,
+      by = "postcode"
+    ) %>%
       mutate(rental_id = row_number()) %>%
       relocate(rental_id, .before = 1)
 
     # Export final data
-    export_path <- export_zoopla_data(final_data)
+    export_path <- export_zoopla_data(final_data, CONFIG$canonical_output_path)
     logger::log_info("Export complete: {export_path}")
-    
-    # Cleanup cache after successful completion
-    cleanup_postcode_cache()
-    
-    invisible(final_data)
+
+    invisible(
+      list(
+        output_path = CONFIG$canonical_output_path,
+        diagnostics = postcode_result$diagnostics
+      )
+    )
   }, error = function(e) {
     logger::log_error("Fatal error: {e$message}")
     stop(e)
@@ -269,5 +282,5 @@ main <- function(refresh_postcodes = FALSE) {
 
 # Run pipeline when script is executed directly
 if (sys.nframe() == 0) {
-  main()
+  main(refresh_postcodes = FALSE)
 }
