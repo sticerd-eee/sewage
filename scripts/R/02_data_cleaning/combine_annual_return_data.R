@@ -15,7 +15,7 @@
 #
 # Outputs:
 #   - data/processed/annual_return_edm.parquet
-#   - output/log/08_combine_annual_return_data.log
+#   - output/log/combine_annual_return_data.log
 #
 # ==============================================================================
 
@@ -44,7 +44,7 @@ REQUIRED_PACKAGES <- c(
   "stringr"
 )
 
-LOG_FILE <- here::here("output", "log", "08_combine_annual_return_data.log")
+LOG_FILE <- here::here("output", "log", "combine_annual_return_data.log")
 
 check_required_packages(REQUIRED_PACKAGES)
 
@@ -150,7 +150,6 @@ load_data <- function(year) {
   }
 
   # Import data
-  logger::log_info("Loading data for year {year}")
   rio::import_list(file_path, skip = 1, setclass = "tbl")
 }
 
@@ -183,8 +182,14 @@ clean_data <- function(df) {
         .x
       )
     ) %>%
+    select(-any_of("x26")) %>%
     # Remove empty water company rows
     filter(!is.na(water_company)) %>%
+    mutate(water_company = if_else(
+      water_company == "Dwr Cymru Welsh Water",
+      "Welsh Water",
+      water_company
+    )) %>%
     # Convert hours to numeric type
     mutate(across(
       any_of("spill_hrs_ea"),
@@ -217,8 +222,7 @@ clean_data <- function(df) {
       outlet_discharge_ngr = str_replace(outlet_discharge_ngr, "(?i)Not.*", ""),
       outlet_discharge_ngr = str_extract(outlet_discharge_ngr, "^[^,&/\\(]+"),
       outlet_discharge_ngr = str_remove_all(outlet_discharge_ngr, "\\s+")
-    ) %>%
-    return()
+    )
 }
 
 #' Process data for a specific year
@@ -249,21 +253,13 @@ process_year <- function(year) {
 #' @param data Combined data frame to export
 #' @return NULL
 export_data <- function(data) {
-  tryCatch(
-    {
-      # File path
-      parquet_file <- file.path(CONFIG$output_dir, "annual_return_edm.parquet")
-      dir.create(dirname(parquet_file), recursive = TRUE, showWarnings = FALSE)
+  # File path
+  parquet_file <- file.path(CONFIG$output_dir, "annual_return_edm.parquet")
+  dir.create(dirname(parquet_file), recursive = TRUE, showWarnings = FALSE)
 
-      # Save data
-      arrow::write_parquet(data, parquet_file)
-      logger::log_info("Data exported to {parquet_file}")
-    },
-    error = function(e) {
-      logger::log_error("Error exporting data: {e$message}")
-      stop(glue::glue("Failed to export data: {e$message}"))
-    }
-  )
+  # Save data
+  arrow::write_parquet(data, parquet_file)
+  logger::log_info("Data exported to {parquet_file}")
 }
 
 # Main Execution
@@ -287,19 +283,6 @@ main <- function() {
         list_rbind()
 
       logger::log_info("Successfully combined data for all years, total rows: {nrow(combined_data)}")
-
-      # Remove empty column
-      combined_data <- select(combined_data, -x26)
-      logger::log_info("Removed empty column x26")
-
-      # Rename Welsh Water
-      combined_data <- combined_data %>%
-        mutate(water_company = if_else(
-          water_company == "Dwr Cymru Welsh Water",
-          "Welsh Water",
-          water_company
-        ))
-      logger::log_info("Standardised water company names")
 
       # Export data
       export_data(combined_data)
