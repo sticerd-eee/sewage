@@ -1,54 +1,37 @@
-# R specific files
-.Rproj.user/
-.Rhistory
+# OS and editor files
+.DS_Store
+Icon?
+Thumbs.db
+.idea/
+.vscode/
+
+# Local environment and session files
+.env
+.history
+.Rapp.history
 .RData
+.Renviron
+.Rhistory
+.Rprofile
+.Rproj.user/
 .Ruserdata
 *.Rproj
 renv/library/
-renv/staging/
 renv/local/
+renv/staging/
+scripts/python/.venv/
+__pycache__/
+*.pyc
 
-# Data files
-data/
-# RiverNetworks
-RiverNetworks/
-!RiverNetworks/**/
-!RiverNetworks/**/*.R
-!RiverNetworks/**/*.sql
-!RiverNetworks/**/*.sh
-!RiverNetworks/**/Dockerfile
-!RiverNetworks/**/docker-compose*.yml
-!RiverNetworks/**/.dockerignore
+# Temporary files and caches
+*_cache/
+*_files/
+~$*
+*.temp
+temp/
+*/temp/*
 
-# Upstream downstream
-upstream_downstream/
-!upstream_downstream/**/
-!upstream_downstream/**/*.R
-!upstream_downstream/**/*.sql
-!upstream_downstream/**/*.sh
-!upstream_downstream/**/Dockerfile
-!upstream_downstream/**/docker-compose*.yml
-!upstream_downstream/**/.dockerignore
-
-# old
-_old/
-
-# Overleaf
-docs/overleaf/
-
-*.csv
-*.xlsx
-*.xlsb
-*.xls
-*.accdb
-*.dta
-*.RData
-*.Rdata
-*.zip
-*.nc
-*.tif
-
-# LaTeX/PDF compilation files
+# Rendered documents and compilation artefacts
 *.aux
 *.bbl
 *.bcf
@@ -61,54 +44,54 @@ docs/overleaf/
 *.run.xml
 *.synctex.gz
 
-# Temporary files
-~$*
-*.temp
-temp/
-*/temp/*
+# Raw data and bulky binary artefacts
+*.accdb
+*.csv
+*.dta
+*.nc
+*.RData
+*.Rdata
+*.tif
+*.xls
+*.xlsb
+*.xlsx
+*.zip
 
-# OS specific
-.DS_Store
-Icon?
-Thumbs.db
-
-# Cache and history files
-*_cache/
-*_files/
-.history
-.Rapp.history
-
-# Environment files
-.env
-.Renviron
-.Rprofile
-
-# Editor specific
-.vscode/
-.idea/
-
-# Website files
-/book/_freeze/
+# Generated book and testing outputs
 /book/.quarto/
+/book/_freeze/
 /book/_site/
 /book/book_figs/
 /book/book_regs/
 /book/test_files/
 /book/tinytable_assets/
-
-# Literature review with personal paths
-docs/lit_review/sewage_literature_review/
-
-# Folder to be integrated
-DD_work/
-
-# Generated analysis outputs
-/output/*
-lma/
 /scripts/R/testing/*.html
 /scripts/R/testing/output/
+/output/*
 
-# Python virtual environments
-scripts/python/.venv/
-*.pyc
-__pycache__/
+# Local project working directories
+data/
+DD_work/
+docs/lit_review/sewage_literature_review/
+docs/overleaf/
+lma/
+_old/
+
+# Embedded subprojects tracked as source only
+RiverNetworks/*
+!RiverNetworks/**/
+!RiverNetworks/**/*.R
+!RiverNetworks/**/*.sql
+!RiverNetworks/**/*.sh
+!RiverNetworks/**/Dockerfile
+!RiverNetworks/**/docker-compose*.yml
+!RiverNetworks/**/.dockerignore
+
+upstream_downstream/*
+!upstream_downstream/**/
+!upstream_downstream/**/*.R
+!upstream_downstream/**/*.sql
+!upstream_downstream/**/*.sh
+!upstream_downstream/**/Dockerfile
+!upstream_downstream/**/docker-compose*.yml
+!upstream_downstream/**/.dockerignore
