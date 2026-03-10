@@ -35,7 +35,7 @@ source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 source(here::here("scripts", "config", "api_config.R"), local = TRUE)
 
 REQUIRED_PACKAGES <- c(
-  "arrow", "dplyr", "fs", "here", "janitor",
+  "arrow", "dplyr", "fs", "janitor",
   "jsonlite", "logger", "purrr", "tibble"
 )
 LOG_FILE <- here::here(
@@ -257,13 +257,11 @@ process_company_data <- function(
   )
 
   final_data_to_write <- all_new_features_data
-  is_append <- FALSE
 
   if (fs::file_exists(output_parquet_path)) {
     logger::log_info(
-      "Existing Parquet file found: {output_parquet_path}. Reading and appending."
+      "Existing Parquet file found: {output_parquet_path}. Reading before merge."
     )
-    is_append <- TRUE
 
     tryCatch(
       {
@@ -272,33 +270,7 @@ process_company_data <- function(
           "Read {nrow(existing_data)} records from existing Parquet file."
         )
 
-        common_cols <- intersect(names(existing_data), names(all_new_features_data))
-        existing_subset <- existing_data[, common_cols, drop = FALSE]
-        new_subset <- all_new_features_data[, common_cols, drop = FALSE]
-
-        if (!isTRUE(all.equal(
-          lapply(existing_subset, class),
-          lapply(new_subset, class)
-        ))) {
-          logger::log_warn(
-            "Schema differences detected between existing and new data for {company_name}. Attempting bind, but review may be needed."
-          )
-        }
-
-        combined_data <- dplyr::bind_rows(existing_data, all_new_features_data)
-        rows_before_dedup <- nrow(combined_data)
-        final_data_to_write <- dplyr::distinct(combined_data)
-        rows_after_dedup <- nrow(final_data_to_write)
-
-        if (rows_before_dedup > rows_after_dedup) {
-          logger::log_info(
-            "Combined {rows_before_dedup} rows total. Removed {rows_before_dedup - rows_after_dedup} duplicate rows for {company_name}."
-          )
-        } else {
-          logger::log_info(
-            "Combined {rows_before_dedup} rows total. No duplicates found."
-          )
-        }
+        final_data_to_write <- dplyr::bind_rows(existing_data, final_data_to_write)
       },
       error = function(e) {
         logger::log_error(
@@ -307,23 +279,26 @@ process_company_data <- function(
         logger::log_warn(
           "Overwriting existing Parquet file for {company_name} with only new data due to read/combine error."
         )
-        is_append <<- FALSE
       }
     )
   } else {
     logger::log_info(
       "No existing Parquet file found for {company_name}. Writing new file."
     )
+  }
 
-    rows_before_dedup <- nrow(final_data_to_write)
-    final_data_to_write <- dplyr::distinct(final_data_to_write)
-    rows_after_dedup <- nrow(final_data_to_write)
+  rows_before_dedup <- nrow(final_data_to_write)
+  final_data_to_write <- dplyr::distinct(final_data_to_write)
+  rows_after_dedup <- nrow(final_data_to_write)
 
-    if (rows_before_dedup > rows_after_dedup) {
-      logger::log_info(
-        "Removed {rows_before_dedup - rows_after_dedup} duplicate rows from initial data for {company_name}."
-      )
-    }
+  if (rows_before_dedup > rows_after_dedup) {
+    logger::log_info(
+      "Prepared {rows_before_dedup} rows total. Removed {rows_before_dedup - rows_after_dedup} duplicate rows for {company_name}."
+    )
+  } else {
+    logger::log_info(
+      "Prepared {rows_after_dedup} rows total for {company_name}. No duplicates found."
+    )
   }
 
   tryCatch(
@@ -334,9 +309,8 @@ process_company_data <- function(
       rows_written <- nrow(final_data_to_write)
       if (rows_written > 0) {
         file_size_kb <- round(fs::file_info(output_parquet_path)$size / 1024, 2)
-        action_word <- if (is_append) "Appended/updated" else "Wrote"
         logger::log_info(
-          "{action_word} {rows_written} total records for {company_name} to: {output_parquet_path} ({file_size_kb} KB)"
+          "Wrote {rows_written} total records for {company_name} to: {output_parquet_path} ({file_size_kb} KB)"
         )
       } else {
         logger::log_info(
@@ -414,14 +388,9 @@ main <- function() {
       results <- purrr::map2_lgl(
         company_names,
         company_dirs,
-        function(company_name, company_dir) {
-          process_company_data(
-            company_name = company_name,
-            company_input_dir = company_dir,
-            output_dir = CONFIG$output_dir,
-            file_pattern = CONFIG$json_file_pattern
-          )
-        }
+        process_company_data,
+        output_dir = CONFIG$output_dir,
+        file_pattern = CONFIG$json_file_pattern
       )
 
       success_count <- sum(results)

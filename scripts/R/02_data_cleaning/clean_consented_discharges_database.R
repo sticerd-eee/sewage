@@ -30,7 +30,7 @@ if (!requireNamespace("here", quietly = TRUE)) {
 
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 
-REQUIRED_PACKAGES <- c("dplyr", "fs", "here", "janitor", "logger", "rio")
+REQUIRED_PACKAGES <- c("dplyr", "fs", "janitor", "logger", "rio")
 LOG_FILE <- here::here(
   "output", "log",
   "11_clean_consented_discharges_database.log"

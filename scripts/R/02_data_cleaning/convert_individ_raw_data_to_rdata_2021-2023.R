@@ -39,7 +39,6 @@ REQUIRED_PACKAGES <- c(
   "furrr",
   "future",
   "glue",
-  "here",
   "janitor",
   "logger",
   "memuse",

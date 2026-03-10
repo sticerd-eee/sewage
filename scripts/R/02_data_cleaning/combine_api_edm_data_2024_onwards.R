@@ -35,7 +35,7 @@ source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 source(here::here("scripts", "config", "api_config.R"), local = TRUE)
 
 REQUIRED_PACKAGES <- c(
-  "arrow", "dplyr", "fs", "here",
+  "arrow", "dplyr", "fs",
   "logger", "lubridate", "purrr"
 )
 LOG_FILE <- here::here(

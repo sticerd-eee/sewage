@@ -30,7 +30,7 @@ if (!requireNamespace("here", quietly = TRUE)) {
 
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 
-REQUIRED_PACKAGES <- c("dplyr", "fs", "here", "httr", "jsonlite", "logger", "lubridate")
+REQUIRED_PACKAGES <- c("dplyr", "fs", "httr", "jsonlite", "logger", "lubridate")
 LOG_FILE <- here::here("output", "log", "fetch_edm_api_data_2024_onwards.log")
 
 check_required_packages(REQUIRED_PACKAGES)

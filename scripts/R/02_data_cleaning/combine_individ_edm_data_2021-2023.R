@@ -34,7 +34,6 @@ REQUIRED_PACKAGES <- c(
   "dplyr",
   "fs",
   "glue",
-  "here",
   "janitor",
   "logger",
   "lubridate",

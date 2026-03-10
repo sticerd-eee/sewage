@@ -29,7 +29,7 @@ if (!requireNamespace("here", quietly = TRUE)) {
 
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 
-REQUIRED_PACKAGES <- c("dplyr", "fs", "here", "logger", "purrr", "stringr", "tibble")
+REQUIRED_PACKAGES <- c("dplyr", "fs", "logger", "purrr", "stringr", "tibble")
 LOG_FILE <- here::here(
   "output", "log",
   "edm_individ_data_standardisation_2021-2023.log"
