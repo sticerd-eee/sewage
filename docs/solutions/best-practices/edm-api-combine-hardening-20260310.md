@@ -140,11 +140,11 @@ Rscript --vanilla scripts/R/testing/test_edm_api_pipeline_contracts.R
 - See also: [annual-return-combiner-simplification-20260310.md](./annual-return-combiner-simplification-20260310.md)
 - See plan: [2026-03-09-refactor-align-edm-api-pipeline-contracts-plan.md](../../plans/2026-03-09-refactor-align-edm-api-pipeline-contracts-plan.md)
 
-Solved review items:
-- [001-pending-p1-propagate-fatal-combine-failures.md](../../../todos/001-pending-p1-propagate-fatal-combine-failures.md)
-- [002-pending-p1-protect-last-known-good-combined-output.md](../../../todos/002-pending-p1-protect-last-known-good-combined-output.md)
-- [003-pending-p2-narrow-and-validate-combine-schema.md](../../../todos/003-pending-p2-narrow-and-validate-combine-schema.md)
-- [004-pending-p2-surface-timestamp-parse-drop-counts.md](../../../todos/004-pending-p2-surface-timestamp-parse-drop-counts.md)
+Resolved review items covered by this fix:
+- fatal failure propagation to the process exit code
+- protection of the last-known-good combined output from empty or invalid publishes
+- schema narrowing before binding to avoid irrelevant Parquet drift
+- explicit timestamp parse and row-drop observability
 
 Follow-on but out of scope for this fix:
 - [007-pending-p2-stage-combined-edm-output-atomically.md](../../../todos/007-pending-p2-stage-combined-edm-output-atomically.md)
