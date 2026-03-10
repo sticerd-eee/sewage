@@ -78,7 +78,7 @@ lma/
 _old/
 
 # Embedded subprojects tracked as source only
-RiverNetworks/*
+RiverNetworks/**
 !RiverNetworks/**/
 !RiverNetworks/**/*.R
 !RiverNetworks/**/*.sql
@@ -87,7 +87,7 @@ RiverNetworks/*
 !RiverNetworks/**/docker-compose*.yml
 !RiverNetworks/**/.dockerignore
 
-upstream_downstream/*
+upstream_downstream/**
 !upstream_downstream/**/
 !upstream_downstream/**/*.R
 !upstream_downstream/**/*.sql
