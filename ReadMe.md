@@ -132,75 +132,66 @@ The project uses a pipeline organised into 6 layers to transform raw administrat
 
 #### 01_data_ingestion/ - Raw Data Ingestion Layer
 
-Scripts for collecting and standardising raw data from historical EDM files, live API endpoints, and external databases. Scripts handle file format variations, API pagination, and initial data validation.
+Scripts for collecting and standardising raw EDM and API inputs before cleaning.
 
 **`edm_individ_data_standardisation_2021-2023.R`**  
-   - **Input:** Original yearly zip archives (`EDM_{year}.zip`) from `data/raw/edm_data/` containing individual company EDM spill data files (XLSX, XLSB, CSV).
-   - Unzips individual EDM data files and standardises filenames to `{yyyy}_{company_name}`.  
-   - **Output:** Unzipped individual EDM files with standardised names (`{yyyy}_{company_name}_edm.ext`) saved directly in `data/raw/edm_data/`.
+   - **Input:** Raw FOI EDM zip archives (`EDM*.zip`) from `data/raw/edm_data/`.
+   - **Output:** Extracted company files with standardised names (`{year}_{company}_edm.{extension}`) saved in `data/raw/edm_data/`.
+   - **Purpose:** Unzips historical EDM archives and renames supported files into a consistent format for downstream ingestion.
 
 **`fetch_edm_api_data_2024_onwards.R`**  
-   - **Input:** Environment Agency real-time API endpoints for each water company.
-   - Fetches live sewage overflow data via REST API calls for the nine England companies in the National Storm Overflows Hub feed.  
-   - **Output:** Raw JSON API responses saved to `data/raw/edm_data/raw_api_responses/` by company.
+   - **Input:** Environment Agency ArcGIS EDM endpoints configured in `scripts/config/api_config.R`.
+   - **Output:** Timestamped raw JSON API snapshots saved in `data/raw/edm_data/raw_api_responses/` by company.
+   - **Purpose:** Downloads 2024+ EDM API data for the England-only live feed and stores raw responses for downstream processing.
 
 #### 02_data_cleaning/ - Data Cleaning & Standardisation Layer
 
-Scripts for cleaning, standardising, and converting raw data into consistent formats. Scripts handle format conversion, column standardisation, data validation, and consolidation of multiple data sources into unified datasets.
+Scripts for cleaning, standardising, and combining raw inputs into consistent intermediate datasets.
 
 **`clean_consented_discharges_database.R`**  
-    - **Input:** Raw EA Consented Discharges database (`data/raw/ea_consents/consents_all.xlsx`).
-    - Processes Environment Agency consented discharges data for site validation.  
-    - Standardises column names, coordinates, and water company identifiers.  
-    - **Output:** Cleaned consented discharges database saved to `data/processed/consent_discharges_db.RData`.
+    - **Input:** Raw EA Consented Discharges database (`data/raw/ea_consents/consents_all.xlsx`).  
+    - **Output:** Cleaned consented discharges database saved to `data/processed/consent_discharges_db.RData` and `data/processed/consent_discharges_db.csv`.
+    - **Purpose:** Cleans the Environment Agency consented discharges database for downstream matching and analysis.
 
 **`clean_lr_house_price_data.R`**  
     - **Input:** Raw Land Registry Price Paid Data CSV files (`pp-{year}.csv`) from `data/raw/lr_house_price/`.
-    - Cleans and combines Land Registry data (2021–2024+) and geocodes via the PostcodesioR client to the postcodes.io API with retry/backoff and caching.
-    - Adds `house_id`, `qtr_id`, and `month_id`; normalises postcodes and validates transactions.
-    - **Caching:** Shared postcode cache at `data/cache/postcodes/lr_house_price_postcodes.rds`.
-    - **Output:** Geocoded house price dataset saved to `data/processed/house_price.parquet`.
+    - **Output:** Canonical house price parquet saved to `data/processed/house_price.parquet`.
+    - **Purpose:** Cleans and combines Land Registry sales data (currently 2021–2023) with local ONS postcode data.
 
 **`clean_zoopla_data.R`**  
     - **Input:** WhenFresh/CDRC safeguarded Zoopla rentals CSVs from `data/raw/zoopla/` (`rentals_safeguarded_2014-2022.csv`, `rentals_safeguarded_2023.csv`).
-    - Cleans, standardises, and filters to study years (2021–2023); harmonises property types; computes `year`, `qtr_id`, `month_id` from listing/rented dates.
-    - Geocodes by postcode using shared utilities (`scripts/R/utils/postcode_processing_utils.R`) with caching and API retries.
-    - **Output:** Parquet in `data/processed/zoopla/` with year-ranged filename (e.g., `zoopla_rentals_2021-2023.parquet`).
+    - **Output:** Canonical rentals parquet saved to `data/processed/zoopla/zoopla_rentals.parquet`.
+    - **Purpose:** Cleans and combines Zoopla rental data (currently 2021–2023) with local ONS postcode data.
 
 **`combine_annual_return_data.R`**  
-   - **Input:** Raw annual return Excel files (`{year}_annual_return_edm.xlsx`) containing aggregated site-level statistics.
-   - Cleans and combines annual sewage spill data for 2021–2023.  
-   - Standardises column and company names across years.  
-   - **Output:** Consolidated annual return dataset saved to `data/processed/annual_return_edm.parquet`.
+   - **Input:** Raw annual return workbooks (`{year}_annual_return_edm.xlsx`) from `data/raw/edm_data/`.
+   - **Output:** Combined annual return parquet saved to `data/processed/annual_return_edm.parquet`.
+   - **Purpose:** Combines and standardises annual return EDM workbooks for 2021–2024.
 
 **`combine_api_edm_data_2024_onwards.R`**  
-   - **Input:** Processed API data Parquet files for the nine in-scope live API companies.
-   - Combines all company API data into single dataset with consistent schema.
-   - **Output:** Unified API dataset saved to `data/processed/edm_api_data/combined_api_data.parquet`.
+   - **Input:** Company-level API parquet files in `data/processed/edm_api_data/`.
+   - **Output:** Combined API parquet saved to `data/processed/edm_api_data/combined_api_data.parquet`.
+   - **Purpose:** Combines and the per-company 2024+ EDM API parquet files into one dataset.
 
 **`combine_individ_edm_data_2021-2023.R`**  
-   - **Input:** RData list object (`data/processed/individual_edm_by_company.RData`) containing raw individual company spill data.
-   - Cleans and combines individual sewage spill data (2021–2023) from all water companies.  
-   - Standardises column names, water company names, and spill start/end dates to POSIXct format.  
-   - **Output:** Single, cleaned, consolidated data frame of all individual spill events saved to `data/processed/combined_edm_data.RData`.
+   - **Input:** Company-level historical EDM parquet files in `data/processed/edm_data_2021_2023/`.
+   - **Output:** Combined individual-EDM parquet saved to `data/processed/combined_edm_data.parquet`.
+   - **Purpose:** Combines 2021–2023 individual EDM parquet files and standardises schema and datetime fields.
 
 **`convert_individ_raw_data_to_rdata_2021-2023.R`**  
-   - **Input:** Standardised individual EDM data files (`{yyyy}_{company_name}_edm.ext`) from `data/raw/edm_data/`.
-   - Reads various file formats (XLSX, XLSB, CSV) of individual EDM data and converts to RData format.  
-   - **Output:** Single RData file (`data/processed/individual_edm_by_company.RData`) containing list object with raw data frames for each company and year.
+   - **Input:** Standardised raw EDM company files (`{year}_{company}_edm.xlsx/.xlsb/.csv`) from `data/raw/edm_data/`.
+   - **Output:** Company-level and year-level parquet files saved in `data/processed/edm_data_2021_2023/`.
+   - **Purpose:** Converts raw historical EDM files into standardised parquet outputs for downstream combination.
 
 **`process_edm_api_json_to_parquet_2024_onwards.R`**  
-   - **Input:** Raw JSON API responses from `data/raw/edm_data/raw_api_responses/` by-company directories.
-   - Processes and standardises JSON data to match historical data schema.
-   - Converts timestamps, standardises location formats, and validates data quality.
-   - **Output:** Processed API data in company-level Parquet files under `data/processed/edm_api_data/`.
+   - **Input:** Raw API JSON snapshots from `data/raw/edm_data/raw_api_responses/` by company.
+   - **Output:** Company-level API parquet files saved in `data/processed/edm_api_data/`.
+   - **Purpose:** Processes raw 2024+ EDM API JSON snapshots into incremental parquet files.
 
 **`clean_rainfall_data.R`**  
-    - **Input:** Raw UK Met Office HadUK-Grid NetCDF files (`rainfall_YYYY_MM.nc`) from `data/raw/haduk_rainfall_data/` and unique spill sites (`data/processed/unique_spill_sites.parquet`).
-    - Extracts daily rainfall data from NetCDF files for grid cells near sewage spill locations using spatial filtering.
-    - Implements neighbourhood analysis mapping each spill site to 3×3 grid area and handles various time encoding formats.
-    - Processes files in parallel with memory optimisation for efficient large dataset handling.
-    - **Output:** Cleaned rainfall dataset (`data/processed/rainfall/rainfall_data_cleaned.parquet`) and spill site to grid cell lookup table (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
+    - **Input:** HadUK-Grid NetCDF rainfall files from `data/raw/haduk_rainfall_data/` and unique spill sites from `data/processed/unique_spill_sites.parquet`.
+    - **Output:** Cleaned rainfall parquet and spill-site lookup tables saved in `data/processed/rainfall/`.
+    - **Purpose:** Extracts rainfall data for grid cells near spill sites and prepares rainfall inputs for spill-weather analysis.
 
 #### 03_data_enrichment/ - Data Enrichment & Aggregation Layer
 
@@ -358,7 +349,7 @@ Scripts for creating final analysis-ready datasets for econometric analysis. Scr
 
 ### Utilities
 
-- `scripts/R/utils/postcode_processing_utils.R`: Postcode geocoding utilities using PostcodesioR with retry/backoff, batch processing, shared cache management (`get_postcode_data`, `process_postcodes`, `cleanup_postcode_cache`).
+- `scripts/R/utils/postcode_processing_utils.R`: Shared postcode utilities. Sales and rentals now use local ONS postcode and code-name lookups (`load_local_postcode_lookup`, `build_local_postcode_label_lookup`, `get_local_postcode_data_for_sales`) instead of the old Postcodes.io/cache workflow.
 - `scripts/R/utils/spill_aggregation_utils.R`: Shared spill aggregation helpers including `split_monthly_records`, `split_quarterly_records`, `prepare_spill_data`, 12/24 counting via `count_spills`, block construction via `build_spill_blocks`, and `calculate_spill_hours`.
 
 ### Analysis Scripts (09_analysis)
@@ -504,18 +495,18 @@ Difference-in-differences and event-study designs exploiting variation in public
 The following sequence removes circular dependencies and includes all scripts in layers 01–06:
 
 #### Layer 01: Data Ingestion
-1. **`edm_individ_data_standardisation_2021-2023.R`** — Unzips and standardises historical EDM archives
-2. **`fetch_edm_api_data_2024_onwards.R`** — Fetches current API data (can run in parallel with step 1)
+1. **`edm_individ_data_standardisation_2021-2023.R`** — Standardises historical EDM archive files
+2. **`fetch_edm_api_data_2024_onwards.R`** — Downloads raw 2024+ API snapshots (can run in parallel with step 1)
 
 #### Layer 02: Data Cleaning
-3. **`clean_consented_discharges_database.R`** — Processes consented discharges (independent)
-4. **`clean_lr_house_price_data.R`** — Cleans LR house prices; geocodes with caching (independent)
-5. **`clean_zoopla_data.R`** — Cleans Zoopla rentals; geocodes with shared utilities (independent, optional until integrated)
-6. **`combine_annual_return_data.R`** — Combines annual return files (independent)
-7. **`convert_individ_raw_data_to_rdata_2021-2023.R`** — Converts individual EDM files (requires step 1)
-8. **`process_edm_api_json_to_parquet_2024_onwards.R`** — Processes API JSON (requires step 2)
-9. **`combine_individ_edm_data_2021-2023.R`** — Combines individual EDM data (requires step 7)
-10. **`combine_api_edm_data_2024_onwards.R`** — Combines API data (requires step 8)
+3. **`clean_consented_discharges_database.R`** — Cleans the consented discharges database (independent)
+4. **`clean_lr_house_price_data.R`** — Cleans LR house prices with ONS postcode data
+5. **`clean_zoopla_data.R`** — Cleans Zoopla rentals with ONS postcode data
+6. **`combine_annual_return_data.R`** — Combines annual return workbooks (independent)
+7. **`convert_individ_raw_data_to_rdata_2021-2023.R`** — Converts raw historical EDM files to parquet (requires step 1)
+8. **`process_edm_api_json_to_parquet_2024_onwards.R`** — Processes raw API JSON to parquet (requires step 2)
+9. **`combine_individ_edm_data_2021-2023.R`** — Combines 2021–2023 individual EDM parquet (requires step 7)
+10. **`combine_api_edm_data_2024_onwards.R`** — Combines 2024+ API parquet (requires step 8)
 
 #### Layer 03: Data Enrichment
 11. **`merge_individ_annual_location.R`** — Merge location into individual spills (requires steps 6, 9)
