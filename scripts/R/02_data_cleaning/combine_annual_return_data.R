@@ -1,57 +1,72 @@
-############################################################
-# Combine Annual Sewage Spill Return Data
-# Project: Sewage
-# Date: 02/12/2024
+# ==============================================================================
+# Annual Return EDM Data Combiner
+# ==============================================================================
+#
+# Purpose: Load annual return EDM workbooks for 2021-2024, standardise schema
+#          differences across reporting vintages, and export a single combined
+#          annual return parquet for downstream sewage spill analysis.
+#
 # Author: Jacopo Olivieri
-############################################################
+# Date: 2024-12-02
+# Date Modified: 2026-03-10
+#
+# Inputs:
+#   - data/raw/edm_data/{year}_annual_return_edm.xlsx
+#
+# Outputs:
+#   - data/processed/annual_return_edm.parquet
+#   - output/log/08_combine_annual_return_data.log
+#
+# ==============================================================================
 
-#' This script cleans and combines the annual sewage spill data
-#' from UK water companies for the years 2021-2024. It's part of the
-#' data preparation pipeline for analysing sewage discharge events.
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first, e.g. `renv::restore()`.",
+    call. = FALSE
+  )
+}
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "conflicted",
+  "dplyr",
+  "fs",
+  "glue",
+  "here",
+  "hms",
+  "janitor",
+  "logger",
+  "purrr",
+  "rio",
+  "stringr"
+)
+
+LOG_FILE <- here::here("output", "log", "08_combine_annual_return_data.log")
+
+check_required_packages(REQUIRED_PACKAGES)
 
 # Setup Functions
 ############################################################
 
-#' Initialize the R environment with required packages
+#' Attach the packages used unqualified in this script
 #' @return NULL
 initialise_environment <- function() {
-  if (!requireNamespace("renv", quietly = TRUE)) {
-    install.packages("renv")
-  }
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
+    library(pkg, character.only = TRUE)
+  }))
+
+  conflicted::conflict_prefer("select", "dplyr")
+  conflicted::conflict_prefer("filter", "dplyr")
 }
 
-#' Load all required packages for data processing
+#' Initialise logging for this script
 #' @return NULL
-load_packages <- function() {
-  required_packages <- c(
-    "rmarkdown", "rio", "tidyverse", "purrr", "here",
-    "janitor", "logger", "glue", "hms", "lubridate", "arrow", "conflicted"
-  )
-
-  install_if_missing <- function(packages) {
-    new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
-    if (length(new_packages) > 0) {
-      message("Installing missing packages: ", paste(new_packages, collapse = ", "))
-      install.packages(new_packages)
-    }
-    invisible(sapply(packages, library, character.only = TRUE))
-  }
-
-  install_if_missing(required_packages)
-  conflict_prefer("select", "dplyr")
-  conflict_prefer("filter", "dplyr")
-}
-
-#' Configure logging for the script
-#' @return NULL
-setup_logging <- function() {
-  log_dir <- here::here("output", "log")
-  fs::dir_create(log_dir, recurse = TRUE)
-  log_path <- file.path(log_dir, "08_combine_annual_return_data.log")
-
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::INFO)
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "INFO")
+  logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
 }
 
@@ -264,8 +279,7 @@ main <- function() {
       logger::log_info("===== Starting Annual Return EDM Data Processing =====")
 
       initialise_environment()
-      load_packages()
-      setup_logging()
+      initialise_logging()
 
       # Process all years and combine
       logger::log_info("Processing data for years {paste(CONFIG$years, collapse=', ')}")

@@ -1,53 +1,64 @@
-############################################################
-# Pre-process and Clean CDRC Zoopla Rental Transactions Data
-# Project: Sewage
-# Date: 02/09/2025
+# ==============================================================================
+# CDRC Zoopla Rental Transactions Data Cleaner
+# ==============================================================================
+#
+# Purpose: Clean and combine safeguarded Zoopla rental listings for 2021-2023,
+#          enrich them with postcode attributes, and export the canonical
+#          rental panel used by downstream sewage and housing analyses.
+#
 # Author: Jacopo Olivieri
-############################################################
+# Date: 2025-09-02
+# Date Modified: 2026-03-10
+#
+# Inputs:
+#   - data/raw/zoopla/rentals_safeguarded_2014-2022.csv
+#   - data/raw/zoopla/rentals_safeguarded_2023.csv
+#   - scripts/R/utils/postcode_processing_utils.R
+#
+# Outputs:
+#   - data/processed/zoopla/zoopla_rental.parquet
+#   - output/log/clean_zoopla_data.log
+#
+# Source:
+#   - WhenFresh / Zoopla Property Transactions
+#
+# ==============================================================================
 
-#' This script cleans and combines the Zoopla rental transactions data for the
-#' years 2021-2023, published by WhenFresh.
-#' It's part of the data preparation pipeline for analysing sewage discharge
-#' @Source WhenFresh/Zoopla Property Transactions
-
-# Load Libraries & Setup
-############################################################
-
-# Load postcode processing utilities
-source(here::here("scripts", "R", "utils", "postcode_processing_utils.R"))
-
-#' Load required packages
-#' @return NULL (invisible)
-initialise_environment <- function() {
-  required_packages <- c(
-    "rio",        # Data import/export
-    "tidyverse",  # Data manipulation and piping
-    "here",       # Project-rooted paths
-    "arrow",      # Parquet I/O
-    "purrr",      # Iteration helpers
-    "logger",     # Logging
-    "glue",       # String interpolation
-    "fs",         # File-system ops
-    "lubridate"   # Date handling
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first, e.g. `renv::restore()`.",
+    call. = FALSE
   )
-
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg)
-    library(pkg, character.only = TRUE)
-  }))
 }
 
-#' Set up logging configuration
-#' @return NULL (invisible). Creates log file and configures logger
-setup_logging <- function() {
-  log_path <- here::here("output", "log", "clean_zoopla_data")
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-  
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
-  logger::log_info("Script started at {Sys.time()}")
-}
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "data.table",
+  "dplyr",
+  "fs",
+  "glue",
+  "here",
+  "logger",
+  "lubridate",
+  "PostcodesioR",
+  "purrr",
+  "rio",
+  "stringr",
+  "tibble",
+  "tidyverse"
+)
+
+LOG_FILE <- here::here("output", "log", "clean_zoopla_data.log")
+
+check_required_packages(REQUIRED_PACKAGES)
+
+source(
+  here::here("scripts", "R", "utils", "postcode_processing_utils.R"),
+  local = TRUE
+)
 
 # Configuration
 ############################################################
@@ -88,6 +99,22 @@ CONFIG <- list(
 
 # Functions
 ############################################################
+
+#' Attach the packages used unqualified in this script
+#' @return NULL
+initialise_environment <- function() {
+  invisible(lapply("dplyr", function(pkg) {
+    library(pkg, character.only = TRUE)
+  }))
+}
+
+#' Initialise logging for this script
+#' @return NULL
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
+  logger::log_info("Logging to {LOG_FILE}")
+  logger::log_info("Script started at {Sys.time()}")
+}
 
 #' Load Zoopla Rental Data
 #'
@@ -208,7 +235,7 @@ main <- function(refresh_postcodes = FALSE) {
   tryCatch({
     # Setup
     initialise_environment()
-    setup_logging()
+    initialise_logging()
 
     # Load raw data
     df_raw <- load_data()

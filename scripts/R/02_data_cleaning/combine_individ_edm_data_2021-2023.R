@@ -1,54 +1,70 @@
-############################################################
-# Process and Combine EDM Parquet Data (2021-2023)
-# Project: Sewage
-# Date: 09/12/2024
+# ==============================================================================
+# Individual EDM Parquet Combiner (2021-2023)
+# ==============================================================================
+#
+# Purpose: Combine the per-company EDM Parquet files for 2021-2023, standardise
+#          their schema and datetime fields, and export the canonical combined
+#          dataset used by downstream spill analysis steps.
+#
 # Author: Jacopo Olivieri
-############################################################
+# Date: 2024-12-09
+# Date Modified: 2026-03-10
+#
+# Inputs:
+#   - data/processed/edm_data_2021_2023/{year}_{water_company}.parquet
+#
+# Outputs:
+#   - data/processed/combined_edm_data.parquet
+#   - output/log/03_combine_individ_edm_data_2021-2023.log
+#
+# ==============================================================================
 
-#' Processes and combines the individual sewage spill data from UK water companies
-#' for the years 2021-2023. Part of the data preparation pipeline for analysing
-#' sewage discharge events. Takes Parquet files produced by script 02 as input.
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first, e.g. `renv::restore()`.",
+    call. = FALSE
+  )
+}
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "dplyr",
+  "fs",
+  "glue",
+  "here",
+  "janitor",
+  "logger",
+  "lubridate",
+  "purrr",
+  "stringr"
+)
+
+LOG_FILE <- here::here(
+  "output", "log",
+  "03_combine_individ_edm_data_2021-2023.log"
+)
+
+check_required_packages(REQUIRED_PACKAGES)
 
 # Setup Functions
 ############################################################
 
-#' Initialize the R environment with required packages
+#' Attach the packages used unqualified in this script
 #' @return NULL
 initialise_environment <- function() {
-  # Package management with renv
-  if (!requireNamespace("renv", quietly = TRUE)) {
-    install.packages("renv")
-    renv::init()
-  }
-
-  # Define required packages
-  required_packages <- c(
-    "rmarkdown", "rio", "tidyverse", "purrr", "here",
-    "janitor", "logger", "glue", "openxlsx2", "fs",
-    "readxlsb", "lubridate", "arrow"
-  )
-
-  # Install and load packages
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
-    }
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
     library(pkg, character.only = TRUE)
   }))
 }
 
-#' Set up logging configuration
+#' Initialise logging for this script
 #' @return NULL
-setup_logging <- function() {
-  log_path <- here::here(
-    "output", "log",
-    "03_combine_individ_edm_data_2021-2023.log"
-  )
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
+  logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
 }
 
@@ -447,7 +463,7 @@ main <- function() {
     {
       # Setup
       initialise_environment()
-      setup_logging()
+      initialise_logging()
 
       # Load data
       logger::log_info("===== Starting Individual EDM Data Processing (2021-2023) =====")

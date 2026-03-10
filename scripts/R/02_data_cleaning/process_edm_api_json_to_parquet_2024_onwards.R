@@ -1,13 +1,24 @@
-############################################################
-# EDM API Data to Parquet Conversion
-# Project: Sewage
-# Date: 2025-04-06
+# ==============================================================================
+# EDM API JSON To Parquet Processor
+# ==============================================================================
+#
+# Purpose: Read raw 2024+ EDM API JSON snapshots for the England-only contract,
+#          extract the feature payloads, and write incremental per-company
+#          Parquet files for downstream combination.
+#
 # Author: Jacopo Olivieri
-############################################################
-
-#' Processes raw water company API JSON data into standardised Parquet files.
-#' Extracts features data from latest API responses and handles incremental
-#' updates for the England-only live 2024+ EDM API contract.
+# Date: 2025-04-06
+# Date Modified: 2026-03-10
+#
+# Inputs:
+#   - data/raw/edm_data/raw_api_responses/{company_id}/*.json.gz
+#   - scripts/config/api_config.R
+#
+# Outputs:
+#   - data/processed/edm_api_data/{company_id}.parquet
+#   - output/log/05_process_edm_api_json_to_parquet_2024_onwards.log
+#
+# ==============================================================================
 
 # Setup
 ############################################################

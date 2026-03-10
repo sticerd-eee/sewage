@@ -1,44 +1,71 @@
-############################################################
-# Convert Raw Sewage Spill Data to RData Format
-# Project: Sewage
-# Date: 05/12/2024
+# ==============================================================================
+# Individual EDM Raw File Converter (2021-2023)
+# ==============================================================================
+#
+# Purpose: Load per-company raw EDM files for 2021-2023, normalise workbook and
+#          CSV format differences, and export per-company plus year-level
+#          parquet outputs for downstream individual-EDM combination steps.
+#
 # Author: Jacopo Olivieri
-############################################################
+# Date: 2024-12-05
+# Date Modified: 2026-03-10
+#
+# Inputs:
+#   - data/raw/edm_data/{year}_{water_company}_edm.xlsx
+#   - data/raw/edm_data/{year}_{water_company}_edm.xlsb
+#   - data/raw/edm_data/{year}_{water_company}_edm.csv
+#
+# Outputs:
+#   - data/processed/edm_data_2021_2023/{year}_{water_company}.parquet
+#   - data/processed/edm_data_2021_2023/combined_edm_data_{year}.parquet
+#   - output/log/02_convert_individ_raw_data_to_rdata_2021-2023.log
+#
+# ==============================================================================
 
-#' This script cleans and combines the individual sewage spill data
-#' from UK water companies for the years 2021-2023. It's part of the
-#' data preparation pipeline for analysing sewage discharge events.
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first, e.g. `renv::restore()`.",
+    call. = FALSE
+  )
+}
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "dplyr",
+  "fs",
+  "furrr",
+  "future",
+  "glue",
+  "here",
+  "janitor",
+  "logger",
+  "memuse",
+  "parallelly",
+  "purrr",
+  "readxlsb",
+  "rio",
+  "tibble"
+)
+
+LOG_FILE <- here::here(
+  "output", "log",
+  "02_convert_individ_raw_data_to_rdata_2021-2023.log"
+)
+
+check_required_packages(REQUIRED_PACKAGES)
 
 # Setup Functions
 ############################################################
 
-#' Initialize required packages with version control
+#' Attach the packages used unqualified in this script
 #' @return NULL
 initialise_environment <- function() {
-  if (!requireNamespace("renv", quietly = TRUE)) {
-    install.packages("renv")
-  }
-}
-
-#' Load all required packages for data processing
-#' @return NULL
-load_packages <- function() {
-  required_packages <- c(
-    "rmarkdown", "rio", "tidyverse", "purrr", "here",
-    "janitor", "logger", "glue", "openxlsx2", "fs",
-    "furrr", "future", "readxlsb"
-  )
-
-  install_if_missing <- function(packages) {
-    new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
-    if (length(new_packages) > 0) {
-      message("Installing missing packages: ", paste(new_packages, collapse = ", "))
-      install.packages(new_packages)
-    }
-    invisible(sapply(packages, library, character.only = TRUE))
-  }
-
-  install_if_missing(required_packages)
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
+    library(pkg, character.only = TRUE)
+  }))
 }
 
 #' Configure parallel processing for improved performance
@@ -60,26 +87,12 @@ setup_parallel <- function() {
   logger::log_info("Parallel processing initialized with {n_workers} workers")
 }
 
-#' Configure logging with appropriate file and format
+#' Initialise logging for this script
 #' @return NULL
-setup_logging <- function() {
-  tryCatch(
-    {
-      log_path <- here::here(
-        "output", "log",
-        "02_convert_individ_raw_data_to_rdata_2021-2023.log"
-      )
-      dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-
-      logger::log_appender(logger::appender_file(log_path))
-      logger::log_layout(logger::layout_glue_colors)
-      logger::log_threshold(logger::INFO)
-      logger::log_info("Script started at {Sys.time()}")
-    },
-    error = function(e) {
-      warning(glue::glue("Failed to set up logging: {e$message}"))
-    }
-  )
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "INFO")
+  logger::log_info("Logging to {LOG_FILE}")
+  logger::log_info("Script started at {Sys.time()}")
 }
 
 # Configuration
@@ -344,8 +357,7 @@ main <- function() {
     {
       # Initialize environment and logging
       initialise_environment()
-      load_packages()
-      setup_logging()
+      initialise_logging()
 
       logger::log_info("===== Starting Raw Data Conversion to Parquet (Sequential Mode) =====")
 

@@ -1,12 +1,24 @@
-############################################################
-# Combine EDM API Parquet Data (2024 Onwards)
-# Project: Sewage
-# Date: 2025-04-06
+# ==============================================================================
+# EDM API Parquet Combiner
+# ==============================================================================
+#
+# Purpose: Read the per-company 2024+ EDM API Parquet files, combine and clean
+#          them, and write the consolidated dataset used by downstream analysis
+#          steps.
+#
 # Author: Jacopo Olivieri
-############################################################
-
-#' Combines and cleans individual water company Parquet files generated from
-#' the live 2024+ EDM API pipeline into a single consolidated Parquet file.
+# Date: 2025-04-06
+# Date Modified: 2026-03-10
+#
+# Inputs:
+#   - data/processed/edm_api_data/{company_id}.parquet
+#   - scripts/config/api_config.R
+#
+# Outputs:
+#   - data/processed/edm_api_data/combined_api_data.parquet
+#   - output/log/06_combine_api_edm_data_2024_onwards.log
+#
+# ==============================================================================
 
 # Setup
 ############################################################
