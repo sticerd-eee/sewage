@@ -162,7 +162,7 @@ digraph DataPipeline {
   EXT1 [label=< <B>data/raw/edm_data/EDM*.zip</B><BR/>Raw EDM data archives from UK water companies >];
   EXT2 [label=< <B>scripts/config/api_config.R</B><BR/>API configuration for data fetching >];
   EXT3 [label=< <B>data/raw/edm_data/<BR/>YYYY_annual_return_edm.xlsx</B><BR/>Annual return data from water companies >];
-  EXT4 [label=< <B>data/raw/ea_consents/consents_all.csv</B><BR/>Environment Agency consented discharges database >];
+  EXT4 [label=< <B>data/raw/ea_consents/consents_all.xlsx</B><BR/>Environment Agency consented discharges database >];
   EXT5 [label=< <B>data/raw/lr_house_price/pp-YYYY.csv</B><BR/>HM Land Registry property sales data >];
 
   node [fillcolor='#fef3c7', color='#f59e0b', penwidth=1.5, fontcolor='#78350f'];
@@ -289,7 +289,7 @@ digraph DataPipeline {
 
 - **script_name**: `clean_consented_discharges_database.R`
 - **purpose**: Cleans the Environment Agency's consented discharges database, standardising water company names and column mappings.
-- **inputs**: `["data/raw/ea_consents/consents_all.csv"]`
+- **inputs**: `["data/raw/ea_consents/consents_all.xlsx"]`
 - **outputs**: 
   - `"data/processed/consent_discharges_db.RData"`
   - `"data/processed/consent_discharges_db.csv"`

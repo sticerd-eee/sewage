@@ -149,7 +149,7 @@ Scripts for collecting and standardising raw data from historical EDM files, liv
 Scripts for cleaning, standardising, and converting raw data into consistent formats. Scripts handle format conversion, column standardisation, data validation, and consolidation of multiple data sources into unified datasets.
 
 **`clean_consented_discharges_database.R`**  
-    - **Input:** Raw EA Consented Discharges database (`data/raw/ea_consents/consents_all.csv`).
+    - **Input:** Raw EA Consented Discharges database (`data/raw/ea_consents/consents_all.xlsx`).
     - Processes Environment Agency consented discharges data for site validation.  
     - Standardises column names, coordinates, and water company identifiers.  
     - **Output:** Cleaned consented discharges database saved to `data/processed/consent_discharges_db.RData`.
