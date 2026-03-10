@@ -56,15 +56,26 @@ CONFIG <- list(
   output_file = EDM_API_CONTRACT$combined_file,
   input_file_pattern = "\\.parquet$",
   exclude_pattern = "combined_api_data\\.parquet$",
-  company_name_mapping = EDM_API_CONTRACT$company_id_to_name,
-  column_name_mapping = c(
-    "attributes_id" = "unique_id",
-    "attributes_latest_event_start" = "start_time_og",
-    "attributes_latest_event_end" = "end_time_og",
-    "attributes_latitude" = "latitude",
-    "attributes_longitude" = "longitude",
-    "attributes_receiving_water_course" = "receiving_water_course"
-  )
+  company_name_mapping = EDM_API_CONTRACT$company_id_to_name
+)
+REQUIRED_INPUT_COLUMNS <- c(
+  "water_company",
+  "attributes_id",
+  "attributes_latest_event_start",
+  "attributes_latest_event_end",
+  "attributes_latitude",
+  "attributes_longitude",
+  "attributes_receiving_water_course"
+)
+EXPECTED_OUTPUT_COLUMNS <- c(
+  "water_company",
+  "unique_id",
+  "latitude",
+  "longitude",
+  "receiving_water_course",
+  "start_time",
+  "end_time",
+  "year"
 )
 
 
@@ -125,6 +136,48 @@ log_parquet_contract <- function(status, input_dir) {
   }
 }
 
+#' Read only the required columns from a Parquet file.
+#'
+#' @param parquet_file Full path to a Parquet file
+#' @param required_columns Character vector of required column names
+#' @return Tibble containing only the required columns
+read_required_parquet_file <- function(
+    parquet_file,
+    required_columns = REQUIRED_INPUT_COLUMNS) {
+  parquet_data <- tryCatch(
+    arrow::read_parquet(
+      parquet_file,
+      col_select = dplyr::all_of(required_columns)
+    ),
+    error = function(e) {
+      stop(
+        paste0(
+          "Failed to read required columns from ",
+          basename(parquet_file),
+          ": ",
+          conditionMessage(e)
+        ),
+        call. = FALSE
+      )
+    }
+  )
+
+  missing_columns <- setdiff(required_columns, names(parquet_data))
+  if (length(missing_columns) > 0) {
+    stop(
+      paste0(
+        "Required columns missing from ",
+        basename(parquet_file),
+        ": ",
+        paste(missing_columns, collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+
+  parquet_data
+}
+
 #' Read and combine in-scope Parquet files from a directory.
 #'
 #' @param input_dir Directory containing the Parquet files
@@ -166,12 +219,12 @@ read_and_combine_parquet_files <- function(
 
   tryCatch(
     {
-      combined_data <- purrr::map_dfr(
+      parquet_data_list <- purrr::map(
         parquet_files,
-        arrow::read_parquet,
-        .id = "source_file"
-      ) |>
-        dplyr::mutate(source_file = basename(source_file))
+        read_required_parquet_file,
+        required_columns = REQUIRED_INPUT_COLUMNS
+      )
+      combined_data <- dplyr::bind_rows(parquet_data_list)
 
       logger::log_info(
         "Successfully read and combined {nrow(combined_data)} rows from {length(parquet_files)} files."
@@ -179,10 +232,81 @@ read_and_combine_parquet_files <- function(
       combined_data
     },
     error = function(e) {
-      logger::log_error("Error reading or combining Parquet files: {e$message}")
+      logger::log_error(
+        "Schema/read error while combining required Parquet columns: {conditionMessage(e)}"
+      )
       NULL
     }
   )
+}
+
+#' Parse EDM API event timestamps and log any dropped values.
+#'
+#' @param values Raw timestamp values from the EDM API parquet files
+#' @param column_name Column name for logging
+#' @return List containing parsed values and parse/drop counts
+parse_api_timestamp_column <- function(values, column_name) {
+  character_values <- as.character(values)
+  missing_input <- is.na(values) | is.na(character_values) | trimws(character_values) == ""
+  missing_input[is.na(missing_input)] <- TRUE
+
+  numeric_values <- suppressWarnings(as.numeric(values))
+  parsed_values <- as.POSIXct(
+    numeric_values / 1000,
+    origin = "1970-01-01",
+    tz = "UTC"
+  )
+  unparseable_values <- !missing_input & is.na(parsed_values)
+
+  missing_input_count <- sum(missing_input)
+  unparseable_count <- sum(unparseable_values)
+
+  if (missing_input_count > 0 || unparseable_count > 0) {
+    logger::log_warn(
+      "Timestamp parse summary for {column_name}: {missing_input_count} missing values, {unparseable_count} unparseable values."
+    )
+  }
+
+  list(
+    values = parsed_values,
+    missing_input_count = missing_input_count,
+    unparseable_count = unparseable_count
+  )
+}
+
+#' Check whether a cleaned dataset is safe to publish.
+#'
+#' @param data_to_write Cleaned tibble intended for the canonical combined output
+#' @param output_path Output Parquet path for logging
+#' @param expected_columns Expected output schema
+#' @return Logical indicating whether the dataset is publishable
+validate_publishable_combined_data <- function(
+    data_to_write,
+    output_path,
+    expected_columns = EXPECTED_OUTPUT_COLUMNS) {
+  if (is.null(data_to_write)) {
+    logger::log_error(
+      "Cannot publish combined Parquet file to {output_path}: input data is NULL."
+    )
+    return(FALSE)
+  }
+
+  missing_columns <- setdiff(expected_columns, names(data_to_write))
+  if (length(missing_columns) > 0) {
+    logger::log_error(
+      "Cannot publish combined Parquet file to {output_path}: missing expected output columns: {paste(missing_columns, collapse = ', ')}"
+    )
+    return(FALSE)
+  }
+
+  if (nrow(data_to_write) == 0) {
+    logger::log_error(
+      "Cannot publish combined Parquet file to {output_path}: combined dataset has 0 rows."
+    )
+    return(FALSE)
+  }
+
+  TRUE
 }
 
 #' Clean and standardise the combined EDM API data.
@@ -199,45 +323,44 @@ clean_combined_data <- function(combined_data) {
 
   snake_case_names <- names(CONFIG$company_name_mapping)
   contract_start <- as.POSIXct("2024-01-01", tz = "UTC")
+  start_time_parse <- parse_api_timestamp_column(
+    combined_data$attributes_latest_event_start,
+    "attributes_latest_event_start"
+  )
+  end_time_parse <- parse_api_timestamp_column(
+    combined_data$attributes_latest_event_end,
+    "attributes_latest_event_end"
+  )
 
   cleaned_data <- combined_data |>
-    dplyr::select(
-      water_company,
-      attributes_id,
-      attributes_latest_event_start,
-      attributes_latest_event_end,
-      attributes_latitude,
-      attributes_longitude,
-      attributes_receiving_water_course
-    ) |>
-    dplyr::rename_with(
-      function(column_name) {
-        ifelse(
-          column_name %in% names(CONFIG$column_name_mapping),
-          CONFIG$column_name_mapping[column_name],
-          column_name
-        )
-      }
-    ) |>
-    dplyr::mutate(
+    dplyr::transmute(
       water_company = dplyr::if_else(
         water_company %in% snake_case_names,
         unname(CONFIG$company_name_mapping[water_company]),
         water_company
-      )
-    ) |>
-    dplyr::mutate(
-      dplyr::across(
-        c(start_time_og, end_time_og),
-        ~ as.POSIXct(as.numeric(.x) / 1000, origin = "1970-01-01", tz = "UTC"),
-        .names = "{.col}_parsed"
-      )
-    ) |>
-    dplyr::rename(
-      start_time = start_time_og_parsed,
-      end_time = end_time_og_parsed
-    ) |>
-    dplyr::select(-c(start_time_og, end_time_og)) |>
+      ),
+      unique_id = attributes_id,
+      latitude = attributes_latitude,
+      longitude = attributes_longitude,
+      receiving_water_course = attributes_receiving_water_course,
+      start_time = start_time_parse$values,
+      end_time = end_time_parse$values
+    )
+
+  invalid_timestamp_rows <- sum(
+    is.na(cleaned_data$start_time) | is.na(cleaned_data$end_time)
+  )
+  pre_contract_rows <- sum(
+    !is.na(cleaned_data$end_time) & cleaned_data$end_time < contract_start
+  )
+
+  if (invalid_timestamp_rows > 0 || pre_contract_rows > 0) {
+    logger::log_warn(
+      "Dropping {invalid_timestamp_rows} rows with missing or unparseable timestamps and {pre_contract_rows} rows ending before {format(contract_start, tz = 'UTC', usetz = TRUE)}."
+    )
+  }
+
+  cleaned_data <- cleaned_data |>
     dplyr::filter(
       end_time >= contract_start,
       !is.na(start_time),
@@ -263,8 +386,7 @@ clean_combined_data <- function(combined_data) {
 #' @param output_path The full path for the output Parquet file
 #' @return Logical indicating success
 write_combined_parquet <- function(data_to_write, output_path) {
-  if (is.null(data_to_write)) {
-    logger::log_error("Cannot write Parquet file: Input data is NULL.")
+  if (!validate_publishable_combined_data(data_to_write, output_path)) {
     return(FALSE)
   }
 
@@ -281,24 +403,20 @@ write_combined_parquet <- function(data_to_write, output_path) {
 
       arrow::write_parquet(data_to_write, output_path)
 
-      rows_written <- nrow(data_to_write)
-      if (fs::file_exists(output_path) && rows_written > 0) {
-        file_size_kb <- round(fs::file_info(output_path)$size / 1024, 2)
-        logger::log_info(
-          "Successfully wrote {rows_written} rows to {output_path} ({file_size_kb} KB)."
+      if (!fs::file_exists(output_path)) {
+        logger::log_error(
+          "File writing seemed complete but file not found or inaccessible at {output_path}."
         )
-        return(TRUE)
+        return(FALSE)
       }
 
-      if (rows_written == 0) {
-        logger::log_info("Wrote an empty Parquet file (0 rows) to {output_path}.")
-        return(TRUE)
-      }
-
-      logger::log_error(
-        "File writing seemed complete but file not found or inaccessible at {output_path}."
+      rows_written <- nrow(data_to_write)
+      file_size_kb <- round(fs::file_info(output_path)$size / 1024, 2)
+      logger::log_info(
+        "Successfully wrote {rows_written} rows to {output_path} ({file_size_kb} KB)."
       )
-      FALSE
+
+      TRUE
     },
     error = function(e) {
       logger::log_error("Failed to write Parquet file to {output_path}: {e$message}")
@@ -331,14 +449,15 @@ main <- function() {
       }
 
       if (nrow(combined_data) == 0) {
-        logger::log_warn(
-          "No data combined from input files. Writing an empty output file."
-        )
+        stop("No in-scope Parquet data available to combine. Refusing to publish an empty canonical output.")
       }
 
       cleaned_data <- clean_combined_data(combined_data)
       if (is.null(cleaned_data)) {
         stop("Data cleaning step failed. See logs for details.")
+      }
+      if (!validate_publishable_combined_data(cleaned_data, CONFIG$output_file)) {
+        stop("Refusing to publish an empty or invalid combined Parquet file.")
       }
 
       write_success <- write_combined_parquet(cleaned_data, CONFIG$output_file)
@@ -351,7 +470,8 @@ main <- function() {
       )
     },
     error = function(e) {
-      logger::log_error("Fatal error during main execution: {e$message}")
+      logger::log_error("Fatal error during main execution: {conditionMessage(e)}")
+      stop(conditionMessage(e), call. = FALSE)
     },
     finally = {
       end_time <- Sys.time()

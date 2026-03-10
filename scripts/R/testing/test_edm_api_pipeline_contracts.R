@@ -177,6 +177,45 @@ assert_identical(
   "Parquet resolution should flag Welsh Water as an out-of-scope artifact."
 )
 
+schema_test_dir <- tempfile("edm-api-schema-")
+dir.create(schema_test_dir, recursive = TRUE, showWarnings = FALSE)
+on.exit(unlink(schema_test_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+arrow::write_parquet(
+  dplyr::mutate(example_company_data, irrelevant_col = 1),
+  file.path(schema_test_dir, "anglian_water.parquet")
+)
+arrow::write_parquet(
+  dplyr::mutate(
+    example_company_data,
+    water_company = "thames_water",
+    irrelevant_col = I(list(c("x", "y")))
+  ),
+  file.path(schema_test_dir, "thames_water.parquet")
+)
+
+schema_combined <- combine_env$read_and_combine_parquet_files(
+  input_dir = schema_test_dir,
+  file_pattern = combine_env$CONFIG$input_file_pattern,
+  exclude_pattern = combine_env$CONFIG$exclude_pattern,
+  contract = contract
+)
+
+assert_true(
+  !is.null(schema_combined),
+  "The combine step should ignore irrelevant extra columns when reading in-scope Parquet files."
+)
+assert_identical(
+  names(schema_combined),
+  combine_env$REQUIRED_INPUT_COLUMNS,
+  "The combine step should read only the required Parquet columns before binding."
+)
+assert_identical(
+  sort(unique(schema_combined$water_company)),
+  c("anglian_water", "thames_water"),
+  "The combine step should still combine multiple in-scope company Parquet files."
+)
+
 clean_input <- dplyr::tibble(
   water_company = "anglian_water",
   attributes_id = "site-1",
@@ -206,6 +245,179 @@ assert_identical(
   as.numeric(cleaned$start_time[[1]]),
   as.numeric(as.POSIXct("2024-01-01 00:00:00", tz = "UTC")),
   "The combine step should truncate pre-2024 starts to the live API contract start date."
+)
+
+timestamp_log_file <- tempfile("edm-api-combine-log-", fileext = ".log")
+combine_env$setup_logging(timestamp_log_file, console = FALSE, threshold = "INFO")
+
+timestamp_input <- dplyr::tibble(
+  water_company = c("anglian_water", "thames_water"),
+  attributes_id = c("site-1", "site-2"),
+  attributes_latest_event_start = c(
+    as.character(as.numeric(as.POSIXct("2024-01-02 00:00:00", tz = "UTC")) * 1000),
+    "not-a-timestamp"
+  ),
+  attributes_latest_event_end = c(
+    as.character(as.numeric(as.POSIXct("2024-01-02 01:00:00", tz = "UTC")) * 1000),
+    as.character(as.numeric(as.POSIXct("2024-01-02 03:00:00", tz = "UTC")) * 1000)
+  ),
+  attributes_latitude = c(51.5, 51.6),
+  attributes_longitude = c(-0.1, -0.2),
+  attributes_receiving_water_course = c("River Test", "River Thames")
+)
+
+timestamp_cleaned <- combine_env$clean_combined_data(timestamp_input)
+timestamp_log_text <- read_text(timestamp_log_file)
+
+assert_identical(
+  nrow(timestamp_cleaned),
+  1L,
+  "Malformed timestamp rows should still be dropped from the cleaned combine output."
+)
+assert_true(
+  grepl(
+    "Timestamp parse summary for attributes_latest_event_start: 0 missing values, 1 unparseable values.",
+    timestamp_log_text,
+    fixed = TRUE
+  ),
+  "The combine step should log malformed start-time counts explicitly."
+)
+assert_true(
+  grepl(
+    "Dropping 1 rows with missing or unparseable timestamps and 0 rows ending before",
+    timestamp_log_text,
+    fixed = TRUE
+  ),
+  "The combine step should log timestamp-driven row drops explicitly."
+)
+
+failure_script <- tempfile("combine-main-failure-", fileext = ".R")
+writeLines(
+  c(
+    paste0(
+      "source(",
+      dQuote(here::here(
+        "scripts",
+        "R",
+        "02_data_cleaning",
+        "combine_api_edm_data_2024_onwards.R"
+      )),
+      ", local = TRUE)"
+    ),
+    "LOG_FILE <- tempfile('combine-failure-', fileext = '.log')",
+    "CONFIG$input_dir <- tempfile('missing-edm-dir-')",
+    "main()"
+  ),
+  failure_script
+)
+failure_run <- suppressWarnings(system2(
+  "Rscript",
+  c("--vanilla", failure_script),
+  stdout = TRUE,
+  stderr = TRUE
+))
+failure_status <- attr(failure_run, "status")
+
+assert_true(
+  !is.null(failure_status) && failure_status != 0L,
+  "The combine script should exit non-zero when main() encounters a fatal error."
+)
+
+existing_output <- dplyr::tibble(
+  water_company = "Anglian Water",
+  unique_id = "existing-site",
+  latitude = 51.5,
+  longitude = -0.1,
+  receiving_water_course = "River Test",
+  start_time = as.POSIXct("2024-01-02 00:00:00", tz = "UTC"),
+  end_time = as.POSIXct("2024-01-02 01:00:00", tz = "UTC"),
+  year = 2024L
+)
+
+no_input_dir <- tempfile("edm-api-empty-")
+dir.create(no_input_dir, recursive = TRUE, showWarnings = FALSE)
+on.exit(unlink(no_input_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+existing_output_path <- file.path(tempdir(), "combined_api_existing.parquet")
+arrow::write_parquet(existing_output, existing_output_path)
+
+combine_no_input_env <- new.env(parent = globalenv())
+source(
+  here::here("scripts", "R", "02_data_cleaning", "combine_api_edm_data_2024_onwards.R"),
+  local = combine_no_input_env
+)
+combine_no_input_env$CONFIG$input_dir <- no_input_dir
+combine_no_input_env$CONFIG$output_file <- existing_output_path
+combine_no_input_env$LOG_FILE <- tempfile("combine-no-input-", fileext = ".log")
+
+no_input_error <- tryCatch(
+  {
+    combine_no_input_env$main()
+    NULL
+  },
+  error = identity
+)
+
+assert_true(
+  inherits(no_input_error, "error"),
+  "The combine step should fail instead of publishing when no in-scope Parquet files are available."
+)
+assert_identical(
+  arrow::read_parquet(existing_output_path),
+  existing_output,
+  "The combine step should leave the existing canonical output untouched on the no-input path."
+)
+
+zero_row_dir <- tempfile("edm-api-zero-row-")
+dir.create(zero_row_dir, recursive = TRUE, showWarnings = FALSE)
+on.exit(unlink(zero_row_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+zero_row_input <- dplyr::tibble(
+  water_company = "anglian_water",
+  attributes_id = "site-3",
+  attributes_latest_event_start = as.character(
+    as.numeric(as.POSIXct("2023-12-30 00:00:00", tz = "UTC")) * 1000
+  ),
+  attributes_latest_event_end = as.character(
+    as.numeric(as.POSIXct("2023-12-30 01:00:00", tz = "UTC")) * 1000
+  ),
+  attributes_latitude = 51.7,
+  attributes_longitude = -0.3,
+  attributes_receiving_water_course = "River Test"
+)
+arrow::write_parquet(
+  zero_row_input,
+  file.path(zero_row_dir, "anglian_water.parquet")
+)
+
+zero_row_output_path <- file.path(tempdir(), "combined_api_zero_row_existing.parquet")
+arrow::write_parquet(existing_output, zero_row_output_path)
+
+combine_zero_row_env <- new.env(parent = globalenv())
+source(
+  here::here("scripts", "R", "02_data_cleaning", "combine_api_edm_data_2024_onwards.R"),
+  local = combine_zero_row_env
+)
+combine_zero_row_env$CONFIG$input_dir <- zero_row_dir
+combine_zero_row_env$CONFIG$output_file <- zero_row_output_path
+combine_zero_row_env$LOG_FILE <- tempfile("combine-zero-row-", fileext = ".log")
+
+zero_row_error <- tryCatch(
+  {
+    combine_zero_row_env$main()
+    NULL
+  },
+  error = identity
+)
+
+assert_true(
+  inherits(zero_row_error, "error"),
+  "The combine step should fail instead of publishing when cleaning removes every row."
+)
+assert_identical(
+  arrow::read_parquet(zero_row_output_path),
+  existing_output,
+  "The combine step should leave the existing canonical output untouched on the zero-row path."
 )
 
 readme_text <- read_text(here::here("ReadMe.md"))
