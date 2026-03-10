@@ -195,42 +195,42 @@ Scripts for cleaning, standardising, and combining raw inputs into consistent in
 
 #### 03_data_enrichment/ - Data Enrichment & Aggregation Layer
 
-Scripts for aggregating raw data into statistics, creating lookup tables, and enriching datasets with additional information. Scripts handle temporal aggregation, site linkage, and statistical summarisation.
+Scripts for aggregating cleaned inputs into derived statistics, lookup tables, and enriched analysis datasets.
 
 **`aggregate_spill_stats.R`**  
-    - **Input:** Individual spill data merged with location information.
-    - Aggregates individual sewage overflow events into site-level statistics (counts and durations).  
-    - Implements 12/24 counting methodology and handles events crossing month boundaries.  
-    - **Output:** Aggregated site-level spill statistics for yearly, monthly, and quarterly analysis saved to `data/processed/agg_spill_stats/`.
+    - **Input:** Matched spill-event parquet (`data/processed/matched_events_annual_data/matched_events_annual_data.parquet`).
+    - **Output:** Site-level spill aggregation parquets saved to `data/processed/agg_spill_stats/agg_spill_yr.parquet`, `data/processed/agg_spill_stats/agg_spill_mo.parquet`, and `data/processed/agg_spill_stats/agg_spill_qtr.parquet`.
+    - **Purpose:** Aggregates individual spill events into yearly, monthly, and quarterly site-level counts and durations using the shared 12/24 counting methodology.
 
 **`create_annual_return_lookup.R`**  
-   - **Input:** Combined annual return data from data cleaning layer.
-   - Creates lookup tables linking site identifiers across different data sources.
-   - **Output:** Site lookup tables enabling data integration across datasets.
+   - **Input:** Combined annual return parquet (`data/processed/annual_return_edm.parquet`).
+   - **Output:** Cross-year site lookup outputs saved to `data/processed/annual_return_lookup.parquet`, `data/processed/annual_return_lookup_edges.parquet`, and `data/processed/annual_return_lookup.xlsx`.
+   - **Purpose:** Builds cross-year lookup tables linking the same annual-return sites across 2021-2024.
 
 **`create_unique_spill_sites.R`**  
-    - **Input:** Merged individual spill data with location information.
-    - Creates unique spill sites dataset by cleaning and validating location data.
-    - Converts National Grid References to eastings/northings coordinates.
-    - **Output:** Dataset of unique spill sites with coordinates saved to `data/processed/unique_spill_sites.parquet`.
+    - **Input:** Matched spill-event parquet (`data/processed/matched_events_annual_data/matched_events_annual_data.parquet`), combined annual return parquet (`data/processed/annual_return_edm.parquet`), and annual return lookup (`data/processed/annual_return_lookup.parquet`).
+    - **Output:** Unique spill-site datasets saved to `data/processed/unique_spill_sites.parquet` and `data/processed/unique_spill_sites.xlsx`.
+    - **Purpose:** Creates a canonical spill-site dataset by cleaning site identifiers and location fields and attaching coordinate metadata.
 
 **`aggregate_rainfall_stats.R`**  
-    - **Input:** Unique spill sites (`data/processed/unique_spill_sites.parquet`), cleaned rainfall (`data/processed/rainfall/rainfall_data_cleaned.parquet`), and site-to-grid lookup (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
-    - Builds a complete site-day panel and aggregates rainfall by site-year, site-month, and site-quarter using center-cell and 9-cell neighbourhood indicators.
-    - Chunked processing for memory efficiency; logs to `output/log/aggregate_rainfall_stats.log`.
-    - **Output:** `data/processed/rainfall/rainfall_agg_yr.parquet`, `rainfall_agg_mo.parquet`, `rainfall_agg_qtr.parquet`.
+    - **Input:** Unique spill sites (`data/processed/unique_spill_sites.parquet`), cleaned rainfall (`data/processed/rainfall/rainfall_data_cleaned.parquet`), and site-grid lookup (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
+    - **Output:** Site-level rainfall aggregation parquets saved to `data/processed/rainfall/rainfall_agg_yr.parquet`, `data/processed/rainfall/rainfall_agg_mo.parquet`, and `data/processed/rainfall/rainfall_agg_qtr.parquet`.
+    - **Purpose:** Aggregates cleaned rainfall into yearly, monthly, and quarterly site-period indicators across the study window.
 
 **`identify_dry_spills.R`**
-    - **Input:** Individual spill data (`data/processed/matched_events_annual_data/matched_events_annual_data.parquet`), cleaned rainfall data (`data/processed/rainfall/rainfall_data_cleaned.parquet`), and spill site to grid cell lookup table (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
-    - Builds 12/24 counted spill blocks for yearly, monthly, and quarterly periods, then matches each block to rainfall using its start date.
-    - **Output:** Block-level parquets with rainfall indicators saved to `data/processed/rainfall/spill_blocks_rainfall_{yr|mo|qt}.parquet`.
+    - **Input:** Matched spill-event parquet (`data/processed/matched_events_annual_data/matched_events_annual_data.parquet`), cleaned rainfall (`data/processed/rainfall/rainfall_data_cleaned.parquet`), unique spill sites (`data/processed/unique_spill_sites.parquet`), and site-grid lookup (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
+    - **Output:** Block-level spill-with-rainfall parquets saved to `data/processed/rainfall/spill_blocks_rainfall_yr.parquet`, `data/processed/rainfall/spill_blocks_rainfall_mo.parquet`, and `data/processed/rainfall/spill_blocks_rainfall_qt.parquet`.
+    - **Purpose:** Builds 12/24-counted spill blocks for each period and enriches them with rainfall indicators for dry-spill classification.
 
 **`aggregate_dry_spill_stats.R`**
-    - **Input:** Block-level parquets with rainfall indicators (`data/processed/rainfall/spill_blocks_rainfall_{yr|mo|qt}.parquet`) and existing spill aggregation files (`data/processed/agg_spill_stats/agg_spill_{yr|mo|qtr}.parquet`).
-    - Classifies each counted block as dry/wet per indicator, then aggregates by counting dry blocks and summing their raw hours.
-    - Creates standardised column naming convention and integrates dry spill metrics with existing aggregation datasets.
-    - Implements zero imputation for periods with no dry spills and maintains compatibility with general spill analysis workflows.
-    - **Output:** Integrated aggregation datasets with dry spill statistics saved to `data/processed/agg_spill_stats/agg_spill_dry_{yr|mo|qtr}.parquet`.
+    - **Input:** Block-level spill-with-rainfall parquets (`data/processed/rainfall/spill_blocks_rainfall_{yr|mo|qt}.parquet`) and main spill aggregation parquets in `data/processed/agg_spill_stats/`.
+    - **Output:** Spill aggregation parquets with dry-spill metrics saved to `data/processed/agg_spill_stats/agg_spill_dry_yr.parquet`, `data/processed/agg_spill_stats/agg_spill_dry_mo.parquet`, and `data/processed/agg_spill_stats/agg_spill_dry_qtr.parquet`.
+    - **Purpose:** Classifies counted spill blocks as dry across multiple rainfall indicators and integrates dry counts and hours into the main spill aggregation outputs.
+
+**`aggregate_daily_spill_rainfall.R`**
+    - **Input:** Matched spill-event parquet (`data/processed/matched_events_annual_data/matched_events_annual_data.parquet`), unique spill sites (`data/processed/unique_spill_sites.parquet`), cleaned rainfall (`data/processed/rainfall/rainfall_data_cleaned.parquet`), and site-grid lookup (`data/processed/rainfall/spill_site_grid_lookup.parquet`).
+    - **Output:** Balanced site-day panel saved to `data/processed/agg_spill_stats/agg_spill_daily.parquet`.
+    - **Purpose:** Builds a complete daily panel of spill counts, spill hours, and rainfall indicators for site-day analysis.
 
 #### 04_feature_engineering/ - Feature Engineering & Spatial Processing Layer
 
