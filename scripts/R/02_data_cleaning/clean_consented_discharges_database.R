@@ -1,70 +1,51 @@
-############################################################
-# Clean the EA's consented discharges database
-# Project: Sewage
-# Date: 10/12/2024
+# ==============================================================================
+# EA Consented Discharges Database Cleaning
+# ==============================================================================
+#
+# Purpose: Load the tracked Environment Agency consented discharges workbook,
+#          standardise key column names and water company labels, and export a
+#          cleaned database for downstream matching and analysis.
+#
 # Author: Jacopo Olivieri
-############################################################
+# Date: 2024-12-10
+# Date Modified: 2026-03-10
+#
+# Inputs:
+#   - data/raw/ea_consents/consents_all.xlsx - EA consented discharges workbook
+#
+# Outputs:
+#   - data/processed/consent_discharges_db.RData
+#   - data/processed/consent_discharges_db.csv
+#   - output/log/11_clean_consented_discharges_database.log
+#
+# ==============================================================================
 
-#' This script cleans the Consented Discharges to Controlled
-#' Waters with Conditions database, published by the Environment Agency
-#' here: https://www.data.gov.uk/dataset/55b8eaa8-60df-48a8-929a-060891b7a109/consented-discharges-to-controlled-waters-with-conditions
-#' It's part of the data preparation pipeline for analysing sewage discharge
-#' events.
-
-# Set Up
-############################################################
-
-# Initialise packages with version control with renv
-#' Initialize the R environment with required packages and settings
-#' @return NULL
-initialise_environment <- function() {
-  # Package management with renv
-  if (!requireNamespace("renv", quietly = TRUE)) {
-    install.packages("renv")
-    renv::init()
-  }
-
-  # Define required packages
-  required_packages <- c(
-    "rmarkdown", "rio", "tidyverse", "purrr", "here",
-    "janitor", "logger", "glue", "fs"
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first, e.g. `renv::restore()`.",
+    call. = FALSE
   )
-
-  # Install and load packages
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
-    }
-    library(pkg, character.only = TRUE)
-  }))
 }
 
-#' Set up logging configuration
-#' @return NULL
-setup_logging <- function() {
-  log_path <- here::here(
-    "output", "log",
-    "11_clean_consented_discharges_database.log"
-  )
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
-  logger::log_info("Script started at {Sys.time()}")
-}
-############################################################
+REQUIRED_PACKAGES <- c("dplyr", "fs", "here", "janitor", "logger", "rio")
+LOG_FILE <- here::here(
+  "output", "log",
+  "11_clean_consented_discharges_database.log"
+)
 
-
-# Configuration
-############################################################
+check_required_packages(REQUIRED_PACKAGES)
 
 CONFIG <- list(
   raw_dir = here::here("data", "raw", "ea_consents"),
   processed_dir = here::here("data", "processed"),
-  water_company_mapping = list(
+  input_file = "consents_all.xlsx",
+  water_company_mapping = c(
     "ANGLIAN WATER SERVICES LIMITED" = "Anglian Water",
     "DWR CYMRU CYFYNGEDIG" = "Welsh Water",
+    "NORTHUMBRIAN WATER LIMITED" = "Northumbrian Water",
     "NORTHUMBRIAN WATER LIMITED (ESSEX & SUFFOLK WATER)" = "Northumbrian Water",
     "SEVERN TRENT WATER LIMITED" = "Severn Trent",
     "SOUTH WEST WATER LIMITED" = "South West Water",
@@ -82,131 +63,66 @@ CONFIG <- list(
     "outlet_grid_ref" = "outlet_discharge_ngr"
   )
 )
-############################################################
 
-# Functions
-############################################################
+rename_mapped_columns <- function(column_names, mapping = CONFIG$column_name_mapping) {
+  renamed_columns <- unname(mapping[column_names])
+  renamed_columns[is.na(renamed_columns)] <- column_names[is.na(renamed_columns)]
+  renamed_columns
+}
 
-#' Load EA consented discharges database
-#' @param file_name Name of the csv file to load
-#' @return List of named dataframes for each water company for each year
-load_data <- function(file_name = "consents_all.csv") {
+load_data <- function(file_name = CONFIG$input_file) {
   file_path <- fs::path(CONFIG$raw_dir, file_name)
   logger::log_info("Loading data: {file_path}")
 
-  if (!file.exists(file_path)) {
-    stop(glue::glue("File not found: {file_path}"))
+  if (!fs::file_exists(file_path)) {
+    stop("File not found: ", file_path, call. = FALSE)
   }
 
-  tryCatch(
-    {
-      df <- rio::import(file_path)
-      logger::log_info("Loaded data")
-      return(df)
-    },
-    error = function(e) {
-      error_msg <- glue::glue("Failed to load data: {e$message}")
-      logger::log_error(error_msg)
-      stop(error_msg)
-    }
-  )
+  rio::import(file_path)
 }
 
-
-#' Clean data
-#' @param df Data frame to clean
-#' @return Cleaned data frame
 clean_data <- function(df) {
-  tryCatch(
-    {
-      cleaned <- df %>%
-        # clean variable names
-        janitor::clean_names() %>%
-        rename_with(
-          ~ if_else(.x %in% names(CONFIG$column_name_mapping),
-            CONFIG$column_name_mapping[.x],
-            .x
-          )
-        ) %>%
-        # clean water company names
-        mutate(
-          water_company = recode(
-            water_company,
-            !!!CONFIG$water_company_mapping
-          )
-        ) %>%
-        filter(water_company %in% unlist(CONFIG$water_company_mapping))
+  cleaned <- df |>
+    janitor::clean_names() |>
+    dplyr::rename_with(rename_mapped_columns) |>
+    dplyr::mutate(
+      water_company = dplyr::recode(water_company, !!!CONFIG$water_company_mapping)
+    ) |>
+    dplyr::filter(water_company %in% unname(CONFIG$water_company_mapping))
 
-      logger::log_info("Cleaned {nrow(cleaned)} records")
-      return(cleaned)
-    },
-    error = function(e) {
-      logger::log_error("Data cleaning failed: {e$message}")
-      stop(e)
-    }
-  )
+  logger::log_info("Cleaned {nrow(cleaned)} records")
+  cleaned
 }
 
-
-#' Export processed data
-#' @param df Processed data frame
-#' @return NULL
 export_data <- function(df) {
-  tryCatch(
-    {
-      # Export as RData
-      rdata_file <- file.path(CONFIG$processed_dir, "consent_discharges_db.RData")
-      save(df, file = rdata_file)
+  fs::dir_create(CONFIG$processed_dir)
 
-      # Export as CSV for easy viewing
-      csv_file <- file.path(CONFIG$processed_dir, "consent_discharges_db.csv")
-      rio::export(df, csv_file)
+  rdata_file <- fs::path(CONFIG$processed_dir, "consent_discharges_db.RData")
+  csv_file <- fs::path(CONFIG$processed_dir, "consent_discharges_db.csv")
 
-      logger::log_info("Data exported successfully to {rdata_file} and {csv_file}")
-    },
-    error = function(e) {
-      msg <- glue::glue("Error exporting data: {e$message}")
-      logger::log_error(msg)
-      stop(msg)
-    }
-  )
+  save(df, file = rdata_file)
+  rio::export(df, csv_file)
+
+  logger::log_info("Data exported successfully to {rdata_file} and {csv_file}")
 }
 
+main <- function(file_name = CONFIG$input_file) {
+  setup_logging(LOG_FILE)
+  logger::log_info("Script started at {Sys.time()}")
+  on.exit(logger::log_info("Script finished at {Sys.time()}"), add = TRUE)
 
-# Main execution
-############################################################
+  start_time <- Sys.time()
+  logger::log_info("Starting data processing")
 
-# Main function
-main <- function() {
-  tryCatch(
-    {
-      # Setup
-      initialise_environment()
-      setup_logging()
+  cleaned_data <- load_data(file_name) |>
+    clean_data()
 
-      # Load data
-      start_time <- Sys.time()
-      logger::log_info("Starting data processing")
-      raw_data <- load_data()
+  export_data(cleaned_data)
 
-      # Clean data
-      processed_data <- clean_data(raw_data)
-
-      # Export data
-      export_data(processed_data)
-      execution_time <- difftime(Sys.time(), start_time, units = "mins")
-      logger::log_info("Processing completed in {round(execution_time, 2)} minutes")
-    },
-    error = function(e) {
-      logger::log_error("Fatal error: {e$message}")
-      stop(e)
-    }, finally = {
-      logger::log_info("Script finished at {Sys.time()}")
-    }
-  )
+  execution_time <- difftime(Sys.time(), start_time, units = "mins")
+  logger::log_info("Processing completed in {round(execution_time, 2)} minutes")
 }
 
-# Execute main function
 if (sys.nframe() == 0) {
   main()
 }
