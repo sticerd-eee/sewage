@@ -77,21 +77,6 @@ docs/overleaf/
 lma/
 _old/
 
-# Embedded subprojects tracked as source only
-RiverNetworks/**
-!RiverNetworks/**/
-!RiverNetworks/**/*.R
-!RiverNetworks/**/*.sql
-!RiverNetworks/**/*.sh
-!RiverNetworks/**/Dockerfile
-!RiverNetworks/**/docker-compose*.yml
-!RiverNetworks/**/.dockerignore
-
-upstream_downstream/**
-!upstream_downstream/**/
-!upstream_downstream/**/*.R
-!upstream_downstream/**/*.sql
-!upstream_downstream/**/*.sh
-!upstream_downstream/**/Dockerfile
-!upstream_downstream/**/docker-compose*.yml
-!upstream_downstream/**/.dockerignore
+# Embedded subprojects blocked entirely
+RiverNetworks/
+upstream_downstream/
