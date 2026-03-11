@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Talk"
+  short_description: "Build a paper-based Beamer talk"
+  default_prompt: "Use $create-talk to draft or reshape a Beamer talk from the sewage paper into the requested format."

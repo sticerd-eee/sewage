@@ -1,0 +1,4 @@
+interface:
+  display_name: "Slide Excellence"
+  short_description: "Comprehensive research slide review"
+  default_prompt: "Use $slide-excellence to review this slide deck for narrative flow, visual quality, quantitative fidelity, and substance."

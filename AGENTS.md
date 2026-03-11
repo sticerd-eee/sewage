@@ -22,7 +22,7 @@ This repository is a research pipeline centered on sewage-spill and housing anal
 - `bash scripts/R/09_analysis/run_all_analysis.sh --dry-run`: preview analysis run order.
 - `bash scripts/R/09_analysis/run_all_analysis.sh`: execute analysis scripts in configured order.
 - `quarto render book`: build the project website/book locally.
-- `python scripts/python/setup.py`: create local Python venv and install `scripts/python/requirements.txt`.
+- `uv venv .venv && source .venv/bin/activate && uv pip install -r scripts/python/requirements.txt`: create a local Python environment for `scripts/python/`.
 
 ## Coding Style & Naming Conventions
 - Prefer `snake_case` for script and object names (`aggregate_spill_stats.R`, `qtr_id`).

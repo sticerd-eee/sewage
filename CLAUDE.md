@@ -29,7 +29,7 @@ The Quarto book (project website) is built from `book/` and deployed via GitHub 
 
 ### 6-Layer Data Pipeline
 
-Scripts in `scripts/R/` are organised into sequential layers with explicit dependencies (full execution order in ReadMe.md, lines 506-561):
+Scripts in `scripts/R/` are organised into sequential layers with explicit dependencies (extended documentation in `docs/pipeline_documentation.md`):
 
 1. **`01_data_ingestion/`** — Raw data collection (EDM archives, APIs)
 2. **`02_data_cleaning/`** — Format standardisation, geocoding, validation
