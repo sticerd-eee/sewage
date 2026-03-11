@@ -150,7 +150,7 @@ This fix works because it restores one explicit contract:
 - See also: [output-compatible-edm-standardisation-refactor-20260309.md](./output-compatible-edm-standardisation-refactor-20260309.md)
 
 Relevant repository references:
-- Script overview and dependency setup in [ReadMe.md](../../../ReadMe.md)
+- Script overview and dependency setup in [README.md](../../../README.md)
 - Ingestion-stage rationale in [02_ingestion.qmd](../../../book/data_clean_documentation/02_ingestion.qmd)
 - Pipeline placement in [01_pipeline.qmd](../../../book/data_clean_documentation/01_pipeline.qmd)
 - Adjacent fail-fast config example in [`scripts/config/api_config.R`](../../../scripts/config/api_config.R)

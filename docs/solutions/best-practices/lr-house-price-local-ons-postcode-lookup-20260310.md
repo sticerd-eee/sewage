@@ -161,7 +161,7 @@ Coordinate revisions are acceptable in this workflow. The change intentionally p
 - When a new local lookup reduces completeness materially, investigate the matching rule before assuming the newer source is worse.
 - Log postcode coverage and ONS misses on every LR run so completeness regressions are visible immediately.
 - Do not reintroduce candidate-only output or comparison-log logic to the default LR path unless you are running a deliberate source-comparison exercise.
-- Update user-facing documentation such as `ReadMe.md` when the canonical enrichment contract changes, so the written pipeline description does not lag behind the code.
+- Update user-facing documentation such as `README.md` when the canonical enrichment contract changes, so the written pipeline description does not lag behind the code.
 
 ## Related Issues
 - See also: [data-cleaning-script-header-bootstrap-standardisation-20260310.md](./data-cleaning-script-header-bootstrap-standardisation-20260310.md)
@@ -172,7 +172,7 @@ Relevant repository references:
 - Shared postcode utilities: [`postcode_processing_utils.R`](../../../scripts/R/utils/postcode_processing_utils.R)
 - Investigation log: [`house_price_local_postcode_comparison.log`](../../../output/log/house_price_local_postcode_comparison.log)
 - Verification log: [`clean_lr_house_price_data.log`](../../../output/log/clean_lr_house_price_data.log)
-- Current repository description of LR cleaning: [ReadMe.md](../../../ReadMe.md)
+- Current repository description of LR cleaning: [README.md](../../../README.md)
 - Nearby manuscript doc still describing the old API path: [`103_appendix_data.tex`](../../../docs/overleaf/103_appendix_data.tex)
 
 ## Verification Note

@@ -174,7 +174,7 @@ Rscript --vanilla -e "source('scripts/R/02_data_cleaning/combine_individ_edm_dat
 
 Relevant repository references:
 - Shared bootstrap helper: [`scripts/R/utils/script_setup.R`](../../../scripts/R/utils/script_setup.R)
-- Pipeline overview and script inventory: [ReadMe.md](../../../ReadMe.md)
+- Pipeline overview and script inventory: [README.md](../../../README.md)
 - Pipeline placement: [01_pipeline.qmd](../../../book/data_clean_documentation/01_pipeline.qmd)
 - Ingestion-stage rationale and 2024+ API context: [02_ingestion.qmd](../../../book/data_clean_documentation/02_ingestion.qmd)
 

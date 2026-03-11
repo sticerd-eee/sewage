@@ -166,6 +166,6 @@ The refactor aligns the code structure with the real job of the script: unzip, d
 No related solution docs existed when this note was written; this is the first file under `docs/solutions/` in this repository.
 
 Relevant repository references:
-- Script overview in [ReadMe.md](../../../ReadMe.md)
+- Script overview in [README.md](../../../README.md)
 - Ingestion-stage rationale in [02_ingestion.qmd](../../../book/data_clean_documentation/02_ingestion.qmd)
 - Pipeline placement in [01_pipeline.qmd](../../../book/data_clean_documentation/01_pipeline.qmd)

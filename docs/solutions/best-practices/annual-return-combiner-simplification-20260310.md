@@ -150,7 +150,7 @@ Rscript --vanilla -e "source('scripts/R/02_data_cleaning/combine_annual_return_d
 
 Relevant repository references:
 - Script: [`scripts/R/02_data_cleaning/combine_annual_return_data.R`](../../../scripts/R/02_data_cleaning/combine_annual_return_data.R)
-- Pipeline overview: [ReadMe.md](../../../ReadMe.md)
+- Pipeline overview: [README.md](../../../README.md)
 - Pipeline placement: [01_pipeline.qmd](../../../book/data_clean_documentation/01_pipeline.qmd)
 
 ## Verification Note

@@ -29,7 +29,7 @@ The script also carried a second layer of avoidable complexity: it defined paral
 - Date solved: 2026-03-10
 
 ## Symptoms
-- The script header, `ReadMe.md`, and `book/data_clean_documentation/01_pipeline.qmd` all described year-level combined parquet outputs, but the output directory contained only the 30 company parquet files.
+- The script header, `README.md`, and `book/data_clean_documentation/01_pipeline.qmd` all described year-level combined parquet outputs, but the output directory contained only the 30 company parquet files.
 - In the pre-fix code, the year-combine step searched for strings like `"year = 2021"` inside values that were only `"2021"`, `"2022"`, and `"2023"`, so `year_combined` was always empty.
 - The export path still logged success for year-specific combined datasets, which made the failure easy to miss unless the output directory was checked directly.
 - The script defined `setup_parallel()` and imported `furrr`, `future`, `memuse`, and `parallelly`, but `main()` logged `"Sequential Mode"` and never enabled a non-sequential `future::plan()`.
@@ -135,7 +135,7 @@ It also makes the script easier to trust operationally:
 Relevant repository references:
 - Script: [`scripts/R/02_data_cleaning/convert_individ_raw_data_to_rdata_2021-2023.R`](../../../scripts/R/02_data_cleaning/convert_individ_raw_data_to_rdata_2021-2023.R)
 - Downstream consumer: [`scripts/R/02_data_cleaning/combine_individ_edm_data_2021-2023.R`](../../../scripts/R/02_data_cleaning/combine_individ_edm_data_2021-2023.R)
-- Pipeline overview: [ReadMe.md](../../../ReadMe.md)
+- Pipeline overview: [README.md](../../../README.md)
 - Pipeline placement: [01_pipeline.qmd](../../../book/data_clean_documentation/01_pipeline.qmd)
 
 ## Verification Note

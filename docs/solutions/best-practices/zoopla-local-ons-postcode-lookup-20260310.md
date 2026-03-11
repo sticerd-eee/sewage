@@ -24,7 +24,7 @@ The Zoopla rental cleaner was still on the old API/cache postcode path after the
 - Affected files:
   - `scripts/R/02_data_cleaning/clean_zoopla_data.R`
   - `scripts/R/utils/postcode_processing_utils.R`
-  - `ReadMe.md`
+  - `README.md`
 - Key inputs:
   - `data/raw/zoopla/rentals_safeguarded_2014-2022.csv`
   - `data/raw/zoopla/rentals_safeguarded_2023.csv`
@@ -71,7 +71,7 @@ The working fix was a gated migration: prove the ONS postcode snapshot was more 
   - return postcode diagnostics invisibly
 - Kept `main(refresh_postcodes = FALSE)` callable for compatibility, but it now logs that refresh is ignored because the cleaner uses local files.
 - Corrected the cleaner’s canonical output path to `data/processed/zoopla/zoopla_rentals.parquet`, matching downstream scripts and the rebuilt parquet.
-- Updated `ReadMe.md` so the shared postcode utility description no longer claims Zoopla still depends on the old API/cache workflow.
+- Updated `README.md` so the shared postcode utility description no longer claims Zoopla still depends on the old API/cache workflow.
 
 **Code changes**:
 
@@ -131,7 +131,7 @@ Relevant repository references:
 - Shared postcode utilities: [`postcode_processing_utils.R`](../../../scripts/R/utils/postcode_processing_utils.R)
 - Current canonical output: [`zoopla_rentals.parquet`](../../../data/processed/zoopla/zoopla_rentals.parquet)
 - Verification log: [`clean_zoopla_data.log`](../../../output/log/clean_zoopla_data.log)
-- Pipeline overview: [ReadMe.md](../../../ReadMe.md)
+- Pipeline overview: [README.md](../../../README.md)
 
 ## Verification Note
 This solution was verified on 2026-03-10 with both read-only comparison checks and a full runtime rebuild.

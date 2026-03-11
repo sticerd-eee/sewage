@@ -4,7 +4,7 @@ date: 2026-03-10
 problem_type: best_practice
 component: documentation
 symptoms:
-  - "The `ReadMe.md` entry for `03_data_enrichment/` did not follow the `Input` / `Output` / `Purpose` format already used in `02_data_cleaning/`."
+  - "The `README.md` entry for `03_data_enrichment/` did not follow the `Input` / `Output` / `Purpose` format already used in `02_data_cleaning/`."
   - "The enrichment-layer script inventory mixed high-level method notes with incomplete file-level output descriptions."
   - "The README section omitted `aggregate_daily_spill_rainfall.R` even though the script exists in `scripts/R/03_data_enrichment/`."
   - "Some enrichment entries described output directories or generic datasets instead of the actual parquet or workbook targets written by the scripts."
@@ -22,7 +22,7 @@ The repository README already had a clear pattern for the `02_data_cleaning/` la
 That drift mattered because `03_data_enrichment/` is where multiple downstream analysis datasets are assembled. If the README is meant to be the quick orientation layer for the pipeline, then the enrichment section needs to be just as precise and scan-friendly as the cleaning section.
 
 ## Environment
-- Module: `ReadMe.md` / `scripts/R/03_data_enrichment/`
+- Module: `README.md` / `scripts/R/03_data_enrichment/`
 - Section updated: `#### 03_data_enrichment/ - Data Enrichment & Aggregation Layer`
 - Script inventory checked on 2026-03-10:
   - `aggregate_spill_stats.R`
@@ -62,7 +62,7 @@ The working fix was to treat the scripts themselves as the source of truth and t
 **Updated documentation targets**:
 
 ```text
-ReadMe.md
+README.md
 docs/solutions/best-practices/data-enrichment-readme-standardisation-20260310.md
 ```
 
@@ -76,7 +76,7 @@ This works because it restores one consistent documentation contract across adja
 
 ## Prevention
 - When a new entry script is added under a numbered pipeline folder, update the matching README section in the same change.
-- Use the `Input` / `Output` / `Purpose` pattern for all script inventories in `ReadMe.md`.
+- Use the `Input` / `Output` / `Purpose` pattern for all script inventories in `README.md`.
 - Derive output descriptions from `CONFIG` objects and export functions instead of memory or older docs.
 - Prefer explicit file targets over vague folder summaries when a script writes stable named outputs.
 - Record non-trivial README contract cleanups in `docs/solutions/` so future documentation work can follow the same precedent.
@@ -88,7 +88,7 @@ ls -1 scripts/R/03_data_enrichment
 ```
 
 ```bash
-rg -n "#### 03_data_enrichment/|aggregate_daily_spill_rainfall|aggregate_dry_spill_stats|create_annual_return_lookup" ReadMe.md
+rg -n "#### 03_data_enrichment/|aggregate_daily_spill_rainfall|aggregate_dry_spill_stats|create_annual_return_lookup" README.md
 ```
 
 ```bash
@@ -99,7 +99,7 @@ rg -n "write_parquet|write.xlsx|rio::export|lookup_parquet|edge_metadata_parquet
 - Style precedent: [data-cleaning-script-header-bootstrap-standardisation-20260310.md](./data-cleaning-script-header-bootstrap-standardisation-20260310.md)
 
 Relevant repository references:
-- Pipeline overview: [`ReadMe.md`](../../../ReadMe.md)
+- Pipeline overview: [`README.md`](../../../README.md)
 - Enrichment scripts: [`scripts/R/03_data_enrichment`](../../../scripts/R/03_data_enrichment)
 
 ## Verification Note

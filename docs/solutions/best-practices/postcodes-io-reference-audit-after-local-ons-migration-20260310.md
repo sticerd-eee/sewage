@@ -46,7 +46,7 @@ After the LR and Zoopla postcode cleaners moved from the legacy `postcodes.io` /
 ## Symptoms
 - The main pipeline no longer called `PostcodesioR`, `bulk_postcode_lookup()`, `get_postcode_data()`, or `cleanup_postcode_cache()`, but repo-wide search still surfaced those strings elsewhere.
 - `scripts/R/testing/test_merge_house_price_data.Rmd` and `scripts/R/testing/test_extract_postcode_data.Rmd` still contained executable legacy API examples.
-- `ReadMe.md`, `book/data_clean_documentation/01_pipeline.qmd`, and `docs/overleaf/103_appendix_data.tex` still described postcode enrichment through `PostcodesioR` or `postcodes.io`.
+- `README.md`, `book/data_clean_documentation/01_pipeline.qmd`, and `docs/overleaf/103_appendix_data.tex` still described postcode enrichment through `PostcodesioR` or `postcodes.io`.
 - `renv.lock` still retained a `PostcodesioR` entry, and generated files such as `book/_site/search.json` and `docs/overleaf/_minted/*` still echoed the old workflow.
 - The result was a false impression that the migration might be incomplete even though the active pipeline had already switched to local ONS inputs.
 
@@ -89,7 +89,7 @@ rg -n -i "PostcodesioR|postcodes\.io|api\.postcodes\.io|bulk_postcode_lookup|get
     - `scripts/R/testing/test_merge_house_price_data.Rmd`
     - `scripts/R/testing/test_extract_postcode_data.Rmd`
   - current docs and manuscript text:
-    - `ReadMe.md`
+    - `README.md`
     - `book/data_clean_documentation/01_pipeline.qmd`
     - `docs/overleaf/103_appendix_data.tex`
   - dependency metadata:
@@ -143,7 +143,7 @@ rg -n -i "PostcodesioR|postcodes\.io|bulk_postcode_lookup|get_postcode_data|clea
   scripts/R/testing --glob '*.Rmd' --glob '*.qmd'
 
 rg -n -i "PostcodesioR|postcodes\.io|api\.postcodes\.io" \
-  ReadMe.md book docs/overleaf \
+  README.md book docs/overleaf \
   --glob '!**/_site/**' --glob '!**/_minted/**'
 
 rg -n -i "PostcodesioR|postcodes\.io" renv.lock
@@ -167,7 +167,7 @@ Relevant repository references:
   - `scripts/R/testing/test_merge_house_price_data.Rmd`
   - `scripts/R/testing/test_extract_postcode_data.Rmd`
 - Remaining current docs:
-  - `ReadMe.md`
+  - `README.md`
   - `book/data_clean_documentation/01_pipeline.qmd`
   - `docs/overleaf/103_appendix_data.tex`
 - Remaining metadata:

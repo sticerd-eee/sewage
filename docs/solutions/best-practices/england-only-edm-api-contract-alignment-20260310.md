@@ -57,7 +57,7 @@ The working fix made `scripts/config/api_config.R` the single source of truth fo
 - Rewired `combine_api_edm_data_2024_onwards.R` to use the contract's processed directory and combined output file, normalize company names from the contract mapping, and derive `year` via `lubridate::year()`.
 - Pointed `combine_2021-2023_and_api_edm_data.R` at the contracted combined API Parquet file instead of a local path guess.
 - Removed runtime package installation from the downstream scripts and aligned startup with `scripts/R/utils/script_setup.R`.
-- Updated `ReadMe.md`, `book/data_clean_documentation/02_ingestion.qmd`, and the notebook wrappers so they describe and exercise the active England-only contract instead of preserving stale copied logic.
+- Updated `README.md`, `book/data_clean_documentation/02_ingestion.qmd`, and the notebook wrappers so they describe and exercise the active England-only contract instead of preserving stale copied logic.
 - Added `scripts/R/testing/test_edm_api_pipeline_contracts.R` as a lightweight regression check for scope, paths, Welsh Water handling, cleaning rules, and doc drift.
 
 **Code changes**:
@@ -124,7 +124,7 @@ The underlying problem was contract drift, not just bad wording or one broken sc
 - See also: [output-compatible-edm-standardisation-refactor-20260309.md](./output-compatible-edm-standardisation-refactor-20260309.md)
 - Contract source: [`scripts/config/api_config.R`](../../../scripts/config/api_config.R)
 - Regression check: [`scripts/R/testing/test_edm_api_pipeline_contracts.R`](../../../scripts/R/testing/test_edm_api_pipeline_contracts.R)
-- User-facing docs: [ReadMe.md](../../../ReadMe.md)
+- User-facing docs: [README.md](../../../README.md)
 - Ingestion docs: [02_ingestion.qmd](../../../book/data_clean_documentation/02_ingestion.qmd)
 
 ## Notes

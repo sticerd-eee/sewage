@@ -420,7 +420,7 @@ assert_identical(
   "The combine step should leave the existing canonical output untouched on the zero-row path."
 )
 
-readme_text <- read_text(here::here("ReadMe.md"))
+readme_text <- read_text(here::here("README.md"))
 assert_true(
   grepl("data/raw/edm_data/raw_api_responses", readme_text, fixed = TRUE),
   "README should document the raw API snapshot path."
