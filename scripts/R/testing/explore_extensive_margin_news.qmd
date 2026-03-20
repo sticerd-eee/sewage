@@ -1,0 +1,2072 @@
+---
+title: "Exploratory Extensive-Margin News Analysis"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+## What This Notebook Shows
+
+This notebook explores an extensive-margin version of the sewage-news exercise. The treatment is **proximity to the nearest overflow** rather than realised spill intensity: for each comparison, `near_bin = 1` marks the closer distance band and `near_bin = 0` marks the farther band.
+
+The aim is narrow. The notebook asks whether prices differ between nearer and farther properties, and whether that near-far gap becomes more negative after the August 2022 news-attention break or as cumulative news coverage rises.
+
+## How To Read The Results
+
+The notebook keeps the same treatment definition throughout and rotates only the estimating equation:
+
+- `baseline` asks whether the near bin trades or lists at a different level than the far bin.
+- `post` asks whether that near-far gap changes after the August 2022 break.
+- `articles` asks whether that near-far gap changes as cumulative news coverage rises.
+
+Negative coefficients mean that the near bin becomes relatively less expensive; positive coefficients mean the near bin becomes relatively more expensive. The preferred cells are the `LSOA + month FE + controls` rows, but the broader matrix is still useful because it shows whether signs survive weaker and stronger specifications.
+
+The notebook is intentionally exploratory. When a comparison looks interesting, it runs a fixed set of follow-ups rather than stopping at the headline table.
+
+```{r}
+#| label: setup
+
+install_if_missing <- function(packages) {
+  missing_packages <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(missing_packages) > 0) {
+    install.packages(missing_packages)
+  }
+  invisible(lapply(packages, library, character.only = TRUE))
+}
+
+required_packages <- c(
+  "arrow",
+  "fixest",
+  "glue",
+  "here",
+  "knitr",
+  "lubridate",
+  "readxl",
+  "rio",
+  "scales",
+  "tidyverse"
+)
+
+install_if_missing(required_packages)
+
+START_DATE <- as.Date("2021-01-01")
+END_DATE <- as.Date("2023-12-31")
+LOOKUP_MAX_DISTANCE <- 10000
+VCOV_MODE <- "hetero"  # switch to "conley" for slower spatial SEs
+CONLEY_CUTOFF_KM <- 0.5
+PREFERRED_SPEC_ID <- "lsoa_month_controls"
+DEEP_DIVE_P_THRESHOLD <- 0.10
+PRE_BREAK_END_DATE <- as.Date("2022-07-31")
+SITE_INTENSITY_LEVELS <- c("Q1", "Q2", "Q3", "Q4")
+OUTPUT_DIR <- here::here("output", "tables", "exploratory_extensive_margin_news")
+MAIN_GRID_ONLY_COMPARISON_IDS <- c("500_vs_1000_2000", "500_vs_500_2000")
+MARKET_COLOURS <- c(Sales = "#1F78B4", Rentals = "#D95F02")
+
+dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+comparison_specs <- tibble::tribble(
+  ~comparison_id, ~comparison_label,        ~near_min, ~near_max, ~far_min, ~far_max,
+  "250_vs_250_500",   "0-250m vs 250-500m",    0,  250,  250,   500,
+  "250_vs_250_1000",  "0-250m vs 250-1000m",   0,  250,  250,  1000,
+  "500_vs_500_1000",  "0-500m vs 500-1000m",   0,  500,  500,  1000,
+  "500_vs_1000_2000", "0-500m vs 1000-2000m",  0,  500, 1000,  2000,
+  "500_vs_500_2000",  "0-500m vs 500-2000m",   0,  500,  500,  2000,
+  "500_vs_500_10km",  "0-500m vs 500-10km",    0,  500,  500, 10000
+)
+
+ring_levels <- c("0-250m", "250-500m", "500-1000m", "1000-2000m", "2000-10000m")
+ring_reference <- "2000-10000m"
+
+spec_grid <- tibble::tribble(
+  ~spec_id,                 ~spec_label,                  ~controls, ~fe_unit,
+  "ols",                    "OLS",                         FALSE,     "none",
+  "ols_controls",           "OLS + controls",             TRUE,      "none",
+  "msoa_month_controls",    "MSOA + month FE + controls", TRUE,      "msoa",
+  "lsoa_month_controls",    "LSOA + month FE + controls", TRUE,      "lsoa"
+)
+
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+month_id_from_date <- function(x) {
+  x_date <- as.Date(x)
+  (lubridate::year(x_date) - 2021L) * 12L + lubridate::month(x_date)
+}
+
+distance_to_ring <- function(distance_m) {
+  dplyr::case_when(
+    is.na(distance_m) ~ NA_character_,
+    distance_m <= 250 ~ "0-250m",
+    distance_m <= 500 ~ "250-500m",
+    distance_m <= 1000 ~ "500-1000m",
+    distance_m <= 2000 ~ "1000-2000m",
+    distance_m <= 10000 ~ "2000-10000m",
+    TRUE ~ NA_character_
+  )
+}
+
+pretty_site_intensity_quartile <- function(x) {
+  dplyr::case_match(
+    as.character(x),
+    "Q1" ~ "Q1 (lowest spill count)",
+    "Q2" ~ "Q2",
+    "Q3" ~ "Q3",
+    "Q4" ~ "Q4 (highest spill count)",
+    .default = as.character(x)
+  )
+}
+
+pretty_market <- function(market) {
+  dplyr::case_match(
+    market,
+    "sales" ~ "Sales",
+    "rentals" ~ "Rentals",
+    .default = market
+  )
+}
+
+maybe_factor <- function(x) {
+  if (is.character(x) || is.logical(x)) {
+    forcats::as_factor(x)
+  } else {
+    x
+  }
+}
+
+pick_term <- function(coef_names, target) {
+  reverse_target <- paste(rev(strsplit(target, ":", fixed = TRUE)[[1]]), collapse = ":")
+  hit <- coef_names[coef_names %in% c(target, reverse_target)]
+  hit[[1]] %||% NA_character_
+}
+
+extract_model_term <- function(model, target_term, metadata) {
+  status_row <- function(status, nobs = NA_integer_, term = NA_character_, coef_names = NA_character_) {
+    tibble::as_tibble(metadata) |>
+      dplyr::mutate(
+        term = term,
+        estimate = NA_real_,
+        std_error = NA_real_,
+        statistic = NA_real_,
+        p_value = NA_real_,
+        nobs = nobs,
+        adj_r2 = NA_real_,
+        status = status,
+        coef_names = coef_names
+      )
+  }
+
+  if (is.null(model)) {
+    return(status_row("model_null"))
+  }
+
+  ct <- as.data.frame(fixest::coeftable(model))
+  ct$term <- rownames(ct)
+  chosen_term <- pick_term(ct$term, target_term)
+
+  if (is.na(chosen_term)) {
+    return(status_row(
+      status = "target_term_missing",
+      nobs = stats::nobs(model),
+      coef_names = paste(ct$term, collapse = "; ")
+    ))
+  }
+
+  out <- ct |>
+    dplyr::filter(.data$term == chosen_term) |>
+    dplyr::transmute(
+      estimate = Estimate,
+      std_error = `Std. Error`,
+      statistic = `t value`,
+      p_value = `Pr(>|t|)`
+    ) |>
+    dplyr::mutate(
+      term = chosen_term,
+      nobs = stats::nobs(model),
+      adj_r2 = suppressWarnings(tryCatch(
+        as.numeric(fixest::fitstat(model, "ar2"))[[1]],
+        error = function(e) NA_real_
+      ))
+    )
+
+  dplyr::bind_cols(tibble::as_tibble(metadata), out) |>
+    dplyr::mutate(
+      status = "ok",
+      coef_names = paste(ct$term, collapse = "; ")
+    )
+}
+
+resolve_vcov <- function(data) {
+  if (
+    identical(VCOV_MODE, "conley") &&
+      all(c("latitude", "longitude") %in% names(data)) &&
+      all(is.finite(data$latitude)) &&
+      all(is.finite(data$longitude))
+  ) {
+    return(fixest::conley(cutoff = CONLEY_CUTOFF_KM))
+  }
+  "hetero"
+}
+
+controls_for_market <- function(market) {
+  market <- tolower(as.character(market))
+  switch(
+    market,
+    sales = c("property_type", "old_new", "duration"),
+    rentals = c("property_type", "bedrooms", "bathrooms"),
+    character()
+  )
+}
+
+load_peak_month_id <- function() {
+  google_trends <- readxl::read_excel(
+    here::here("data", "raw", "google_trends", "google_trends_uk.xlsx"),
+    sheet = "united_kingdom"
+  ) |>
+    dplyr::filter(.data$Year >= 2021, .data$Year <= 2023)
+
+  peak_row <- google_trends |>
+    dplyr::slice_max(`'Sewage Spill' Google Searches`, n = 1, with_ties = FALSE)
+
+  peak_year <- peak_row$Year[[1]]
+  peak_month <- as.integer(substr(peak_row$Date[[1]], 6, 7))
+
+  (peak_year - 2021L) * 12L + peak_month
+}
+
+load_articles <- function() {
+  arrow::read_parquet(
+    here::here("data", "processed", "lexis_nexis", "search1_monthly.parquet")
+  ) |>
+    dplyr::filter(.data$month_id >= 1L, .data$month_id <= 36L) |>
+    dplyr::arrange(.data$month_id) |>
+    dplyr::mutate(
+      cumulative_articles = cumsum(.data$article_count),
+      log_cumulative_articles = log(.data$cumulative_articles)
+    )
+}
+
+load_nearest_lookup <- function(path, id_col) {
+  id_sym <- rlang::sym(id_col)
+  lookup <- arrow::open_dataset(path) |>
+    dplyr::select(!!id_sym, .data$site_id, .data$distance_m) |>
+    dplyr::filter(
+      !is.na(.data$site_id),
+      !is.na(.data$distance_m),
+      .data$distance_m <= LOOKUP_MAX_DISTANCE
+    )
+
+  min_distance <- lookup |>
+    dplyr::group_by(!!id_sym) |>
+    dplyr::summarise(min_distance = min(.data$distance_m, na.rm = TRUE), .groups = "drop")
+
+  lookup |>
+    dplyr::inner_join(min_distance, by = id_col) |>
+    dplyr::filter(.data$distance_m == .data$min_distance) |>
+    dplyr::group_by(!!id_sym) |>
+    dplyr::summarise(
+      min_distance = min(.data$min_distance, na.rm = TRUE),
+      nearest_site_id = min(.data$site_id, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    dplyr::collect()
+}
+
+load_site_intensity_quartiles <- function() {
+  arrow::open_dataset(
+    here::here("data", "processed", "agg_spill_stats", "agg_spill_daily.parquet")
+  ) |>
+    dplyr::filter(
+      .data$date >= START_DATE,
+      .data$date <= PRE_BREAK_END_DATE,
+      !.data$site_missing,
+      !is.na(.data$spill_count)
+    ) |>
+    dplyr::group_by(.data$site_id) |>
+    dplyr::summarise(
+      site_intensity_prebreak_count = mean(.data$spill_count, na.rm = TRUE),
+      observed_days = dplyr::n(),
+      .groups = "drop"
+    ) |>
+    dplyr::collect() |>
+    dplyr::filter(
+      is.finite(.data$site_intensity_prebreak_count),
+      .data$observed_days > 0
+    ) |>
+    dplyr::mutate(
+      site_intensity_q = dplyr::ntile(.data$site_intensity_prebreak_count, 4L),
+      site_intensity_q = factor(
+        paste0("Q", .data$site_intensity_q),
+        levels = SITE_INTENSITY_LEVELS
+      )
+    ) |>
+    dplyr::select(
+      .data$site_id,
+      .data$site_intensity_prebreak_count,
+      .data$site_intensity_q,
+      .data$observed_days
+    )
+}
+
+load_sales_transactions <- function() {
+  sales <- rio::import(
+    here::here("data", "processed", "house_price.parquet"),
+    trust = TRUE
+  ) |>
+    tibble::as_tibble() |>
+    dplyr::select(dplyr::any_of(c(
+      "house_id", "price", "date_of_transfer", "property_type",
+      "old_new", "duration", "lsoa", "msoa", "latitude", "longitude"
+    ))) |>
+    dplyr::mutate(
+      date_of_transfer = as.Date(.data$date_of_transfer),
+      month_id = month_id_from_date(.data$date_of_transfer),
+      log_price = log(.data$price),
+      property_type = forcats::fct_drop(forcats::as_factor(.data$property_type)),
+      old_new = forcats::fct_drop(forcats::as_factor(.data$old_new)),
+      duration = forcats::fct_drop(forcats::as_factor(.data$duration))
+    ) |>
+    dplyr::filter(
+      .data$date_of_transfer >= START_DATE,
+      .data$date_of_transfer <= END_DATE,
+      .data$month_id >= 1L,
+      .data$month_id <= 36L,
+      is.finite(.data$log_price)
+    ) |>
+    dplyr::mutate(
+      flat_flag = dplyr::case_when(
+        as.character(.data$property_type) %in% c("F", "Flat", "flat") ~ "Flat",
+        TRUE ~ "Non-flat"
+      ),
+      flat_flag = forcats::as_factor(.data$flat_flag)
+    )
+
+  sales
+}
+
+load_rental_transactions <- function() {
+  rentals <- rio::import(
+    here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
+    trust = TRUE
+  ) |>
+    tibble::as_tibble() |>
+    dplyr::select(dplyr::any_of(c(
+      "rental_id", "listing_price", "rented_est", "property_type",
+      "bedrooms", "bathrooms", "lsoa", "msoa", "latitude", "longitude"
+    ))) |>
+    dplyr::mutate(
+      rented_est = as.Date(.data$rented_est),
+      month_id = month_id_from_date(.data$rented_est),
+      log_price = log(.data$listing_price),
+      property_type = forcats::fct_drop(forcats::as_factor(.data$property_type))
+    ) |>
+    dplyr::filter(
+      .data$rented_est >= START_DATE,
+      .data$rented_est <= END_DATE,
+      .data$month_id >= 1L,
+      .data$month_id <= 36L,
+      is.finite(.data$log_price)
+    ) |>
+    dplyr::mutate(
+      flat_flag = dplyr::case_when(
+        stringr::str_detect(tolower(as.character(.data$property_type)), "flat") ~ "Flat",
+        TRUE ~ "Non-flat"
+      ),
+      flat_flag = forcats::as_factor(.data$flat_flag)
+    )
+
+  rentals
+}
+
+prepare_market_data <- function(market, peak_month_id, articles, site_intensity_quartiles) {
+  if (market == "sales") {
+    transactions <- load_sales_transactions()
+    nearest_lookup <- load_nearest_lookup(
+      here::here("data", "processed", "spill_house_lookup.parquet"),
+      "house_id"
+    )
+    id_col <- "house_id"
+  } else {
+    transactions <- load_rental_transactions()
+    nearest_lookup <- load_nearest_lookup(
+      here::here("data", "processed", "zoopla", "spill_rental_lookup.parquet"),
+      "rental_id"
+    )
+    id_col <- "rental_id"
+  }
+
+  joined <- transactions |>
+    dplyr::inner_join(nearest_lookup, by = id_col) |>
+    dplyr::left_join(
+      site_intensity_quartiles,
+      by = c("nearest_site_id" = "site_id")
+    ) |>
+    dplyr::left_join(
+      articles |>
+        dplyr::select(.data$month_id, .data$cumulative_articles, .data$log_cumulative_articles),
+      by = "month_id"
+    ) |>
+    dplyr::mutate(
+      post = as.integer(.data$month_id >= peak_month_id),
+      ring5 = factor(distance_to_ring(.data$min_distance), levels = ring_levels),
+      site_intensity_q = factor(.data$site_intensity_q, levels = SITE_INTENSITY_LEVELS),
+      market = market
+    )
+
+  joined
+}
+
+build_comparison_sample <- function(data, comparison_row) {
+  sample <- data |>
+    dplyr::filter(
+      (.data$min_distance >= comparison_row$near_min & .data$min_distance <= comparison_row$near_max) |
+        (.data$min_distance > comparison_row$far_min & .data$min_distance <= comparison_row$far_max)
+    ) |>
+    dplyr::mutate(
+      near_bin = as.integer(.data$min_distance <= comparison_row$near_max),
+      comparison_id = comparison_row$comparison_id,
+      comparison_label = comparison_row$comparison_label,
+      near_group = dplyr::if_else(.data$near_bin == 1L, "Near", "Far")
+    )
+
+  sample
+}
+
+sample_summary <- function(sample, market, comparison_row) {
+  summarise_group <- function(data, label) {
+    tibble::tibble(
+      market = market,
+      comparison_id = comparison_row$comparison_id,
+      comparison_label = comparison_row$comparison_label,
+      group_label = label,
+      observations = nrow(data),
+      mean_distance_m = mean(data$min_distance, na.rm = TRUE),
+      mean_price = mean(exp(data$log_price), na.rm = TRUE),
+      mean_log_price = mean(data$log_price, na.rm = TRUE),
+      mean_articles = mean(data$cumulative_articles, na.rm = TRUE),
+      mean_post = mean(data$post, na.rm = TRUE)
+    )
+  }
+
+  near_label <- glue::glue("{comparison_row$near_min}-{comparison_row$near_max}m")
+  far_label <- glue::glue("({comparison_row$far_min}, {comparison_row$far_max}]m")
+
+  dplyr::bind_rows(
+    summarise_group(dplyr::filter(sample, .data$near_bin == 1L), near_label),
+    summarise_group(dplyr::filter(sample, .data$near_bin == 0L), far_label)
+  )
+}
+
+build_formula <- function(family, spec_row, market) {
+  controls <- if (isTRUE(spec_row$controls)) controls_for_market(market) else character()
+  rhs <- c("near_bin")
+
+  if (family == "baseline") {
+    rhs <- rhs
+  } else if (family == "post") {
+    rhs <- c(rhs, if (spec_row$fe_unit == "none") "post" else NULL, "near_bin:post")
+  } else if (family == "articles") {
+    rhs <- c(
+      rhs,
+      if (spec_row$fe_unit == "none") "log_cumulative_articles" else NULL,
+      "near_bin:log_cumulative_articles"
+    )
+  } else {
+    stop("Unknown family: ", family)
+  }
+
+  rhs <- c(rhs, controls)
+  rhs_text <- paste(rhs, collapse = " + ")
+
+  if (spec_row$fe_unit == "none") {
+    stats::as.formula(glue::glue("log_price ~ {rhs_text}"))
+  } else {
+    stats::as.formula(glue::glue("log_price ~ {rhs_text} | {spec_row$fe_unit} + month_id"))
+  }
+}
+
+required_vars_for_family <- function(family, spec_row, market) {
+  vars <- c("log_price", "near_bin")
+  if (family == "post") {
+    vars <- c(vars, "post")
+  } else if (family == "articles") {
+    vars <- c(vars, "log_cumulative_articles")
+  }
+  if (isTRUE(spec_row$controls)) {
+    vars <- c(vars, controls_for_market(market))
+  }
+  if (spec_row$fe_unit != "none") {
+    vars <- c(vars, spec_row$fe_unit, "month_id")
+  }
+  unique(vars)
+}
+
+target_term_for_family <- function(family) {
+  dplyr::case_match(
+    family,
+    "baseline" ~ "near_bin",
+    "post" ~ "near_bin:post",
+    "articles" ~ "near_bin:log_cumulative_articles"
+  )
+}
+
+quartile_modifier_parts_for_family <- function(family, quartile) {
+  switch(
+    family,
+    baseline = c("near_bin", paste0("site_intensity_q", quartile)),
+    post = c("near_bin", "post", paste0("site_intensity_q", quartile)),
+    articles = c("near_bin", "log_cumulative_articles", paste0("site_intensity_q", quartile)),
+    stop("Unknown family: ", family)
+  )
+}
+
+pick_term_by_parts <- function(coef_names, parts) {
+  hits <- coef_names[vapply(
+    coef_names,
+    function(term) all(vapply(parts, function(part) stringr::str_detect(term, stringr::fixed(part)), logical(1))),
+    logical(1)
+  )]
+
+  hits[[1]] %||% NA_character_
+}
+
+fmt_big_n <- function(x) {
+  if (length(x) == 0 || is.null(x) || is.na(x)) {
+    return("n/a")
+  }
+  scales::comma(round(as.numeric(x)))
+}
+
+fmt_num <- function(x, digits = 1) {
+  if (length(x) == 0 || is.null(x) || is.na(x)) {
+    return("n/a")
+  }
+  formatC(as.numeric(x), format = "f", digits = digits)
+}
+
+fmt_coef <- function(x, digits = 4) {
+  fmt_num(x, digits = digits)
+}
+
+fmt_p_value <- function(x) {
+  if (length(x) == 0 || is.null(x) || is.na(x)) {
+    return("n/a")
+  }
+  if (as.numeric(x) < 0.001) {
+    "< 0.001"
+  } else {
+    paste0("= ", formatC(as.numeric(x), format = "f", digits = 3))
+  }
+}
+
+estimate_sign_text <- function(x, negative = "negative", positive = "positive") {
+  if (length(x) == 0 || is.null(x) || is.na(x)) {
+    return("unclear")
+  }
+  if (as.numeric(x) < 0) negative else positive
+}
+
+estimate_stability_text <- function(estimates) {
+  x <- estimates[is.finite(estimates)]
+
+  if (length(x) <= 1) {
+    return("hard to judge from the available specifications")
+  }
+
+  if (all(x > 0) || all(x < 0)) {
+    "stable across specifications"
+  } else {
+    "sensitive to specification choice"
+  }
+}
+
+pretty_family_label <- function(family) {
+  dplyr::case_match(
+    family,
+    "baseline" ~ "baseline near-far gap",
+    "post" ~ "post-break change in the near-far gap",
+    "articles" ~ "news-coverage change in the near-far gap",
+    .default = as.character(family)
+  )
+}
+
+pretty_family_short <- function(family) {
+  dplyr::case_match(
+    family,
+    "baseline" ~ "Baseline gap",
+    "post" ~ "Post-break change",
+    "articles" ~ "News-coverage change",
+    .default = as.character(family)
+  )
+}
+
+comparison_context_note <- function(comparison_id) {
+  dplyr::case_match(
+    comparison_id,
+    "250_vs_250_500" ~ "Because the far bin is still very local, this comparison is best read as a fine spatial gradient rather than as a wider market comparison.",
+    "250_vs_250_1000" ~ "This is a middle-ground control group: broader than the adjacent ring, but still local enough that composition should move less sharply than in the 10km comparison.",
+    "500_vs_500_1000" ~ "This comparison checks whether any near-overflow pattern survives once the near bin is widened to 500m while the control group remains fairly local.",
+    "500_vs_1000_2000" ~ "This comparison keeps the near bin fixed at 500m but moves the control group just beyond the very local ring, which makes it a useful mid-range benchmark.",
+    "500_vs_500_2000" ~ "This is a wider mid-range control group than `0-500m vs 500-1000m`, but it is still much more local than the 10km comparison.",
+    "500_vs_500_10km" ~ "This is the hardest control group because the far bin reaches into the wider market. A sign change here usually means the result depends on the choice of control group, not just on very local distance.",
+    .default = "This comparison is best read as one point on the near-versus-far gradient."
+  )
+}
+
+row_value <- function(data, column, default = NA) {
+  if (is.null(data) || nrow(data) == 0 || !column %in% names(data)) {
+    return(default)
+  }
+
+  value <- data[[column]][[1]]
+  if (length(value) == 0 || is.null(value)) default else value
+}
+
+get_result_row <- function(data,
+                           market = NULL,
+                           comparison_id = NULL,
+                           comparison_label = NULL,
+                           group_label = NULL,
+                           family = NULL,
+                           spec_id = NULL,
+                           term = NULL,
+                           flat_group = NULL,
+                           overlay = NULL,
+                           trigger_comparison = NULL,
+                           trigger_family = NULL) {
+  out <- data
+
+  if (!is.null(market) && "market" %in% names(out)) {
+    out <- dplyr::filter(out, .data$market == .env$market)
+  }
+  if (!is.null(comparison_id) && "comparison_id" %in% names(out)) {
+    out <- dplyr::filter(out, .data$comparison_id == .env$comparison_id)
+  }
+  if (!is.null(comparison_label) && "comparison_label" %in% names(out)) {
+    out <- dplyr::filter(out, .data$comparison_label == .env$comparison_label)
+  }
+  if (!is.null(group_label) && "group_label" %in% names(out)) {
+    out <- dplyr::filter(out, .data$group_label == .env$group_label)
+  }
+  if (!is.null(family) && "family" %in% names(out)) {
+    out <- dplyr::filter(out, .data$family == .env$family)
+  }
+  if (!is.null(spec_id) && "spec_id" %in% names(out)) {
+    out <- dplyr::filter(out, .data$spec_id == .env$spec_id)
+  }
+  if (!is.null(term) && "term" %in% names(out)) {
+    out <- dplyr::filter(out, .data$term == .env$term)
+  }
+  if (!is.null(flat_group) && "flat_group" %in% names(out)) {
+    out <- dplyr::filter(out, .data$flat_group == .env$flat_group)
+  }
+  if (!is.null(overlay) && "overlay" %in% names(out)) {
+    out <- dplyr::filter(out, .data$overlay == .env$overlay)
+  }
+  if (!is.null(trigger_comparison) && "trigger_comparison" %in% names(out)) {
+    out <- dplyr::filter(out, .data$trigger_comparison == .env$trigger_comparison)
+  }
+  if (!is.null(trigger_family) && "trigger_family" %in% names(out)) {
+    out <- dplyr::filter(out, .data$trigger_family == .env$trigger_family)
+  }
+
+  dplyr::slice_head(out, n = 1)
+}
+
+comparison_summary_text <- function(main_results, market, comparison_label) {
+  market_results <- main_results |>
+    dplyr::filter(
+      .data$market == .env$market,
+      .data$comparison_label == .env$comparison_label,
+      .data$status == "ok"
+    )
+
+  preferred <- market_results |>
+    dplyr::filter(.data$spec_id == PREFERRED_SPEC_ID)
+
+  if (nrow(preferred) == 0) {
+    return("Preferred-spec rows are unavailable for this comparison.")
+  }
+
+  lead <- preferred |>
+    dplyr::mutate(abs_t = abs(.data$statistic)) |>
+    dplyr::arrange(dplyr::desc(.data$abs_t)) |>
+    dplyr::slice_head(n = 1)
+
+  secondary <- preferred |>
+    dplyr::filter(
+      .data$family != row_value(lead, "family"),
+      !is.na(.data$p_value),
+      .data$p_value < 0.10
+    ) |>
+    dplyr::arrange(.data$p_value, dplyr::desc(abs(.data$statistic))) |>
+    dplyr::slice_head(n = 1)
+
+  family_rows <- market_results |>
+    dplyr::filter(.data$family == row_value(lead, "family"))
+
+  lead_sentence <- glue::glue(
+    "In the preferred specification, the clearest signal is the {pretty_family_label(row_value(lead, 'family'))} (`{row_value(lead, 'term', default = 'coefficient')}` = {fmt_coef(row_value(lead, 'estimate'))}, p {fmt_p_value(row_value(lead, 'p_value'))})."
+  )
+
+  stability_sentence <- glue::glue(
+    "For that family, the sign is {estimate_stability_text(family_rows$estimate)}."
+  )
+
+  secondary_sentence <- if (nrow(secondary) > 0) {
+    glue::glue(
+      "The only other preferred-spec family below p < 0.10 here is the {pretty_family_label(row_value(secondary, 'family'))} ({fmt_coef(row_value(secondary, 'estimate'))}, p {fmt_p_value(row_value(secondary, 'p_value'))})."
+    )
+  } else {
+    "The other preferred-spec families are weak enough that this cell is best read as a one-margin result rather than as a broad pattern across all three families."
+  }
+
+  paste(
+    lead_sentence,
+    stability_sentence,
+    secondary_sentence,
+    comparison_context_note(row_value(lead, "comparison_id"))
+  )
+}
+
+clean_ring_term <- function(term) {
+  dplyr::case_when(
+    stringr::str_detect(term, "ring50-250m") ~ "0-250m",
+    stringr::str_detect(term, "ring5250-500m") ~ "250-500m",
+    stringr::str_detect(term, "ring5500-1000m") ~ "500-1000m",
+    stringr::str_detect(term, "ring51000-2000m") ~ "1000-2000m",
+    stringr::str_detect(term, "ring52000-10000m") ~ "2000-10000m",
+    TRUE ~ term
+  )
+}
+
+pretty_overlay_term <- function(term) {
+  dplyr::case_match(
+    term,
+    "near_bin" ~ "Near-bin coefficient after overlay",
+    "near_bin:post" ~ "Near-bin × post coefficient after overlay",
+    "near_bin:log_cumulative_articles" ~ "Near-bin × articles coefficient after overlay",
+    "nearest_site_count_daily_avg" ~ "Nearest-site spill count",
+    "nearest_site_hrs_daily_avg" ~ "Nearest-site spill hours",
+    .default = term
+  )
+}
+
+market_signal_text <- function(main_results, market, comparison_label) {
+  preferred <- main_results |>
+    dplyr::filter(
+      .data$market == .env$market,
+      .data$comparison_label == .env$comparison_label,
+      .data$spec_id == PREFERRED_SPEC_ID,
+      .data$status == "ok"
+    )
+
+  if (nrow(preferred) == 0) {
+    return(glue::glue("{market}: preferred-spec rows are unavailable."))
+  }
+
+  lead <- preferred |>
+    dplyr::mutate(abs_t = abs(.data$statistic)) |>
+    dplyr::arrange(dplyr::desc(.data$abs_t)) |>
+    dplyr::slice_head(n = 1)
+
+  glue::glue(
+    "{market}: the strongest preferred-spec signal is the {pretty_family_label(row_value(lead, 'family'))} ({fmt_coef(row_value(lead, 'estimate'))}, p {fmt_p_value(row_value(lead, 'p_value'))})."
+  )
+}
+
+comparison_pair_summary_text <- function(main_results, comparison_label) {
+  comparison_rows <- main_results |>
+    dplyr::filter(.data$comparison_label == .env$comparison_label)
+
+  comparison_id <- row_value(comparison_rows, "comparison_id", default = NA_character_)
+
+  paste(
+    market_signal_text(main_results, "Sales", comparison_label),
+    market_signal_text(main_results, "Rentals", comparison_label),
+    comparison_context_note(comparison_id)
+  )
+}
+
+make_coefficient_plot <- function(data, y_var, title = NULL, subtitle = NULL, legend_position = "bottom") {
+  y_sym <- rlang::sym(y_var)
+  dodge <- ggplot2::position_dodge(width = 0.45)
+
+  ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = .data$estimate,
+      y = !!y_sym,
+      xmin = .data$estimate - 1.96 * .data$std_error,
+      xmax = .data$estimate + 1.96 * .data$std_error,
+      colour = .data$market,
+      group = .data$market
+    )
+  ) +
+    ggplot2::geom_vline(xintercept = 0, linetype = 2, colour = "grey60") +
+    ggplot2::geom_errorbarh(height = 0.16, alpha = 0.8, position = dodge) +
+    ggplot2::geom_point(size = 2.3, position = dodge) +
+    ggplot2::facet_wrap(~ family, scales = "free_x") +
+    ggplot2::scale_colour_manual(values = MARKET_COLOURS, drop = FALSE) +
+    ggplot2::labs(
+      x = "Coefficient",
+      y = NULL,
+      title = title,
+      subtitle = subtitle,
+      colour = NULL
+    ) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(
+      legend.position = legend_position,
+      panel.grid.minor = ggplot2::element_blank(),
+      panel.grid.major.y = ggplot2::element_line(colour = "grey92"),
+      strip.text = ggplot2::element_text(face = "bold")
+    )
+}
+
+make_quartile_heterogeneity_plot <- function(data, title = NULL, subtitle = NULL) {
+  dodge <- ggplot2::position_dodge(width = 0.45)
+
+  ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = .data$estimate,
+      y = .data$quartile_label,
+      xmin = .data$estimate - 1.96 * .data$std_error,
+      xmax = .data$estimate + 1.96 * .data$std_error,
+      colour = .data$market,
+      group = .data$market
+    )
+  ) +
+    ggplot2::geom_vline(xintercept = 0, linetype = 2, colour = "grey60") +
+    ggplot2::geom_errorbarh(height = 0.16, alpha = 0.8, position = dodge) +
+    ggplot2::geom_point(size = 2.3, position = dodge) +
+    ggplot2::facet_wrap(~ comparison_label, scales = "free_x", ncol = 3) +
+    ggplot2::scale_colour_manual(values = MARKET_COLOURS, drop = FALSE) +
+    ggplot2::labs(
+      x = "Quartile-specific coefficient",
+      y = NULL,
+      title = title,
+      subtitle = subtitle,
+      colour = NULL
+    ) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(
+      legend.position = "bottom",
+      panel.grid.minor = ggplot2::element_blank(),
+      panel.grid.major.y = ggplot2::element_line(colour = "grey92"),
+      strip.text = ggplot2::element_text(face = "bold")
+    )
+}
+
+estimate_one_model <- function(sample, market, comparison_row, family, spec_row) {
+  metadata <- list(
+    market = market,
+    comparison_id = comparison_row$comparison_id,
+    comparison_label = comparison_row$comparison_label,
+    family = family,
+    spec_id = spec_row$spec_id,
+    spec_label = spec_row$spec_label
+  )
+
+  needed <- required_vars_for_family(family, spec_row, market)
+  data_est <- sample |>
+    dplyr::filter(stats::complete.cases(dplyr::pick(dplyr::all_of(needed))))
+
+  if (nrow(data_est) == 0 || dplyr::n_distinct(data_est$near_bin) < 2) {
+    return(list(
+      model = NULL,
+      term = tibble::as_tibble(metadata) |>
+        dplyr::mutate(
+          term = NA_character_,
+          estimate = NA_real_,
+          std_error = NA_real_,
+          statistic = NA_real_,
+          p_value = NA_real_,
+          nobs = nrow(data_est),
+          adj_r2 = NA_real_,
+          status = "insufficient_variation",
+          coef_names = NA_character_
+        )
+    ))
+  }
+
+  model_error <- NULL
+  model <- tryCatch(
+    fixest::feols(
+      fml = build_formula(family, spec_row, market),
+      data = data_est,
+      vcov = resolve_vcov(data_est)
+    ),
+    error = function(e) {
+      model_error <<- e$message
+      NULL
+    }
+  )
+
+  if (is.null(model)) {
+    return(list(
+      model = NULL,
+      term = tibble::as_tibble(metadata) |>
+        dplyr::mutate(
+          term = NA_character_,
+          estimate = NA_real_,
+          std_error = NA_real_,
+          statistic = NA_real_,
+          p_value = NA_real_,
+          nobs = nrow(data_est),
+          adj_r2 = NA_real_,
+          status = paste0("model_error: ", model_error %||% "unknown"),
+          coef_names = NA_character_
+        )
+    ))
+  }
+
+  term <- extract_model_term(model, target_term_for_family(family), metadata)
+
+  list(model = model, term = term)
+}
+
+required_vars_for_quartile_family <- function(family, market) {
+  vars <- c(
+    "log_price", "near_bin", "site_intensity_q",
+    "lsoa", "month_id", controls_for_market(market)
+  )
+
+  if (family == "post") {
+    vars <- c(vars, "post")
+  } else if (family == "articles") {
+    vars <- c(vars, "log_cumulative_articles")
+  }
+
+  unique(vars)
+}
+
+build_quartile_formula <- function(family, market) {
+  controls <- controls_for_market(market)
+
+  rhs <- dplyr::case_match(
+    family,
+    "baseline" ~ "near_bin * site_intensity_q",
+    "post" ~ "near_bin * post * site_intensity_q",
+    "articles" ~ "near_bin * log_cumulative_articles * site_intensity_q"
+  )
+
+  rhs <- c(rhs, controls)
+
+  stats::as.formula(
+    glue::glue("log_price ~ {paste(rhs, collapse = ' + ')} | lsoa + month_id")
+  )
+}
+
+extract_linear_combo <- function(model, terms, metadata) {
+  beta <- stats::coef(model)
+  vcov_mat <- stats::vcov(model)
+  coef_names <- names(beta)
+
+  if (any(is.na(terms)) || !all(terms %in% coef_names)) {
+    return(
+      tibble::as_tibble(metadata) |>
+        dplyr::mutate(
+          estimate = NA_real_,
+          std_error = NA_real_,
+          statistic = NA_real_,
+          p_value = NA_real_,
+          nobs = stats::nobs(model),
+          adj_r2 = suppressWarnings(tryCatch(
+            as.numeric(fixest::fitstat(model, "ar2"))[[1]],
+            error = function(e) NA_real_
+          )),
+          status = "target_term_missing",
+          coef_names = paste(coef_names, collapse = "; "),
+          component_terms = paste(stats::na.omit(terms), collapse = " + ")
+        )
+    )
+  }
+
+  weights <- rep(0, length(beta))
+  names(weights) <- coef_names
+  weights[terms] <- 1
+
+  estimate <- as.numeric(sum(beta[terms]))
+  variance <- as.numeric(t(weights) %*% vcov_mat %*% weights)
+  std_error <- if (is.finite(variance) && variance >= 0) sqrt(variance) else NA_real_
+  statistic <- if (is.finite(std_error) && std_error > 0) estimate / std_error else NA_real_
+  p_value <- if (is.finite(statistic)) 2 * stats::pnorm(abs(statistic), lower.tail = FALSE) else NA_real_
+
+  tibble::as_tibble(metadata) |>
+    dplyr::mutate(
+      estimate = estimate,
+      std_error = std_error,
+      statistic = statistic,
+      p_value = p_value,
+      nobs = stats::nobs(model),
+      adj_r2 = suppressWarnings(tryCatch(
+        as.numeric(fixest::fitstat(model, "ar2"))[[1]],
+        error = function(e) NA_real_
+      )),
+      status = "ok",
+      coef_names = paste(coef_names, collapse = "; "),
+      component_terms = paste(terms, collapse = " + ")
+    )
+}
+
+extract_quartile_effects <- function(model, family, metadata) {
+  coef_names <- names(stats::coef(model))
+  base_term <- pick_term(coef_names, target_term_for_family(family))
+
+  purrr::map_dfr(SITE_INTENSITY_LEVELS, function(quartile) {
+    modifier_term <- if (quartile == "Q1") {
+      character()
+    } else {
+      pick_term_by_parts(coef_names, quartile_modifier_parts_for_family(family, quartile))
+    }
+
+    extract_linear_combo(
+      model,
+      terms = c(base_term, modifier_term),
+      metadata = c(
+        metadata,
+        list(
+          quartile = quartile,
+          quartile_label = pretty_site_intensity_quartile(quartile)
+        )
+      )
+    )
+  })
+}
+
+estimate_quartile_heterogeneity <- function(sample, market, comparison_row) {
+  families <- c("baseline", "post", "articles")
+
+  purrr::map_dfr(families, function(family) {
+    metadata <- list(
+      market = market,
+      comparison_id = comparison_row$comparison_id,
+      comparison_label = comparison_row$comparison_label,
+      family = family,
+      spec_id = PREFERRED_SPEC_ID,
+      spec_label = spec_grid$spec_label[spec_grid$spec_id == PREFERRED_SPEC_ID][[1]]
+    )
+
+    needed <- required_vars_for_quartile_family(family, market)
+    data_est <- sample |>
+      dplyr::filter(stats::complete.cases(dplyr::pick(dplyr::all_of(needed))))
+
+    if (
+      nrow(data_est) == 0 ||
+      dplyr::n_distinct(data_est$near_bin) < 2 ||
+      dplyr::n_distinct(data_est$site_intensity_q) < 2
+    ) {
+      return(
+        tibble::tibble(quartile = SITE_INTENSITY_LEVELS) |>
+          dplyr::mutate(
+            quartile_label = pretty_site_intensity_quartile(.data$quartile)
+          ) |>
+          dplyr::bind_cols(tibble::as_tibble(metadata)[rep(1, 4), , drop = FALSE]) |>
+          dplyr::mutate(
+            estimate = NA_real_,
+            std_error = NA_real_,
+            statistic = NA_real_,
+            p_value = NA_real_,
+            nobs = nrow(data_est),
+            adj_r2 = NA_real_,
+            status = "insufficient_variation",
+            coef_names = NA_character_,
+            component_terms = NA_character_
+          ) |>
+          dplyr::select(
+            .data$market, .data$comparison_id, .data$comparison_label, .data$family,
+            .data$spec_id, .data$spec_label, .data$quartile, .data$quartile_label,
+            .data$estimate, .data$std_error, .data$statistic, .data$p_value,
+            .data$nobs, .data$adj_r2, .data$status, .data$coef_names, .data$component_terms
+          )
+      )
+    }
+
+    model <- tryCatch(
+      fixest::feols(
+        fml = build_quartile_formula(family, market),
+        data = data_est,
+        vcov = resolve_vcov(data_est)
+      ),
+      error = function(e) NULL
+    )
+
+    if (is.null(model)) {
+      return(
+        tibble::tibble(quartile = SITE_INTENSITY_LEVELS) |>
+          dplyr::mutate(
+            quartile_label = pretty_site_intensity_quartile(.data$quartile)
+          ) |>
+          dplyr::bind_cols(tibble::as_tibble(metadata)[rep(1, 4), , drop = FALSE]) |>
+          dplyr::mutate(
+            estimate = NA_real_,
+            std_error = NA_real_,
+            statistic = NA_real_,
+            p_value = NA_real_,
+            nobs = nrow(data_est),
+            adj_r2 = NA_real_,
+            status = "model_null",
+            coef_names = NA_character_,
+            component_terms = NA_character_
+          ) |>
+          dplyr::select(
+            .data$market, .data$comparison_id, .data$comparison_label, .data$family,
+            .data$spec_id, .data$spec_label, .data$quartile, .data$quartile_label,
+            .data$estimate, .data$std_error, .data$statistic, .data$p_value,
+            .data$nobs, .data$adj_r2, .data$status, .data$coef_names, .data$component_terms
+          )
+      )
+    }
+
+    extract_quartile_effects(model, family, metadata)
+  })
+}
+
+summarise_quartile_cells <- function(sample, market, comparison_row) {
+  sample |>
+    dplyr::filter(!is.na(.data$site_intensity_q)) |>
+    dplyr::count(.data$site_intensity_q, .data$near_bin, name = "observations") |>
+    tidyr::complete(
+      site_intensity_q = factor(SITE_INTENSITY_LEVELS, levels = SITE_INTENSITY_LEVELS),
+      near_bin = c(0L, 1L),
+      fill = list(observations = 0L)
+    ) |>
+    dplyr::mutate(
+      market = market,
+      comparison_id = comparison_row$comparison_id,
+      comparison_label = comparison_row$comparison_label,
+      quartile = as.character(.data$site_intensity_q),
+      quartile_label = pretty_site_intensity_quartile(.data$quartile),
+      near_group = dplyr::if_else(.data$near_bin == 1L, "Near", "Far")
+    ) |>
+    dplyr::select(
+      .data$market, .data$comparison_id, .data$comparison_label,
+      .data$quartile, .data$quartile_label, .data$near_bin,
+      .data$near_group, .data$observations
+    )
+}
+
+estimate_comparison <- function(sample, market, comparison_row) {
+  families <- c("baseline", "post", "articles")
+
+  term_rows <- list()
+  idx <- 1L
+
+  for (family in families) {
+    for (i in seq_len(nrow(spec_grid))) {
+      spec_row <- spec_grid[i, ]
+      est <- estimate_one_model(sample, market, comparison_row, family, spec_row)
+      term_rows[[idx]] <- est$term
+      idx <- idx + 1L
+    }
+  }
+
+  list(term_table = dplyr::bind_rows(term_rows))
+}
+
+pick_deep_dive_targets <- function(term_table) {
+  preferred <- term_table |>
+    dplyr::filter(
+      .data$spec_id == PREFERRED_SPEC_ID,
+      !.data$comparison_id %in% MAIN_GRID_ONLY_COMPARISON_IDS
+    )
+
+  preferred |>
+    dplyr::group_by(.data$market) |>
+    dplyr::group_modify(function(df, key) {
+      sig <- df |>
+        dplyr::filter(!is.na(.data$p_value), .data$p_value < DEEP_DIVE_P_THRESHOLD)
+
+      if (nrow(sig) > 0) {
+        sig |>
+          dplyr::arrange(.data$p_value, dplyr::desc(abs(.data$statistic)))
+      } else {
+        df |>
+          dplyr::arrange(dplyr::desc(abs(.data$statistic))) |>
+          dplyr::slice_head(n = 1)
+      }
+    }) |>
+    dplyr::ungroup()
+}
+
+load_nearest_site_intensity <- function(market) {
+  if (market == "sales") {
+    path <- here::here("data", "processed", "cross_section", "sales", "prior_to_sale_house_site")
+    id_col <- "house_id"
+  } else {
+    path <- here::here("data", "processed", "cross_section", "rentals", "prior_to_rental_rental_site")
+    id_col <- "rental_id"
+  }
+
+  id_sym <- rlang::sym(id_col)
+
+  out <- tryCatch(
+    {
+      arrow::open_dataset(path) |>
+        dplyr::filter(.data$radius == 1000) |>
+        dplyr::select(!!id_sym, .data$site_id, .data$distance_m,
+                      .data$spill_count_daily_avg, .data$spill_hrs_daily_avg) |>
+        dplyr::collect() |>
+        dplyr::arrange(!!id_sym, .data$distance_m) |>
+        dplyr::group_by(!!id_sym) |>
+        dplyr::slice_head(n = 1) |>
+        dplyr::ungroup() |>
+        dplyr::rename(
+          nearest_site_id = .data$site_id,
+          nearest_site_distance_m = .data$distance_m,
+          nearest_site_count_daily_avg = .data$spill_count_daily_avg,
+          nearest_site_hrs_daily_avg = .data$spill_hrs_daily_avg
+        )
+    },
+    error = function(e) NULL
+  )
+
+  out
+}
+
+run_ring_deep_dive <- function(data, trigger_row) {
+  data_use <- data |>
+    dplyr::filter(!is.na(.data$ring5), .data$min_distance <= LOOKUP_MAX_DISTANCE) |>
+    dplyr::mutate(ring5 = stats::relevel(.data$ring5, ref = ring_reference))
+
+  market <- trigger_row$market[[1]]
+  family <- trigger_row$family[[1]]
+
+  if (family == "baseline") {
+    formula <- build_formula(
+      family = "baseline",
+      spec_row = spec_grid |> dplyr::filter(.data$spec_id == PREFERRED_SPEC_ID),
+      market = market
+    )
+    formula <- update(formula, . ~ . - near_bin + ring5)
+    target_pattern <- "^ring5"
+  } else if (family == "post") {
+    formula <- stats::as.formula(
+      glue::glue(
+        "log_price ~ ring5 + ring5:post + {paste(controls_for_market(market), collapse = ' + ')} | lsoa + month_id"
+      )
+    )
+    target_pattern <- "^ring5.*:post$|^post:ring5"
+  } else {
+    formula <- stats::as.formula(
+      glue::glue(
+        "log_price ~ ring5 + ring5:log_cumulative_articles + {paste(controls_for_market(market), collapse = ' + ')} | lsoa + month_id"
+      )
+    )
+    target_pattern <- "^ring5.*:log_cumulative_articles$|^log_cumulative_articles:ring5"
+  }
+
+  model <- tryCatch(
+    fixest::feols(fml = formula, data = data_use, vcov = resolve_vcov(data_use)),
+    error = function(e) NULL
+  )
+
+  if (is.null(model)) {
+    return(NULL)
+  }
+
+  ct <- as.data.frame(fixest::coeftable(model))
+  ct$term <- rownames(ct)
+
+  ct |>
+    tibble::as_tibble() |>
+    dplyr::filter(stringr::str_detect(.data$term, target_pattern)) |>
+    dplyr::transmute(
+      market = market,
+      trigger_comparison = trigger_row$comparison_label[[1]],
+      trigger_family = family,
+      term = .data$term,
+      estimate = .data$Estimate,
+      std_error = .data$`Std. Error`,
+      statistic = .data$`t value`,
+      p_value = .data$`Pr(>|t|)`
+    )
+}
+
+run_flat_split <- function(sample, trigger_row) {
+  market <- trigger_row$market[[1]]
+  family <- trigger_row$family[[1]]
+  spec_row <- spec_grid |> dplyr::filter(.data$spec_id == PREFERRED_SPEC_ID)
+
+  split_levels <- sample |>
+    dplyr::filter(!is.na(.data$flat_flag)) |>
+    dplyr::pull(.data$flat_flag) |>
+    unique() |>
+    as.character()
+
+  purrr::map_dfr(split_levels, function(level) {
+    data_sub <- sample |>
+      dplyr::filter(as.character(.data$flat_flag) == level)
+
+    est <- estimate_one_model(
+      sample = data_sub,
+      market = market,
+      comparison_row = trigger_row |> dplyr::select(.data$comparison_id, .data$comparison_label) |> dplyr::slice(1),
+      family = family,
+      spec_row = spec_row
+    )
+
+    if (is.null(est$term) || nrow(est$term) == 0) {
+      return(NULL)
+    }
+
+    est$term |>
+      dplyr::mutate(flat_group = level)
+  })
+}
+
+run_intensity_overlay <- function(sample, trigger_row, intensity_data) {
+  if (is.null(intensity_data)) {
+    return(NULL)
+  }
+
+  comparison_id <- trigger_row$comparison_id[[1]]
+  family <- trigger_row$family[[1]]
+  market <- trigger_row$market[[1]]
+  market_key <- tolower(as.character(market))
+  spec_row <- spec_grid |> dplyr::filter(.data$spec_id == PREFERRED_SPEC_ID)
+
+  if (!comparison_id %in% c("250_vs_250_500", "250_vs_250_1000", "500_vs_500_1000")) {
+    return(NULL)
+  }
+
+  id_col <- if (market_key == "sales") "house_id" else "rental_id"
+
+  data_use <- sample |>
+    dplyr::left_join(intensity_data, by = id_col)
+
+  base_rhs <- c("near_bin")
+
+  if (family == "post") {
+    base_rhs <- c(base_rhs, "near_bin:post")
+  } else if (family == "articles") {
+    base_rhs <- c(base_rhs, "near_bin:log_cumulative_articles")
+  }
+
+  controls <- controls_for_market(market)
+
+  model_terms <- list(
+    nearest_site_count_daily_avg = "count_overlay",
+    nearest_site_hrs_daily_avg = "hours_overlay"
+  )
+
+  purrr::imap_dfr(model_terms, function(label, intensity_var) {
+    rhs <- c(
+      "near_bin",
+      if (family == "post") NULL else if (family == "articles") NULL else NULL,
+      if (family == "post") "near_bin:post" else NULL,
+      if (family == "articles") "near_bin:log_cumulative_articles" else NULL,
+      intensity_var,
+      controls
+    )
+    rhs <- rhs[!is.na(rhs)]
+    formula <- stats::as.formula(
+      glue::glue("log_price ~ {paste(rhs, collapse = ' + ')} | lsoa + month_id")
+    )
+
+    needed <- c("log_price", "near_bin", intensity_var, "lsoa", "month_id", controls)
+    if (family == "post") {
+      needed <- c(needed, "post")
+    } else if (family == "articles") {
+      needed <- c(needed, "log_cumulative_articles")
+    }
+
+    data_est <- data_use |>
+      dplyr::filter(stats::complete.cases(dplyr::pick(dplyr::all_of(unique(needed)))))
+
+    if (nrow(data_est) == 0 || dplyr::n_distinct(data_est$near_bin) < 2) {
+      return(NULL)
+    }
+
+    model <- tryCatch(
+      fixest::feols(fml = formula, data = data_est, vcov = resolve_vcov(data_est)),
+      error = function(e) NULL
+    )
+
+    if (is.null(model)) {
+      return(NULL)
+    }
+
+    ct <- as.data.frame(fixest::coeftable(model))
+    ct$term <- rownames(ct)
+
+    target <- pick_term(ct$term, target_term_for_family(family))
+    if (is.na(target)) {
+      return(NULL)
+    }
+
+    tibble::as_tibble(ct) |>
+      dplyr::filter(.data$term %in% c(target, intensity_var)) |>
+      dplyr::transmute(
+        market = market,
+        comparison_id = comparison_id,
+        comparison_label = trigger_row$comparison_label[[1]],
+        family = family,
+        overlay = label,
+        term = .data$term,
+        estimate = .data$Estimate,
+        std_error = .data$`Std. Error`,
+        statistic = .data$`t value`,
+        p_value = .data$`Pr(>|t|)`
+      )
+  })
+}
+```
+
+```{r}
+#| label: data-prep
+
+peak_month_id <- load_peak_month_id()
+articles <- load_articles()
+site_intensity_quartiles <- load_site_intensity_quartiles()
+
+market_data <- list(
+  sales = prepare_market_data("sales", peak_month_id, articles, site_intensity_quartiles),
+  rentals = prepare_market_data("rentals", peak_month_id, articles, site_intensity_quartiles)
+)
+
+market_overview <- purrr::imap_dfr(market_data, function(data, market) {
+  tibble::tibble(
+    market = pretty_market(market),
+    observations = nrow(data),
+    min_distance_mean = mean(data$min_distance, na.rm = TRUE),
+    min_distance_median = stats::median(data$min_distance, na.rm = TRUE),
+    p25_distance = stats::quantile(data$min_distance, 0.25, na.rm = TRUE),
+    p75_distance = stats::quantile(data$min_distance, 0.75, na.rm = TRUE),
+    mean_log_price = mean(data$log_price, na.rm = TRUE),
+    mean_articles = mean(data$cumulative_articles, na.rm = TRUE),
+    post_share = mean(data$post, na.rm = TRUE)
+  )
+})
+
+sample_store <- list()
+summary_rows <- list()
+result_rows <- list()
+quartile_result_rows <- list()
+quartile_count_rows <- list()
+idx <- 1L
+
+for (market in names(market_data)) {
+  data_market <- market_data[[market]]
+
+  for (i in seq_len(nrow(comparison_specs))) {
+    comp <- comparison_specs[i, ]
+    sample <- build_comparison_sample(data_market, comp)
+
+    summary_rows[[idx]] <- sample_summary(sample, market, comp)
+
+    est <- estimate_comparison(sample, market, comp)
+    result_rows[[idx]] <- est$term_table
+    quartile_result_rows[[idx]] <- estimate_quartile_heterogeneity(sample, market, comp)
+    quartile_count_rows[[idx]] <- summarise_quartile_cells(sample, market, comp)
+    idx <- idx + 1L
+  }
+}
+
+sample_summaries <- dplyr::bind_rows(summary_rows) |>
+  dplyr::mutate(market = pretty_market(.data$market))
+
+main_results <- dplyr::bind_rows(result_rows) |>
+  dplyr::mutate(
+    market = pretty_market(.data$market),
+    family = factor(.data$family, levels = c("baseline", "post", "articles"))
+  )
+
+preferred_results <- main_results |>
+  dplyr::filter(.data$spec_id == PREFERRED_SPEC_ID, .data$status == "ok")
+
+ranking_table <- preferred_results |>
+  dplyr::mutate(abs_t = abs(.data$statistic)) |>
+  dplyr::arrange(dplyr::desc(.data$abs_t))
+
+quartile_heterogeneity_results <- dplyr::bind_rows(quartile_result_rows) |>
+  dplyr::mutate(
+    market = pretty_market(.data$market),
+    family = factor(.data$family, levels = c("baseline", "post", "articles")),
+    quartile = factor(.data$quartile, levels = SITE_INTENSITY_LEVELS)
+  )
+
+quartile_cell_counts <- dplyr::bind_rows(quartile_count_rows) |>
+  dplyr::mutate(
+    market = pretty_market(.data$market),
+    quartile = factor(.data$quartile, levels = SITE_INTENSITY_LEVELS)
+  )
+
+readr::write_csv(sample_summaries, file.path(OUTPUT_DIR, "sample_summaries.csv"))
+readr::write_csv(main_results, file.path(OUTPUT_DIR, "main_results.csv"))
+readr::write_csv(ranking_table, file.path(OUTPUT_DIR, "preferred_result_ranking.csv"))
+readr::write_csv(quartile_heterogeneity_results, file.path(OUTPUT_DIR, "quartile_heterogeneity_results.csv"))
+readr::write_csv(quartile_cell_counts, file.path(OUTPUT_DIR, "quartile_cell_counts.csv"))
+```
+
+```{r}
+#| label: narrative-prep
+#| include: false
+
+sales_overview <- get_result_row(market_overview, market = "Sales")
+rentals_overview <- get_result_row(market_overview, market = "Rentals")
+
+sales_broad_near <- get_result_row(
+  sample_summaries,
+  market = "Sales",
+  comparison_id = "500_vs_500_10km",
+  group_label = "0-500m"
+)
+sales_broad_far <- get_result_row(
+  sample_summaries,
+  market = "Sales",
+  comparison_id = "500_vs_500_10km",
+  group_label = "(500, 10000]m"
+)
+rentals_broad_near <- get_result_row(
+  sample_summaries,
+  market = "Rentals",
+  comparison_id = "500_vs_500_10km",
+  group_label = "0-500m"
+)
+rentals_broad_far <- get_result_row(
+  sample_summaries,
+  market = "Rentals",
+  comparison_id = "500_vs_500_10km",
+  group_label = "(500, 10000]m"
+)
+
+sales_local_baseline <- get_result_row(
+  preferred_results,
+  market = "Sales",
+  comparison_id = "250_vs_250_500",
+  family = "baseline"
+)
+sales_broad_baseline <- get_result_row(
+  preferred_results,
+  market = "Sales",
+  comparison_id = "500_vs_500_10km",
+  family = "baseline"
+)
+sales_mid_baseline <- get_result_row(
+  preferred_results,
+  market = "Sales",
+  comparison_id = "500_vs_500_1000",
+  family = "baseline"
+)
+rentals_broad_post <- get_result_row(
+  preferred_results,
+  market = "Rentals",
+  comparison_id = "500_vs_500_10km",
+  family = "post"
+)
+rentals_broad_articles <- get_result_row(
+  preferred_results,
+  market = "Rentals",
+  comparison_id = "500_vs_500_10km",
+  family = "articles"
+)
+rentals_mid_post <- get_result_row(
+  preferred_results,
+  market = "Rentals",
+  comparison_id = "500_vs_500_1000",
+  family = "post"
+)
+rentals_mid_articles <- get_result_row(
+  preferred_results,
+  market = "Rentals",
+  comparison_id = "500_vs_500_1000",
+  family = "articles"
+)
+top_ranked <- dplyr::slice_head(ranking_table, n = 1)
+
+sample_summaries_display <- sample_summaries |>
+  dplyr::arrange(.data$market, .data$comparison_label, dplyr::desc(.data$group_label)) |>
+  dplyr::mutate(
+    mean_distance_m = round(.data$mean_distance_m, 1),
+    mean_price = round(.data$mean_price, 0),
+    mean_log_price = round(.data$mean_log_price, 3),
+    mean_articles = round(.data$mean_articles, 1),
+    mean_post = round(.data$mean_post, 3)
+  )
+
+preferred_plot_data <- preferred_results |>
+  dplyr::mutate(
+    comparison_label = factor(.data$comparison_label, levels = rev(comparison_specs$comparison_label)),
+    family = pretty_family_short(as.character(.data$family)),
+    market = factor(.data$market, levels = c("Sales", "Rentals"))
+  )
+
+msoa_overview_results <- main_results |>
+  dplyr::filter(.data$spec_id == "msoa_month_controls", .data$status == "ok")
+
+msoa_plot_data <- msoa_overview_results |>
+  dplyr::mutate(
+    comparison_label = factor(.data$comparison_label, levels = rev(comparison_specs$comparison_label)),
+    family = pretty_family_short(as.character(.data$family)),
+    market = factor(.data$market, levels = c("Sales", "Rentals"))
+  )
+
+quartile_support_display <- quartile_cell_counts |>
+  dplyr::mutate(
+    quartile_label = factor(
+      .data$quartile_label,
+      levels = rev(pretty_site_intensity_quartile(SITE_INTENSITY_LEVELS))
+    )
+  ) |>
+  dplyr::arrange(.data$market, .data$comparison_label, .data$quartile, dplyr::desc(.data$near_bin))
+
+quartile_plot_data <- quartile_heterogeneity_results |>
+  dplyr::filter(.data$status == "ok") |>
+  dplyr::mutate(
+    comparison_label = factor(.data$comparison_label, levels = comparison_specs$comparison_label),
+    quartile_label = factor(
+      .data$quartile_label,
+      levels = rev(pretty_site_intensity_quartile(SITE_INTENSITY_LEVELS))
+    ),
+    family_label = pretty_family_short(as.character(.data$family)),
+    market = factor(.data$market, levels = c("Sales", "Rentals"))
+  )
+
+quartile_top_signal <- quartile_heterogeneity_results |>
+  dplyr::filter(.data$status == "ok") |>
+  dplyr::mutate(abs_t = abs(.data$statistic)) |>
+  dplyr::arrange(dplyr::desc(.data$abs_t)) |>
+  dplyr::slice_head(n = 1)
+
+quartile_top_signal_text <- if (nrow(quartile_top_signal) > 0) {
+  glue::glue(
+    "{row_value(quartile_top_signal, 'market')} {row_value(quartile_top_signal, 'comparison_label')} {pretty_family_short(as.character(row_value(quartile_top_signal, 'family')))} in {row_value(quartile_top_signal, 'quartile_label')} ({fmt_coef(row_value(quartile_top_signal, 'estimate'))}, p {fmt_p_value(row_value(quartile_top_signal, 'p_value'))})"
+  )
+} else {
+  "not available"
+}
+
+quartile_top_table <- quartile_heterogeneity_results |>
+  dplyr::filter(.data$status == "ok") |>
+  dplyr::mutate(abs_t = abs(.data$statistic)) |>
+  dplyr::arrange(dplyr::desc(.data$abs_t)) |>
+  dplyr::slice_head(n = 12) |>
+  dplyr::mutate(
+    family = pretty_family_short(as.character(.data$family)),
+    estimate = round(.data$estimate, 4),
+    std_error = round(.data$std_error, 4),
+    statistic = round(.data$statistic, 3),
+    p_value = round(.data$p_value, 4)
+  ) |>
+  dplyr::select(
+    .data$market, .data$comparison_label, .data$family, .data$quartile_label,
+    .data$estimate, .data$std_error, .data$statistic, .data$p_value
+  )
+```
+
+::: {.callout-note appearance="simple"}
+## Main Takeaway
+
+The preferred-spec pattern is sharpest in rentals, not in sales levels. In the broad `0-500m` versus `500-10km` comparison, the rental near-far gap shifts after the August 2022 break (`near_bin:post` = `r fmt_coef(row_value(rentals_broad_post, "estimate"))`, p `r fmt_p_value(row_value(rentals_broad_post, "p_value"))`) and with cumulative news coverage (`near_bin:log_cumulative_articles` = `r fmt_coef(row_value(rentals_broad_articles, "estimate"))`, p `r fmt_p_value(row_value(rentals_broad_articles, "p_value"))`).
+
+Sales are more sensitive to the choice of control group. In the very local `0-250m` versus `250-500m` comparison the preferred baseline coefficient is `r fmt_coef(row_value(sales_local_baseline, "estimate"))`, while against the broad `500-10km` control it is `r fmt_coef(row_value(sales_broad_baseline, "estimate"))`. `r if (isTRUE(sign(row_value(sales_local_baseline, "estimate")) != sign(row_value(sales_broad_baseline, "estimate")))) "The sign flips between those two comparisons." else "The sign does not flip, but the magnitude changes noticeably."` That makes the sales pattern look more like a composition or heterogeneity result than a single uniform local discount.
+:::
+
+## Market Overview
+
+These are the raw matched universes before any near-versus-far distance window is imposed. The sales sample contains `r fmt_big_n(row_value(sales_overview, "observations"))` transactions and the rentals sample contains `r fmt_big_n(row_value(rentals_overview, "observations"))`. The table is mainly there to show scale and coverage; it should not be read as a balance table for the comparison cells below.
+
+```{r}
+knitr::kable(
+  market_overview |>
+    dplyr::mutate(
+      dplyr::across(dplyr::where(is.numeric), ~ round(.x, 3))
+    ),
+  caption = "Raw transaction samples after joining to the nearest-overflow lookup."
+)
+```
+
+## Sample Sizes By Comparison
+
+This table is where the comparison design becomes concrete. As the far bin widens, the control group stops looking like a neighbouring ring and starts looking like a broader market benchmark. In sales, the mean price in the `0-500m` side of the `500-10km` comparison is about `r fmt_big_n(row_value(sales_broad_near, "mean_price"))`, versus `r fmt_big_n(row_value(sales_broad_far, "mean_price"))` in the far bin. Rentals show the same pattern: about `r fmt_big_n(row_value(rentals_broad_near, "mean_price"))` in the near bin and `r fmt_big_n(row_value(rentals_broad_far, "mean_price"))` in the far bin. That is why the `500-10km` rows are informative but also much more demanding than the local-ring comparisons.
+
+```{r}
+knitr::kable(
+  sample_summaries_display,
+  caption = "Sample composition for each near-versus-far comparison."
+)
+```
+
+## Preferred-Spec Overview
+
+This overview now shows both `LSOA + month FE + controls` and `MSOA + month FE + controls`, so the fine-geography specification can be compared directly with a coarser spatial unit. The broad sales `0-500m` versus `500-10km` baseline result is still the single most precise `LSOA` estimate (`r fmt_coef(row_value(top_ranked, "estimate"))`, p `r fmt_p_value(row_value(top_ranked, "p_value"))`), but the main point of this section is whether those market-by-comparison patterns survive when the fixed effects are moved up from `LSOA` to `MSOA`. The two added mid-range comparisons still sit between the tight local rings and the 10km benchmark, which makes it easier to see where that sensitivity starts to matter.
+
+```{r}
+make_coefficient_plot(
+  preferred_plot_data,
+  y_var = "comparison_label",
+  subtitle = "Preferred specification only: LSOA + month FE + controls"
+)
+```
+
+```{r}
+make_coefficient_plot(
+  msoa_plot_data,
+  y_var = "comparison_label",
+  subtitle = "Comparison specification: MSOA + month FE + controls"
+)
+```
+
+## Comparison Detail
+
+These figures keep all four specification rows and put `Sales` and `Rentals` on the same axis. That makes it easier to see whether a difference is coming from the market, from the control set, or from both at once.
+
+```{r}
+#| results: asis
+#| fig-width: 8
+#| fig-height: 4.5
+
+for (comparison in comparison_specs$comparison_label) {
+  cat(glue::glue("### {comparison}\n\n"))
+  cat(glue::glue("{comparison_pair_summary_text(main_results, comparison)}\n\n"))
+
+  plot_data <- main_results |>
+    dplyr::filter(.data$comparison_label == .env$comparison, .data$status == "ok") |>
+    dplyr::mutate(
+      market = factor(.data$market, levels = c("Sales", "Rentals")),
+      family = pretty_family_short(as.character(.data$family)),
+      spec_label = factor(.data$spec_label, levels = spec_grid$spec_label)
+    )
+
+  print(
+    make_coefficient_plot(
+      plot_data,
+      y_var = "spec_label",
+      subtitle = "Four-spec comparison with sales and rentals shown together"
+    )
+  )
+  cat("\n\n")
+}
+```
+
+## Nearest-Site Spill-Quartile Heterogeneity
+
+This simplified heterogeneity exercise keeps the main treatment fixed and changes only the moderator. Each property is assigned to the quartile of its nearest overflow site's **pre-August 2022 average daily spill count**, and the preferred `LSOA + month FE + controls` regressions then ask whether the near-far effect differs across those fixed quartiles.
+
+The quartiles are site based rather than property weighted, so they should be read as a coarse ranking of nearby overflow intensity rather than as a new exposure measure. The strongest quartile-specific signal in this render is `r quartile_top_signal_text`.
+
+```{r}
+knitr::kable(
+  quartile_support_display,
+  caption = "Near/far cell counts by nearest-site pre-break spill-count quartile."
+)
+```
+
+```{r}
+#| fig-width: 12
+#| fig-height: 6
+for (family_id in c("baseline", "post", "articles")) {
+  plot_data <- quartile_plot_data |>
+    dplyr::filter(as.character(.data$family) == family_id)
+
+  if (nrow(plot_data) == 0) {
+    next
+  }
+
+  print(
+    make_quartile_heterogeneity_plot(
+      plot_data,
+      subtitle = glue::glue("{pretty_family_short(family_id)} by nearest-site pre-break spill-count quartile")
+    )
+  )
+}
+```
+
+```{r}
+if (nrow(quartile_top_table) > 0) {
+  knitr::kable(
+    quartile_top_table,
+    caption = "Top quartile-specific preferred-spec coefficients by |t|."
+  )
+}
+```
+
+## Structured Deep Dives
+
+The follow-ups are rule based rather than hand picked. The notebook carries forward every preferred-spec cell with `p < 0.10`; if a market has none, it keeps the single strongest preferred-spec cell by `|t|`. That means the deep dives are there to clarify the patterns that already stand out in the preferred-spec overview, not to open a second unrestricted search.
+
+```{r}
+#| label: deep-dive-data
+
+deep_dive_targets <- pick_deep_dive_targets(main_results)
+
+intensity_store <- list(
+  sales = load_nearest_site_intensity("sales"),
+  rentals = load_nearest_site_intensity("rentals")
+)
+
+ring_deep_dives <- list()
+flat_deep_dives <- list()
+overlay_deep_dives <- list()
+descriptive_intensity <- list()
+
+for (i in seq_len(nrow(deep_dive_targets))) {
+  target <- deep_dive_targets[i, ]
+  market_key <- if (target$market == "Sales") "sales" else "rentals"
+  comp <- comparison_specs |>
+    dplyr::filter(.data$comparison_id == target$comparison_id[[1]])
+  sample <- build_comparison_sample(market_data[[market_key]], comp)
+
+  ring_deep_dives[[i]] <- run_ring_deep_dive(market_data[[market_key]], target)
+  flat_deep_dives[[i]] <- run_flat_split(sample, target)
+  overlay_deep_dives[[i]] <- run_intensity_overlay(sample, target, intensity_store[[market_key]])
+
+  intensity_data <- intensity_store[[market_key]]
+  if (!is.null(intensity_data)) {
+    id_col <- if (market_key == "sales") "house_id" else "rental_id"
+    descriptive_intensity[[i]] <- sample |>
+      dplyr::left_join(intensity_data, by = id_col) |>
+      dplyr::group_by(.data$near_bin) |>
+      dplyr::summarise(
+        market = target$market,
+        comparison_label = target$comparison_label,
+        family = target$family,
+        group = dplyr::if_else(.data$near_bin[[1]] == 1L, "Near", "Far"),
+        mean_nearest_site_count = mean(.data$nearest_site_count_daily_avg, na.rm = TRUE),
+        mean_nearest_site_hours = mean(.data$nearest_site_hrs_daily_avg, na.rm = TRUE),
+        .groups = "drop"
+      )
+    } else {
+      descriptive_intensity[[i]] <- NULL
+    }
+}
+
+ring_deep_dive_table <- dplyr::bind_rows(ring_deep_dives)
+flat_split_table <- dplyr::bind_rows(flat_deep_dives)
+overlay_table <- dplyr::bind_rows(overlay_deep_dives)
+intensity_descriptives <- dplyr::bind_rows(descriptive_intensity)
+
+if (nrow(ring_deep_dive_table) > 0) {
+  readr::write_csv(ring_deep_dive_table, file.path(OUTPUT_DIR, "ring_deep_dive_results.csv"))
+}
+if (nrow(flat_split_table) > 0) {
+  readr::write_csv(flat_split_table, file.path(OUTPUT_DIR, "flat_split_results.csv"))
+}
+if (nrow(overlay_table) > 0) {
+  readr::write_csv(overlay_table, file.path(OUTPUT_DIR, "intensity_overlay_results.csv"))
+}
+if (nrow(intensity_descriptives) > 0) {
+  readr::write_csv(intensity_descriptives, file.path(OUTPUT_DIR, "intensity_descriptives.csv"))
+}
+```
+
+```{r}
+#| label: deep-dive-narrative
+#| include: false
+
+deep_dive_targets_display <- deep_dive_targets |>
+  dplyr::mutate(
+    family = pretty_family_short(as.character(.data$family)),
+    estimate = round(.data$estimate, 4),
+    std_error = round(.data$std_error, 4),
+    statistic = round(.data$statistic, 3),
+    p_value = round(.data$p_value, 4)
+  ) |>
+  dplyr::select(
+    .data$market, .data$comparison_label, .data$family, .data$estimate,
+    .data$std_error, .data$statistic, .data$p_value
+  )
+
+intensity_descriptives_display <- intensity_descriptives |>
+  dplyr::mutate(
+    family = pretty_family_short(as.character(.data$family)),
+    mean_nearest_site_count = round(.data$mean_nearest_site_count, 4),
+    mean_nearest_site_hours = round(.data$mean_nearest_site_hours, 4)
+  )
+
+overlay_table_display <- overlay_table |>
+  dplyr::mutate(
+    family = pretty_family_short(as.character(.data$family)),
+    overlay = dplyr::case_match(
+      .data$overlay,
+      "count_overlay" ~ "Count overlay",
+      "hours_overlay" ~ "Hours overlay",
+      .default = .data$overlay
+    ),
+    term = pretty_overlay_term(.data$term),
+    estimate = round(.data$estimate, 4),
+    std_error = round(.data$std_error, 4),
+    statistic = round(.data$statistic, 3),
+    p_value = round(.data$p_value, 4)
+  ) |>
+  dplyr::select(
+    .data$market, .data$comparison_label, .data$family, .data$overlay,
+    .data$term, .data$estimate, .data$std_error, .data$statistic, .data$p_value
+  )
+
+flat_split_display <- flat_split_table |>
+  dplyr::mutate(
+    family = pretty_family_short(as.character(.data$family)),
+    estimate = round(.data$estimate, 4),
+    std_error = round(.data$std_error, 4),
+    statistic = round(.data$statistic, 3),
+    p_value = round(.data$p_value, 4)
+  ) |>
+  dplyr::select(
+    .data$market, .data$comparison_label, .data$family, .data$flat_group,
+    .data$estimate, .data$std_error, .data$statistic, .data$p_value, .data$nobs
+  )
+
+ring_deep_dive_display <- ring_deep_dive_table |>
+  dplyr::mutate(
+    family = pretty_family_short(as.character(.data$trigger_family)),
+    ring = clean_ring_term(.data$term),
+    estimate = round(.data$estimate, 4),
+    std_error = round(.data$std_error, 4),
+    statistic = round(.data$statistic, 3),
+    p_value = round(.data$p_value, 4)
+  ) |>
+  dplyr::select(
+    .data$market, .data$trigger_comparison, .data$family, .data$ring,
+    .data$estimate, .data$std_error, .data$statistic, .data$p_value
+  )
+
+rentals_overlay_post_count <- get_result_row(
+  overlay_table,
+  market = "Rentals",
+  comparison_id = "500_vs_500_1000",
+  family = "post",
+  overlay = "count_overlay",
+  term = "near_bin:post"
+)
+rentals_overlay_post_hours <- get_result_row(
+  overlay_table,
+  market = "Rentals",
+  comparison_id = "500_vs_500_1000",
+  family = "post",
+  overlay = "hours_overlay",
+  term = "near_bin:post"
+)
+rentals_overlay_articles_count <- get_result_row(
+  overlay_table,
+  market = "Rentals",
+  comparison_id = "500_vs_500_1000",
+  family = "articles",
+  overlay = "count_overlay",
+  term = "near_bin:log_cumulative_articles"
+)
+rentals_overlay_articles_hours <- get_result_row(
+  overlay_table,
+  market = "Rentals",
+  comparison_id = "500_vs_500_1000",
+  family = "articles",
+  overlay = "hours_overlay",
+  term = "near_bin:log_cumulative_articles"
+)
+
+sales_flat_broad_nonflat <- get_result_row(
+  flat_split_table,
+  market = "Sales",
+  comparison_id = "500_vs_500_10km",
+  family = "baseline",
+  flat_group = "Non-flat"
+)
+sales_flat_broad_flat <- get_result_row(
+  flat_split_table,
+  market = "Sales",
+  comparison_id = "500_vs_500_10km",
+  family = "baseline",
+  flat_group = "Flat"
+)
+
+rentals_ring_post_0_250 <- get_result_row(
+  ring_deep_dive_table,
+  market = "Rentals",
+  trigger_comparison = "0-500m vs 500-10km",
+  trigger_family = "post",
+  term = "ring50-250m:post"
+)
+rentals_ring_post_250_500 <- get_result_row(
+  ring_deep_dive_table,
+  market = "Rentals",
+  trigger_comparison = "0-500m vs 500-10km",
+  trigger_family = "post",
+  term = "ring5250-500m:post"
+)
+rentals_ring_post_500_1000 <- get_result_row(
+  ring_deep_dive_table,
+  market = "Rentals",
+  trigger_comparison = "0-500m vs 500-10km",
+  trigger_family = "post",
+  term = "ring5500-1000m:post"
+)
+
+significant_intensity_term <- overlay_table |>
+  dplyr::filter(
+    .data$term %in% c("nearest_site_count_daily_avg", "nearest_site_hrs_daily_avg"),
+    !is.na(.data$p_value),
+    .data$p_value < 0.10
+  ) |>
+  dplyr::arrange(.data$p_value, dplyr::desc(abs(.data$statistic))) |>
+  dplyr::slice_head(n = 1)
+```
+
+```{r}
+knitr::kable(
+  deep_dive_targets_display,
+  caption = "Comparisons selected for follow-up. The notebook uses all preferred-spec cells with p < 0.10; if none qualify in a market, it uses the single strongest cell by |t|."
+)
+```
+
+The target list lines up with the story above. In this render, sales contribute `r sum(deep_dive_targets$market == "Sales")` follow-up cells and rentals contribute `r sum(deep_dive_targets$market == "Rentals")`. The point is not to widen the search, but to unpack the handful of preferred-spec cells that already looked most informative.
+
+The first mechanism check is descriptive. It asks whether the near and far groups in the selected comparisons simply sit next to different kinds of nearest overflow sites, measured here by average spill counts and spill hours at the nearest observed site. Those variables do **not** replace the main treatment; they only enter later as overlays on the preferred extensive-margin models.
+
+```{r}
+if (nrow(intensity_descriptives) > 0) {
+  knitr::kable(
+    intensity_descriptives_display,
+    caption = "Nearest-site spill intensity by near/far group for the deep-dive comparisons."
+  )
+}
+```
+
+The overlay regressions ask whether the proximity result survives once those nearest-site intensity measures are added. For rentals in `0-500m` versus `500-1000m`, the preferred `near_bin:post` coefficient is `r fmt_coef(row_value(rentals_overlay_post_count, "estimate"))` under the count overlay and `r fmt_coef(row_value(rentals_overlay_post_hours, "estimate"))` under the hours overlay; the `near_bin:log_cumulative_articles` term is `r fmt_coef(row_value(rentals_overlay_articles_count, "estimate"))` and `r fmt_coef(row_value(rentals_overlay_articles_hours, "estimate"))`. That is consistent with the core rental signal surviving the overlay rather than being absorbed by the nearest-site intensity controls. `r if (nrow(significant_intensity_term) > 0) glue::glue("The intensity controls themselves are mostly weak; the clearest exception is {row_value(significant_intensity_term, 'market')} {row_value(significant_intensity_term, 'comparison_label')} {pretty_overlay_term(row_value(significant_intensity_term, 'term'))} ({fmt_coef(row_value(significant_intensity_term, 'estimate'))}, p {fmt_p_value(row_value(significant_intensity_term, 'p_value'))}).") else "The intensity controls themselves are weak in this render."`
+
+```{r}
+if (nrow(overlay_table) > 0) {
+  knitr::kable(
+    overlay_table_display,
+  caption = "Preferred extensive-margin models after adding nearest-site spill intensity controls."
+  )
+}
+```
+
+The flat split changes the sales interpretation most sharply. In the broad `0-500m` versus `500-10km` baseline comparison, non-flats load `r fmt_coef(row_value(sales_flat_broad_nonflat, "estimate"))` (p `r fmt_p_value(row_value(sales_flat_broad_nonflat, "p_value"))`) while flats load `r fmt_coef(row_value(sales_flat_broad_flat, "estimate"))` (p `r fmt_p_value(row_value(sales_flat_broad_flat, "p_value"))`). `r if (isTRUE(sign(row_value(sales_flat_broad_nonflat, "estimate")) != sign(row_value(sales_flat_broad_flat, "estimate")))) "Those coefficients point in opposite directions." else "Those coefficients move in the same direction, but with clearly different magnitudes."` That makes the pooled sales baseline result look less like a single housing-market response and more like a composition result that differs sharply by property type.
+
+```{r}
+if (nrow(flat_split_table) > 0) {
+  knitr::kable(
+    flat_split_display,
+    caption = "Flat versus non-flat splits for the preferred specification in each deep-dive comparison."
+  )
+}
+```
+
+The ring deep dive is most informative for rentals in the `post` family. In the broad rental comparison, the post-break coefficient is `r fmt_coef(row_value(rentals_ring_post_0_250, "estimate"))` in `0-250m`, `r fmt_coef(row_value(rentals_ring_post_250_500, "estimate"))` in `250-500m`, and `r fmt_coef(row_value(rentals_ring_post_500_1000, "estimate"))` in `500-1000m`. That looks like a gradient that is strongest within 500m and then attenuates. The corresponding ring-by-articles rows are much noisier here, so the cleanest ring-based interpretation comes from the post-break margin rather than from the cumulative-articles margin.
+
+```{r}
+if (nrow(ring_deep_dive_table) > 0) {
+  knitr::kable(
+    ring_deep_dive_display,
+    caption = "Finer ring dose-response estimates for the deep-dive targets."
+  )
+}
+```
+
+## What Matters For Interpretation
+
+- The main treatment is **nearest-overflow proximity** rather than continuous spill intensity.
+- The simplified quartile heterogeneity check leaves that treatment intact and instead asks whether the near-far gap differs by the nearest site's pre-break spill-count quartile.
+- Rentals show the clearest exploratory salience pattern: the stronger signals sit in the broader `post` and `articles` interactions, not in baseline levels.
+- Sales baseline results depend heavily on the control group. The local-ring comparisons are positive, while the broad `500-10km` comparison turns negative.
+- The sales deep dives suggest that the broad baseline pattern is not uniform across property types: flats and non-flats move in opposite directions.
+- The `0-500m` vs `500-10km` comparison is built from raw transactions plus the 10km lookup universe, because the existing prior-to-transaction cross-sections stop at `1000m`.
+- Spill counts and spill hours appear only in the deep-dive mechanism overlays, where they are used to see whether the proximity result survives conditioning on nearest-site intensity.

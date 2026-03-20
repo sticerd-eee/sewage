@@ -131,7 +131,7 @@ dat <- dat_cs_sales |>
     !is.na(spill_count_daily_avg),
     is.finite(log_cumulative_articles),
     !is.na(lsoa),
-    !is.na(qtr_id),
+    !is.na(month_id),
     !is.na(latitude),
     !is.na(longitude),
     !is.na(property_type),
@@ -141,6 +141,7 @@ dat <- dat_cs_sales |>
   ) |>
   mutate(
     lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
     property_type = forcats::fct_drop(property_type),
     old_new = forcats::fct_drop(old_new),
     duration = forcats::fct_drop(duration)
@@ -202,7 +203,7 @@ dat_rental <- dat_cs_rentals |>
     !is.na(spill_count_daily_avg),
     is.finite(log_cumulative_articles),
     !is.na(lsoa),
-    !is.na(qtr_id),
+    !is.na(month_id),
     !is.na(latitude),
     !is.na(longitude),
     !is.na(property_type),
@@ -212,6 +213,7 @@ dat_rental <- dat_cs_rentals |>
   ) |>
   mutate(
     lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
     property_type = forcats::fct_drop(property_type)
   )
 
@@ -259,24 +261,43 @@ model_sale_1b <- fixest::feols(
 )
 cat("  Sales Model 1b (controls, no FE) estimated\n")
 
-# Model 2: LSOA + Quarter FE only
+# Model 2: MSOA + Month FE only
 model_sale_2 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + log_cumulative_articles +
-              spill_count_daily_avg:log_cumulative_articles | lsoa + qtr_id,
+  log_price ~ spill_count_daily_avg +
+              spill_count_daily_avg:log_cumulative_articles | msoa + month_id,
   data = dat,
   vcov = conley(cutoff = CONLEY_CUTOFF)
 )
-cat("  Sales Model 2 (FE only) estimated\n")
+cat("  Sales Model 2 (MSOA FE + month FE) estimated\n")
 
-# Model 3: LSOA + Quarter FE + property controls
+# Model 3: MSOA + Month FE + property controls
 model_sale_3 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + log_cumulative_articles +
+  log_price ~ spill_count_daily_avg +
               spill_count_daily_avg:log_cumulative_articles +
-              property_type + old_new + duration | lsoa + qtr_id,
+              property_type + old_new + duration | msoa + month_id,
   data = dat,
   vcov = conley(cutoff = CONLEY_CUTOFF)
 )
-cat("  Sales Model 3 (FE + controls) estimated\n")
+cat("  Sales Model 3 (MSOA FE + month FE + controls) estimated\n")
+
+# Model 4: LSOA + Month FE only
+model_sale_4 <- fixest::feols(
+  log_price ~ spill_count_daily_avg +
+              spill_count_daily_avg:log_cumulative_articles | lsoa + month_id,
+  data = dat,
+  vcov = conley(cutoff = CONLEY_CUTOFF)
+)
+cat("  Sales Model 4 (LSOA FE + month FE) estimated\n")
+
+# Model 5: LSOA + Month FE + property controls
+model_sale_5 <- fixest::feols(
+  log_price ~ spill_count_daily_avg +
+              spill_count_daily_avg:log_cumulative_articles +
+              property_type + old_new + duration | lsoa + month_id,
+  data = dat,
+  vcov = conley(cutoff = CONLEY_CUTOFF)
+)
+cat("  Sales Model 5 (LSOA FE + month FE + controls) estimated\n")
 
 # 5.2 Rental models -----------------------------------------------------------
 
@@ -299,24 +320,43 @@ model_rent_1b <- fixest::feols(
 )
 cat("  Rental Model 1b (controls, no FE) estimated\n")
 
-# Model 5: LSOA + Quarter FE only
+# Model 2: MSOA + Month FE only
 model_rent_2 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + log_cumulative_articles +
-              spill_count_daily_avg:log_cumulative_articles | lsoa + qtr_id,
+  log_price ~ spill_count_daily_avg +
+              spill_count_daily_avg:log_cumulative_articles | msoa + month_id,
   data = dat_rental,
   vcov = conley(cutoff = CONLEY_CUTOFF)
 )
-cat("  Rental Model 2 (FE only) estimated\n")
+cat("  Rental Model 2 (MSOA FE + month FE) estimated\n")
 
-# Model 6: LSOA + Quarter FE + property controls
+# Model 3: MSOA + Month FE + property controls
 model_rent_3 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + log_cumulative_articles +
+  log_price ~ spill_count_daily_avg +
               spill_count_daily_avg:log_cumulative_articles +
-              property_type + bedrooms + bathrooms | lsoa + qtr_id,
+              property_type + bedrooms + bathrooms | msoa + month_id,
   data = dat_rental,
   vcov = conley(cutoff = CONLEY_CUTOFF)
 )
-cat("  Rental Model 3 (FE + controls) estimated\n")
+cat("  Rental Model 3 (MSOA FE + month FE + controls) estimated\n")
+
+# Model 4: LSOA + Month FE only
+model_rent_4 <- fixest::feols(
+  log_price ~ spill_count_daily_avg +
+              spill_count_daily_avg:log_cumulative_articles | lsoa + month_id,
+  data = dat_rental,
+  vcov = conley(cutoff = CONLEY_CUTOFF)
+)
+cat("  Rental Model 4 (LSOA FE + month FE) estimated\n")
+
+# Model 5: LSOA + Month FE + property controls
+model_rent_5 <- fixest::feols(
+  log_price ~ spill_count_daily_avg +
+              spill_count_daily_avg:log_cumulative_articles +
+              property_type + bedrooms + bathrooms | lsoa + month_id,
+  data = dat_rental,
+  vcov = conley(cutoff = CONLEY_CUTOFF)
+)
+cat("  Rental Model 5 (LSOA FE + month FE + controls) estimated\n")
 
 cat(sprintf("  Using Conley SEs with %.0fm cutoff\n", CONLEY_CUTOFF * 1000))
 
@@ -342,16 +382,20 @@ gof_map <- tibble::tribble(
 
 # Add rows for fixed effects
 add_rows <- tibble::tribble(
-  ~term, ~`(1)`, ~`(2)`, ~`(3)`, ~`(4)`, ~`(5)`, ~`(6)`, ~`(7)`, ~`(8)`,
-  "Property controls", "No", "Yes", "No", "Yes", "No", "Yes", "No", "Yes",
-  "LSOA FE", "No", "No", "Yes", "Yes", "No", "No", "Yes", "Yes",
-  "Quarter FE", "No", "No", "Yes", "Yes", "No", "No", "Yes", "Yes"
+  ~term, ~`(1)`, ~`(2)`, ~`(3)`, ~`(4)`, ~`(5)`, ~`(6)`,
+  ~`(7)`, ~`(8)`, ~`(9)`, ~`(10)`, ~`(11)`, ~`(12)`,
+  "Property controls", "No", "Yes", "No", "Yes", "No", "Yes",
+  "No", "Yes", "No", "Yes", "No", "Yes",
+  "Location FE", "No", "No", "MSOA", "MSOA", "LSOA", "LSOA",
+  "No", "No", "MSOA", "MSOA", "LSOA", "LSOA",
+  "Time FE", "No", "No", "Month", "Month", "Month", "Month",
+  "No", "No", "Month", "Month", "Month", "Month"
 )
 attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--4) or the log weekly asking rent for rentals (columns 5--8). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. \\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative UK news coverage of sewage spills from LexisNexis from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. $\\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative UK news coverage of sewage spills from LexisNexis from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Set option to avoid siunitx wrapping
@@ -363,13 +407,17 @@ panels <- list(
     "(1)" = model_sale_1,
     "(2)" = model_sale_1b,
     "(3)" = model_sale_2,
-    "(4)" = model_sale_3
+    "(4)" = model_sale_3,
+    "(5)" = model_sale_4,
+    "(6)" = model_sale_5
   ),
   "House Rentals" = list(
-    "(5)" = model_rent_1,
-    "(6)" = model_rent_1b,
-    "(7)" = model_rent_2,
-    "(8)" = model_rent_3
+    "(7)" = model_rent_1,
+    "(8)" = model_rent_1b,
+    "(9)" = model_rent_2,
+    "(10)" = model_rent_3,
+    "(11)" = model_rent_4,
+    "(12)" = model_rent_5
   )
 )
 
@@ -403,7 +451,7 @@ table_latex <- sub(
 # Add colsep and font size for tighter column spacing
 table_latex <- sub(
   "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1width=0.9\\\\linewidth,\ncolsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
   table_latex
 )
 
