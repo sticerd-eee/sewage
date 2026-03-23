@@ -1,0 +1,4 @@
+interface:
+  display_name: "Architecture Strategist"
+  short_description: "Review architecture and design integrity"
+  default_prompt: "Use $architecture-strategist to review this change for architectural fit, boundaries, and design risk."

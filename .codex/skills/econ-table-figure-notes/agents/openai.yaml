@@ -1,0 +1,4 @@
+interface:
+  display_name: "Econ Table/Figure Notes"
+  short_description: "Write manuscript-grade economics table and figure notes"
+  default_prompt: "Use $econ-table-figure-notes to draft or tighten the caption, notes, and Source line for this economics table or figure while matching this repository's house style."

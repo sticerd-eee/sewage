@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reviewing Economics Manuscripts"
+  short_description: "Full-coverage parallel manuscript review with verifier-backed findings"
+  default_prompt: "Use $reviewing-economics-manuscripts to run a full-coverage parallel review of this manuscript, verify the strongest findings, and save a Markdown report plus JSON sidecar."

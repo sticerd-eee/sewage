@@ -1,0 +1,4 @@
+interface:
+  display_name: "Andrew Kane Gem Writer"
+  short_description: "Write Ruby gems in Andrew Kane's style"
+  default_prompt: "Use $andrew-kane-gem-writer to design or refactor this Ruby gem in Andrew Kane's style."

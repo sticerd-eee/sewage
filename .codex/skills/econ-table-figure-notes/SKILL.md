@@ -1,23 +1,13 @@
 ---
 name: econ-table-figure-notes
-description: This skill should be used when writing or revising captions, notes, and source lines for economics tables and figures, especially top-journal manuscripts, while preserving this repository's preferred house style.
+description: "Write or revise captions, notes, and `Source:` lines for economics tables and figures while preserving this repository's preferred house style. Use when Codex needs to draft, tighten, or review manuscript-quality notes for regression tables, descriptive tables, maps, heatmaps, or figures in this repository."
 ---
 
 # Economics Table And Figure Notes
 
 Use this skill to write table notes and figure notes that are self-contained, technically precise, and aligned with the note style already used in this repository.
 
-## When To Use
-
-Use this skill when asked to:
-
-- draft or rewrite a `Notes:` paragraph under a table or figure;
-- decide what belongs in the caption, the note, and the `Source:` line;
-- tighten notes to top-journal standards without losing the repository's preferred level of detail;
-- review whether a table or figure can be understood on its own;
-- write regression-table notes or notes for any other table or figure.
-
-## Load Order
+## Use the bundled references
 
 1. Read `references/repo_examples.md` first.
 2. Read `references/econ_guidance.md` second.

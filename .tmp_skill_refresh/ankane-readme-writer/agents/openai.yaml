@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ankane README Writer"
+  short_description: "Write Ankane-style README files for gems"
+  default_prompt: "Use $ankane-readme-writer to draft or tighten this Ruby gem README in Ankane style."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bug Reproduction Validator"
+  short_description: "Reproduce and validate reported bugs"
+  default_prompt: "Use $bug-reproduction-validator to verify this bug report and classify the outcome before fixing it."
