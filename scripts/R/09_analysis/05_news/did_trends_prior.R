@@ -28,7 +28,6 @@
 # 1. Configuration
 # ==============================================================================
 RAD <- 250L
-CONLEY_CUTOFF <- 0.5  # Conley SE cutoff in km (500m)
 
 
 # ==============================================================================
@@ -233,7 +232,7 @@ cat("\nEstimating regression models...\n")
 model_sale_1 <- fixest::feols(
   log_price ~ spill_count_daily_avg + post + spill_count_daily_avg:post,
   data = dat,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Sales Model 1 (no controls, no FE) estimated\n")
 
@@ -242,7 +241,7 @@ model_sale_1b <- fixest::feols(
   log_price ~ spill_count_daily_avg + post + spill_count_daily_avg:post +
     property_type + old_new + duration,
   data = dat,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Sales Model 1b (controls, no FE) estimated\n")
 
@@ -250,7 +249,7 @@ cat("  Sales Model 1b (controls, no FE) estimated\n")
 model_sale_2 <- fixest::feols(
   log_price ~ spill_count_daily_avg + spill_count_daily_avg:post | msoa + month_id,
   data = dat,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Sales Model 2 (MSOA FE + month FE) estimated\n")
 
@@ -259,7 +258,7 @@ model_sale_3 <- fixest::feols(
   log_price ~ spill_count_daily_avg + spill_count_daily_avg:post +
     property_type + old_new + duration | msoa + month_id,
   data = dat,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Sales Model 3 (MSOA FE + month FE + controls) estimated\n")
 
@@ -267,7 +266,7 @@ cat("  Sales Model 3 (MSOA FE + month FE + controls) estimated\n")
 model_sale_4 <- fixest::feols(
   log_price ~ spill_count_daily_avg + spill_count_daily_avg:post | lsoa + month_id,
   data = dat,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Sales Model 4 (LSOA FE + month FE) estimated\n")
 
@@ -276,7 +275,7 @@ model_sale_5 <- fixest::feols(
   log_price ~ spill_count_daily_avg + spill_count_daily_avg:post +
     property_type + old_new + duration | lsoa + month_id,
   data = dat,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Sales Model 5 (LSOA FE + month FE + controls) estimated\n")
 
@@ -286,7 +285,7 @@ cat("  Sales Model 5 (LSOA FE + month FE + controls) estimated\n")
 model_rent_1 <- fixest::feols(
   log_price ~ spill_count_daily_avg + post + spill_count_daily_avg:post,
   data = dat_rental,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Rental Model 1 (no controls, no FE) estimated\n")
 
@@ -295,7 +294,7 @@ model_rent_1b <- fixest::feols(
   log_price ~ spill_count_daily_avg + post + spill_count_daily_avg:post +
     property_type + bedrooms + bathrooms,
   data = dat_rental,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Rental Model 1b (controls, no FE) estimated\n")
 
@@ -303,7 +302,7 @@ cat("  Rental Model 1b (controls, no FE) estimated\n")
 model_rent_2 <- fixest::feols(
   log_price ~ spill_count_daily_avg + spill_count_daily_avg:post | msoa + month_id,
   data = dat_rental,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Rental Model 2 (MSOA FE + month FE) estimated\n")
 
@@ -312,7 +311,7 @@ model_rent_3 <- fixest::feols(
   log_price ~ spill_count_daily_avg + spill_count_daily_avg:post +
     property_type + bedrooms + bathrooms | msoa + month_id,
   data = dat_rental,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Rental Model 3 (MSOA FE + month FE + controls) estimated\n")
 
@@ -320,7 +319,7 @@ cat("  Rental Model 3 (MSOA FE + month FE + controls) estimated\n")
 model_rent_4 <- fixest::feols(
   log_price ~ spill_count_daily_avg + spill_count_daily_avg:post | lsoa + month_id,
   data = dat_rental,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Rental Model 4 (LSOA FE + month FE) estimated\n")
 
@@ -329,11 +328,11 @@ model_rent_5 <- fixest::feols(
   log_price ~ spill_count_daily_avg + spill_count_daily_avg:post +
     property_type + bedrooms + bathrooms | lsoa + month_id,
   data = dat_rental,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Rental Model 5 (LSOA FE + month FE + controls) estimated\n")
 
-cat(sprintf("  Using Conley SEs with %.0fm cutoff\n", CONLEY_CUTOFF * 1000))
+cat("  Using LSOA-clustered SEs\n")
 
 
 # ==============================================================================
@@ -370,7 +369,7 @@ attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Post is an indicator equal to one for transactions occurring on or after August 2022 (the peak month for Google Trends searches and news coverage of sewage spills). Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Conley spatial standard errors (500m cutoff) are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Post is an indicator equal to one for transactions occurring on or after August 2022 (the peak month for Google Trends searches and news coverage of sewage spills). Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Set option to avoid siunitx wrapping
@@ -405,7 +404,7 @@ table_latex <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 2,
+  fmt = 3,
   coef_map = coef_labels,
   gof_map = gof_map,
   add_rows = add_rows,

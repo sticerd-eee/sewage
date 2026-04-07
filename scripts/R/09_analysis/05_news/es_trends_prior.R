@@ -28,7 +28,6 @@
 # 1. Configuration
 # ==============================================================================
 RAD <- 250L
-CONLEY_CUTOFF <- 0.5  # Conley SE cutoff in km (500m)
 EVENT_MIN <- -4L
 EVENT_MAX <- 5L
 EVENT_REF <- -1L
@@ -263,7 +262,7 @@ event_term <- paste0("i(event_qtr, spill_count_daily_avg, ref = ", EVENT_REF, ")
 model_sale_1 <- fixest::feols(
   as.formula(paste0("log_price ~ ", event_term)),
   data = dat,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Sales Model 1 (no controls, no FE) estimated\n")
 
@@ -271,7 +270,7 @@ cat("  Sales Model 1 (no controls, no FE) estimated\n")
 model_sale_2 <- fixest::feols(
   as.formula(paste0("log_price ~ ", event_term, " | lsoa + qtr_id")),
   data = dat,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Sales Model 2 (FE only) estimated\n")
 
@@ -282,7 +281,7 @@ model_sale_3 <- fixest::feols(
     " + property_type + old_new + duration | lsoa + qtr_id"
   )),
   data = dat,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Sales Model 3 (FE + controls) estimated\n")
 
@@ -292,7 +291,7 @@ cat("  Sales Model 3 (FE + controls) estimated\n")
 model_rent_1 <- fixest::feols(
   as.formula(paste0("log_price ~ ", event_term)),
   data = dat_rental,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Rental Model 1 (no controls, no FE) estimated\n")
 
@@ -300,7 +299,7 @@ cat("  Rental Model 1 (no controls, no FE) estimated\n")
 model_rent_2 <- fixest::feols(
   as.formula(paste0("log_price ~ ", event_term, " | lsoa + qtr_id")),
   data = dat_rental,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Rental Model 2 (FE only) estimated\n")
 
@@ -311,11 +310,11 @@ model_rent_3 <- fixest::feols(
     " + property_type + bedrooms + bathrooms | lsoa + qtr_id"
   )),
   data = dat_rental,
-  vcov = conley(cutoff = CONLEY_CUTOFF)
+  vcov = ~lsoa
 )
 cat("  Rental Model 3 (FE + controls) estimated\n")
 
-cat(sprintf("  Using Conley SEs with %.0fm cutoff\n", CONLEY_CUTOFF * 1000))
+cat("  Using LSOA-clustered SEs\n")
 
 
 # ==============================================================================
@@ -380,7 +379,7 @@ attr(add_rows, "position") <- "coef_end"
 custom_notes <- paste0(
   "note{}={\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Event time is measured in quarters relative to the Google Trends peak quarter. Estimates report the interaction between daily average spill count and event-time dummies, with the quarter immediately before the peak (t = -1) as the reference period. ",
   sprintf("The event window is [%d, %d] quarters. ", EVENT_MIN, EVENT_MAX),
-  "Daily avg. spill count measures the average total number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Conley spatial standard errors (500m cutoff) in parentheses. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "Daily avg. spill count measures the average total number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Standard errors clustered at the LSOA level in parentheses. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Set option to avoid siunitx wrapping
