@@ -74,10 +74,10 @@ comparison_specs <- tibble::tribble(
   ~comparison_id, ~comparison_label,        ~near_min, ~near_max, ~far_min, ~far_max,
   "250_vs_250_500",   "0-250m vs 250-500m",    0,  250,  250,   500,
   "250_vs_250_1000",  "0-250m vs 250-1000m",   0,  250,  250,  1000,
+  "250_vs_500_1000",  "0-250m vs 500-1000m",   0,  250,  500,  1000,
   "500_vs_500_1000",  "0-500m vs 500-1000m",   0,  500,  500,  1000,
   "500_vs_1000_2000", "0-500m vs 1000-2000m",  0,  500, 1000,  2000,
-  "500_vs_500_2000",  "0-500m vs 500-2000m",   0,  500,  500,  2000,
-  "500_vs_500_10km",  "0-500m vs 500-10km",    0,  500,  500, 10000
+  "500_vs_500_2000",  "0-500m vs 500-2000m",   0,  500,  500,  2000
 )
 
 ring_levels <- c("0-250m", "250-500m", "500-1000m", "1000-2000m", "2000-10000m")
@@ -608,11 +608,11 @@ comparison_context_note <- function(comparison_id) {
   dplyr::case_match(
     comparison_id,
     "250_vs_250_500" ~ "Because the far bin is still very local, this comparison is best read as a fine spatial gradient rather than as a wider market comparison.",
-    "250_vs_250_1000" ~ "This is a middle-ground control group: broader than the adjacent ring, but still local enough that composition should move less sharply than in the 10km comparison.",
+    "250_vs_250_1000" ~ "This is a middle-ground control group: broader than the adjacent ring, but still local enough that it remains a local comparison rather than a wider market benchmark.",
+    "250_vs_500_1000" ~ "This comparison skips the 250-500m ring altogether, so it is useful for asking whether the nearest 250m differs from properties that are still local but no longer adjacent.",
     "500_vs_500_1000" ~ "This comparison checks whether any near-overflow pattern survives once the near bin is widened to 500m while the control group remains fairly local.",
     "500_vs_1000_2000" ~ "This comparison keeps the near bin fixed at 500m but moves the control group just beyond the very local ring, which makes it a useful mid-range benchmark.",
-    "500_vs_500_2000" ~ "This is a wider mid-range control group than `0-500m vs 500-1000m`, but it is still much more local than the 10km comparison.",
-    "500_vs_500_10km" ~ "This is the hardest control group because the far bin reaches into the wider market. A sign change here usually means the result depends on the choice of control group, not just on very local distance.",
+    "500_vs_500_2000" ~ "This is a wider mid-range control group than `0-500m vs 500-1000m`, but it still stays within a local-to-mid-range distance window.",
     .default = "This comparison is best read as one point on the near-versus-far gradient."
   )
 }
@@ -1332,7 +1332,7 @@ run_intensity_overlay <- function(sample, trigger_row, intensity_data) {
   market_key <- tolower(as.character(market))
   spec_row <- spec_grid |> dplyr::filter(.data$spec_id == PREFERRED_SPEC_ID)
 
-  if (!comparison_id %in% c("250_vs_250_500", "250_vs_250_1000", "500_vs_500_1000")) {
+  if (!comparison_id %in% c("250_vs_250_500", "250_vs_250_1000", "250_vs_500_1000", "500_vs_500_1000")) {
     return(NULL)
   }
 
@@ -1512,29 +1512,29 @@ readr::write_csv(quartile_cell_counts, file.path(OUTPUT_DIR, "quartile_cell_coun
 sales_overview <- get_result_row(market_overview, market = "Sales")
 rentals_overview <- get_result_row(market_overview, market = "Rentals")
 
-sales_broad_near <- get_result_row(
+sales_skip_near <- get_result_row(
   sample_summaries,
   market = "Sales",
-  comparison_id = "500_vs_500_10km",
-  group_label = "0-500m"
+  comparison_id = "250_vs_500_1000",
+  group_label = "0-250m"
 )
-sales_broad_far <- get_result_row(
+sales_skip_far <- get_result_row(
   sample_summaries,
   market = "Sales",
-  comparison_id = "500_vs_500_10km",
-  group_label = "(500, 10000]m"
+  comparison_id = "250_vs_500_1000",
+  group_label = "(500, 1000]m"
 )
-rentals_broad_near <- get_result_row(
+rentals_skip_near <- get_result_row(
   sample_summaries,
   market = "Rentals",
-  comparison_id = "500_vs_500_10km",
-  group_label = "0-500m"
+  comparison_id = "250_vs_500_1000",
+  group_label = "0-250m"
 )
-rentals_broad_far <- get_result_row(
+rentals_skip_far <- get_result_row(
   sample_summaries,
   market = "Rentals",
-  comparison_id = "500_vs_500_10km",
-  group_label = "(500, 10000]m"
+  comparison_id = "250_vs_500_1000",
+  group_label = "(500, 1000]m"
 )
 
 sales_local_baseline <- get_result_row(
@@ -1543,10 +1543,10 @@ sales_local_baseline <- get_result_row(
   comparison_id = "250_vs_250_500",
   family = "baseline"
 )
-sales_broad_baseline <- get_result_row(
+sales_skip_baseline <- get_result_row(
   preferred_results,
   market = "Sales",
-  comparison_id = "500_vs_500_10km",
+  comparison_id = "250_vs_500_1000",
   family = "baseline"
 )
 sales_mid_baseline <- get_result_row(
@@ -1555,16 +1555,16 @@ sales_mid_baseline <- get_result_row(
   comparison_id = "500_vs_500_1000",
   family = "baseline"
 )
-rentals_broad_post <- get_result_row(
+rentals_skip_post <- get_result_row(
   preferred_results,
   market = "Rentals",
-  comparison_id = "500_vs_500_10km",
+  comparison_id = "250_vs_500_1000",
   family = "post"
 )
-rentals_broad_articles <- get_result_row(
+rentals_skip_articles <- get_result_row(
   preferred_results,
   market = "Rentals",
-  comparison_id = "500_vs_500_10km",
+  comparison_id = "250_vs_500_1000",
   family = "articles"
 )
 rentals_mid_post <- get_result_row(
@@ -1664,9 +1664,9 @@ quartile_top_table <- quartile_heterogeneity_results |>
 ::: {.callout-note appearance="simple"}
 ## Main Takeaway
 
-The preferred-spec pattern is sharpest in rentals, not in sales levels. In the broad `0-500m` versus `500-10km` comparison, the rental near-far gap shifts after the August 2022 break (`near_bin:post` = `r fmt_coef(row_value(rentals_broad_post, "estimate"))`, p `r fmt_p_value(row_value(rentals_broad_post, "p_value"))`) and with cumulative news coverage (`near_bin:log_cumulative_articles` = `r fmt_coef(row_value(rentals_broad_articles, "estimate"))`, p `r fmt_p_value(row_value(rentals_broad_articles, "p_value"))`).
+The preferred-spec pattern is sharpest in rentals, not in sales levels. In the non-adjacent `0-250m` versus `500-1000m` comparison, the rental near-far gap shifts after the August 2022 break (`near_bin:post` = `r fmt_coef(row_value(rentals_skip_post, "estimate"))`, p `r fmt_p_value(row_value(rentals_skip_post, "p_value"))`) and with cumulative news coverage (`near_bin:log_cumulative_articles` = `r fmt_coef(row_value(rentals_skip_articles, "estimate"))`, p `r fmt_p_value(row_value(rentals_skip_articles, "p_value"))`).
 
-Sales are more sensitive to the choice of control group. In the very local `0-250m` versus `250-500m` comparison the preferred baseline coefficient is `r fmt_coef(row_value(sales_local_baseline, "estimate"))`, while against the broad `500-10km` control it is `r fmt_coef(row_value(sales_broad_baseline, "estimate"))`. `r if (isTRUE(sign(row_value(sales_local_baseline, "estimate")) != sign(row_value(sales_broad_baseline, "estimate")))) "The sign flips between those two comparisons." else "The sign does not flip, but the magnitude changes noticeably."` That makes the sales pattern look more like a composition or heterogeneity result than a single uniform local discount.
+Sales are more sensitive to the choice of control group. In the very local `0-250m` versus `250-500m` comparison the preferred baseline coefficient is `r fmt_coef(row_value(sales_local_baseline, "estimate"))`, while against the skipped-ring `0-250m` versus `500-1000m` control it is `r fmt_coef(row_value(sales_skip_baseline, "estimate"))`. `r if (isTRUE(sign(row_value(sales_local_baseline, "estimate")) != sign(row_value(sales_skip_baseline, "estimate")))) "The sign flips between those two comparisons." else "The sign does not flip, but the magnitude changes noticeably."` That makes the sales pattern look more like a composition or heterogeneity result than a single uniform local discount.
 :::
 
 ## Market Overview
@@ -1685,7 +1685,7 @@ knitr::kable(
 
 ## Sample Sizes By Comparison
 
-This table is where the comparison design becomes concrete. As the far bin widens, the control group stops looking like a neighbouring ring and starts looking like a broader market benchmark. In sales, the mean price in the `0-500m` side of the `500-10km` comparison is about `r fmt_big_n(row_value(sales_broad_near, "mean_price"))`, versus `r fmt_big_n(row_value(sales_broad_far, "mean_price"))` in the far bin. Rentals show the same pattern: about `r fmt_big_n(row_value(rentals_broad_near, "mean_price"))` in the near bin and `r fmt_big_n(row_value(rentals_broad_far, "mean_price"))` in the far bin. That is why the `500-10km` rows are informative but also much more demanding than the local-ring comparisons.
+This table is where the comparison design becomes concrete. Some rows keep the far bin adjacent to the treatment ring, while others skip outward to a non-adjacent but still local control group. In sales, the mean price in the `0-250m` side of the `0-250m` versus `500-1000m` comparison is about `r fmt_big_n(row_value(sales_skip_near, "mean_price"))`, versus `r fmt_big_n(row_value(sales_skip_far, "mean_price"))` in the far bin. Rentals show the same pattern: about `r fmt_big_n(row_value(rentals_skip_near, "mean_price"))` in the near bin and `r fmt_big_n(row_value(rentals_skip_far, "mean_price"))` in the far bin. That is why the skipped-ring rows are informative: they separate the nearest properties from the next clearly more distant local band without jumping all the way to a wider-market benchmark.
 
 ```{r}
 knitr::kable(
@@ -1696,7 +1696,7 @@ knitr::kable(
 
 ## Preferred-Spec Overview
 
-This overview now shows both `LSOA + month FE + controls` and `MSOA + month FE + controls`, so the fine-geography specification can be compared directly with a coarser spatial unit. The broad sales `0-500m` versus `500-10km` baseline result is still the single most precise `LSOA` estimate (`r fmt_coef(row_value(top_ranked, "estimate"))`, p `r fmt_p_value(row_value(top_ranked, "p_value"))`), but the main point of this section is whether those market-by-comparison patterns survive when the fixed effects are moved up from `LSOA` to `MSOA`. The two added mid-range comparisons still sit between the tight local rings and the 10km benchmark, which makes it easier to see where that sensitivity starts to matter.
+This overview now shows both `LSOA + month FE + controls` and `MSOA + month FE + controls`, so the fine-geography specification can be compared directly with a coarser spatial unit. The single most precise `LSOA` estimate in this render is `r row_value(top_ranked, "market")` `r row_value(top_ranked, "comparison_label")` `r pretty_family_label(row_value(top_ranked, "family"))` (`r fmt_coef(row_value(top_ranked, "estimate"))`, p `r fmt_p_value(row_value(top_ranked, "p_value"))`), but the main point of this section is whether those market-by-comparison patterns survive when the fixed effects are moved up from `LSOA` to `MSOA`. The skipped-ring and mid-range comparisons make it easier to see where sensitivity starts to matter without relying on a single very broad benchmark.
 
 ```{r}
 make_coefficient_plot(
@@ -1961,17 +1961,17 @@ rentals_overlay_articles_hours <- get_result_row(
   term = "near_bin:log_cumulative_articles"
 )
 
-sales_flat_broad_nonflat <- get_result_row(
+sales_flat_skip_nonflat <- get_result_row(
   flat_split_table,
   market = "Sales",
-  comparison_id = "500_vs_500_10km",
+  comparison_id = "250_vs_500_1000",
   family = "baseline",
   flat_group = "Non-flat"
 )
-sales_flat_broad_flat <- get_result_row(
+sales_flat_skip_flat <- get_result_row(
   flat_split_table,
   market = "Sales",
-  comparison_id = "500_vs_500_10km",
+  comparison_id = "250_vs_500_1000",
   family = "baseline",
   flat_group = "Flat"
 )
@@ -1979,21 +1979,21 @@ sales_flat_broad_flat <- get_result_row(
 rentals_ring_post_0_250 <- get_result_row(
   ring_deep_dive_table,
   market = "Rentals",
-  trigger_comparison = "0-500m vs 500-10km",
+  trigger_comparison = "0-250m vs 500-1000m",
   trigger_family = "post",
   term = "ring50-250m:post"
 )
 rentals_ring_post_250_500 <- get_result_row(
   ring_deep_dive_table,
   market = "Rentals",
-  trigger_comparison = "0-500m vs 500-10km",
+  trigger_comparison = "0-250m vs 500-1000m",
   trigger_family = "post",
   term = "ring5250-500m:post"
 )
 rentals_ring_post_500_1000 <- get_result_row(
   ring_deep_dive_table,
   market = "Rentals",
-  trigger_comparison = "0-500m vs 500-10km",
+  trigger_comparison = "0-250m vs 500-1000m",
   trigger_family = "post",
   term = "ring5500-1000m:post"
 )
@@ -2039,7 +2039,7 @@ if (nrow(overlay_table) > 0) {
 }
 ```
 
-The flat split changes the sales interpretation most sharply. In the broad `0-500m` versus `500-10km` baseline comparison, non-flats load `r fmt_coef(row_value(sales_flat_broad_nonflat, "estimate"))` (p `r fmt_p_value(row_value(sales_flat_broad_nonflat, "p_value"))`) while flats load `r fmt_coef(row_value(sales_flat_broad_flat, "estimate"))` (p `r fmt_p_value(row_value(sales_flat_broad_flat, "p_value"))`). `r if (isTRUE(sign(row_value(sales_flat_broad_nonflat, "estimate")) != sign(row_value(sales_flat_broad_flat, "estimate")))) "Those coefficients point in opposite directions." else "Those coefficients move in the same direction, but with clearly different magnitudes."` That makes the pooled sales baseline result look less like a single housing-market response and more like a composition result that differs sharply by property type.
+The flat split changes the sales interpretation most sharply. In the skipped-ring `0-250m` versus `500-1000m` baseline comparison, non-flats load `r fmt_coef(row_value(sales_flat_skip_nonflat, "estimate"))` (p `r fmt_p_value(row_value(sales_flat_skip_nonflat, "p_value"))`) while flats load `r fmt_coef(row_value(sales_flat_skip_flat, "estimate"))` (p `r fmt_p_value(row_value(sales_flat_skip_flat, "p_value"))`). `r if (isTRUE(sign(row_value(sales_flat_skip_nonflat, "estimate")) != sign(row_value(sales_flat_skip_flat, "estimate")))) "Those coefficients point in opposite directions." else "Those coefficients move in the same direction, but with clearly different magnitudes."` That makes the pooled sales baseline result look less like a single housing-market response and more like a composition result that differs sharply by property type.
 
 ```{r}
 if (nrow(flat_split_table) > 0) {
@@ -2050,7 +2050,7 @@ if (nrow(flat_split_table) > 0) {
 }
 ```
 
-The ring deep dive is most informative for rentals in the `post` family. In the broad rental comparison, the post-break coefficient is `r fmt_coef(row_value(rentals_ring_post_0_250, "estimate"))` in `0-250m`, `r fmt_coef(row_value(rentals_ring_post_250_500, "estimate"))` in `250-500m`, and `r fmt_coef(row_value(rentals_ring_post_500_1000, "estimate"))` in `500-1000m`. That looks like a gradient that is strongest within 500m and then attenuates. The corresponding ring-by-articles rows are much noisier here, so the cleanest ring-based interpretation comes from the post-break margin rather than from the cumulative-articles margin.
+The ring deep dive is most informative for rentals in the `post` family. In the `0-250m` versus `500-1000m` rental comparison, the post-break coefficient is `r fmt_coef(row_value(rentals_ring_post_0_250, "estimate"))` in `0-250m`, `r fmt_coef(row_value(rentals_ring_post_250_500, "estimate"))` in `250-500m`, and `r fmt_coef(row_value(rentals_ring_post_500_1000, "estimate"))` in `500-1000m`. That looks like a gradient that is strongest within 250m, weaker in the skipped middle ring, and then attenuated further by `500-1000m`. The corresponding ring-by-articles rows are much noisier here, so the cleanest ring-based interpretation comes from the post-break margin rather than from the cumulative-articles margin.
 
 ```{r}
 if (nrow(ring_deep_dive_table) > 0) {
@@ -2066,7 +2066,7 @@ if (nrow(ring_deep_dive_table) > 0) {
 - The main treatment is **nearest-overflow proximity** rather than continuous spill intensity.
 - The simplified quartile heterogeneity check leaves that treatment intact and instead asks whether the near-far gap differs by the nearest site's pre-break spill-count quartile.
 - Rentals show the clearest exploratory salience pattern: the stronger signals sit in the broader `post` and `articles` interactions, not in baseline levels.
-- Sales baseline results depend heavily on the control group. The local-ring comparisons are positive, while the broad `500-10km` comparison turns negative.
-- The sales deep dives suggest that the broad baseline pattern is not uniform across property types: flats and non-flats move in opposite directions.
-- The `0-500m` vs `500-10km` comparison is built from raw transactions plus the 10km lookup universe, because the existing prior-to-transaction cross-sections stop at `1000m`.
+- Sales baseline results depend heavily on the control group. The tight local rings and the skipped-ring `0-250m` versus `500-1000m` comparison do not line up cleanly.
+- The sales deep dives suggest that the skipped-ring baseline pattern is not uniform across property types: flats and non-flats move in opposite directions.
+- The `0-250m` vs `500-1000m` comparison stays within the existing `1000m` cross-section support, so it can be carried through the same overlay follow-ups as the other local specifications.
 - Spill counts and spill hours appear only in the deep-dive mechanism overlays, where they are used to see whether the proximity result survives conditioning on nearest-site intensity.
