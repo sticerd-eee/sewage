@@ -55,7 +55,7 @@ setup_logging <- function() {
 ############################################################
 
 CONFIG <- list(
-  years = 2021:2023,
+  years = 2021:2024,
   data_path_annual = here::here(
     "data", "processed", "annual_return_edm.parquet"
   ),

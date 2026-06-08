@@ -1,8 +1,8 @@
 # ==============================================================================
-# Individual EDM Raw File Converter (2021-2023)
+# Individual EDM Raw File Converter (2021-2024)
 # ==============================================================================
 #
-# Purpose: Load per-company raw EDM files for 2021-2023, normalise workbook and
+# Purpose: Load per-company raw EDM files for 2021-2024, normalise workbook and
 #          CSV format differences, and export per-company plus year-level
 #          parquet outputs for downstream individual-EDM combination steps.
 #
@@ -18,7 +18,7 @@
 # Outputs:
 #   - data/processed/edm_data_2021_2023/{year}_{water_company}.parquet
 #   - data/processed/edm_data_2021_2023/combined_edm_data_{year}.parquet
-#   - output/log/02_convert_individ_raw_data_to_rdata_2021-2023.log
+#   - output/log/02_convert_individ_raw_data_to_rdata.log
 #
 # ==============================================================================
 
@@ -47,7 +47,7 @@ REQUIRED_PACKAGES <- c(
 
 LOG_FILE <- here::here(
   "output", "log",
-  "02_convert_individ_raw_data_to_rdata_2021-2023.log"
+  "02_convert_individ_raw_data_to_rdata.log"
 )
 
 check_required_packages(REQUIRED_PACKAGES)
@@ -75,7 +75,7 @@ initialise_logging <- function() {
 ############################################################
 
 CONFIG <- list(
-  years = 2021:2023,
+  years = 2021:2024,
   input_dir = here::here("data", "raw", "edm_data"),
   output_dir = here::here("data", "processed"),
   water_company_names = c(

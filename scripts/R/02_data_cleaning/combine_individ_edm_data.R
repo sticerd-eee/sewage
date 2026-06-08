@@ -1,8 +1,8 @@
 # ==============================================================================
-# Individual EDM Parquet Combiner (2021-2023)
+# Individual EDM Parquet Combiner (2021-2024)
 # ==============================================================================
 #
-# Purpose: Combine the per-company EDM Parquet files for 2021-2023, standardise
+# Purpose: Combine the per-company EDM Parquet files for 2021-2024, standardise
 #          their schema and datetime fields, and export the canonical combined
 #          dataset used by downstream spill analysis steps.
 #
@@ -15,7 +15,7 @@
 #
 # Outputs:
 #   - data/processed/combined_edm_data.parquet
-#   - output/log/03_combine_individ_edm_data_2021-2023.log
+#   - output/log/03_combine_individ_edm_data.log
 #
 # ==============================================================================
 
@@ -43,7 +43,7 @@ REQUIRED_PACKAGES <- c(
 
 LOG_FILE <- here::here(
   "output", "log",
-  "03_combine_individ_edm_data_2021-2023.log"
+  "03_combine_individ_edm_data.log"
 )
 
 check_required_packages(REQUIRED_PACKAGES)
@@ -132,7 +132,7 @@ initialise_parsed_datetime_columns <- function(df, parsed_cols, tz = "UTC") {
 ############################################################
 
 CONFIG <- list(
-  years = 2021:2023,
+  years = 2021:2024,
   input_dir = here::here("data", "processed", "edm_data_2021_2023"),
   processed_dir = here::here("data", "processed"),
   water_company_names = c(
@@ -606,7 +606,7 @@ main <- function() {
       initialise_logging()
 
       # Load data
-      logger::log_info("===== Starting Individual EDM Data Processing (2021-2023) =====")
+      logger::log_info("===== Starting Individual EDM Data Processing (2021-2024) =====")
       raw_data <- load_data()
 
       # Process data

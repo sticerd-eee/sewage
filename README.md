@@ -52,7 +52,7 @@ The only restricted datasets currently used in this project are `data/raw/zoopla
 
 | Data Directory | Source | Access | Notes | Citation |
 | --- | --- | --- | --- | --- |
-| `data/raw/edm_data/` | UK Government: Environment Agency | Public | Historical company EDM files (2021-2023) plus live API snapshots for the nine England companies in the National Storm Overflows Hub feed (2024+). | [Environment Agency EDM](https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac) |
+| `data/raw/edm_data/` | UK Government: Environment Agency | Public | Historical company EDM files (2021-2024) plus live API snapshots for the nine England companies in the National Storm Overflows Hub feed (2024+). | [Environment Agency EDM](https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac) |
 | `data/raw/ea_consents/` | UK Government: Environment Agency | Public | Site locations, permit details, and discharge consent information under the Environmental Permit Regulations. | [EA Consents Data](https://www.data.gov.uk/dataset/55b8eaa8-60df-48a8-929a-060891b7a109) |
 | `data/raw/haduk_rainfall_data/` | UK Government: Met Office | Public | Daily precipitation data used to construct rainfall indicators and identify dry spills. | [Met Office HadUK-Grid](https://www.metoffice.gov.uk/research/climate/maps-and-data/data/haduk-grid/haduk-grid) |
 | `data/raw/lr_house_price/` | UK Government: HM Land Registry | Public | Property transaction records for England and Wales used for the sales-side analysis. | [Price Paid Data](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads) |
@@ -65,7 +65,7 @@ The only restricted datasets currently used in this project are `data/raw/zoopla
 - **Source:** [UK Government: Environment Agency](https://environment.data.gov.uk/dataset/21e15f12-0df8-4bfc-b763-45226c16a8ac)
 - **Format:** XLSX, XLSB, CSV (historical), JSON (API)
 - **Coverage:** 2021-2024+ individual sewage overflow events
-- **Notes:** Historical data (2021-2023) comes from annual EDM archives containing company files. Live API snapshots (2024+) come from the England-only National Storm Overflows Hub feed for nine companies and are stored under `data/raw/edm_data/raw_api_responses/`. Welsh Water's separate public map is not part of this live API pipeline.
+- **Notes:** Historical data (2021-2024) comes from annual EDM archives containing company files. Live API snapshots (2024+) come from the England-only National Storm Overflows Hub feed for nine companies and are stored under `data/raw/edm_data/raw_api_responses/`. Welsh Water's separate public map is not part of this live API pipeline.
 
 #### Consented Discharges to Controlled Waters with Conditions
 

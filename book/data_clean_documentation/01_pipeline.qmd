@@ -108,8 +108,8 @@ digraph DataPipeline {
     label = '02 Cleaning & Standardisation Layer';
     style='filled,rounded'; fillcolor='#eff6ff'; color='#3b82f6'; fontcolor='#1e3a8a'; penwidth=2;
     node [style='filled,rounded', rx=6, ry=6, fillcolor='#e0e7ff', color='#6366f1', penwidth=2, fontcolor='#312e81'];
-    S02 [label='convert_individ_raw_data_to_rdata_2021-2023.R\\nConverts raw EDM data files to standardised Parquet format'];
-    S03 [label='combine_individ_edm_data_2021-2023.R\\nCombines individual water company Parquet files into single dataset'];
+    S02 [label='convert_individ_raw_data_to_rdata.R\\nConverts raw EDM data files to standardised Parquet format'];
+    S03 [label='combine_individ_edm_data.R\\nCombines individual water company Parquet files into single dataset'];
     S05 [label='process_edm_api_json_to_parquet_2024_onwards.R\\nProcesses raw API JSON data into standardised Parquet files'];
     S06 [label='combine_api_edm_data_2024_onwards.R\\nCombines individual water company API Parquet files'];
     S08 [label='combine_annual_return_data.R\\nCleans and combines annual sewage spill return data'];
@@ -250,8 +250,8 @@ digraph DataPipeline {
 
 **Raw Data Conversion**
 
-- **script_name**: `convert_individ_raw_data_to_rdata_2021-2023.R`
-- **purpose**: Converts and cleans individual raw EDM data files from CSV/Excel formats to standardised Parquet format for years 2021-2023.
+- **script_name**: `convert_individ_raw_data_to_rdata.R`
+- **purpose**: Converts and cleans individual raw EDM data files from CSV/Excel formats to standardised Parquet format for years 2021-2024.
 - **inputs**: `["data/raw/edm_data/YYYY_company_name_edm.*"]`
 - **outputs**: 
   - `"data/processed/edm_data_2021_2023/*.parquet"`
@@ -259,8 +259,8 @@ digraph DataPipeline {
 
 **Individual EDM Data Combination**
 
-- **script_name**: `combine_individ_edm_data_2021-2023.R`
-- **purpose**: Combines and cleans individual water company Parquet files from 2021-2023 into a single consolidated dataset with standardised datetime parsing.
+- **script_name**: `combine_individ_edm_data.R`
+- **purpose**: Combines and cleans individual water company Parquet files from 2021-2024 into a single consolidated dataset with standardised datetime parsing.
 - **inputs**: `["data/processed/edm_data_2021_2023/*.parquet"]`
 - **outputs**: `["data/processed/combined_edm_data.parquet"]`
 

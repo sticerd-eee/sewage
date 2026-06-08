@@ -57,8 +57,8 @@ CONFIG <- list(
     "data", "processed", "annual_return_edm.parquet"),
   lookup_data_path = here::here(
     "data", "processed", "annual_return_lookup.parquet"),
-  availability_years = 2021:2023,
-  metadata_years = 2021:2023,
+  availability_years = 2021:2024,
+  metadata_years = 2021:2024,
   unique_spills_parquet = here::here(
     "data", "processed", "unique_spill_sites.parquet"),
   unique_spills_xlsx = here::here(
@@ -336,7 +336,7 @@ parse_bng_coordinates <- function(ngr) {
 #' @param data Matched event-annual dataframe
 #' @param availability_years Integer vector of availability years
 #' @return One row per matched site_id with availability flags and fallback fields
-build_matched_site_data <- function(data, availability_years = 2021:2023) {
+build_matched_site_data <- function(data, availability_years = 2021:2024) {
   matched_data <- data %>%
     filter(!is.na(site_id), year %in% availability_years) %>%
     mutate(
@@ -396,7 +396,7 @@ build_matched_site_data <- function(data, availability_years = 2021:2023) {
 map_annual_to_canonical_sites <- function(
     annual_data,
     lookup_data,
-    metadata_years = 2021:2023
+    metadata_years = 2021:2024
 ) {
   id_cols <- paste0("site_id_", metadata_years)
 
@@ -462,7 +462,7 @@ map_annual_to_canonical_sites <- function(
 #' @param data Annual-return site-year dataframe with canonical site_id
 #' @param metadata_years Integer vector of metadata years
 #' @return One row per site_id with metadata columns used in unique_spill_sites
-summarise_site_metadata <- function(data, metadata_years = 2021:2023) {
+summarise_site_metadata <- function(data, metadata_years = 2021:2024) {
   site_year_meta <- data %>%
     mutate(
       water_company = normalise_missing_character(water_company),
@@ -586,8 +586,8 @@ summarise_site_metadata <- function(data, metadata_years = 2021:2023) {
 apply_nlo_carryforward <- function(
     unique_sites,
     matched_data,
-    availability_years = 2021:2023,
-    metadata_years = 2021:2023
+    availability_years = 2021:2024,
+    metadata_years = 2021:2024
 ) {
   availability_cols <- paste0("available_year_", availability_years)
   reason_cols <- paste0("edm_operation_reason_", metadata_years)
@@ -706,8 +706,8 @@ assemble_unique_sites <- function(
     annual_metadata,
     matched_sites,
     matched_data,
-    availability_years = 2021:2023,
-    metadata_years = 2021:2023
+    availability_years = 2021:2024,
+    metadata_years = 2021:2024
 ) {
   availability_cols <- paste0("available_year_", availability_years)
   percent_cols <- paste0("edm_operation_percent_", metadata_years)
@@ -799,8 +799,8 @@ assemble_unique_sites <- function(
 #' @return NULL
 log_output_diagnostics <- function(
     unique_sites,
-    availability_years = 2021:2023,
-    metadata_years = 2021:2023
+    availability_years = 2021:2024,
+    metadata_years = 2021:2024
 ) {
   availability_cols <- paste0("available_year_", availability_years)
   reason_cols <- paste0("edm_operation_reason_", metadata_years)

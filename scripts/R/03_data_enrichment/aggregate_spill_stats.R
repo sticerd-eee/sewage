@@ -65,7 +65,7 @@ CONFIG <- list(
     "data", "processed", "annual_return_edm.parquet"
   ),
   output_dir = here::here("data", "processed", "agg_spill_stats"),
-  years = 2021:2023,
+  years = 2021:2024,
   base_year = 2021
 )
 

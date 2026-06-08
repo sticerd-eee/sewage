@@ -28,9 +28,9 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 - `clean_lr_house_price_data.R`: cleans Land Registry price-paid data using local ONS postcode data.
 - `clean_zoopla_data.R`: cleans safeguarded Zoopla rental data.
 - `combine_annual_return_data.R`: combines annual return workbooks.
-- `convert_individ_raw_data_to_rdata_2021-2023.R`: converts historical EDM files into parquet outputs.
+- `convert_individ_raw_data_to_rdata.R`: converts historical EDM files into parquet outputs.
 - `process_edm_api_json_to_parquet_2024_onwards.R`: processes raw API snapshots into parquet outputs.
-- `combine_individ_edm_data_2021-2023.R`: combines cleaned historical EDM parquet files.
+- `combine_individ_edm_data.R`: combines cleaned historical EDM parquet files.
 - `combine_api_edm_data_2024_onwards.R`: combines cleaned API parquet files.
 - `clean_rainfall_data.R`: prepares rainfall inputs and site-grid lookup files.
 
@@ -81,9 +81,9 @@ The `scripts/R/09_analysis/` folder contains the main descriptive, hedonic, repe
 4. `clean_lr_house_price_data.R` — clean Land Registry house prices with local ONS postcode data.
 5. `clean_zoopla_data.R` — clean safeguarded Zoopla rentals with local ONS postcode data.
 6. `combine_annual_return_data.R` — combine annual return workbooks.
-7. `convert_individ_raw_data_to_rdata_2021-2023.R` — convert standardised historical EDM files to parquet.
+7. `convert_individ_raw_data_to_rdata.R` — convert standardised historical EDM files to parquet.
 8. `process_edm_api_json_to_parquet_2024_onwards.R` — process raw API JSON snapshots into parquet.
-9. `combine_individ_edm_data_2021-2023.R` — combine the 2021–2023 individual EDM parquet files.
+9. `combine_individ_edm_data.R` — combine the 2021–2024 individual EDM parquet files.
 10. `combine_api_edm_data_2024_onwards.R` — combine the 2024+ API parquet files.
 
 ### Layer 03: Data Enrichment
