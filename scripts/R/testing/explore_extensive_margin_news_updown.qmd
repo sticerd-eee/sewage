@@ -1,0 +1,850 @@
+---
+title: "Direction-Aware Extensive-Margin News Analysis"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+## What This Notebook Shows
+
+This notebook combines the extensive-margin publicity design with the upstream/downstream nearest-site classification. It asks whether public attention changes the near-far price gap differently when the nearest signed overflow is upstream rather than downstream of the property.
+
+The estimating equation is:
+
+`log_price ~ near_bin * upstream * attention + controls | location FE + month FE`
+
+The headline object is the triple interaction, `near_bin:upstream:attention`. The tables below report it as an interpretable contrast: the upstream-minus-downstream difference in the publicity-driven near-far gap.
+
+This is not the same sample as the broader extensive-margin notebook. Here, every property must have a nearest overflow that can be classified on the river network. Because the signed-pair files currently cover properties within 1km of an overflow, the analysis uses comparisons inside that support only.
+
+```{r}
+#| label: setup
+
+install_if_missing <- function(packages) {
+  missing_packages <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(missing_packages) > 0) {
+    install.packages(missing_packages)
+  }
+  invisible(lapply(packages, library, character.only = TRUE))
+}
+
+required_packages <- c(
+  "arrow",
+  "dplyr",
+  "fixest",
+  "forcats",
+  "ggplot2",
+  "glue",
+  "here",
+  "knitr",
+  "lubridate",
+  "purrr",
+  "readr",
+  "readxl",
+  "rio",
+  "scales",
+  "stringr",
+  "tibble",
+  "tidyr"
+)
+
+install_if_missing(required_packages)
+
+START_DATE <- as.Date("2021-01-01")
+END_DATE <- as.Date("2023-12-31")
+LOOKUP_MAX_DISTANCE <- 1000
+RIVER_DIST_CAP <- 1000
+LATERAL_CAP <- 250
+VCOV_MODE <- "hetero"
+
+MARKET_COLOURS <- c(Sales = "#1F78B4", Rentals = "#D95F02")
+EFFECT_COLOURS <- c(
+  "Downstream" = "#1F78B4",
+  "Upstream" = "#D95F02",
+  "Upstream - downstream" = "#4D4D4D"
+)
+
+comparison_specs <- tibble::tribble(
+  ~comparison_id,      ~comparison_label,       ~near_min, ~near_max, ~far_min, ~far_max,
+  "250_vs_250_500",    "0-250m vs 250-500m",     0, 250, 250, 500,
+  "250_vs_250_1000",   "0-250m vs 250-1000m",    0, 250, 250, 1000,
+  "250_vs_500_1000",   "0-250m vs 500-1000m",    0, 250, 500, 1000,
+  "500_vs_500_1000",   "0-500m vs 500-1000m",    0, 500, 500, 1000
+)
+
+spec_grid <- tibble::tribble(
+  ~spec_id,              ~spec_label,                  ~controls, ~fe_unit,
+  "ols",                 "OLS",                         FALSE,     "none",
+  "ols_controls",        "OLS + controls",              TRUE,      "none",
+  "msoa_month_controls", "MSOA + month FE + controls",  TRUE,      "msoa",
+  "lsoa_month_controls", "LSOA + month FE + controls",  TRUE,      "lsoa"
+)
+
+FAMILIES <- c("post", "articles")
+EFFECT_LEVELS <- c("Downstream", "Upstream", "Upstream - downstream")
+
+`%||%` <- function(x, y) if (is.null(x) || length(x) == 0 || is.na(x)) y else x
+
+month_id_from_date <- function(x) {
+  x_date <- as.Date(x)
+  (lubridate::year(x_date) - 2021L) * 12L + lubridate::month(x_date)
+}
+
+pretty_market <- function(market) {
+  dplyr::case_when(
+    market == "sales" ~ "Sales",
+    market == "rentals" ~ "Rentals",
+    TRUE ~ as.character(market)
+  )
+}
+
+pretty_family <- function(family) {
+  dplyr::case_when(
+    family == "post" ~ "Near x Post",
+    family == "articles" ~ "Near x log(Articles)",
+    TRUE ~ as.character(family)
+  )
+}
+
+controls_for_market <- function(market) {
+  switch(
+    tolower(as.character(market)),
+    sales = c("property_type", "old_new", "duration"),
+    rentals = c("property_type", "bedrooms", "bathrooms"),
+    character()
+  )
+}
+
+attention_var_for_family <- function(family) {
+  switch(
+    family,
+    post = "post",
+    articles = "log_cumulative_articles",
+    stop("Unknown family: ", family)
+  )
+}
+
+fmt_num <- function(x, digits = 3) {
+  if (length(x) == 0 || is.null(x) || is.na(x)) {
+    return("n/a")
+  }
+  formatC(as.numeric(x), format = "f", digits = digits)
+}
+
+fmt_big_n <- function(x) {
+  if (length(x) == 0 || is.null(x) || is.na(x)) {
+    return("n/a")
+  }
+  scales::comma(round(as.numeric(x)))
+}
+
+fmt_est_se <- function(estimate, std_error, status) {
+  if (!identical(status, "ok") || is.na(estimate) || is.na(std_error)) {
+    return(status)
+  }
+  paste0(fmt_num(estimate, 4), " (", fmt_num(std_error, 4), ")")
+}
+
+row_value <- function(data, column, default = NA) {
+  if (nrow(data) == 0 || !column %in% names(data)) {
+    return(default)
+  }
+  data[[column]][[1]] %||% default
+}
+
+load_peak_month_id <- function() {
+  google_trends <- readxl::read_excel(
+    here::here("data", "raw", "google_trends", "google_trends_uk.xlsx"),
+    sheet = "united_kingdom"
+  ) |>
+    dplyr::filter(.data$Year >= 2021, .data$Year <= 2023)
+
+  peak_row <- google_trends |>
+    dplyr::slice_max(`'Sewage Spill' Google Searches`, n = 1, with_ties = FALSE)
+
+  peak_year <- peak_row$Year[[1]]
+  peak_month <- as.integer(substr(as.character(peak_row$Date[[1]]), 6, 7))
+
+  (peak_year - 2021L) * 12L + peak_month
+}
+
+load_articles <- function() {
+  arrow::read_parquet(
+    here::here("data", "processed", "lexis_nexis", "search1_monthly.parquet")
+  ) |>
+    dplyr::filter(.data$month_id >= 1L, .data$month_id <= 36L) |>
+    dplyr::arrange(.data$month_id) |>
+    dplyr::mutate(
+      cumulative_articles = cumsum(.data$article_count),
+      log_cumulative_articles = log(.data$cumulative_articles)
+    )
+}
+
+load_signed_nearest_lookup <- function(market) {
+  if (market == "sales") {
+    path <- here::here(
+      "upstream_downstream", "output", "18-03", "river_filter",
+      "spill_house_signed.csv"
+    )
+    id_col <- "house_id"
+    property_lateral_col <- "house_lateral_m"
+    distance_col <- "spill_house_euclid_m"
+  } else {
+    path <- here::here(
+      "upstream_downstream", "output", "18-03", "river_filter",
+      "spill_rental_signed.csv"
+    )
+    id_col <- "rental_id"
+    property_lateral_col <- "rental_lateral_m"
+    distance_col <- "spill_rental_euclid_m"
+  }
+
+  readr::read_csv(path, show_col_types = FALSE, progress = FALSE) |>
+    dplyr::select(dplyr::all_of(c(
+      id_col, "site_id", "signed_dist_m", "direction", "spill_lateral_m",
+      property_lateral_col, distance_col
+    ))) |>
+    dplyr::rename(
+      property_lateral_m = dplyr::all_of(property_lateral_col),
+      distance_m = dplyr::all_of(distance_col)
+    ) |>
+    dplyr::mutate(
+      dist_river_m = abs(.data$signed_dist_m),
+      upstream = as.integer(.data$direction == -1),
+      direction_label = dplyr::if_else(.data$upstream == 1L, "Upstream", "Downstream")
+    ) |>
+    dplyr::filter(
+      !is.na(.data$site_id),
+      !is.na(.data$direction),
+      !is.na(.data$distance_m),
+      !is.na(.data$dist_river_m),
+      .data$distance_m <= LOOKUP_MAX_DISTANCE,
+      .data$dist_river_m <= RIVER_DIST_CAP,
+      .data$spill_lateral_m <= LATERAL_CAP,
+      .data$property_lateral_m <= LATERAL_CAP
+    ) |>
+    dplyr::arrange(.data[[id_col]], .data$distance_m, .data$dist_river_m, .data$site_id) |>
+    dplyr::group_by(.data[[id_col]]) |>
+    dplyr::slice_head(n = 1) |>
+    dplyr::ungroup() |>
+    dplyr::rename(nearest_site_id = .data$site_id)
+}
+
+load_sales_transactions <- function() {
+  rio::import(
+    here::here("data", "processed", "house_price.parquet"),
+    trust = TRUE
+  ) |>
+    tibble::as_tibble() |>
+    dplyr::select(dplyr::any_of(c(
+      "house_id", "price", "date_of_transfer", "property_type",
+      "old_new", "duration", "lsoa", "msoa", "latitude", "longitude"
+    ))) |>
+    dplyr::mutate(
+      date_of_transfer = as.Date(.data$date_of_transfer),
+      month_id = month_id_from_date(.data$date_of_transfer),
+      log_price = log(.data$price),
+      property_type = forcats::fct_drop(forcats::as_factor(.data$property_type)),
+      old_new = forcats::fct_drop(forcats::as_factor(.data$old_new)),
+      duration = forcats::fct_drop(forcats::as_factor(.data$duration))
+    ) |>
+    dplyr::filter(
+      .data$date_of_transfer >= START_DATE,
+      .data$date_of_transfer <= END_DATE,
+      .data$month_id >= 1L,
+      .data$month_id <= 36L,
+      is.finite(.data$log_price)
+    )
+}
+
+load_rental_transactions <- function() {
+  rio::import(
+    here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
+    trust = TRUE
+  ) |>
+    tibble::as_tibble() |>
+    dplyr::select(dplyr::any_of(c(
+      "rental_id", "listing_price", "rented_est", "property_type",
+      "bedrooms", "bathrooms", "lsoa", "msoa", "latitude", "longitude"
+    ))) |>
+    dplyr::mutate(
+      rented_est = as.Date(.data$rented_est),
+      month_id = month_id_from_date(.data$rented_est),
+      log_price = log(.data$listing_price),
+      property_type = forcats::fct_drop(forcats::as_factor(.data$property_type))
+    ) |>
+    dplyr::filter(
+      .data$rented_est >= START_DATE,
+      .data$rented_est <= END_DATE,
+      .data$month_id >= 1L,
+      .data$month_id <= 36L,
+      is.finite(.data$log_price)
+    )
+}
+
+prepare_market_data <- function(market, peak_month_id, articles) {
+  if (market == "sales") {
+    transactions <- load_sales_transactions()
+    id_col <- "house_id"
+  } else {
+    transactions <- load_rental_transactions()
+    id_col <- "rental_id"
+  }
+
+  transactions |>
+    dplyr::inner_join(load_signed_nearest_lookup(market), by = id_col) |>
+    dplyr::left_join(
+      articles |>
+        dplyr::select(
+          .data$month_id, .data$cumulative_articles, .data$log_cumulative_articles
+        ),
+      by = "month_id"
+    ) |>
+    dplyr::mutate(
+      post = as.integer(.data$month_id >= peak_month_id),
+      market = market
+    )
+}
+
+build_comparison_sample <- function(data, comparison_row) {
+  data |>
+    dplyr::filter(
+      (.data$distance_m >= comparison_row$near_min &
+         .data$distance_m <= comparison_row$near_max) |
+        (.data$distance_m > comparison_row$far_min &
+           .data$distance_m <= comparison_row$far_max)
+    ) |>
+    dplyr::mutate(
+      near_bin = as.integer(.data$distance_m <= comparison_row$near_max),
+      near_group = dplyr::if_else(.data$near_bin == 1L, "Near", "Far"),
+      comparison_id = comparison_row$comparison_id,
+      comparison_label = comparison_row$comparison_label
+    )
+}
+
+sample_cell_summary <- function(sample, market, comparison_row) {
+  sample |>
+    dplyr::count(.data$near_group, .data$direction_label, name = "observations") |>
+    tidyr::complete(
+      near_group = c("Near", "Far"),
+      direction_label = c("Downstream", "Upstream"),
+      fill = list(observations = 0L)
+    ) |>
+    dplyr::left_join(
+      sample |>
+        dplyr::group_by(.data$near_group, .data$direction_label) |>
+        dplyr::summarise(
+          mean_distance_m = mean(.data$distance_m, na.rm = TRUE),
+          mean_log_price = mean(.data$log_price, na.rm = TRUE),
+          post_share = mean(.data$post, na.rm = TRUE),
+          mean_articles = mean(.data$cumulative_articles, na.rm = TRUE),
+          .groups = "drop"
+        ),
+      by = c("near_group", "direction_label")
+    ) |>
+    dplyr::mutate(
+      market = market,
+      comparison_id = comparison_row$comparison_id,
+      comparison_label = comparison_row$comparison_label,
+      .before = 1
+    )
+}
+
+support_summary <- function(sample, market, comparison_row) {
+  cell_counts <- sample |>
+    dplyr::count(.data$near_bin, .data$upstream, name = "observations")
+
+  tibble::tibble(
+    market = market,
+    comparison_id = comparison_row$comparison_id,
+    comparison_label = comparison_row$comparison_label,
+    observations = nrow(sample),
+    near_values = dplyr::n_distinct(sample$near_bin),
+    upstream_values = dplyr::n_distinct(sample$upstream),
+    near_upstream_cells = nrow(cell_counts),
+    min_cell_n = min(cell_counts$observations),
+    month_values = dplyr::n_distinct(sample$month_id),
+    post_values = dplyr::n_distinct(sample$post),
+    ok_for_triple = near_values == 2L &&
+      upstream_values == 2L &&
+      near_upstream_cells == 4L &&
+      month_values > 1L &&
+      post_values == 2L
+  )
+}
+
+build_formula <- function(family, spec_row, market) {
+  attention_var <- attention_var_for_family(family)
+  controls <- if (isTRUE(spec_row$controls)) controls_for_market(market) else character()
+  rhs <- c(glue::glue("near_bin * upstream * {attention_var}"), controls)
+  rhs_text <- paste(rhs, collapse = " + ")
+
+  if (spec_row$fe_unit == "none") {
+    stats::as.formula(glue::glue("log_price ~ {rhs_text}"))
+  } else {
+    stats::as.formula(glue::glue("log_price ~ {rhs_text} | {spec_row$fe_unit} + month_id"))
+  }
+}
+
+required_vars_for_model <- function(family, spec_row, market) {
+  vars <- c("log_price", "near_bin", "upstream", attention_var_for_family(family))
+  if (isTRUE(spec_row$controls)) {
+    vars <- c(vars, controls_for_market(market))
+  }
+  if (spec_row$fe_unit != "none") {
+    vars <- c(vars, spec_row$fe_unit, "month_id")
+  }
+  unique(vars)
+}
+
+term_matches_parts <- function(term, parts) {
+  term_parts <- strsplit(term, ":", fixed = TRUE)[[1]]
+  setequal(term_parts, parts)
+}
+
+find_term_by_parts <- function(coef_names, parts) {
+  hits <- coef_names[vapply(
+    coef_names,
+    term_matches_parts,
+    logical(1),
+    parts = parts
+  )]
+  hits[[1]] %||% NA_character_
+}
+
+empty_effect_rows <- function(metadata, status, nobs = NA_integer_, note = NA_character_) {
+  tibble::as_tibble(metadata) |>
+    tidyr::crossing(
+      effect = factor(EFFECT_LEVELS, levels = EFFECT_LEVELS)
+    ) |>
+    dplyr::mutate(
+      term = NA_character_,
+      estimate = NA_real_,
+      std_error = NA_real_,
+      statistic = NA_real_,
+      p_value = NA_real_,
+      nobs = nobs,
+      adj_r2 = NA_real_,
+      status = status,
+      note = note
+    )
+}
+
+linear_combo <- function(model, terms, weights, effect, metadata) {
+  if (any(is.na(terms))) {
+    return(
+      tibble::as_tibble(metadata) |>
+        dplyr::mutate(
+          effect = factor(effect, levels = EFFECT_LEVELS),
+          term = paste(terms, collapse = " + "),
+          estimate = NA_real_,
+          std_error = NA_real_,
+          statistic = NA_real_,
+          p_value = NA_real_,
+          nobs = stats::nobs(model),
+          adj_r2 = suppressWarnings(tryCatch(
+            as.numeric(fixest::fitstat(model, "ar2"))[[1]],
+            error = function(e) NA_real_
+          )),
+          status = "effect_terms_missing",
+          note = paste("Missing term for", effect)
+        )
+    )
+  }
+
+  coefs <- stats::coef(model)
+  vc <- stats::vcov(model)
+  missing_terms <- terms[!terms %in% names(coefs)]
+
+  if (length(missing_terms) > 0) {
+    return(
+      tibble::as_tibble(metadata) |>
+        dplyr::mutate(
+          effect = factor(effect, levels = EFFECT_LEVELS),
+          term = paste(terms, collapse = " + "),
+          estimate = NA_real_,
+          std_error = NA_real_,
+          statistic = NA_real_,
+          p_value = NA_real_,
+          nobs = stats::nobs(model),
+          adj_r2 = suppressWarnings(tryCatch(
+            as.numeric(fixest::fitstat(model, "ar2"))[[1]],
+            error = function(e) NA_real_
+          )),
+          status = "effect_terms_missing",
+          note = paste(missing_terms, collapse = "; ")
+        )
+    )
+  }
+
+  names(weights) <- terms
+  vc_sub <- vc[terms, terms, drop = FALSE]
+  estimate <- sum(weights * coefs[terms])
+  variance <- as.numeric(t(weights) %*% vc_sub %*% weights)
+  std_error <- sqrt(max(variance, 0))
+  statistic <- estimate / std_error
+  df <- stats::df.residual(model)
+  p_value <- if (is.finite(df) && df > 0) {
+    2 * stats::pt(abs(statistic), df = df, lower.tail = FALSE)
+  } else {
+    2 * stats::pnorm(abs(statistic), lower.tail = FALSE)
+  }
+
+  tibble::as_tibble(metadata) |>
+    dplyr::mutate(
+      effect = factor(effect, levels = EFFECT_LEVELS),
+      term = paste(terms, collapse = " + "),
+      estimate = estimate,
+      std_error = std_error,
+      statistic = statistic,
+      p_value = p_value,
+      nobs = stats::nobs(model),
+      adj_r2 = suppressWarnings(tryCatch(
+        as.numeric(fixest::fitstat(model, "ar2"))[[1]],
+        error = function(e) NA_real_
+      )),
+      status = "ok",
+      note = NA_character_
+    )
+}
+
+extract_effects <- function(model, family, metadata) {
+  attention_var <- attention_var_for_family(family)
+  coef_names <- names(stats::coef(model))
+  downstream_term <- find_term_by_parts(coef_names, c("near_bin", attention_var))
+  triple_term <- find_term_by_parts(coef_names, c("near_bin", "upstream", attention_var))
+
+  dplyr::bind_rows(
+    linear_combo(
+      model = model,
+      terms = downstream_term,
+      weights = 1,
+      effect = "Downstream",
+      metadata = metadata
+    ),
+    linear_combo(
+      model = model,
+      terms = c(downstream_term, triple_term),
+      weights = c(1, 1),
+      effect = "Upstream",
+      metadata = metadata
+    ),
+    linear_combo(
+      model = model,
+      terms = triple_term,
+      weights = 1,
+      effect = "Upstream - downstream",
+      metadata = metadata
+    )
+  )
+}
+
+estimate_one_model <- function(sample, market, comparison_row, family, spec_row) {
+  metadata <- list(
+    market = market,
+    comparison_id = comparison_row$comparison_id,
+    comparison_label = comparison_row$comparison_label,
+    family = family,
+    spec_id = spec_row$spec_id,
+    spec_label = spec_row$spec_label
+  )
+
+  needed <- required_vars_for_model(family, spec_row, market)
+  data_est <- sample |>
+    dplyr::filter(stats::complete.cases(dplyr::pick(dplyr::all_of(needed))))
+
+  cell_count <- data_est |>
+    dplyr::distinct(.data$near_bin, .data$upstream) |>
+    nrow()
+
+  if (
+    nrow(data_est) == 0 ||
+      dplyr::n_distinct(data_est$near_bin) < 2 ||
+      dplyr::n_distinct(data_est$upstream) < 2 ||
+      dplyr::n_distinct(data_est[[attention_var_for_family(family)]]) < 2 ||
+      cell_count < 4
+  ) {
+    return(empty_effect_rows(metadata, "insufficient_variation", nrow(data_est)))
+  }
+
+  model <- tryCatch(
+    fixest::feols(
+      fml = build_formula(family, spec_row, market),
+      data = data_est,
+      vcov = VCOV_MODE
+    ),
+    error = function(e) e
+  )
+
+  if (inherits(model, "error")) {
+    return(empty_effect_rows(metadata, "model_error", nrow(data_est), model$message))
+  }
+
+  extract_effects(model, family, metadata)
+}
+
+estimate_comparison <- function(sample, market, comparison_row) {
+  rows <- list()
+  idx <- 1L
+
+  for (family in FAMILIES) {
+    for (j in seq_len(nrow(spec_grid))) {
+      rows[[idx]] <- estimate_one_model(
+        sample = sample,
+        market = market,
+        comparison_row = comparison_row,
+        family = family,
+        spec_row = spec_grid[j, ]
+      )
+      idx <- idx + 1L
+    }
+  }
+
+  dplyr::bind_rows(rows)
+}
+
+make_effect_plot <- function(data, title, subtitle) {
+  dodge <- ggplot2::position_dodge(width = 0.65)
+
+  ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = .data$estimate,
+      y = .data$comparison_label,
+      xmin = .data$estimate - 1.96 * .data$std_error,
+      xmax = .data$estimate + 1.96 * .data$std_error,
+      colour = .data$effect,
+      group = .data$effect
+    )
+  ) +
+    ggplot2::geom_vline(xintercept = 0, linetype = 2, colour = "grey60") +
+    ggplot2::geom_errorbarh(height = 0.16, alpha = 0.8, position = dodge) +
+    ggplot2::geom_point(size = 2.1, position = dodge) +
+    ggplot2::facet_grid(.data$market ~ .data$family, scales = "free_x") +
+    ggplot2::scale_colour_manual(values = EFFECT_COLOURS, drop = FALSE) +
+    ggplot2::labs(
+      title = title,
+      subtitle = subtitle,
+      x = "Attention effect on the near-far log-price gap",
+      y = NULL,
+      colour = NULL
+    ) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(
+      legend.position = "bottom",
+      panel.grid.minor = ggplot2::element_blank(),
+      panel.grid.major.y = ggplot2::element_line(colour = "grey92"),
+      strip.text = ggplot2::element_text(face = "bold"),
+      plot.title = ggplot2::element_text(face = "bold")
+    )
+}
+```
+
+```{r}
+#| label: data-prep
+
+peak_month_id <- load_peak_month_id()
+articles <- load_articles()
+
+market_data <- list(
+  sales = prepare_market_data("sales", peak_month_id, articles),
+  rentals = prepare_market_data("rentals", peak_month_id, articles)
+)
+
+market_overview <- purrr::imap_dfr(market_data, function(data, market) {
+  tibble::tibble(
+    market = pretty_market(market),
+    observations = nrow(data),
+    mean_distance_m = mean(data$distance_m, na.rm = TRUE),
+    median_distance_m = stats::median(data$distance_m, na.rm = TRUE),
+    upstream_share = mean(data$upstream, na.rm = TRUE),
+    post_share = mean(data$post, na.rm = TRUE),
+    min_month_id = min(data$month_id, na.rm = TRUE),
+    max_month_id = max(data$month_id, na.rm = TRUE)
+  )
+})
+
+sample_rows <- list()
+support_rows <- list()
+result_rows <- list()
+idx <- 1L
+
+for (market in names(market_data)) {
+  data_market <- market_data[[market]]
+
+  for (i in seq_len(nrow(comparison_specs))) {
+    comp <- comparison_specs[i, ]
+    sample <- build_comparison_sample(data_market, comp)
+
+    sample_rows[[idx]] <- sample_cell_summary(sample, market, comp)
+    support_rows[[idx]] <- support_summary(sample, market, comp)
+    result_rows[[idx]] <- estimate_comparison(sample, market, comp)
+    idx <- idx + 1L
+  }
+}
+
+sample_summaries <- dplyr::bind_rows(sample_rows) |>
+  dplyr::mutate(market = pretty_market(.data$market))
+
+support_checks <- dplyr::bind_rows(support_rows) |>
+  dplyr::mutate(market = pretty_market(.data$market))
+
+main_results <- dplyr::bind_rows(result_rows) |>
+  dplyr::mutate(
+    market = pretty_market(.data$market),
+    family = factor(.data$family, levels = FAMILIES, labels = pretty_family(FAMILIES)),
+    effect = factor(.data$effect, levels = EFFECT_LEVELS)
+  )
+
+main_results_display <- main_results |>
+  dplyr::mutate(
+    cell = purrr::pmap_chr(
+      list(.data$estimate, .data$std_error, .data$status),
+      fmt_est_se
+    )
+  ) |>
+  dplyr::select(
+    .data$market, .data$comparison_label, .data$family, .data$effect,
+    .data$spec_label, .data$cell
+  ) |>
+  tidyr::pivot_wider(names_from = .data$spec_label, values_from = .data$cell) |>
+  dplyr::arrange(.data$market, .data$family, .data$comparison_label, .data$effect)
+
+preferred_lsoa_plot_data <- main_results |>
+  dplyr::filter(.data$spec_id == "lsoa_month_controls", .data$status == "ok") |>
+  dplyr::mutate(
+    comparison_label = factor(.data$comparison_label, levels = rev(comparison_specs$comparison_label)),
+    market = factor(.data$market, levels = c("Sales", "Rentals"))
+  )
+
+preferred_msoa_plot_data <- main_results |>
+  dplyr::filter(.data$spec_id == "msoa_month_controls", .data$status == "ok") |>
+  dplyr::mutate(
+    comparison_label = factor(.data$comparison_label, levels = rev(comparison_specs$comparison_label)),
+    market = factor(.data$market, levels = c("Sales", "Rentals"))
+  )
+
+missing_effect_terms <- main_results |>
+  dplyr::filter(.data$status != "ok") |>
+  dplyr::count(
+    .data$market, .data$comparison_label, .data$family,
+    .data$spec_label, .data$status, .data$note,
+    name = "effects"
+  )
+
+top_lsoa_difference <- main_results |>
+  dplyr::filter(
+    .data$spec_id == "lsoa_month_controls",
+    .data$effect == "Upstream - downstream",
+    .data$status == "ok"
+  ) |>
+  dplyr::mutate(abs_t = abs(.data$statistic)) |>
+  dplyr::arrange(dplyr::desc(.data$abs_t)) |>
+  dplyr::slice_head(n = 1)
+```
+
+::: {.callout-note appearance="simple"}
+## Main Takeaway
+
+The preferred LSOA specification's strongest upstream-minus-downstream contrast in this render is `r row_value(top_lsoa_difference, "market")`, `r row_value(top_lsoa_difference, "comparison_label")`, `r row_value(top_lsoa_difference, "family")`: estimate `r fmt_num(row_value(top_lsoa_difference, "estimate"), 4)` with standard error `r fmt_num(row_value(top_lsoa_difference, "std_error"), 4)`.
+
+Read this as the difference between the upstream and downstream publicity effects on the near-far log-price gap. The downstream effect is the `near_bin x attention` coefficient; the upstream effect is that coefficient plus the triple interaction.
+:::
+
+## Matched Market Overview
+
+These are the transaction samples after joining to the nearest signed overflow. The join requires a direction-classifiable river-network match, so the sample is narrower than the generic nearest-overflow extensive-margin sample.
+
+```{r}
+knitr::kable(
+  market_overview |>
+    dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~ round(.x, 3))),
+  caption = "Transaction samples after joining to nearest signed overflows."
+)
+```
+
+## Sample Counts
+
+The table reports near/far cells separately for upstream and downstream nearest overflows. These are the cells that identify the triple interaction.
+
+```{r}
+knitr::kable(
+  sample_summaries |>
+    dplyr::mutate(
+      mean_distance_m = round(.data$mean_distance_m, 1),
+      mean_log_price = round(.data$mean_log_price, 3),
+      post_share = round(.data$post_share, 3),
+      mean_articles = round(.data$mean_articles, 1)
+    ) |>
+    dplyr::arrange(.data$market, .data$comparison_label, .data$near_group, .data$direction_label),
+  caption = "Sample counts by market, comparison, near/far group, and direction."
+)
+```
+
+## Support Checks
+
+Each retained market-comparison cell should contain both near and far properties, both upstream and downstream nearest overflows, and all four near-by-direction cells.
+
+```{r}
+knitr::kable(
+  support_checks,
+  caption = "Variation checks for the triple-interaction design."
+)
+```
+
+## Coefficient Plots
+
+Each point is a linear combination from one triple-interaction regression. `Downstream` is the publicity effect on the near-far gap when the nearest signed overflow is downstream. `Upstream` adds the triple interaction. `Upstream - downstream` is the triple interaction itself.
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+make_effect_plot(
+  preferred_msoa_plot_data,
+  title = "Direction-aware extensive-margin publicity effects",
+  subtitle = "MSOA + month FE + controls"
+)
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+make_effect_plot(
+  preferred_lsoa_plot_data,
+  title = "Direction-aware extensive-margin publicity effects",
+  subtitle = "LSOA + month FE + controls"
+)
+```
+
+## Main Coefficient Tables
+
+Cells report estimates with heteroskedasticity-robust standard errors in parentheses. The three effect rows are linear combinations from the same underlying regression.
+
+```{r}
+knitr::kable(
+  main_results_display,
+  caption = "Direction-aware near-far attention effects across specifications."
+)
+```
+
+## Missing-Term Diagnostics
+
+This diagnostic is intentionally explicit. If fixed effects absorb a requested term, or a comparison lacks enough variation, the relevant row appears here rather than causing the render to fail.
+
+```{r}
+if (nrow(missing_effect_terms) == 0) {
+  cat("All requested effect terms were available in every retained model.")
+} else {
+  knitr::kable(
+    missing_effect_terms,
+    caption = "Models or effects that could not be estimated as requested."
+  )
+}
+```
+
