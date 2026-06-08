@@ -33,9 +33,6 @@ LAG_MONTHS <- 4L      # Number of months to lag the article count
 # ==============================================================================
 # 2. Package Management
 # ==============================================================================
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
 
 required_packages <- c(
   "arrow",

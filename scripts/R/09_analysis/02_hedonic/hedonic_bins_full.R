@@ -35,9 +35,6 @@ BASE_YEAR <- 2021
 # ==============================================================================
 # 2. Package Management
 # ==============================================================================
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
 
 required_packages <- c(
   "arrow",

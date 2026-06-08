@@ -51,7 +51,7 @@ if (length(missing_packages) > 0L) {
   stop(
     "Missing required packages: ",
     paste(missing_packages, collapse = ", "),
-    ". Run renv::restore() before running this script.",
+    ". Run `rv sync` before running this script.",
     call. = FALSE
   )
 }

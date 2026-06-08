@@ -47,9 +47,6 @@ GEO_LABEL <- toupper(GEOGRAPHY)
 # ==============================================================================
 # 2. Package Management
 # ==============================================================================
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
 
 required_packages <- c(
   "arrow",

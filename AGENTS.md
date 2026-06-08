@@ -17,7 +17,7 @@ This repository is a research pipeline centered on sewage-spill and housing anal
 - Use that Overleaf-synced repository for manuscript `.tex`, bibliography, and paper-figure/table tasks; do not assume the LaTeX paper source lives in this analysis repository.
 
 ## Build, Test, and Development Commands
-- `R -q -e "renv::restore()"`: install/lock R dependencies from `renv.lock`.
+- `rv sync`: install R dependencies from `rproject.toml` and `rv.lock`.
 - `Rscript scripts/R/02_data_cleaning/clean_lr_house_price_data.R`: run a single pipeline step.
 - `bash scripts/R/09_analysis/run_all_analysis.sh --dry-run`: preview analysis run order.
 - `bash scripts/R/09_analysis/run_all_analysis.sh`: execute analysis scripts in configured order.

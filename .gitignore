@@ -12,13 +12,11 @@ Thumbs.db
 .RData
 .Renviron
 .Rhistory
-.Rprofile
 .Rproj.user/
 .Ruserdata
 *.Rproj
-renv/library/
-renv/local/
-renv/staging/
+rv/library/
+rv/local/
 scripts/python/.venv/
 __pycache__/
 *.pyc

@@ -53,9 +53,6 @@ EVENT_TEXT_SIZE <- 4.5        # Text size for annotations
 # ==============================================================================
 # 2. Package Management
 # ==============================================================================
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
 
 required_packages <- c(
   "readxl",

@@ -40,9 +40,6 @@ PLOT_DPI <- 300
 # ==============================================================================
 # 2. Package Management
 # ==============================================================================
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
 
 required_packages <- c(
   "arrow",

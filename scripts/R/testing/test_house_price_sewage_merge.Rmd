@@ -15,15 +15,7 @@ knitr:
 ---
 
 ```{r setup, include=FALSE}
-# Initialize packages with version control
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
-
-# Run manual renv commands if needed
-# renv::activate() # Activate the project library # nolint
-# renv::restore()  # Restore the environment if running for first time # nolint
-# renv::snapshot()  # After adding/updating packages, snapshot the state # nolint
+# Use rv for package management; run `rv sync` from the project root if packages are missing.
 
 
 # Load required packages
@@ -435,11 +427,7 @@ ggplot(performance_results, aes(x = as.factor(chunk_size), y = execution_time_se
 #' Initialise the R environment with required packages and settings
 #' @return NULL
 initialise_environment <- function() {
-  # Package management with renv
-  if (!requireNamespace("renv", quietly = TRUE)) {
-    install.packages("renv")
-    renv::init()
-  }
+  # Package management is handled by rv
 
   # Define required packages
   required_packages <- c(

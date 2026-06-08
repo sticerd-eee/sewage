@@ -29,9 +29,6 @@ BAR_COLOR <- "#B63679FF"  # Viridis magma color
 # ==============================================================================
 # 2. Package Management
 # ==============================================================================
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
 
 required_packages <- c(
   "arrow",

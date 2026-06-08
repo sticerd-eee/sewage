@@ -42,9 +42,6 @@ CONLEY_CUTOFF <- 0.5  # Conley SE cutoff in km (500m)
 # ==============================================================================
 # 2. Package Management
 # ==============================================================================
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
 
 required_packages <- c(
   "arrow",

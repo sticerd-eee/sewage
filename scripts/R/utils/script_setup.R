@@ -11,7 +11,7 @@ check_required_packages <- function(required_packages) {
       paste0(
         "Missing required packages: ",
         paste(missing_packages, collapse = ", "),
-        ". Install project dependencies first, e.g. `renv::restore()`."
+        ". Install project dependencies first with `rv sync`."
       ),
       call. = FALSE
     )

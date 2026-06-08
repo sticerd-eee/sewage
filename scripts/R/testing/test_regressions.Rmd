@@ -15,15 +15,7 @@ knitr:
 ---
 
 ```{r setup, include=FALSE}
-# Initialize packages with version control
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
-
-# Run manual renv commands if needed
-# renv::activate() # Activate the project library # nolint
-# renv::restore()  # Restore the environment if running for first time # nolint
-# renv::snapshot()  # After adding/updating packages, snapshot the state # nolint
+# Use rv for package management; run `rv sync` from the project root if packages are missing.
 
 
 # Load required packages

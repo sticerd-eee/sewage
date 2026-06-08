@@ -17,9 +17,6 @@
 #' @return NULL
 initialise_environment <- function() {
 
-  if (!requireNamespace("renv", quietly = TRUE)) {
-    install.packages("renv")
-  }
 
   required_packages <- c(
     "arrow",

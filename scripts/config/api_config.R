@@ -21,7 +21,7 @@
 if (!requireNamespace("here", quietly = TRUE)) {
   stop(
     "Package `here` is required to source scripts/config/api_config.R. ",
-    "Install project dependencies first, e.g. `renv::restore()`.",
+    "Install project dependencies first with `rv sync`.",
     call. = FALSE
   )
 }

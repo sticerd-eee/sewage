@@ -14,11 +14,7 @@
 #' Initialize the R environment with required packages
 #' @return NULL
 initialise_environment <- function() {
-  # Package management with renv
-  if (!requireNamespace("renv", quietly = TRUE)) {
-    install.packages("renv")
-    renv::init()
-  }
+  # Package management is handled by rv; run `rv sync` from the project root if packages are missing.
 
   # Define required packages
   required_packages <- c(
@@ -26,11 +22,8 @@ initialise_environment <- function() {
     "fs", "conflicted", "reclin2", "data.table", "assertthat"
   )
 
-  # Install and load packages
+  # Load packages
   invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
-    }
     library(pkg, character.only = TRUE)
   }))
   conflict_prefer("flatten", "purrr")

@@ -40,7 +40,7 @@ The project is organised as follows:
 │
 ├── AGENTS.md # Repository guidance
 ├── README.md # Project README
-├── renv.lock # R dependency lockfile
+├── rv.lock # R dependency lockfile
 └── sewage.Rproj # RStudio project file
 ```
 
@@ -109,9 +109,9 @@ The only restricted datasets currently used in this project are `data/raw/zoopla
 
 ### Software Requirements
 
-- **R (version 4.5.0+)**
-  - Uses `renv` for reproducible package management.
-  - Restore the environment with `R -q -e "renv::restore()"`.
+- **R (version 4.6.0+)**
+  - Uses `rv` for R package management.
+  - Install and sync the R environment with `rv sync`.
 - **Python**
   - Uses `uv` for package management:
 

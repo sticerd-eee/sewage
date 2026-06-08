@@ -37,9 +37,6 @@ N_DAYS_FULL_PERIOD <- 1095L  # 365 * 3 (2021-2023)
 # ==============================================================================
 # 2. Package Management
 # ==============================================================================
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
 
 required_packages <- c(
   "arrow",

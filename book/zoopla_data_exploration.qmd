@@ -19,9 +19,6 @@ execute:
 
 ```{r setup, include=FALSE}
 # Initialize packages with version control
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
 
 # Load required packages
 required_packages <- c(

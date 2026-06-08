@@ -17,10 +17,6 @@
 #' Initialize the R environment with required packages and settings
 #' @return NULL
 initialise_environment <- function() {
-  if (!requireNamespace("renv", quietly = TRUE)) {
-    install.packages("renv")
-    renv::init()
-  }
   required_packages <- c(
     "rio", "tidyverse", "purrr", "here", "logger", "glue", "fs",
     "lubridate", "DBI", "duckdb", "dbplyr", "arrow", "dtplyr",

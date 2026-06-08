@@ -11,10 +11,7 @@
 #' Initialise the R environment with required packages and settings
 #' @return NULL
 initialise_environment <- function() {
-  # Package management with renv (optional)
-  if (!requireNamespace("renv", quietly = TRUE)) {
-    install.packages("renv")
-  }
+  # Package management is handled by rv (optional)
 
   # Define required packages
   required_packages <- c(
