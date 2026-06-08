@@ -23,14 +23,14 @@ The ingestion layer is responsible for acquiring raw data and preparing it for d
 
 Within this project, the ingestion layer is only required for the two sources of data:
 
-1. **EDM 2021–2023:** Individual spill data obtained via a Freedom of Information request, received in a variety of file formats from water companies.
+1. **EDM 2021–2024:** Individual spill data received in a variety of file formats from water companies.
 2. **EDM 2024-present:** Individual spill data obtained from the ArcGIS API endpoints used by Water UK's National Storm Overflows Hub for the nine England companies.^[As of July 2025, the API data for 2024 is excluded from the analysis due to major gaps—fewer than 2,000 spill records are available, compared to an expected 450,000. The ingestion infrastructure is ready to incorporate this data once it becomes complete. Welsh Water maintains a separate public storm-overflow map and is not part of this live API pipeline.]
 
 
 
-## 2021-2023 EDM Data Ingestion {#sec-02-02-edm-data-ingestion}
+## 2021-2024 EDM Data Ingestion {#sec-02-02-edm-data-ingestion}
 
-The 2021–2023 EDM data was obtained via FOI requests from multiple water companies, each using different formats and naming conventions. The script `edm_individ_data_standardisation_2021-2023.R` standardises the raw files at the ingestion stage to ensure consistent structure and naming.
+The 2021–2024 EDM archive data was received from multiple water companies, each using different formats and naming conventions. The script `edm_individ_data_standardisation.R` standardises the raw files at the ingestion stage to ensure consistent structure and naming.
 
 It extracts files from `.zip` archives, identifies those with `.csv`, .`xlsx`, or `.xlsb` extensions, and renames them using the format YYYY_CompanyName_edm.ext, based on metadata inferred from the original filenames. The script performs only file system operations and does not load or modify the data. All standardised files are moved to a single directory for downstream processing.
 

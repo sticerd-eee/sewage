@@ -19,7 +19,7 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 
 ### 01_data_ingestion
 
-- `edm_individ_data_standardisation_2021-2023.R`: standardises historical EDM archive files from FOI returns.
+- `edm_individ_data_standardisation.R`: standardises historical EDM archive files.
 - `fetch_edm_api_data_2024_onwards.R`: downloads timestamped EDM API snapshots for the live England-only feed.
 
 ### 02_data_cleaning
@@ -72,7 +72,7 @@ The `scripts/R/09_analysis/` folder contains the main descriptive, hedonic, repe
 
 ### Layer 01: Data Ingestion
 
-1. `edm_individ_data_standardisation_2021-2023.R` — standardise historical EDM archive files.
+1. `edm_individ_data_standardisation.R` — standardise historical EDM archive files.
 2. `fetch_edm_api_data_2024_onwards.R` — download raw 2024+ EDM API snapshots.
 
 ### Layer 02: Data Cleaning

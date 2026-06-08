@@ -2,9 +2,9 @@
 # EDM Spill Data File Standardisation
 # ==============================================================================
 #
-# Purpose: Unzip historical EDM archives for 2021-2023, identify year and water
-#          company from raw filenames, and rename supported files into a stable
-#          standard format for downstream ingestion steps.
+# Purpose: Unzip historical EDM archives, identify year and water company from
+#          raw filenames, and rename supported files into a stable standard
+#          format for downstream ingestion steps.
 #
 # Author: Jacopo Olivieri
 # Date: 2024-12-01
@@ -15,7 +15,7 @@
 #
 # Outputs:
 #   - data/raw/edm_data/{year}_{company}_edm.{extension} - Standardised files
-#   - output/log/edm_individ_data_standardisation_2021-2023.log
+#   - output/log/edm_individ_data_standardisation.log
 #
 # ==============================================================================
 
@@ -32,7 +32,7 @@ source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 REQUIRED_PACKAGES <- c("dplyr", "fs", "logger", "purrr", "stringr", "tibble")
 LOG_FILE <- here::here(
   "output", "log",
-  "edm_individ_data_standardisation_2021-2023.log"
+  "edm_individ_data_standardisation.log"
 )
 
 check_required_packages(REQUIRED_PACKAGES)

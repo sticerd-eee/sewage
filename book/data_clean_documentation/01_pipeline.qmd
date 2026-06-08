@@ -100,7 +100,7 @@ digraph DataPipeline {
     label = '01 Ingestion Layer';
     style='filled,rounded'; fillcolor='#f3f4f6'; color='#6b7280'; fontcolor='#111827'; penwidth=2;
     node [style='filled,rounded', rx=6, ry=6, fillcolor='#e0e7ff', color='#6366f1', penwidth=2, fontcolor='#312e81'];
-    S01 [label='edm_individ_data_standardisation_2021-2023.R\\nStandardises raw EDM data files from UK water companies'];
+    S01 [label='edm_individ_data_standardisation.R\\nStandardises raw EDM data files from UK water companies'];
     S04 [label='fetch_edm_api_data_2024_onwards.R\\nDownloads EDM data from ArcGIS API endpoints for 2024+'];
   }
 
@@ -230,10 +230,10 @@ digraph DataPipeline {
 
 ### Raw Data Ingestion Layer {#sec-01-03-01-raw-data-ingestion}
 
-**EDM Data Standardisation (2021-2023)**
+**EDM Data Standardisation (2021-2024)**
 
-- **script_name**: `edm_individ_data_standardisation_2021-2023.R`
-- **purpose**: Standardises raw Event Duration Monitoring (EDM) data files from UK water companies for 2021-2023 by extracting, renaming, and organising files from zip archives.
+- **script_name**: `edm_individ_data_standardisation.R`
+- **purpose**: Standardises raw Event Duration Monitoring (EDM) data files from UK water companies for 2021-2024 by extracting, renaming, and organising files from zip archives.
 - **inputs**: `["data/raw/edm_data/EDM*.zip"]`
 - **outputs**: `["data/raw/edm_data/YYYY_company_name_edm.*"]`
 
