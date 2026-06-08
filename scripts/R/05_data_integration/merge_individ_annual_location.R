@@ -1,12 +1,62 @@
-############################################################
-# Merge location data with individual spill data
-# Project: Sewage
-# Date: 18/05/2025
+# ==============================================================================
+# Individual and Annual EDM Location Merge
+# ==============================================================================
+#
+# Purpose: Link event-level EDM spill records to annual-return spill site
+#          records, so that each spill carries reliable site identifiers,
+#          discharge coordinates, and annual EA spill totals.
+#
 # Author: Jacopo Olivieri
+# Date: 2025-05-18
+# Date Modified: 2026-06-08
+#
+# Inputs:
+#   - data/processed/combined_edm_data.parquet
+#   - data/processed/annual_return_edm.parquet
+#   - data/processed/annual_return_lookup.parquet
+#
+# Outputs:
+#   - data/processed/matched_events_annual_data/matched_events_annual_data.parquet
+#   - data/processed/matched_events_annual_data/events_unmatched.parquet
+#   - data/processed/matched_events_annual_data/annual_unmatched.parquet
+#   - data/processed/matched_events_annual_data/site_metadata.parquet
+#   - output/log/10_merge_individ_annual_location.log
+#
+# ==============================================================================
+
+# Setup
 ############################################################
 
-#' This script merges the location data from the annual sewage overflow datasets
-#' with the individual spill data.
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first with `rv sync`.",
+    call. = FALSE
+  )
+}
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "assertthat",
+  "conflicted",
+  "data.table",
+  "dplyr",
+  "fs",
+  "glue",
+  "here",
+  "logger",
+  "purrr",
+  "reclin2",
+  "rio",
+  "tibble",
+  "tidyr"
+)
+
+LOG_FILE <- here::here("output", "log", "10_merge_individ_annual_location.log")
+
+check_required_packages(REQUIRED_PACKAGES)
 
 # Setup Functions
 ############################################################
@@ -14,32 +64,21 @@
 #' Initialize the R environment with required packages
 #' @return NULL
 initialise_environment <- function() {
-  # Package management is handled by rv; run `rv sync` from the project root if packages are missing.
-
-  # Define required packages
-  required_packages <- c(
-    "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue",
-    "fs", "conflicted", "reclin2", "data.table", "assertthat"
-  )
-
-  # Load packages
-  invisible(sapply(required_packages, function(pkg) {
+  # Package management is handled by rv; fail early via check_required_packages().
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
     library(pkg, character.only = TRUE)
   }))
-  conflict_prefer("flatten", "purrr")
-  conflict_prefer("filter", "dplyr")
+
+  conflicted::conflict_prefer("filter", "dplyr")
+  conflicted::conflict_prefer("flatten", "purrr")
+  conflicted::conflict_prefer("select", "dplyr")
 }
 
 #' Configure logging for the script
 #' @return NULL
-setup_logging <- function() {
-  log_dir <- here::here("output", "log")
-  fs::dir_create(log_dir, recurse = TRUE)
-  log_path <- file.path(log_dir, "10_merge_individ_annual_location.log")
-
-  logger::log_appender(logger::appender_tee(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::INFO)
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "INFO")
+  logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
 }
 
@@ -1018,7 +1057,7 @@ export_results <- function(final_results) {
 main <- function() {
   # Initialize environment and set up logging
   initialise_environment()
-  setup_logging()
+  initialise_logging()
 
   logger::log_info("Starting merge process for individual and annual location data")
 
