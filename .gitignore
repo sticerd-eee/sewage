@@ -14,7 +14,6 @@ Thumbs.db
 .Rhistory
 .Rproj.user/
 .Ruserdata
-*.Rproj
 rv/library/
 rv/local/
 scripts/python/.venv/
