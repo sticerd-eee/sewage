@@ -4,7 +4,7 @@ date: 2026-03-10
 problem_type: best_practice
 component: tooling
 symptoms:
-  - "The documented year-level outputs `data/processed/edm_data_2021_2023/combined_edm_data_{year}.parquet` were never being written."
+  - "The documented year-level outputs `data/processed/edm_spill_level/combined_edm_data_{year}.parquet` were never being written."
   - "The yearly combine step matched datasets with a text search against values like `\"2021\"`, so the year-specific selection was always empty in the pre-fix code."
   - "The script logged that year-specific combined datasets had been created even when no combined parquet files were written."
   - "The script carried unused parallel setup (`setup_parallel()` plus `furrr`/`future` dependencies) even though `main()` explicitly ran in sequential mode and never enabled a non-sequential plan."
@@ -25,7 +25,7 @@ The script also carried a second layer of avoidable complexity: it defined paral
 - Module: Individual EDM Raw File Converter / `scripts/R/02_data_cleaning/`
 - Affected component: Repository tooling / parquet export script
 - Key file: `scripts/R/02_data_cleaning/convert_individ_raw_data_to_rdata_2021-2023.R`
-- Expected outputs include per-company parquet files plus year-level combined parquet files under `data/processed/edm_data_2021_2023/`
+- Expected outputs include per-company parquet files plus year-level combined parquet files under `data/processed/edm_spill_level/`
 - Date solved: 2026-03-10
 
 ## Symptoms
@@ -144,5 +144,5 @@ The fix was verified with targeted checks rather than a completed full raw-data 
 - The updated script parsed successfully with `Rscript --vanilla -e "parse(file='scripts/R/02_data_cleaning/convert_individ_raw_data_to_rdata_2021-2023.R')"` .
 - A synthetic-data export test confirmed that `export_to_parquet()` now writes both company parquet files and year-level combined parquet files such as `combined_edm_data_2021.parquet` and `combined_edm_data_2022.parquet`.
 - A real-data run of `scripts/R/02_data_cleaning/convert_individ_raw_data_to_rdata_2021-2023.R` was started on 2026-03-10, but it did not complete during the session. The process remained active in the 2021 raw-data loading phase and was stopped before it reached the export stage.
-- Before and after that aborted real-data run, the pre-existing company parquet outputs in `data/processed/edm_data_2021_2023/` had identical file inventories and identical SHA-256 hashes. So the attempted run did not alter any existing company parquet files.
+- Before and after that aborted real-data run, the pre-existing company parquet outputs in `data/processed/edm_spill_level/` had identical file inventories and identical SHA-256 hashes. So the attempted run did not alter any existing company parquet files.
 - Because the full real-data run was not completed, this note documents a verified logic fix plus targeted export validation, not a fully replayed end-to-end regeneration of all raw-data outputs.

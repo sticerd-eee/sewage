@@ -159,8 +159,8 @@ digraph DataPipeline {
 
   node [fillcolor='#fef3c7', color='#f59e0b', penwidth=1.5, fontcolor='#78350f'];
   D01 [label='data/raw/edm_data/\\nYYYY_company_name_edm.*\\nStandardised EDM files from zip extraction'];
-  D02 [label='data/processed/edm_data_2021_2023/*.parquet\\nIndividual company EDM data in Parquet format'];
-  D03 [label='data/processed/combined_edm_data.parquet\\nCombined EDM data for 2021-2023'];
+  D02 [label='data/processed/edm_spill_level/*.parquet\\nIndividual company EDM data in Parquet format'];
+  D03 [label='data/processed/combined_edm_data.parquet\\nCombined EDM data for 2021-2024'];
   D04 [label='data/raw/edm_data/raw_api_responses/*.json.gz\\nRaw API JSON responses from ArcGIS endpoints'];
   D05 [label='data/processed/edm_api_data/*.parquet\\nProcessed API data in Parquet format'];
   D06 [label='data/processed/edm_api_data/combined_api_data.parquet\\nCombined API data for 2024+'];
@@ -246,14 +246,14 @@ digraph DataPipeline {
 - **purpose**: Converts and cleans individual raw EDM data files from CSV/Excel formats to standardised Parquet format for years 2021-2024.
 - **inputs**: `["data/raw/edm_data/YYYY_company_name_edm.*"]`
 - **outputs**: 
-  - `"data/processed/edm_data_2021_2023/*.parquet"`
-  - `"data/processed/edm_data_2021_2023/combined_edm_data_*.parquet"`
+  - `"data/processed/edm_spill_level/*.parquet"`
+  - `"data/processed/edm_spill_level/combined_edm_data_*.parquet"`
 
 **Individual EDM Data Combination**
 
 - **script_name**: `combine_individ_edm_data.R`
 - **purpose**: Combines and cleans individual water company Parquet files from 2021-2024 into a single consolidated dataset with standardised datetime parsing.
-- **inputs**: `["data/processed/edm_data_2021_2023/*.parquet"]`
+- **inputs**: `["data/processed/edm_spill_level/*.parquet"]`
 - **outputs**: `["data/processed/combined_edm_data.parquet"]`
 
 **API Data Processing**
