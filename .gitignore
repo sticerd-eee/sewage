@@ -25,6 +25,8 @@ __pycache__/
 .claude/
 .codex/
 .tmp_skill_refresh/
+AGENTS.md
+compound-engineering.local.md
 
 # Temporary files and caches
 *_cache/
@@ -70,10 +72,10 @@ temp/
 /book/tinytable_assets/
 /scripts/R/testing/*.html
 /scripts/R/testing/output/
-/output/*
+/output
 
 # Local project working directories
-data/
+/data
 DD_work/
 docs/lit_review/sewage_literature_review/
 docs/overleaf/
