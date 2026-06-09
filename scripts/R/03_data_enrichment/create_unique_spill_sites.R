@@ -1,43 +1,76 @@
-############################################################
+# ==============================================================================
 # Create Unique Spill Sites
-# Project: Sewage
-# Date: 03/02/2025
+# ==============================================================================
+#
+# Purpose: Build the unique spill-site metadata table from the annual-return
+#          lookup, annual EDM datasets, and matched event-annual records.
+#
 # Author: Jacopo Olivieri
-############################################################
+# Date: 2025-02-03
+# Date Modified: 2026-06-09
+#
+# Inputs:
+#   - data/processed/matched_events_annual_data/matched_events_annual_data.parquet
+#   - data/processed/annual_return_edm.parquet
+#   - data/processed/annual_return_lookup.parquet
+#
+# Outputs:
+#   - data/processed/unique_spill_sites.parquet
+#   - data/processed/unique_spill_sites.xlsx
+#   - output/log/13_create_unique_spill_sites.log
+#
+# ==============================================================================
 
-#' This script creates unique spill sites from the merged EDM data
-#' by cleaning location data and extracting distinct sites.
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first with `rv sync`.",
+    call. = FALSE
+  )
+}
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "conflicted",
+  "dplyr",
+  "fs",
+  "glue",
+  "here",
+  "logger",
+  "purrr",
+  "readr",
+  "rio",
+  "rnrfa",
+  "stringr",
+  "tibble",
+  "tidyr"
+)
+
+LOG_FILE <- here::here("output", "log", "13_create_unique_spill_sites.log")
+
+check_required_packages(REQUIRED_PACKAGES)
 
 # Set Up Functions
 ############################################################
 
-#' Initialize the R environment with required packages and settings
+#' Attach the packages used unqualified in this script
 #' @return NULL
 initialise_environment <- function() {
-  
-  required_packages <- c(
-    "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue", 
-    "fs", "rnrfa", "arrow"
-  )
-  
-  # Install and load packages
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
-    }
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
     library(pkg, character.only = TRUE)
   }))
+
+  conflicted::conflict_prefer("filter", "dplyr")
+  conflicted::conflict_prefer("select", "dplyr")
 }
 
-#' Set up logging configuration
+#' Initialise logging for this script
 #' @return NULL
-setup_logging <- function() {
-  log_path <- here::here("output", "log", "13_create_unique_spill_sites.log")
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-  
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
+  logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
 }
 
@@ -79,7 +112,11 @@ load_data <- function(file_path, label = "dataset") {
   
   tryCatch(
     {
-      df <- rio::import(file_path, trust = TRUE)
+      df <- if (tolower(fs::path_ext(file_path)) == "parquet") {
+        arrow::read_parquet(file_path)
+      } else {
+        rio::import(file_path, trust = TRUE)
+      }
       logger::log_info("Loaded {label} ({nrow(df)} rows)")
       return(df)
     },
@@ -857,7 +894,7 @@ main <- function() {
     {
       # Setup
       initialise_environment()
-      setup_logging()
+      initialise_logging()
       
       # Load source data
       matched_data <- load_data(CONFIG$spill_data_path, "matched event-annual data")
