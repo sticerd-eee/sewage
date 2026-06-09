@@ -16,8 +16,8 @@
 #   - data/raw/edm_data/{year}_{water_company}_edm.csv
 #
 # Outputs:
-#   - data/processed/edm_data_2021_2023/{year}_{water_company}.parquet
-#   - data/processed/edm_data_2021_2023/combined_edm_data_{year}.parquet
+#   - data/processed/edm_spill_level/{year}_{water_company}.parquet
+#   - data/processed/edm_spill_level/combined_edm_data_{year}.parquet
 #   - output/log/02_convert_individ_raw_data_to_rdata.log
 #
 # ==============================================================================
@@ -182,7 +182,7 @@ load_data <- function(year) {
 export_to_parquet <- function(data) {
   tryCatch(
     {
-      output_dir <- file.path(CONFIG$output_dir, "edm_data_2021_2023")
+      output_dir <- file.path(CONFIG$output_dir, "edm_spill_level")
       fs::dir_create(output_dir)
 
       logger::log_info("Exporting data to Parquet format")

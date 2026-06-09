@@ -14,12 +14,20 @@ Thumbs.db
 .Rhistory
 .Rproj.user/
 .Ruserdata
-*.Rproj
 rv/library/
 rv/local/
 scripts/python/.venv/
 __pycache__/
 *.pyc
+
+# Local agent and assistant configuration
+.agents/
+.claude/
+.codex/
+.tmp_skill_refresh/
+AGENTS.md
+compound-engineering.local.md
+.compound-engineering/
 
 # Temporary files and caches
 *_cache/
@@ -65,10 +73,10 @@ temp/
 /book/tinytable_assets/
 /scripts/R/testing/*.html
 /scripts/R/testing/output/
-/output/*
+/output
 
 # Local project working directories
-data/
+/data
 DD_work/
 docs/lit_review/sewage_literature_review/
 docs/overleaf/

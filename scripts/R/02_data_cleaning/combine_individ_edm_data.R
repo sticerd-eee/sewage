@@ -11,7 +11,7 @@
 # Date Modified: 2026-03-10
 #
 # Inputs:
-#   - data/processed/edm_data_2021_2023/{year}_{water_company}.parquet
+#   - data/processed/edm_spill_level/{year}_{water_company}.parquet
 #
 # Outputs:
 #   - data/processed/combined_edm_data.parquet
@@ -133,7 +133,7 @@ initialise_parsed_datetime_columns <- function(df, parsed_cols, tz = "UTC") {
 
 CONFIG <- list(
   years = 2021:2024,
-  input_dir = here::here("data", "processed", "edm_data_2021_2023"),
+  input_dir = here::here("data", "processed", "edm_spill_level"),
   processed_dir = here::here("data", "processed"),
   water_company_names = c(
     "Anglian Water",
@@ -278,8 +278,8 @@ clean_data <- function(df, df_name) {
               grepl("site", lower_name) & grepl("ea", lower_name) ~ "site_name_ea",
               grepl("site", lower_name) & grepl("wa_sc", lower_name) ~ "site_name_wa_sc",
               grepl("site", lower_name) & grepl("name", lower_name) ~ "site_name_ea",
-              grepl("start|begin", lower_name) ~ "start_time",
-              grepl("end|stop", lower_name) ~ "end_time",
+              grepl("start|strat|begin", lower_name) ~ "start_time",
+              grepl("end|stop|finish", lower_name) ~ "end_time",
               . %in% names(CONFIG$column_name_mapping) ~ CONFIG$column_name_mapping[.],
               TRUE ~ .
             )
