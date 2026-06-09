@@ -20,6 +20,12 @@ scripts/python/.venv/
 __pycache__/
 *.pyc
 
+# Local agent and assistant configuration
+.agents/
+.claude/
+.codex/
+.tmp_skill_refresh/
+
 # Temporary files and caches
 *_cache/
 *_files/
