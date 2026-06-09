@@ -27,6 +27,7 @@ __pycache__/
 .tmp_skill_refresh/
 AGENTS.md
 compound-engineering.local.md
+.compound-engineering/
 
 # Temporary files and caches
 *_cache/
