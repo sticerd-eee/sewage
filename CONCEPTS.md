@@ -7,8 +7,13 @@ Shared domain vocabulary for this project - entities, named processes, and statu
 ### Annual Return EDM
 The yearly company-reported event-duration monitoring return for storm overflow assets, combining site identifiers, permit/activity references, location fields, and reporting-year metadata.
 
+### Monitored Discharge Point
+A single monitored overflow asset at a wastewater works — a storm tank, inlet overflow, or network outfall — and the unit recorded by one Annual Return EDM row.
+
+One works can carry several Monitored Discharge Points that share every identifying field (names, permits, location) while reporting different spill behavior. Per-monitor unique identifiers exist only from the 2023 return onward (re-keyed each year, with a bridge to the prior year's identifiers); earlier returns carry no monitor-level key, so monitor-multiples in those years cannot be tracked individually across years.
+
 ### Annual-Return Site
-A reporting-year-specific storm overflow record in the Annual Return EDM. It is not automatically a stable cross-year entity, because identifiers and reporting structures can change between returns.
+A reporting-year-specific record of one Monitored Discharge Point in the Annual Return EDM. It is not automatically a stable cross-year entity, because identifiers and reporting structures can change between returns.
 
 ### Canonical Spill Site
 A stable project-level site identity used to connect records that refer to the same storm overflow asset across years and datasets.
