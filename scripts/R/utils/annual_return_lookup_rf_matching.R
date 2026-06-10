@@ -48,6 +48,24 @@ RF_MATCH_VARS <- c(
 # to load model files that do not carry it.
 RF_TRAINER_VERSION <- "downsampled_v2"
 
+#' Compare candidate pairs on the evidence fields, in place
+#'
+#' Single comparator construction shared by training and scoring so the
+#' model always predicts on features computed exactly as it was trained.
+#' @param pairs reclin2 pairs object (modified in place)
+#' @param match_vars Evidence fields to compare
+#' @return The pairs object, invisibly
+compare_rf_match_vars <- function(pairs, match_vars) {
+  cmp_list <- lapply(match_vars, function(x) jaro_winkler_na())
+  names(cmp_list) <- match_vars
+  reclin2::compare_pairs(pairs,
+    on = match_vars,
+    default_comparator = jaro_winkler_na(),
+    comparators = cmp_list, inplace = TRUE
+  )
+  invisible(pairs)
+}
+
 #' Create a Jaro-Winkler string comparator with NA handling
 #' @param threshold Threshold for Jaro-Winkler distance
 #' @param na_placeholder Placeholder for NA values
@@ -71,7 +89,10 @@ jaro_winkler_na <- function(threshold = 0.85, na_placeholder = "") {
 #'
 #' Runs the year-constrained spanning forest over the deterministic
 #' matches WITHOUT building the full lookup or writing any audit files,
-#' and returns the site IDs that end up in no matched component.
+#' and returns the site IDs that no deterministic edge touches. Sites
+#' whose every edge was dropped during resolution still count as matched
+#' (they appear in the forest membership) - the same semantics as the
+#' preliminary lookup pass this replaces.
 #' @param match_dfs Named list of windfall match dataframes
 #' @param data_list Named list of yearly dataframes
 #' @param years Reporting years included in the lookup
@@ -142,9 +163,6 @@ build_rf_training_pairs <- function(
   )
   set.seed(seed)
 
-  cmp_list <- lapply(match_vars, function(x) jaro_winkler_na())
-  names(cmp_list) <- match_vars
-
   blocks <- lapply(companies, function(comp) {
     lb <- data.table::as.data.table(
       df_left[df_left[[blocking_var]] %in% comp, , drop = FALSE]
@@ -160,11 +178,7 @@ build_rf_training_pairs <- function(
     if (nrow(pairs) == 0) {
       return(NULL)
     }
-    reclin2::compare_pairs(pairs,
-      on = match_vars,
-      default_comparator = jaro_winkler_na(),
-      comparators = cmp_list, inplace = TRUE
-    )
+    compare_rf_match_vars(pairs, match_vars)
 
     pair_tbl <- as.data.frame(pairs)
     pair_key <- paste(
@@ -202,7 +216,8 @@ build_rf_training_pairs <- function(
       length(easy_idx),
       ceiling(easy_negative_ratio * block_budget)
     )
-    easy_keep <- if (n_easy_keep > 0) sample(easy_idx, n_easy_keep) else integer(0)
+    # sample.int avoids sample()'s scalar trap when only one easy negative exists
+    easy_keep <- easy_idx[sample.int(length(easy_idx), n_easy_keep)]
 
     keep_idx <- sort(c(which(is_positive), hard_keep, easy_keep))
 
@@ -428,13 +443,7 @@ perform_rf_matching <- function(
 
   # Compare pairs
   logger::log_info("Comparing {nrow(pairs)} candidate pairs")
-  cmp_list <- lapply(match_vars, function(x) jaro_winkler_na())
-  names(cmp_list) <- match_vars
-  reclin2::compare_pairs(pairs,
-    on = match_vars,
-    default_comparator = jaro_winkler_na(),
-    comparators = cmp_list, inplace = TRUE
-  )
+  compare_rf_match_vars(pairs, match_vars)
 
   # Predict probabilities
   logger::log_info("Predicting match probabilities")

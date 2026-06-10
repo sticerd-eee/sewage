@@ -24,6 +24,12 @@
 #'
 #' Required packages (loaded by the calling script): dplyr, tibble,
 #' stringr, igraph, stats.
+#'
+#' Co-sourcing requirement: this file uses the schema prototypes and
+#' conform_to_prototype() from annual_return_lookup_audit_utils.R, which
+#' in turn calls attach_pre_resolution_components() from this file. Both
+#' files must be sourced into the same environment (the numbered script
+#' does this).
 
 #' Parse the reporting year from a year-specific graph vertex
 #' @param vertex Character vector like "2024_121"

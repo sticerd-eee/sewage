@@ -129,9 +129,6 @@ CONFIG <- list(
   )
 )
 
-# Convenience binding
-YEARS <- CONFIG$years
-
 # Sourced Utilities
 ############################################################
 
@@ -733,12 +730,10 @@ build_lookup_from_matches <- function(
     )
   }
 
-  edge_metadata <- if (nrow(constrained_forest$kept_edges) > 0) {
-    constrained_forest$kept_edges %>%
-      select(all_of(names(EDGE_METADATA_EXPORT_PROTOTYPE)))
-  } else {
-    empty_edge_metadata()
-  }
+  # The kept-edge prototype is a column superset of the export prototype,
+  # so this select covers the zero-row case too.
+  edge_metadata <- constrained_forest$kept_edges %>%
+    select(all_of(names(EDGE_METADATA_EXPORT_PROTOTYPE)))
 
   post_conflict_audit <- build_lookup_conflict_audit(
     membership_tbl = constrained_forest$membership_tbl,
@@ -754,6 +749,9 @@ build_lookup_from_matches <- function(
   if (nrow(post_conflict_audit$summary) > 0) {
     # Failure-gated diagnostics: written only at the moment the final
     # safety net trips, inside the same code path as the stop (KTD3).
+    # The pre-resolution audit is exported too so every audit file on
+    # disk describes the tripped run, not a previous one.
+    export_conflict_audit(pre_conflict_audit, paths = CONFIG)
     post_conflict_paths <- post_resolution_conflict_audit_paths(CONFIG)
     export_conflict_audit(post_conflict_audit, paths = post_conflict_paths)
     stop_if_lookup_conflicts(

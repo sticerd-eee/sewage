@@ -696,6 +696,10 @@ assert_true(
   nrow(arrow::read_parquet(trip_env$CONFIG$post_resolution_conflict_summary_parquet)) > 0,
   "A tripped run should write nonzero post-resolution diagnostics."
 )
+assert_true(
+  file.exists(trip_env$CONFIG$conflict_summary_parquet),
+  "A tripped run should also export the pre-resolution audit so all audit files describe the tripped run."
+)
 
 # Healthy run after a tripped run: stale post-resolution files are removed
 # and none are recreated.
@@ -1017,9 +1021,11 @@ assert_true(
 )
 quality_col <- grep("^match_quality_rf_", names(threshold_all$matches), value = TRUE)
 max_quality <- max(threshold_all$matches[[quality_col]])
+# No cap at 1: reclin2 selects score >= threshold, so a perfect 1.0
+# probability must face a threshold strictly above it to be excluded.
 threshold_cut <- lookup_env$perform_rf_matching(
   threshold_left, threshold_right, rf_model_fixture,
-  match_threshold = min(max_quality + 1e-6, 1)
+  match_threshold = max_quality + 1e-6
 )
 assert_identical(
   nrow(threshold_cut$matches), 0L,

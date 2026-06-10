@@ -26,6 +26,12 @@
 #'
 #' Required packages (loaded by the calling script): dplyr, tibble,
 #' tidyr, purrr, glue, logger, arrow, rio.
+#'
+#' Co-sourcing requirement: empty_conflict_audit() calls
+#' attach_pre_resolution_components() from
+#' annual_return_lookup_graph_utils.R, which in turn uses this file's
+#' schema prototypes. Both files must be sourced into the same
+#' environment (the numbered script does this).
 
 # Canonical zero-row schema prototypes
 ############################################################
@@ -189,6 +195,15 @@ EDGE_METADATA_EXPORT_PROTOTYPE <- tibble::tibble(
 #' @param prototype Zero-row prototype tibble
 #' @return Tibble with exactly the prototype's columns, order, and types
 conform_to_prototype <- function(tbl, prototype) {
+  for (col in intersect(names(prototype), names(tbl))) {
+    if (!identical(class(tbl[[col]]), class(prototype[[col]]))) {
+      stop(glue::glue(
+        "Column {col} has class {paste(class(tbl[[col]]), collapse = '/')} ",
+        "but its prototype declares {paste(class(prototype[[col]]), collapse = '/')}; ",
+        "fix the producing code rather than the prototype."
+      ))
+    }
+  }
   for (col in setdiff(names(prototype), names(tbl))) {
     tbl[[col]] <- rep(prototype[[col]][NA_integer_], nrow(tbl))
   }
@@ -468,7 +483,15 @@ clear_post_resolution_conflict_audit <- function(paths) {
   files <- conflict_audit_files(post_resolution_conflict_audit_paths(paths))
   existing <- files[file.exists(files)]
   if (length(existing) > 0) {
-    file.remove(existing)
+    removed <- suppressWarnings(file.remove(existing))
+    if (!all(removed)) {
+      stop(glue::glue(
+        "Could not remove stale post-resolution conflict-audit files: ",
+        "{paste(basename(existing[!removed]), collapse = ', ')}. ",
+        "Their presence would wrongly signal a tripped safety net - ",
+        "remove them manually (close any program holding them open) and rerun."
+      ))
+    }
     logger::log_info(
       "Removed {length(existing)} stale post-resolution conflict-audit files"
     )
