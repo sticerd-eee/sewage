@@ -583,387 +583,6 @@ run_all_windfall_matches <- function(
   )
 }
 
-# (Optional) Probabilistic Matching w/ Random Forest
-############################################################
-
-# NOTE: The following ML‑based matching functions are loaded **lazily** and executed only if `compute_rf_matching` parameter to the main() function
-# is set to TRUE.  This keeps the dependency cost & runtime low for the common
-# case where deterministic matching is sufficient.
-
-# --- Helper comparators --------------------------------------------------- #
-
-#' Create a Jaro-Winkler string comparator with NA handling
-#' @param threshold Threshold for Jaro-Winkler distance
-#' @param na_placeholder Placeholder for NA values
-#' @return Comparator function that handles NA values
-jaro_winkler_na <- function(threshold = 0.85, na_placeholder = "") {
-  SCORE_BOTH_NA <- -1L
-  SCORE_ONE_NA <- -2L
-  base_comp <- reclin2::cmp_jarowinkler(threshold = threshold)
-
-  function(x, y) {
-    is_na_x <- is.na(x) | x == na_placeholder
-    is_na_y <- is.na(y) | y == na_placeholder
-
-    ifelse(is_na_x & is_na_y, SCORE_BOTH_NA,
-      ifelse(is_na_x | is_na_y, SCORE_ONE_NA, base_comp(x, y))
-    )
-  }
-}
-
-#' Train a Random‑Forest model for record linkage
-#' @param df_left Left dataframe
-#' @param df_right Right dataframe
-#' @param known_matches Dataframe of known matches between left and right
-#' @param match_vars Vector of variables to use for matching
-#' @param blocking_var Variable to use for blocking
-#' @param threshold_default Default threshold for Jaro-Winkler comparator
-#' @param num_trees Number of trees in the random forest
-#' @param max_depth Maximum depth of trees
-#' @param num_threads Number of threads to use
-#' @param model_file Path to save the trained model
-#' @return Trained random forest model
-train_rf_linkage_model <- function(
-    df_left,
-    df_right,
-    known_matches,
-    match_vars = c(
-      "site_name_ea", "site_name_wa_sc", "permit_reference_ea",
-      "permit_reference_wa_sc", "activity_reference", "outlet_discharge_ngr"
-    ),
-    blocking_var = "water_company",
-    threshold_default = 0.85,
-    num_trees = 500,
-    max_depth = 8,
-    num_threads = 4,
-    model_file = NULL) {
-  tryCatch(
-    {
-      logger::log_info("Training random forest linkage model")
-
-      # Identify site_id columns programmatically
-      site_id_left <- grep("^site_id_", names(df_left), value = TRUE)
-      site_id_right <- grep("^site_id_", names(df_right), value = TRUE)
-      if (length(site_id_left) != 1 || length(site_id_right) != 1) {
-        stop("df_left / df_right must carry exactly one site_id_ column each")
-      }
-      left_year <- sub("^site_id_", "", site_id_left)
-      right_year <- sub("^site_id_", "", site_id_right)
-
-      logger::log_info("Preparing training data for years {left_year} and {right_year}")
-
-      dt_left <- as.data.table(df_left)
-      dt_right <- as.data.table(df_right)
-
-      # Bring known match labels
-      known_matches <- as.data.table(known_matches)[, match_id := .I]
-      dt_left[known_matches, on = site_id_left, match_id := i.match_id]
-      dt_right[known_matches, on = site_id_right, match_id := i.match_id]
-
-      # Create candidate pairs via blocking
-      logger::log_info("Creating candidate pairs using blocking on {blocking_var}")
-      pairs <- reclin2::pair_blocking(dt_left, dt_right, on = blocking_var, add_xy = TRUE)
-
-      # Comparators list (Jaro‑Winkler + NA handling)
-      cmp_list <- lapply(match_vars, function(x) jaro_winkler_na())
-      names(cmp_list) <- match_vars
-      cmp_list$match_id <- reclin2::cmp_identical()
-
-      # Compare pairs
-      logger::log_info("Comparing {nrow(pairs)} candidate pairs")
-      reclin2::compare_pairs(pairs,
-        on = c(match_vars, "match_id"),
-        default_comparator = jaro_winkler_na(threshold_default),
-        comparators = cmp_list, inplace = TRUE
-      )
-
-      # Response variable
-      pairs[, match_id := factor(data.table::fifelse(match_id %in% TRUE, 1L, 0L),
-        levels = c(0, 1),
-        labels = c("non_match", "match")
-      )]
-
-      formula_rf <- as.formula(paste("match_id ~", paste(match_vars, collapse = " + ")))
-
-      logger::log_info("Training RF model on {nrow(pairs)} candidate pairs ({sum(pairs$match_id=='match')} matches)")
-      m_rf <- ranger::ranger(formula_rf,
-        data = pairs, num.trees = num_trees,
-        max.depth = max_depth, num.threads = num_threads,
-        probability = TRUE, importance = "impurity"
-      )
-
-      if (!is.null(model_file)) {
-        dir.create(dirname(model_file), recursive = TRUE, showWarnings = FALSE)
-        saveRDS(list(model = m_rf, importance = ranger::importance(m_rf)), model_file)
-        logger::log_info("RF model saved to {model_file}")
-      }
-
-      logger::log_info("Random forest model training complete: OOB error = {m_rf$prediction.error}")
-      return(m_rf)
-    },
-    error = function(e) {
-      logger::log_error("RF model training failed: {e$message}")
-      stop(glue::glue("Random forest model training failed: {e$message}"))
-    }
-  )
-}
-
-#' Prepare data by sub‑setting to unmatched IDs for RF matching
-#' @param df Original dataframe
-#' @param unmatched_ids Vector of unmatched IDs
-#' @return Filtered and processed dataframe ready for RF matching
-prepare_rf_data <- function(df, unmatched_ids) {
-  tryCatch(
-    {
-      site_id_col <- grep("^site_id_", names(df), value = TRUE)
-      if (length(site_id_col) != 1) {
-        stop("Unexpected site_id column configuration")
-      }
-
-      logger::log_info("Preparing data for RF matching with {length(unmatched_ids)} unmatched IDs")
-
-      result <- df %>%
-        filter(.data[[site_id_col]] %in% unmatched_ids) %>%
-        mutate(
-          site_name_ea = if_else(is.na(site_name_ea) & !is.na(site_name_wa_sc), site_name_wa_sc, site_name_ea),
-          site_name_wa_sc = if_else(is.na(site_name_wa_sc) & !is.na(site_name_ea), site_name_ea, site_name_wa_sc)
-        )
-
-      logger::log_info("Prepared {nrow(result)} rows for RF matching")
-      return(result)
-    },
-    error = function(e) {
-      logger::log_error("Failed to prepare data for RF matching: {e$message}")
-      stop(glue::glue("Data preparation for RF matching failed: {e$message}"))
-    }
-  )
-}
-
-#' Use a trained RF model to find high‑probability matches between two years
-#' @param df_left Left dataframe
-#' @param df_right Right dataframe
-#' @param rf_model Trained random forest model
-#' @param match_threshold Probability threshold for considering a match
-#' @param blocking_var Variable to use for blocking
-#' @param match_vars Vector of variables to use for matching
-#' @return List containing matches dataframe
-perform_rf_matching <- function(
-    df_left,
-    df_right,
-    rf_model,
-    match_threshold = 0.05,
-    blocking_var = "water_company",
-    match_vars = c(
-      "site_name_ea", "site_name_wa_sc", "permit_reference_ea",
-      "permit_reference_wa_sc", "activity_reference", "outlet_discharge_ngr"
-    )) {
-  tryCatch(
-    {
-      # Identify site_id columns
-      site_id_left <- grep("^site_id_", names(df_left), value = TRUE)
-      site_id_right <- grep("^site_id_", names(df_right), value = TRUE)
-      if (length(site_id_left) != 1 || length(site_id_right) != 1) {
-        stop("df_left / df_right must carry exactly one site_id_ column each")
-      }
-      left_year <- sub("^site_id_", "", site_id_left)
-      right_year <- sub("^site_id_", "", site_id_right)
-      year_suffix <- paste0(left_year, "_", right_year)
-
-      logger::log_info("Performing RF matching for years {left_year} and {right_year}")
-
-      dt_left <- as.data.table(df_left)
-      dt_right <- as.data.table(df_right)
-
-      # Blocking & comparison
-      logger::log_info("Creating candidate pairs using blocking on {blocking_var}")
-      pairs <- reclin2::pair_blocking(dt_left, dt_right, on = blocking_var, add_xy = TRUE)
-      if (nrow(pairs) == 0) {
-        logger::log_info("No candidate pairs found after blocking")
-        return(list(matches = tibble()))
-      }
-
-      # Compare pairs
-      logger::log_info("Comparing {nrow(pairs)} candidate pairs")
-      cmp_list <- lapply(match_vars, function(x) jaro_winkler_na())
-      names(cmp_list) <- match_vars
-      reclin2::compare_pairs(pairs,
-        on = match_vars,
-        default_comparator = jaro_winkler_na(),
-        comparators = cmp_list, inplace = TRUE
-      )
-
-      # Predict probabilities
-      logger::log_info("Predicting match probabilities")
-      pred <- predict(rf_model, data = pairs)
-      prob_col <- paste0("match_prob_", year_suffix)
-      pairs[, (prob_col) := pred$predictions[, "match"]]
-
-      # Select matches
-      logger::log_info("Selecting matches with threshold {match_threshold}")
-      sel_col <- paste0("selected_rf_", year_suffix)
-      pairs <- reclin2::select_n_to_m(pairs,
-        variable = sel_col, score = prob_col,
-        threshold = match_threshold, n = 1, m = 1, inplace = TRUE
-      )
-
-      # Link records
-      results <- reclin2::link(pairs,
-        selection = sel_col, all_x = FALSE, all_y = FALSE,
-        suffixes = c(paste0("_", left_year), paste0("_", right_year)),
-        keep_from_pairs = prob_col
-      )
-
-      if (nrow(results) == 0) {
-        logger::log_info("No matches found above threshold")
-        return(list(matches = tibble()))
-      }
-
-      # Format results
-      results <- as_tibble(results) %>%
-        rename(!!paste0("match_quality_rf_", year_suffix) := all_of(prob_col)) %>%
-        mutate(
-          !!paste0("match_method_", year_suffix) := "rf",
-          !!paste0("match_type_", year_suffix) := "one_to_one",
-          !!paste0("join_keys_", year_suffix) := "rf_probabilistic",
-          !!paste0("match_level_", year_suffix) := (1 - !!sym(paste0("match_quality_rf_", year_suffix))) * 100
-        ) %>%
-        select(
-          !!sym(site_id_left), !!sym(site_id_right),
-          starts_with("match_method_"), starts_with("match_type_"),
-          starts_with("join_keys_"), starts_with("match_level_"),
-          starts_with("match_quality_rf_")
-        )
-
-      logger::log_info("Found {nrow(results)} probabilistic matches")
-      return(list(matches = results))
-    },
-    error = function(e) {
-      logger::log_error("RF matching failed: {e$message}")
-      stop(glue::glue("Probabilistic matching failed: {e$message}"))
-    }
-  )
-}
-
-#' Run RF matching over all year pairs
-#' @param year_pairs Dataframe with left_year and right_year columns
-#' @param data_list List of tibbles with one tibble per year
-#' @param rf_model Trained random forest model
-#' @param unmatched_ids_by_year List of unmatched IDs by year
-#' @return Named list of match dataframes, one for each year pair
-run_rf_matching <- function(
-    year_pairs,
-    data_list,
-    rf_model,
-    unmatched_ids_by_year) {
-  logger::log_info("Running RF matching across all year pairs")
-
-  tryCatch(
-    {
-      out <- list()
-
-      for (i in seq_len(nrow(year_pairs))) {
-        ly <- year_pairs$left_year[i]
-        ry <- year_pairs$right_year[i]
-        pair_name <- paste(ly, ry, sep = "_")
-
-        logger::log_info("Processing year pair: {pair_name}")
-
-        df_left <- data_list[[paste0("df", ly)]]
-        df_right <- data_list[[paste0("df", ry)]]
-
-        um_left <- unmatched_ids_by_year[[as.character(ly)]]
-        um_right <- unmatched_ids_by_year[[as.character(ry)]]
-
-        # Skip if either side has no unmatched IDs
-        if (length(um_left) == 0 || length(um_right) == 0) {
-          logger::log_info("Skipping {pair_name}: no unmatched IDs on one or both sides")
-          out[[pair_name]] <- tibble()
-          next
-        }
-
-        df_left_filt <- prepare_rf_data(df_left, um_left)
-        df_right_filt <- prepare_rf_data(df_right, um_right)
-
-        # If filtering removed all rows on either side, skip
-        if (nrow(df_left_filt) == 0 || nrow(df_right_filt) == 0) {
-          logger::log_info("Skipping {pair_name}: filtered data is empty")
-          out[[pair_name]] <- tibble()
-          next
-        }
-
-        res <- perform_rf_matching(df_left_filt, df_right_filt, rf_model)$matches
-        out[[pair_name]] <- res
-
-        logger::log_info("Completed RF matching for {pair_name}: found {nrow(res)} matches")
-      }
-
-      total_matches <- sum(sapply(out, nrow))
-      logger::log_info("RF matching complete. Found {total_matches} matches across all year pairs")
-      return(out)
-    },
-    error = function(e) {
-      logger::log_error("RF matching failed: {e$message}")
-      stop(glue::glue("RF matching across year pairs failed: {e$message}"))
-    }
-  )
-}
-
-#' Load an existing RF model or train a new one conditionally
-#' @param data_list List of tibbles with one tibble per year
-#' @param model_file Path to the saved model file
-#' @param train_if_missing Boolean indicating whether to train a new model if not found
-#' @return RF model object or NULL if model not found and training disabled
-load_or_train_rf_model <- function(data_list, model_file = CONFIG$rf_model_file, train_if_missing = TRUE) {
-  tryCatch(
-    {
-      if (file.exists(model_file)) {
-        logger::log_info("Loading RF model from {model_file}")
-        saved_model <- readRDS(model_file)
-        m_rf <- if (is.list(saved_model) && "model" %in% names(saved_model)) {
-          saved_model$model
-        } else {
-          saved_model
-        }
-
-        if (!inherits(m_rf, "ranger")) {
-          stop("Saved RF model file does not contain a ranger model at key 'model'")
-        }
-
-        return(m_rf)
-      }
-
-      if (!train_if_missing) {
-        logger::log_warn("RF model file not found and training disabled")
-        return(NULL)
-      }
-
-      logger::log_info("RF model file not found – training a new model...")
-
-      # Train on 2023 ↔ 2024 deterministic unique_id matches
-      windfall_unique <- perform_windfall_matching("2023_2024",
-        matching_levels = list(c("unique_id_2023")), data_list = data_list
-      )$matches %>%
-        filter(join_keys_2023_2024 == "water_company|unique_id_2023") %>%
-        select(site_id_2024, site_id_2023)
-
-      logger::log_info("Training RF model with {nrow(windfall_unique)} known matches")
-      m <- train_rf_linkage_model(
-        df_left       = data_list$df2023,
-        df_right      = data_list$df2024,
-        known_matches = windfall_unique,
-        model_file    = model_file
-      )
-
-      logger::log_info("RF model training complete")
-      return(m)
-    },
-    error = function(e) {
-      logger::log_error("Failed to load or train RF model: {e$message}")
-      stop(glue::glue("RF model loading/training failed: {e$message}"))
-    }
-  )
-}
-
 # Graph & Lookup‑Table Construction
 ############################################################
 
@@ -978,6 +597,91 @@ has_lookup_match_schema <- function(df) {
     length(grep("^match_type_", names(df), value = TRUE)) == 1 &&
     length(grep("^match_level_", names(df), value = TRUE)) == 1 &&
     length(grep("^join_keys_", names(df), value = TRUE)) == 1
+}
+
+#' Convert pairwise match dataframes into weighted candidate graph edges
+#' @param match_dfs Named list of pairwise match dataframes
+#' @return Tibble of weighted, deduplicated candidate edges (possibly empty)
+build_weighted_edges <- function(match_dfs) {
+  nonempty_match_dfs <- purrr::keep(
+    match_dfs,
+    ~ is.data.frame(.x) && nrow(.x) > 0
+  )
+  invalid_match_dfs <- purrr::discard(
+    nonempty_match_dfs,
+    has_lookup_match_schema
+  )
+
+  if (length(invalid_match_dfs) > 0) {
+    invalid_names <- names(invalid_match_dfs)
+    if (is.null(invalid_names) || any(invalid_names == "")) {
+      invalid_names <- paste0("match_df_", seq_along(invalid_match_dfs))
+    }
+    stop(glue::glue(
+      "Nonempty match dataframes are missing lookup columns: ",
+      "{paste(invalid_names, collapse = ', ')}"
+    ))
+  }
+
+  if (length(nonempty_match_dfs) == 0) {
+    return(tibble())
+  }
+
+  # Build edge list
+  edges_df <- lapply(nonempty_match_dfs, function(df) {
+    site_cols <- grep("^site_id_", names(df), value = TRUE)
+    match_method_col <- grep("^match_method_", names(df), value = TRUE)
+    match_type_col <- grep("^match_type_", names(df), value = TRUE)
+    level_col <- grep("^match_level_", names(df), value = TRUE)
+    join_keys_col <- grep("^join_keys_", names(df), value = TRUE)
+
+    # Edges are undirected, but exports use chronological endpoint labels.
+    site_years <- as.integer(stringr::str_extract(site_cols, "\\d{4}$"))
+    endpoint_order <- order(site_years)
+    site_cols <- site_cols[endpoint_order]
+    site_years <- site_years[endpoint_order]
+    yr_l <- site_years[1]
+    yr_r <- site_years[2]
+
+    df %>%
+      filter(!is.na(.data[[join_keys_col]])) %>%
+      transmute(
+        from         = paste0(yr_l, "_", .data[[site_cols[1]]]),
+        to           = paste0(yr_r, "_", .data[[site_cols[2]]]),
+        match_method = .data[[match_method_col]],
+        match_type   = .data[[match_type_col]],
+        match_level  = as.integer(.data[[level_col]]),
+        join_keys    = .data[[join_keys_col]]
+      ) %>%
+      filter(from != "", to != "")
+  }) %>%
+    bind_rows() %>%
+    distinct()
+
+  if (nrow(edges_df) == 0) {
+    return(edges_df)
+  }
+
+  edge_evidence <- score_join_key_evidence(edges_df$join_keys)
+
+  # Weight: ordinary field count plus exact-ID/RF priority diagnostics.
+  bind_cols(edges_df, edge_evidence) %>%
+    mutate(
+      n_keys = stringr::str_count(join_keys, "\\|") + 1L,
+      edge_priority = case_when(
+        has_unique_id_2023_key ~ 300L,
+        has_unique_id_key ~ 290L,
+        stringr::str_detect(join_keys, "rf_probabilistic") ~ 10L,
+        TRUE ~ 100L
+      ),
+      raw_score = case_when(
+        has_unique_id_2023_key | has_unique_id_key ~ max(n_keys) + 2,
+        stringr::str_detect(join_keys, "rf_probabilistic") ~ 1,
+        TRUE ~ evidence_field_count + 1
+      ),
+      weight = raw_score * 100 - match_level
+    ) %>%
+    select(-has_unique_id_2023_key, -has_unique_id_key)
 }
 
 #' Given pairwise match dataframes, build a year-constrained lookup
@@ -995,65 +699,7 @@ build_lookup_from_matches <- function(
   tryCatch(
     {
       conflict_resolution <- match.arg(conflict_resolution)
-      nonempty_match_dfs <- purrr::keep(
-        match_dfs,
-        ~ is.data.frame(.x) && nrow(.x) > 0
-      )
-      invalid_match_dfs <- purrr::discard(
-        nonempty_match_dfs,
-        has_lookup_match_schema
-      )
-
-      if (length(invalid_match_dfs) > 0) {
-        invalid_names <- names(invalid_match_dfs)
-        if (is.null(invalid_names) || any(invalid_names == "")) {
-          invalid_names <- paste0("match_df_", seq_along(invalid_match_dfs))
-        }
-        stop(glue::glue(
-          "Nonempty match dataframes are missing lookup columns: ",
-          "{paste(invalid_names, collapse = ', ')}"
-        ))
-      }
-
-      match_dfs <- nonempty_match_dfs
-      if (length(match_dfs) == 0) {
-        logger::log_warn("No usable match rows supplied; returning empty lookup")
-        return(list(
-          lookup_table = empty_lookup_table(CONFIG$years),
-          edge_metadata = empty_edge_metadata()
-        ))
-      }
-
-      # Build edge list
-      edges_df <- lapply(match_dfs, function(df) {
-        site_cols <- grep("^site_id_", names(df), value = TRUE)
-        match_method_col <- grep("^match_method_", names(df), value = TRUE)
-        match_type_col <- grep("^match_type_", names(df), value = TRUE)
-        level_col <- grep("^match_level_", names(df), value = TRUE)
-        join_keys_col <- grep("^join_keys_", names(df), value = TRUE)
-
-        # Edges are undirected, but exports use chronological endpoint labels.
-        site_years <- as.integer(stringr::str_extract(site_cols, "\\d{4}$"))
-        endpoint_order <- order(site_years)
-        site_cols <- site_cols[endpoint_order]
-        site_years <- site_years[endpoint_order]
-        yr_l <- site_years[1]
-        yr_r <- site_years[2]
-
-        df %>%
-          filter(!is.na(.data[[join_keys_col]])) %>%
-          transmute(
-            from         = paste0(yr_l, "_", .data[[site_cols[1]]]),
-            to           = paste0(yr_r, "_", .data[[site_cols[2]]]),
-            match_method = .data[[match_method_col]],
-            match_type   = .data[[match_type_col]],
-            match_level  = as.integer(.data[[level_col]]),
-            join_keys    = .data[[join_keys_col]]
-          ) %>%
-          filter(from != "", to != "")
-      }) %>%
-        bind_rows() %>%
-        distinct()
+      edges_df <- build_weighted_edges(match_dfs)
 
       if (nrow(edges_df) == 0) {
         logger::log_warn("No usable match edges supplied; returning empty lookup")
@@ -1062,27 +708,6 @@ build_lookup_from_matches <- function(
           edge_metadata = empty_edge_metadata()
         ))
       }
-
-      edge_evidence <- score_join_key_evidence(edges_df$join_keys)
-
-      # Weight: ordinary field count plus exact-ID/RF priority diagnostics.
-      edges_df <- bind_cols(edges_df, edge_evidence) %>%
-        mutate(
-          n_keys = stringr::str_count(join_keys, "\\|") + 1L,
-          edge_priority = case_when(
-            has_unique_id_2023_key ~ 300L,
-            has_unique_id_key ~ 290L,
-            stringr::str_detect(join_keys, "rf_probabilistic") ~ 10L,
-            TRUE ~ 100L
-          ),
-          raw_score = case_when(
-            has_unique_id_2023_key | has_unique_id_key ~ max(n_keys) + 2,
-            stringr::str_detect(join_keys, "rf_probabilistic") ~ 1,
-            TRUE ~ evidence_field_count + 1
-          ),
-          weight = raw_score * 100 - match_level
-        ) %>%
-        select(-has_unique_id_2023_key, -has_unique_id_key)
 
       # Keep the old MST only as a pre-resolution audit view, then build the
       # canonical lookup from the year-constrained forest.
@@ -1383,19 +1008,18 @@ main <- function(
     match_dfs <- windfall_match_dfs
 
     if (compute_rf_matching) {
-      prelim_lookup <- build_lookup_from_matches(
+      # RF matching is optional and heavy: source its utilities on demand only.
+      source(
+        here::here("scripts", "R", "utils", "annual_return_lookup_rf_matching.R"),
+        local = TRUE
+      )
+
+      # Windfall-only forest pass (no exports) to find still-unmatched sites.
+      unmatched_ids_by_year <- derive_windfall_unmatched_ids(
         windfall_match_dfs,
         data_list = data_list,
-        conflict_resolution = same_year_conflict_resolution
-      )$lookup_table
-      unmatched_ids_by_year <- lapply(CONFIG$years, function(yr) {
-        site_col <- paste0("site_id_", yr)
-        setdiff(
-          data_list[[paste0("df", yr)]][[site_col]],
-          prelim_lookup[[site_col]]
-        )
-      })
-      names(unmatched_ids_by_year) <- as.character(CONFIG$years)
+        years = CONFIG$years
+      )
 
       m_rf <- load_or_train_rf_model(
         data_list,

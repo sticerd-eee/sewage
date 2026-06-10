@@ -591,6 +591,233 @@ assert_identical(
 lookup_env$CONFIG <- ORIGINAL_CONFIG
 
 # ------------------------------------------------------------------------------
+# RF matching: lazy loading
+# ------------------------------------------------------------------------------
+
+rf_lazy_env <- new.env(parent = globalenv())
+source(
+  here::here("scripts", "R", "03_data_enrichment", "create_annual_return_lookup.R"),
+  local = rf_lazy_env
+)
+assert_true(
+  !exists("perform_rf_matching", envir = rf_lazy_env, inherits = FALSE),
+  "RF matching functions should not be defined after sourcing the script."
+)
+
+main_fixture <- bind_rows(lapply(2021:2024, function(yr) {
+  tibble(
+    year = yr,
+    water_company = "Test Co",
+    site_name_ea = paste0("SITE-", yr, "-", 1:2),
+    site_name_wa_sc = NA_character_,
+    permit_reference_ea = NA_character_,
+    permit_reference_wa_sc = NA_character_,
+    activity_reference = NA_character_,
+    outlet_discharge_ngr = NA_character_
+  )
+}))
+main_fixture_parquet <- tempfile("lookup-main-", fileext = ".parquet")
+on.exit(unlink(main_fixture_parquet), add = TRUE)
+arrow::write_parquet(main_fixture, main_fixture_parquet)
+
+main_dir <- tempfile("lookup-main-out-")
+dir.create(main_dir, recursive = TRUE, showWarnings = FALSE)
+on.exit(unlink(main_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+main_overrides <- builder_path_overrides
+main_overrides$output_dir <- main_dir
+for (key in names(main_overrides)) {
+  if (grepl("parquet$|xlsx$", main_overrides[[key]])) {
+    main_overrides[[key]] <- file.path(main_dir, basename(main_overrides[[key]]))
+  }
+}
+main_overrides$data_path <- main_fixture_parquet
+
+rf_lazy_env$load_packages <- function() invisible(NULL)
+rf_lazy_env$setup_logging <- function() invisible(NULL)
+rf_lazy_env$CONFIG <- utils::modifyList(rf_lazy_env$CONFIG, main_overrides)
+rf_lazy_env$main(compute_rf_matching = FALSE)
+
+assert_true(
+  !exists("perform_rf_matching", envir = rf_lazy_env, inherits = FALSE),
+  "A default run (compute_rf_matching = FALSE) should never source the RF utilities."
+)
+
+# ------------------------------------------------------------------------------
+# RF matching: downsampled trainer, labels, ambiguity guard, threshold
+# ------------------------------------------------------------------------------
+
+source(
+  here::here("scripts", "R", "utils", "annual_return_lookup_rf_matching.R"),
+  local = lookup_env
+)
+
+rf_fixture_cols <- function(df) {
+  df %>%
+    mutate(
+      site_name_wa_sc = NA_character_,
+      permit_reference_ea = NA_character_,
+      permit_reference_wa_sc = NA_character_,
+      activity_reference = NA_character_,
+      outlet_discharge_ngr = NA_character_
+    )
+}
+rf_left <- rf_fixture_cols(tibble(
+  site_id_2023 = 1:6,
+  water_company = c("Co A", "Co A", "Co A", "Co B", "Co B", "Co B"),
+  site_name_ea = c(
+    "ALPHA WORKS", "BRAVO WORKS", "CHARLIE WORKS",
+    "DELTA WORKS", "ECHO WORKS", NA
+  )
+))
+rf_right <- rf_fixture_cols(tibble(
+  site_id_2024 = 11:16,
+  water_company = c("Co A", "Co A", "Co A", "Co B", "Co B", "Co B"),
+  site_name_ea = c(
+    "ALPHA WORKS", "BRAVO WORKS LTD", "CHARLIE WKS",
+    "DELTA WORKS", "FOXTROT STREET", NA
+  )
+))
+rf_known_matches <- tibble(
+  site_id_2023 = c(1L, 2L, 4L),
+  site_id_2024 = c(11L, 12L, 14L)
+)
+
+training_pairs <- lookup_env$build_rf_training_pairs(
+  rf_left, rf_right, rf_known_matches,
+  hard_negative_floor = 0.95,
+  easy_negative_ratio = 1,
+  seed = 1
+)
+assert_identical(
+  sum(training_pairs$training_role == "positive"), 3L,
+  "The downsampled training set should contain every known-match positive."
+)
+hard_rows <- training_pairs %>% filter(training_role == "hard_negative")
+if (nrow(hard_rows) > 0) {
+  hard_sims <- as.matrix(hard_rows[lookup_env$RF_MATCH_VARS])
+  hard_sims[hard_sims < 0] <- NA
+  assert_true(
+    all(apply(hard_sims, 1, max, na.rm = TRUE) >= 0.95),
+    "Hard negatives should only be kept above the similarity floor."
+  )
+}
+easy_by_block <- training_pairs %>%
+  group_by(training_block) %>%
+  summarise(
+    n_easy = sum(training_role == "easy_negative"),
+    n_positive = sum(training_role == "positive"),
+    .groups = "drop"
+  )
+assert_true(
+  all(easy_by_block$n_easy <= ceiling(1 * pmax(1, easy_by_block$n_positive))),
+  "Easy negatives should respect the per-block sampling ratio."
+)
+assert_true(
+  all(training_pairs$label[training_pairs$training_role == "positive"] == "match"),
+  "Known-match pairs should be labelled match."
+)
+
+all_pairs <- lookup_env$build_rf_training_pairs(
+  rf_left, rf_right, rf_known_matches,
+  hard_negative_floor = 0.95,
+  easy_negative_ratio = 100,
+  seed = 1
+)
+na_similarity_rows <- all_pairs %>%
+  filter(if_all(all_of(lookup_env$RF_MATCH_VARS), ~ .x == -1))
+assert_true(
+  nrow(na_similarity_rows) > 0 && all(na_similarity_rows$label == "non_match"),
+  "Pairs with NA similarity on every field should be labelled non_match (poison-label guard)."
+)
+
+rf_model_fixture <- lookup_env$train_rf_linkage_model(
+  rf_left, rf_right, rf_known_matches,
+  num_trees = 100,
+  seed = 1
+)
+assert_true(
+  inherits(rf_model_fixture, "ranger"),
+  "The downsampled trainer should return a ranger probability model."
+)
+
+# Ambiguity guard: identifier-identical groups are flagged, never linked.
+ident_left <- tibble(
+  site_id_2023 = 1:3,
+  water_company = "Co A",
+  site_name_ea = "SAME WORKS",
+  site_name_wa_sc = "SAME WORKS",
+  permit_reference_ea = "PERMIT-1",
+  permit_reference_wa_sc = NA_character_,
+  activity_reference = "ACT-1",
+  outlet_discharge_ngr = "NGR-1"
+)
+ident_right <- ident_left %>%
+  select(-site_id_2023) %>%
+  mutate(site_id_2024 = 21:23, .before = 1)
+
+guard_split <- lookup_env$flag_ambiguous_rf_proposals(
+  matches = tibble(site_id_2023 = 1:3, site_id_2024 = 21:23),
+  df_left = ident_left,
+  df_right = ident_right,
+  match_vars = lookup_env$RF_MATCH_VARS,
+  site_id_left = "site_id_2023",
+  site_id_right = "site_id_2024"
+)
+assert_identical(
+  nrow(guard_split$matches), 0L,
+  "Identifier-identical proposals should never be linked."
+)
+assert_identical(
+  nrow(guard_split$ambiguous), 3L,
+  "Identifier-identical proposals should be flagged as ambiguous."
+)
+
+ambiguous_run <- lookup_env$perform_rf_matching(
+  ident_left, ident_right, rf_model_fixture,
+  match_threshold = 0.05
+)
+assert_identical(
+  nrow(ambiguous_run$matches), 0L,
+  "An identifier-identical fixture should yield zero RF links end-to-end."
+)
+assert_true(
+  nrow(ambiguous_run$ambiguous) > 0,
+  "An identifier-identical fixture should surface a flagged ambiguous group."
+)
+
+# Threshold: 0.90 by default; override honoured.
+assert_identical(
+  formals(lookup_env$perform_rf_matching)$match_threshold, 0.90,
+  "perform_rf_matching() should default to the validated 0.90 threshold."
+)
+assert_identical(
+  formals(lookup_env$run_rf_matching)$match_threshold, 0.90,
+  "run_rf_matching() should default to the validated 0.90 threshold."
+)
+
+threshold_left <- rf_left %>% filter(site_id_2023 %in% c(1L, 5L))
+threshold_right <- rf_right %>% filter(site_id_2024 %in% c(11L, 15L))
+threshold_all <- lookup_env$perform_rf_matching(
+  threshold_left, threshold_right, rf_model_fixture,
+  match_threshold = 0.001
+)
+assert_true(
+  nrow(threshold_all$matches) > 0,
+  "A near-zero threshold override should admit RF proposals."
+)
+quality_col <- grep("^match_quality_rf_", names(threshold_all$matches), value = TRUE)
+max_quality <- max(threshold_all$matches[[quality_col]])
+threshold_cut <- lookup_env$perform_rf_matching(
+  threshold_left, threshold_right, rf_model_fixture,
+  match_threshold = min(max_quality + 1e-6, 1)
+)
+assert_identical(
+  nrow(threshold_cut$matches), 0L,
+  "Proposals below the configured threshold should be excluded."
+)
+
+# ------------------------------------------------------------------------------
 # Baseline metrics (integration block on refreshed data/processed outputs)
 # ------------------------------------------------------------------------------
 
@@ -642,5 +869,32 @@ for (yr in names(expected_coverage)) {
     paste0("Baseline: ", yr, " lookup IDs should contain no duplicates.")
   )
 }
+
+# Monitor-granularity characterization: within-year identifier-duplicate
+# groups are distinct monitored discharge points (see CONCEPTS.md and the
+# same-year-conflicts solution note). A data refresh that changes these
+# counts should be noticed, not silently absorbed.
+expected_duplicate_groups <- tibble(
+  year = 2021:2024,
+  n_groups = c(38L, 20L, 14L, 17L),
+  n_rows = c(81L, 45L, 35L, 38L)
+)
+monitor_data_list <- lookup_env$prepare_data_list()
+identifier_cols <- c(
+  "water_company", "site_name_ea", "site_name_wa_sc",
+  "permit_reference_ea", "permit_reference_wa_sc",
+  "activity_reference", "outlet_discharge_ngr"
+)
+observed_duplicate_groups <- map_dfr(2021:2024, function(yr) {
+  groups <- monitor_data_list[[paste0("df", yr)]] %>%
+    count(across(all_of(identifier_cols)), name = "n") %>%
+    filter(n > 1)
+  tibble(year = yr, n_groups = nrow(groups), n_rows = sum(groups$n))
+})
+assert_identical(
+  observed_duplicate_groups,
+  expected_duplicate_groups,
+  "Within-year identifier-duplicate (monitor-multiple) landscape should match the documented 89-group / 199-row characterization."
+)
 
 cat("All annual-return lookup contract tests passed.\n")
