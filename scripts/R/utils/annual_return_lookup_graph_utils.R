@@ -105,16 +105,11 @@ build_unconstrained_mst_components <- function(edges_df) {
     site_id = vertex_site_id(vertex)
   )
 
+  # resolution_order is NA on this view: the MST is a pre-resolution
+  # diagnostic, so no resolution pass has ordered its edges.
   edge_metadata <- igraph::as_data_frame(g_mst, what = "edges") %>%
     attach_edge_components(membership_tbl) %>%
-    select(
-      component, year_from, site_id_from, year_to, site_id_to,
-      match_method, match_type, match_level, join_keys, weight,
-      any_of(c(
-        "n_keys", "evidence_field_count", "field_priority_score",
-        "raw_score", "edge_priority"
-      ))
-    )
+    conform_to_prototype(CONFLICT_EDGES_PROTOTYPE)
 
   list(
     membership_tbl = membership_tbl,
@@ -259,62 +254,12 @@ build_year_constrained_spanning_forest <- function(edges_df) {
       site_id = vertex_site_id(vertex)
     )
 
-  empty_kept_edges <- tibble(
-    component = integer(),
-    year_from = integer(),
-    site_id_from = character(),
-    year_to = integer(),
-    site_id_to = character(),
-    from = character(),
-    to = character(),
-    match_method = character(),
-    match_type = character(),
-    match_level = integer(),
-    join_keys = character(),
-    n_keys = integer(),
-    evidence_field_count = integer(),
-    field_priority_score = numeric(),
-    raw_score = numeric(),
-    edge_priority = integer(),
-    weight = numeric(),
-    resolution_order = integer()
-  )
-
-  empty_dropped_edges <- tibble(
-    final_component_from = integer(),
-    final_component_to = integer(),
-    year_from = integer(),
-    site_id_from = character(),
-    year_to = integer(),
-    site_id_to = character(),
-    from = character(),
-    to = character(),
-    match_method = character(),
-    match_type = character(),
-    match_level = integer(),
-    join_keys = character(),
-    n_keys = integer(),
-    evidence_field_count = integer(),
-    field_priority_score = numeric(),
-    raw_score = numeric(),
-    edge_priority = integer(),
-    weight = numeric(),
-    resolution_order = integer(),
-    drop_reason = character(),
-    duplicate_years = character()
-  )
-
   kept_edges <- if (kept_n > 0) {
     ordered_edges[kept_idx[seq_len(kept_n)], , drop = FALSE] %>%
       attach_edge_components(membership_tbl) %>%
-      select(
-        component, year_from, site_id_from, year_to, site_id_to,
-        from, to, match_method, match_type, match_level, join_keys,
-        n_keys, evidence_field_count, field_priority_score,
-        raw_score, edge_priority, weight, resolution_order
-      )
+      select(all_of(names(EDGE_RESOLUTION_KEPT_PROTOTYPE)))
   } else {
-    empty_kept_edges
+    EDGE_RESOLUTION_KEPT_PROTOTYPE
   }
 
   dropped_edges <- if (dropped_n > 0) {
@@ -324,7 +269,7 @@ build_year_constrained_spanning_forest <- function(edges_df) {
         duplicate_years = dropped_duplicate_years[seq_len(dropped_n)]
       )
   } else {
-    empty_dropped_edges
+    EDGE_RESOLUTION_DROPPED_PROTOTYPE
   }
 
   if (nrow(dropped_edges) > 0) {
@@ -342,14 +287,7 @@ build_year_constrained_spanning_forest <- function(edges_df) {
         year_to = vertex_year(to),
         site_id_to = vertex_site_id(to)
       ) %>%
-      select(
-        final_component_from, final_component_to,
-        year_from, site_id_from, year_to, site_id_to,
-        from, to, match_method, match_type, match_level, join_keys,
-        n_keys, evidence_field_count, field_priority_score,
-        raw_score, edge_priority, weight, resolution_order,
-        drop_reason, duplicate_years
-      )
+      select(all_of(names(EDGE_RESOLUTION_DROPPED_PROTOTYPE)))
   }
 
   list(

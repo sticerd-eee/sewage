@@ -554,14 +554,23 @@ assert_identical(
   "The year-constrained forest should clear all conflicts post-resolution."
 )
 
-# Zero-row (post) and nonzero (pre) exports of the kept/dropped edge families
-# must share identical arrow schemas, pinning the n_keys integer fix.
-for (family in c("kept_edges", "dropped_edges")) {
+# Zero-row (post) and nonzero (pre) exports of every audit family must
+# share identical arrow schemas: kept/dropped pin the n_keys integer fix,
+# and summary/records/edges pin the canonical prototypes (vertex and
+# resolution_order drift resolved).
+parity_families <- list(
+  kept_edges = c("resolution_kept_edges_parquet", "post_resolution_kept_edges_parquet"),
+  dropped_edges = c("resolution_dropped_edges_parquet", "post_resolution_dropped_edges_parquet"),
+  summary = c("conflict_summary_parquet", "post_resolution_conflict_summary_parquet"),
+  records = c("conflict_records_parquet", "post_resolution_conflict_records_parquet"),
+  edges = c("conflict_edges_parquet", "post_resolution_conflict_edges_parquet")
+)
+for (family in names(parity_families)) {
   pre_types <- parquet_arrow_types(
-    lookup_env$CONFIG[[paste0("resolution_", family, "_parquet")]]
+    lookup_env$CONFIG[[parity_families[[family]][1]]]
   )
   post_types <- parquet_arrow_types(
-    lookup_env$CONFIG[[paste0("post_resolution_", family, "_parquet")]]
+    lookup_env$CONFIG[[parity_families[[family]][2]]]
   )
   assert_identical(
     post_types, pre_types,
@@ -570,11 +579,24 @@ for (family in c("kept_edges", "dropped_edges")) {
       " family should share identical arrow schemas."
     )
   )
+}
+for (family in c("kept_edges", "dropped_edges")) {
+  pre_types <- parquet_arrow_types(
+    lookup_env$CONFIG[[parity_families[[family]][1]]]
+  )
   assert_identical(
     unname(pre_types[["n_keys"]]), "int32",
     paste0("The ", family, " family should export n_keys as int32.")
   )
 }
+assert_true(
+  "vertex" %in% names(parquet_arrow_types(lookup_env$CONFIG$conflict_records_parquet)),
+  "Conflict records should carry the vertex column in both zero-row and nonzero exports."
+)
+assert_true(
+  "resolution_order" %in% names(parquet_arrow_types(lookup_env$CONFIG$conflict_edges_parquet)),
+  "Conflict edges should carry resolution_order (NA on the pre-resolution view) in every export."
+)
 
 # Final edge-metadata schema parity between empty and nonzero builds.
 empty_builder_result <- lookup_env$build_lookup_from_matches(

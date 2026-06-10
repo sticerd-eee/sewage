@@ -741,12 +741,7 @@ build_lookup_from_matches <- function(
 
       edge_metadata <- if (nrow(constrained_forest$kept_edges) > 0) {
         constrained_forest$kept_edges %>%
-          select(
-            component, year_from, site_id_from, year_to, site_id_to,
-            match_method, match_type, match_level, join_keys,
-            edge_priority, evidence_field_count, field_priority_score,
-            resolution_order, weight
-          )
+          select(all_of(names(EDGE_METADATA_EXPORT_PROTOTYPE)))
       } else {
         empty_edge_metadata()
       }

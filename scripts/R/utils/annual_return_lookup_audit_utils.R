@@ -27,6 +27,174 @@
 #' Required packages (loaded by the calling script): dplyr, tibble,
 #' tidyr, purrr, glue, logger, arrow, rio.
 
+# Canonical zero-row schema prototypes
+############################################################
+
+# One prototype per edge/audit table family. Every empty builder and every
+# select() over these families derives from the prototypes, so zero-row and
+# nonzero exports of the same logical table always share names, order, and
+# arrow types. Do NOT delete the empty builders in favour of letting dplyr
+# produce empties: dplyr does not reproduce these schemas on empty input
+# (e.g. max() on a zero-row group returns -Inf, a double, where the schema
+# declares integer).
+
+# Kept edges of the year-constrained resolution forest.
+EDGE_RESOLUTION_KEPT_PROTOTYPE <- tibble::tibble(
+  component = integer(),
+  year_from = integer(),
+  site_id_from = character(),
+  year_to = integer(),
+  site_id_to = character(),
+  from = character(),
+  to = character(),
+  match_method = character(),
+  match_type = character(),
+  match_level = integer(),
+  join_keys = character(),
+  n_keys = integer(),
+  evidence_field_count = integer(),
+  field_priority_score = numeric(),
+  raw_score = numeric(),
+  edge_priority = integer(),
+  weight = numeric(),
+  resolution_order = integer()
+)
+
+# Dropped edges of the year-constrained resolution forest.
+EDGE_RESOLUTION_DROPPED_PROTOTYPE <- tibble::tibble(
+  final_component_from = integer(),
+  final_component_to = integer(),
+  year_from = integer(),
+  site_id_from = character(),
+  year_to = integer(),
+  site_id_to = character(),
+  from = character(),
+  to = character(),
+  match_method = character(),
+  match_type = character(),
+  match_level = integer(),
+  join_keys = character(),
+  n_keys = integer(),
+  evidence_field_count = integer(),
+  field_priority_score = numeric(),
+  raw_score = numeric(),
+  edge_priority = integer(),
+  weight = numeric(),
+  resolution_order = integer(),
+  drop_reason = character(),
+  duplicate_years = character()
+)
+
+# Conflict-audit summary (one row per conflicted component-year).
+CONFLICT_SUMMARY_PROTOTYPE <- tibble::tibble(
+  component = integer(),
+  year = integer(),
+  component_year_n_site_ids = integer(),
+  site_ids = character(),
+  component_n_vertices = integer(),
+  component_n_years = integer(),
+  component_n_conflicted_years = integer(),
+  component_conflicted_years = character(),
+  component_max_site_ids_in_year = integer(),
+  water_companies = character(),
+  n_water_companies = integer(),
+  n_site_name_ea = integer(),
+  n_site_name_wa_sc = integer(),
+  n_permit_reference_ea = integer(),
+  n_permit_reference_wa_sc = integer(),
+  n_activity_reference = integer(),
+  n_outlet_discharge_ngr = integer(),
+  site_name_ea_values = character(),
+  site_name_wa_sc_values = character(),
+  permit_reference_ea_values = character(),
+  permit_reference_wa_sc_values = character(),
+  activity_reference_values = character(),
+  outlet_discharge_ngr_values = character()
+)
+
+# Conflict-audit records (one row per vertex of a conflicted component).
+# vertex is part of the canonical schema: the historical zero-row builder
+# omitted it while nonzero exports carried it (resolved drift).
+CONFLICT_RECORDS_PROTOTYPE <- tibble::tibble(
+  vertex = character(),
+  component = integer(),
+  year = integer(),
+  site_id = character(),
+  component_year_n_site_ids = integer(),
+  is_conflicted_component_year = logical(),
+  component_n_vertices = integer(),
+  component_n_years = integer(),
+  component_n_conflicted_years = integer(),
+  component_conflicted_years = character(),
+  component_max_site_ids_in_year = integer(),
+  year_site_id = integer(),
+  water_company = character(),
+  site_name_ea = character(),
+  site_name_wa_sc = character(),
+  permit_reference_ea = character(),
+  permit_reference_wa_sc = character(),
+  activity_reference = character(),
+  outlet_discharge_ngr = character(),
+  unique_id = character(),
+  unique_id_2023 = character(),
+  primary_id = character()
+)
+
+# Conflict-audit edges (source edges of conflicted components).
+# resolution_order is part of the canonical schema and is NA for the
+# pre-resolution MST view (resolved drift).
+CONFLICT_EDGES_PROTOTYPE <- tibble::tibble(
+  component = integer(),
+  year_from = integer(),
+  site_id_from = character(),
+  year_to = integer(),
+  site_id_to = character(),
+  match_method = character(),
+  match_type = character(),
+  match_level = integer(),
+  join_keys = character(),
+  weight = numeric(),
+  n_keys = integer(),
+  evidence_field_count = integer(),
+  field_priority_score = numeric(),
+  raw_score = numeric(),
+  edge_priority = integer(),
+  resolution_order = integer()
+)
+
+# Final exported edge metadata of the canonical lookup.
+EDGE_METADATA_EXPORT_PROTOTYPE <- tibble::tibble(
+  component = integer(),
+  year_from = integer(),
+  site_id_from = character(),
+  year_to = integer(),
+  site_id_to = character(),
+  match_method = character(),
+  match_type = character(),
+  match_level = integer(),
+  join_keys = character(),
+  edge_priority = integer(),
+  evidence_field_count = integer(),
+  field_priority_score = numeric(),
+  resolution_order = integer(),
+  weight = numeric()
+)
+
+#' Conform a table to a zero-row schema prototype
+#'
+#' Adds any missing prototype columns as typed NA and returns the columns
+#' in prototype order, so zero-row and nonzero exports of one table family
+#' share identical schemas.
+#' @param tbl Table to conform
+#' @param prototype Zero-row prototype tibble
+#' @return Tibble with exactly the prototype's columns, order, and types
+conform_to_prototype <- function(tbl, prototype) {
+  for (col in setdiff(names(prototype), names(tbl))) {
+    tbl[[col]] <- rep(prototype[[col]][NA_integer_], nrow(tbl))
+  }
+  select(tbl, all_of(names(prototype)))
+}
+
 #' Collapse unique non-missing values into a readable audit string
 #' @param x Vector of values
 #' @return Character scalar
@@ -114,80 +282,11 @@ build_lookup_conflict_audit <- function(
     count(component, year, name = "component_year_n_site_ids") %>%
     filter(component_year_n_site_ids > 1)
 
-  empty_summary <- tibble(
-    component = integer(),
-    year = integer(),
-    component_year_n_site_ids = integer(),
-    site_ids = character(),
-    component_n_vertices = integer(),
-    component_n_years = integer(),
-    component_n_conflicted_years = integer(),
-    component_conflicted_years = character(),
-    component_max_site_ids_in_year = integer(),
-    water_companies = character(),
-    n_water_companies = integer(),
-    n_site_name_ea = integer(),
-    n_site_name_wa_sc = integer(),
-    n_permit_reference_ea = integer(),
-    n_permit_reference_wa_sc = integer(),
-    n_activity_reference = integer(),
-    n_outlet_discharge_ngr = integer(),
-    site_name_ea_values = character(),
-    site_name_wa_sc_values = character(),
-    permit_reference_ea_values = character(),
-    permit_reference_wa_sc_values = character(),
-    activity_reference_values = character(),
-    outlet_discharge_ngr_values = character()
-  )
-
-  empty_records <- tibble(
-    component = integer(),
-    year = integer(),
-    site_id = character(),
-    component_year_n_site_ids = integer(),
-    component_n_vertices = integer(),
-    component_n_years = integer(),
-    component_n_conflicted_years = integer(),
-    component_conflicted_years = character(),
-    component_max_site_ids_in_year = integer(),
-    is_conflicted_component_year = logical(),
-    year_site_id = integer(),
-    water_company = character(),
-    site_name_ea = character(),
-    site_name_wa_sc = character(),
-    permit_reference_ea = character(),
-    permit_reference_wa_sc = character(),
-    activity_reference = character(),
-    outlet_discharge_ngr = character(),
-    unique_id = character(),
-    unique_id_2023 = character(),
-    primary_id = character()
-  )
-
-  empty_edges <- tibble(
-    component = integer(),
-    year_from = integer(),
-    site_id_from = character(),
-    year_to = integer(),
-    site_id_to = character(),
-    match_method = character(),
-    match_type = character(),
-    match_level = integer(),
-    join_keys = character(),
-    n_keys = integer(),
-    evidence_field_count = integer(),
-    field_priority_score = numeric(),
-    raw_score = numeric(),
-    edge_priority = integer(),
-    weight = numeric(),
-    resolution_order = integer()
-  )
-
   if (nrow(conflict_counts) == 0) {
     return(list(
-      summary = empty_summary,
-      records = empty_records,
-      edges = empty_edges,
+      summary = CONFLICT_SUMMARY_PROTOTYPE,
+      records = CONFLICT_RECORDS_PROTOTYPE,
+      edges = CONFLICT_EDGES_PROTOTYPE,
       kept_edges = kept_edges %>% slice(0),
       dropped_edges = dropped_edges %>% slice(0)
     ))
@@ -229,7 +328,8 @@ build_lookup_conflict_audit <- function(
     ) %>%
     left_join(component_context, by = "component") %>%
     left_join(annual_identifiers, by = c("year", "site_id")) %>%
-    arrange(component, year, year_site_id)
+    arrange(component, year, year_site_id) %>%
+    conform_to_prototype(CONFLICT_RECORDS_PROTOTYPE)
 
   conflict_summary <- conflict_records %>%
     filter(is_conflicted_component_year) %>%
@@ -258,7 +358,8 @@ build_lookup_conflict_audit <- function(
       outlet_discharge_ngr_values = collapse_unique_values(outlet_discharge_ngr),
       .groups = "drop"
     ) %>%
-    arrange(component, year)
+    arrange(component, year) %>%
+    conform_to_prototype(CONFLICT_SUMMARY_PROTOTYPE)
 
   conflict_edges <- edge_metadata %>%
     semi_join(conflicted_components, by = "component") %>%
@@ -272,7 +373,8 @@ build_lookup_conflict_audit <- function(
       suppressWarnings(as.integer(site_id_from)),
       year_to,
       suppressWarnings(as.integer(site_id_to))
-    )
+    ) %>%
+    conform_to_prototype(CONFLICT_EDGES_PROTOTYPE)
 
   filter_resolution_edges <- function(edge_tbl) {
     if (nrow(edge_tbl) == 0) {
@@ -414,20 +516,5 @@ empty_lookup_table <- function(years) {
 #' Return an empty edge metadata table with the export schema
 #' @return Empty edge metadata tibble
 empty_edge_metadata <- function() {
-  tibble(
-    component = integer(),
-    year_from = integer(),
-    site_id_from = character(),
-    year_to = integer(),
-    site_id_to = character(),
-    match_method = character(),
-    match_type = character(),
-    match_level = integer(),
-    join_keys = character(),
-    edge_priority = integer(),
-    evidence_field_count = integer(),
-    field_priority_score = numeric(),
-    resolution_order = integer(),
-    weight = numeric()
-  )
+  EDGE_METADATA_EXPORT_PROTOTYPE
 }
