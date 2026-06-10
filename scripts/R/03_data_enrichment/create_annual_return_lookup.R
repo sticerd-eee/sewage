@@ -46,7 +46,7 @@ load_packages <- function() {
 setup_logging <- function() {
   log_dir <- here::here("output", "log")
   fs::dir_create(log_dir, recurse = TRUE)
-  log_path <- file.path(log_dir, "09_create_annual_return_lookup.log")
+  log_path <- here::here("output", "log", "09_create_annual_return_lookup.log")
 
   logger::log_appender(logger::appender_tee(log_path))
   logger::log_layout(logger::layout_glue_colors)
@@ -171,7 +171,7 @@ prepare_data_list <- function(years = CONFIG$years, data_path = CONFIG$data_path
         df <- mutate(df, across(
           any_of(CONFIG$evidence_field_priority),
           ~ if_else(
-            stringr::str_to_upper(as.character(.x)) %in% c("TBC", "N/A"),
+            stringr::str_to_upper(stringr::str_trim(as.character(.x))) %in% c("TBC", "N/A", ""),
             NA_character_,
             as.character(.x)
           )
@@ -967,8 +967,12 @@ collapse_unique_values <- function(x) {
 #' @param data_list Named list with entries like df2021
 #' @return Integer vector of reporting years
 data_list_years <- function(data_list) {
-  years <- suppressWarnings(as.integer(sub("^df", "", names(data_list))))
-  sort(years[!is.na(years)])
+  nm <- names(data_list)
+  if (is.null(nm) || !all(grepl("^df\\d{4}$", nm))) {
+    bad <- if (is.null(nm)) "<unnamed>" else paste(nm[!grepl("^df\\d{4}$", nm)], collapse = ", ")
+    stop(glue::glue("data_list names must follow the dfYYYY convention; offending entries: {bad}"))
+  }
+  sort(as.integer(sub("^df", "", nm)))
 }
 
 #' Convert the yearly annual-return data list to an identifier lookup
@@ -1819,7 +1823,7 @@ build_lookup_from_matches <- function(
       # Weight: ordinary field count plus exact-ID/RF priority diagnostics.
       edges_df <- bind_cols(edges_df, edge_evidence) %>%
         mutate(
-          n_keys = stringr::str_count(join_keys, "\\|") + 1,
+          n_keys = stringr::str_count(join_keys, "\\|") + 1L,
           edge_priority = case_when(
             has_unique_id_2023_key ~ 300L,
             has_unique_id_key ~ 290L,
