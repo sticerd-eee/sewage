@@ -79,6 +79,17 @@ The audit outputs are:
 - `annual_return_lookup_resolution_dropped_edges.parquet`
 - `annual_return_lookup_conflicts.xlsx`
 
+Since the 2026-06-10 decomposition refactor, the post-resolution audit is
+failure-gated (user-approved deviation from plan 002 R4): the
+`annual_return_lookup_post_resolution_*` diagnostic set is written only at
+the moment the final safety net trips - inside the same code path as the
+stop, whose message names the files - and a healthy run deletes stale
+post-resolution files instead of writing six empty ones. The absence of
+post-resolution files is therefore the expected state after a clean run.
+The same refactor made `build_lookup_from_matches()` pure on success (all
+exports happen in `main()`) and moved the graph and audit machinery to
+`scripts/R/utils/annual_return_lookup_{graph_utils,audit_utils}.R`.
+
 Edge ordering is deterministic. Exact `unique_id_2023` and `unique_id` matches dominate, and non-unique evidence is ordered by field count, an explicit field-priority score, then stable endpoint and metadata tie-breakers. The field priority is:
 
 ```text
@@ -118,6 +129,11 @@ The verification run after the final fix showed:
 - post-resolution same-year conflicts were zero;
 - duplicated yearly IDs after singleton appending were zero;
 - raw annual-return coverage was exact for 2021-2024.
+
+(After the committed placeholder trim fix, the pinned baseline became 91
+conflicted component-years across 41 components with 153 dropped edges;
+`scripts/R/testing/test_annual_return_lookup_contracts.R` asserts these
+values on every run.)
 
 ## Monitor-Granularity Limitation (2026-06-10 evaluation)
 The unit of analysis is the Monitored Discharge Point (see `CONCEPTS.md`), not the wastewater works. One annual-return row is one monitored overflow asset, and a works can carry several rows that share every identifying field.
