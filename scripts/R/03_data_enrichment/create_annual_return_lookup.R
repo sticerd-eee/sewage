@@ -638,7 +638,7 @@ train_rf_linkage_model <- function(
       )
 
       # Response variable
-      pairs[, match_id := factor(ifelse(is.na(match_id), 0L, 1L),
+      pairs[, match_id := factor(data.table::fifelse(match_id %in% TRUE, 1L, 0L),
         levels = c(0, 1),
         labels = c("non_match", "match")
       )]
@@ -886,7 +886,18 @@ load_or_train_rf_model <- function(data_list, model_file = CONFIG$rf_model_file,
     {
       if (file.exists(model_file)) {
         logger::log_info("Loading RF model from {model_file}")
-        return(readRDS(model_file)$m_rf)
+        saved_model <- readRDS(model_file)
+        m_rf <- if (is.list(saved_model) && "model" %in% names(saved_model)) {
+          saved_model$model
+        } else {
+          saved_model
+        }
+
+        if (!inherits(m_rf, "ranger")) {
+          stop("Saved RF model file does not contain a ranger model at key 'model'")
+        }
+
+        return(m_rf)
       }
 
       if (!train_if_missing) {
@@ -1565,15 +1576,90 @@ stop_if_lookup_conflicts <- function(conflict_audit) {
   ))
 }
 
+#' Return an empty lookup table with the canonical year columns
+#' @param years Reporting years included in the lookup
+#' @return Empty lookup tibble
+empty_lookup_table <- function(years = CONFIG$years) {
+  lookup_tbl <- tibble(component = integer())
+  for (site_col in paste0("site_id_", years)) {
+    lookup_tbl[[site_col]] <- character()
+  }
+  lookup_tbl
+}
+
+#' Return an empty edge metadata table with the export schema
+#' @return Empty edge metadata tibble
+empty_edge_metadata <- function() {
+  tibble(
+    component = integer(),
+    year_from = integer(),
+    site_id_from = character(),
+    year_to = integer(),
+    site_id_to = character(),
+    match_method = character(),
+    match_type = character(),
+    match_level = integer(),
+    join_keys = character(),
+    weight = numeric()
+  )
+}
+
+#' Check whether a match dataframe can be converted to graph edges
+#' @param df Match dataframe
+#' @return TRUE when the dataframe has the required lookup columns
+has_lookup_match_schema <- function(df) {
+  is.data.frame(df) &&
+    length(grep("^site_id_", names(df), value = TRUE)) == 2 &&
+    length(grep("^match_method_", names(df), value = TRUE)) == 1 &&
+    length(grep("^match_type_", names(df), value = TRUE)) == 1 &&
+    length(grep("^match_level_", names(df), value = TRUE)) == 1 &&
+    length(grep("^join_keys_", names(df), value = TRUE)) == 1
+}
+
 #' Given pairwise match dataframes, build a year-constrained lookup
 #' @param match_dfs Named list of pairwise match dataframes
 #' @param data_list Named list of yearly dataframes
+#' @param conflict_resolution Same-year conflict policy: fail closed, or
+#'   explicitly split ambiguous components with a year-constrained forest
 #' @return A list containing lookup_table and edge_metadata
-build_lookup_from_matches <- function(match_dfs, data_list) {
+build_lookup_from_matches <- function(
+    match_dfs,
+    data_list,
+    conflict_resolution = c("fail", "year_constrained_forest")) {
   logger::log_info("Building lookup table from match data")
 
   tryCatch(
     {
+      conflict_resolution <- match.arg(conflict_resolution)
+      nonempty_match_dfs <- purrr::keep(
+        match_dfs,
+        ~ is.data.frame(.x) && nrow(.x) > 0
+      )
+      invalid_match_dfs <- purrr::discard(
+        nonempty_match_dfs,
+        has_lookup_match_schema
+      )
+
+      if (length(invalid_match_dfs) > 0) {
+        invalid_names <- names(invalid_match_dfs)
+        if (is.null(invalid_names) || any(invalid_names == "")) {
+          invalid_names <- paste0("match_df_", seq_along(invalid_match_dfs))
+        }
+        stop(glue::glue(
+          "Nonempty match dataframes are missing lookup columns: ",
+          "{paste(invalid_names, collapse = ', ')}"
+        ))
+      }
+
+      match_dfs <- nonempty_match_dfs
+      if (length(match_dfs) == 0) {
+        logger::log_warn("No usable match rows supplied; returning empty lookup")
+        return(list(
+          lookup_table = empty_lookup_table(),
+          edge_metadata = empty_edge_metadata()
+        ))
+      }
+
       # Build edge list
       edges_df <- lapply(match_dfs, function(df) {
         site_cols <- grep("^site_id_", names(df), value = TRUE)
@@ -1599,6 +1685,14 @@ build_lookup_from_matches <- function(match_dfs, data_list) {
       }) %>%
         bind_rows() %>%
         distinct()
+
+      if (nrow(edges_df) == 0) {
+        logger::log_warn("No usable match edges supplied; returning empty lookup")
+        return(list(
+          lookup_table = empty_lookup_table(),
+          edge_metadata = empty_edge_metadata()
+        ))
+      }
 
       edge_evidence <- score_join_key_evidence(edges_df$join_keys)
 
@@ -1646,6 +1740,9 @@ build_lookup_from_matches <- function(match_dfs, data_list) {
         dropped_edges = dropped_edges_for_audit
       )
       export_conflict_audit(pre_conflict_audit)
+      if (conflict_resolution == "fail") {
+        stop_if_lookup_conflicts(pre_conflict_audit)
+      }
 
       edge_metadata <- if (nrow(constrained_forest$kept_edges) > 0) {
         constrained_forest$kept_edges %>%
@@ -1654,18 +1751,7 @@ build_lookup_from_matches <- function(match_dfs, data_list) {
             match_method, match_type, match_level, join_keys, weight
           )
       } else {
-        tibble(
-          component = integer(),
-          year_from = integer(),
-          site_id_from = character(),
-          year_to = integer(),
-          site_id_to = character(),
-          match_method = character(),
-          match_type = character(),
-          match_level = integer(),
-          join_keys = character(),
-          weight = numeric()
-        )
+        empty_edge_metadata()
       }
 
       post_conflict_audit <- build_lookup_conflict_audit(
@@ -1710,29 +1796,85 @@ build_lookup_from_matches <- function(match_dfs, data_list) {
 #' @param data_list Named list of yearly dataframes
 #' @return Extended lookup table including singletons
 append_singleton_sites <- function(lookup_tbl, data_list) {
-  years    <- CONFIG$years
-  site_cols<- paste0("site_id_", years)
-  
+  years <- as.integer(sub("^df", "", names(data_list)))
+  years <- sort(years[!is.na(years)])
+  site_cols <- paste0("site_id_", years)
+
+  for (site_col in setdiff(site_cols, names(lookup_tbl))) {
+    lookup_tbl[[site_col]] <- NA_real_
+  }
+  lookup_tbl <- lookup_tbl %>%
+    mutate(across(
+      all_of(site_cols),
+      ~ suppressWarnings(as.numeric(as.character(.)))
+    ))
+
   orphan_rows <- purrr::map_dfr(years, function(yr) {
-    col     <- paste0("site_id_", yr)
-    all_ids <- data_list[[paste0("df", yr)]][[col]]
-    missing <- setdiff(all_ids, lookup_tbl[[col]])
+    col <- paste0("site_id_", yr)
+    all_ids <- suppressWarnings(as.numeric(as.character(
+      data_list[[paste0("df", yr)]][[col]]
+    )))
+    linked_ids <- suppressWarnings(as.numeric(as.character(lookup_tbl[[col]])))
+    missing <- setdiff(all_ids, linked_ids)
     if (length(missing) == 0) return(tibble())
     tibble::tibble(!!!setNames(
-      purrr::map(years, function(y) if (y == yr) missing else rep(NA_integer_, length(missing))),
+      purrr::map(years, function(y) if (y == yr) missing else rep(NA_real_, length(missing))),
       site_cols
     ))
   })
-  
+
   if (nrow(orphan_rows) > 0) {
-    next_id <- max(lookup_tbl$site_id) + seq_len(nrow(orphan_rows))
-    orphan_rows <- orphan_rows %>% mutate(site_id = next_id)
     lookup_tbl <- bind_rows(lookup_tbl, orphan_rows)
   }
-  
-  lookup_tbl %>% 
-    arrange(site_id_2021) %>% 
-    return()
+
+  lookup_tbl
+}
+
+#' Assign stable canonical site IDs after matched and singleton rows are present
+#' @param lookup_tbl Lookup table with one column per annual-return year
+#' @param years Reporting years included in the lookup
+#' @return Lookup table with deterministic canonical site_id values
+assign_canonical_site_ids <- function(lookup_tbl, years = CONFIG$years) {
+  site_cols <- paste0("site_id_", years)
+
+  for (site_col in setdiff(site_cols, names(lookup_tbl))) {
+    lookup_tbl[[site_col]] <- NA_real_
+  }
+  if (!"component" %in% names(lookup_tbl)) {
+    lookup_tbl$component <- NA_integer_
+  }
+
+  lookup_tbl <- lookup_tbl %>%
+    mutate(across(
+      all_of(site_cols),
+      ~ suppressWarnings(as.numeric(as.character(.)))
+    ))
+
+  site_id_matrix <- as.data.frame(lookup_tbl[site_cols])
+  first_observed_year <- vapply(seq_len(nrow(lookup_tbl)), function(i) {
+    observed_idx <- which(!is.na(unlist(site_id_matrix[i, ], use.names = FALSE)))
+    if (length(observed_idx) == 0) {
+      return(Inf)
+    }
+    years[observed_idx[1]]
+  }, numeric(1))
+
+  # Stable canonical order: earliest observed annual-return year, then the
+  # year-specific annual-return IDs from oldest to newest.
+  lookup_tbl %>%
+    mutate(
+      first_observed_year = first_observed_year,
+      component_sort = tidyr::replace_na(as.integer(component), .Machine$integer.max)
+    ) %>%
+    arrange(
+      first_observed_year,
+      across(all_of(site_cols)),
+      component_sort
+    ) %>%
+    mutate(site_id = row_number()) %>%
+    select(site_id, component, all_of(site_cols), everything(),
+      -first_observed_year, -component_sort
+    )
 }
 
 
@@ -1786,9 +1928,15 @@ export_data <- function(
 
 #' Main execution function
 #' @param compute_rf_matching Boolean probabilistic matching
+#' @param same_year_conflict_resolution Same-year conflict policy for lookup
+#'   construction. Defaults to explicit year-constrained splitting.
 #' @return NULL
-main <- function(compute_rf_matching = FALSE) {
+main <- function(
+    compute_rf_matching = FALSE,
+    same_year_conflict_resolution = c("year_constrained_forest", "fail")) {
   tryCatch({
+    same_year_conflict_resolution <- match.arg(same_year_conflict_resolution)
+
     # Setup
     logger::log_info("===== Building Annual Return Lookup Table =====")
     initialise_environment()
@@ -1807,61 +1955,67 @@ main <- function(compute_rf_matching = FALSE) {
     )
     logger::log_info("Deterministic matching complete.")
 
-    # 3. Build preliminary lookup and derive unmatched IDs per year
-    prelim_lookup <- build_lookup_from_matches(
-      windfall_match_dfs,
-      data_list = data_list
-    )$lookup_table
-    unmatched_ids_by_year <- lapply(CONFIG$years, function(yr) {
-      site_col <- paste0("site_id_", yr)
-      setdiff(
-        data_list[[paste0("df", yr)]][[site_col]],
-        prelim_lookup[[site_col]]
-      )
-    })
-    names(unmatched_ids_by_year) <- as.character(CONFIG$years)
-
-    # 4. Probabilistic matching (if enabled)
+    # 3. Probabilistic matching (if enabled)
     match_dfs <- windfall_match_dfs
-    m_rf <- load_or_train_rf_model(
-      data_list,
-      train_if_missing = compute_rf_matching
-    )
-    if (!is.null(m_rf)) {
-      year_pairs_df <- expand.grid(
-        left_year = CONFIG$years,
-        right_year = CONFIG$years,
-        stringsAsFactors = FALSE
-      ) %>%
-        filter(left_year < right_year) %>%
-        arrange(desc(right_year), desc(left_year))
-      rf_match_dfs <- run_rf_matching(
-        year_pairs_df, data_list, m_rf, unmatched_ids_by_year
+
+    if (compute_rf_matching) {
+      prelim_lookup <- build_lookup_from_matches(
+        windfall_match_dfs,
+        data_list = data_list,
+        conflict_resolution = same_year_conflict_resolution
+      )$lookup_table
+      unmatched_ids_by_year <- lapply(CONFIG$years, function(yr) {
+        site_col <- paste0("site_id_", yr)
+        setdiff(
+          data_list[[paste0("df", yr)]][[site_col]],
+          prelim_lookup[[site_col]]
+        )
+      })
+      names(unmatched_ids_by_year) <- as.character(CONFIG$years)
+
+      m_rf <- load_or_train_rf_model(
+        data_list,
+        train_if_missing = TRUE
       )
-      match_dfs <- c(match_dfs, rf_match_dfs)
-      logger::log_info(
-        "RF matching complete –
-        {sum(vapply(rf_match_dfs, nrow, integer(1)))} matches added."
-      )
+      if (!is.null(m_rf)) {
+        year_pairs_df <- expand.grid(
+          left_year = CONFIG$years,
+          right_year = CONFIG$years,
+          stringsAsFactors = FALSE
+        ) %>%
+          filter(left_year < right_year) %>%
+          arrange(desc(right_year), desc(left_year))
+        rf_match_dfs <- run_rf_matching(
+          year_pairs_df, data_list, m_rf, unmatched_ids_by_year
+        )
+        match_dfs <- c(match_dfs, rf_match_dfs)
+        logger::log_info(
+          "RF matching complete -
+          {sum(vapply(rf_match_dfs, nrow, integer(1)))} matches added."
+        )
+      }
     } else {
-      logger::log_warn(
-        "RF matching skipped - no model available and training disabled"
+      logger::log_info(
+        "RF matching skipped because compute_rf_matching is FALSE"
       )
     }
 
-    # 5. Build lookup table
-    lookup_res <- build_lookup_from_matches(match_dfs, data_list = data_list)
-    lookup_tbl <- lookup_res$lookup_table %>%
-      mutate(across(starts_with("site_id"), ~ as.numeric(as.character(.)))) %>% 
-      mutate(site_id = row_number())
+    # 4. Build lookup table
+    lookup_res <- build_lookup_from_matches(
+      match_dfs,
+      data_list = data_list,
+      conflict_resolution = same_year_conflict_resolution
+    )
     edges_tbl <- lookup_res$edge_metadata %>%
       mutate(across(starts_with("site_id") | starts_with("year"), 
                     ~ as.numeric(as.character(.))))
-    
-    # 6. Append singleton sites with no matches
-    lookup_tbl <- append_singleton_sites(lookup_tbl, data_list)
 
-    # 7. Save outputs
+    # 5. Append singleton sites with no matches and assign canonical IDs
+    lookup_tbl <- lookup_res$lookup_table %>%
+      append_singleton_sites(data_list) %>%
+      assign_canonical_site_ids()
+
+    # 6. Save outputs
     export_data(lookup_tbl, edges_tbl)
 
     logger::log_info("Lookup table saved (rows: {nrow(lookup_tbl)})")
