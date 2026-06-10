@@ -119,6 +119,18 @@ The verification run after the final fix showed:
 - duplicated yearly IDs after singleton appending were zero;
 - raw annual-return coverage was exact for 2021-2024.
 
+## Monitor-Granularity Limitation (2026-06-10 evaluation)
+The unit of analysis is the Monitored Discharge Point (see `CONCEPTS.md`), not the wastewater works. One annual-return row is one monitored overflow asset, and a works can carry several rows that share every identifying field.
+
+Evaluation findings on the current 2021-2024 data:
+
+- 89 within-year identifier-duplicate groups (199 rows) exist across the four returns: 38 groups / 81 rows in 2021, 20 / 45 in 2022, 14 / 35 in 2023, 17 / 38 in 2024. These are distinct monitored discharge points of the same works, identical on water company, both site names, both permit references, activity reference, and outlet NGR.
+- Worked example: Oldham WWTW carries four monitor rows in both 2023 and 2024. Each carries its own `unique_id` (UUG0690-UUG0693 in 2023; UUP01458-UUP01461 in 2024), and their spill hours range from 0 to 1,021 in the same year - the duplicates are real, behaviorally distinct monitors, not data errors.
+- 2021/2022 monitor-multiples are untrackable across years by construction: those returns carry no monitor-level key, so no evidence can distinguish which of several identical rows continues which. They are correctly left unmatched, and the RF matching path flags proposals among identifier-identical groups as ambiguous instead of pairing them arbitrarily (41 of the 50 legacy-threshold RF proposals were exactly such arbitrary pairings).
+- Works-level aggregation was considered and rejected: collapsing monitor rows to one works row would break alignment with the per-monitor unique-ID era (2023+) and destroy real variation (e.g. Oldham's 0 vs 1,021 spill hours).
+
+A characterization test in `scripts/R/testing/test_annual_return_lookup_contracts.R` asserts the per-year duplicate-group counts, so a future data refresh that changes this landscape is noticed rather than silently absorbed.
+
 ## Prevention
 - Test both invariants: exact raw yearly ID coverage and zero duplicate `(component, year)` memberships.
 - Keep `stop_if_lookup_conflicts()` directly before lookup pivoting.
