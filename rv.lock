@@ -1735,6 +1735,13 @@ force_source = false
 dependencies = []
 
 [[packages]]
+name = "nanoparquet"
+version = "0.5.1"
+source = { repository = "https://packagemanager.posit.co/cran/2026-05-12" }
+force_source = false
+dependencies = []
+
+[[packages]]
 name = "ncdf4"
 version = "1.24"
 source = { repository = "https://packagemanager.posit.co/cran/2026-05-12" }

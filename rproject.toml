@@ -287,4 +287,5 @@ dependencies = [
   "zip",
   "zoo",
   { name = "readxlsb", git = "https://github.com/velofrog/readxlsb", commit = "644ef7aefd4b1342d6754db7bab3dc9310137da7" },
+    "nanoparquet",
 ]
