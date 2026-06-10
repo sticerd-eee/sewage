@@ -8,49 +8,46 @@
 # This script builds a cross‑year lookup table that links the same spill
 # sites across the annual EDM returns (2021‑2024).
 
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first with `rv sync`.",
+    call. = FALSE
+  )
+}
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "tidyverse", "arrow", "here", "conflicted", "stringr", "stringdist",
+  "reclin2", "igraph", "ranger", "logger", "glue", "data.table",
+  "purrr", "rio"
+)
+
+LOG_FILE <- here::here("output", "log", "09_create_annual_return_lookup.log")
+
+check_required_packages(REQUIRED_PACKAGES)
+
 # Setup Functions
 ############################################################
 
-#' Initialize the R environment with required packages
+#' Attach the packages used unqualified in this script
 #' @return NULL
 initialise_environment <- function() {
-  # Package management is handled by rv
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
+    library(pkg, character.only = TRUE)
+  }))
+
+  conflicted::conflict_prefer("select", "dplyr")
+  conflicted::conflict_prefer("filter", "dplyr")
+  conflicted::conflict_prefer("first", "dplyr")
 }
 
-#' Load all required packages for data processing
+#' Initialise logging for this script
 #' @return NULL
-load_packages <- function() {
-  # Define required packages
-  pkgs <- c(
-    "tidyverse", "arrow", "here", "conflicted", "stringr", "stringdist",
-    "fastLink", "reclin2", "pbapply", "rnrfa", "sf", "igraph", "ranger",
-    "logger", "glue", "data.table", "purrr", "janitor", "hms", "rio"
-  )
-
-  # Install and load packages
-  to_install <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]
-  if (length(to_install) > 0) {
-    message("Installing missing packages: ", paste(to_install, collapse = ", "))
-    install.packages(to_install)
-  }
-  invisible(lapply(pkgs, library, character.only = TRUE))
-
-  # Prefer dplyr over other packages for common verbs
-  conflict_prefer("select", "dplyr")
-  conflict_prefer("filter", "dplyr")
-  conflict_prefer("first", "dplyr")
-}
-
-#' Configure logging for the script
-#' @return NULL
-setup_logging <- function() {
-  log_dir <- here::here("output", "log")
-  fs::dir_create(log_dir, recurse = TRUE)
-  log_path <- here::here("output", "log", "09_create_annual_return_lookup.log")
-
-  logger::log_appender(logger::appender_tee(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::INFO)
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "INFO")
+  logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
 }
 
@@ -160,56 +157,46 @@ source(
 prepare_data_list <- function(years = CONFIG$years, data_path = CONFIG$data_path) {
   logger::log_info("Reading consolidated parquet from {data_path}")
 
-  tryCatch(
-    {
-      full_data <- arrow::read_parquet(data_path)
+  full_data <- arrow::read_parquet(data_path)
 
-      res <- lapply(years, function(yr) {
-        df <- dplyr::filter(full_data, year == yr)
+  res <- lapply(years, function(yr) {
+    df <- dplyr::filter(full_data, year == yr)
 
-        # Create primary_id based on unique_id where available (2024)
-        if (yr == 2024 && "unique_id" %in% names(df)) {
-          df <- mutate(df, primary_id = unique_id)
-        }
-
-        # Store 2023 unique_id for matching with 2024
-        if (yr == 2023 && "unique_id" %in% names(df)) {
-          df <- mutate(df, unique_id_2023 = unique_id)
-        }
-
-        # Add a deterministic site_id_<year> if not present already
-        site_id_col <- paste0("site_id_", yr)
-        if (!site_id_col %in% names(df)) {
-          df <- mutate(df, !!site_id_col := row_number())
-        }
-
-        df <- mutate(df, across(
-          any_of(CONFIG$evidence_field_priority),
-          ~ if_else(
-            stringr::str_to_upper(stringr::str_trim(as.character(.x))) %in% c("TBC", "N/A", ""),
-            NA_character_,
-            as.character(.x)
-          )
-        ))
-
-        # Keep only relevant columns
-        df <- select(df, any_of(c(
-          "primary_id", "unique_id", "unique_id_2023",
-          CONFIG$core_identifier_cols, site_id_col
-        )))
-
-        df
-      })
-      names(res) <- paste0("df", years)
-
-      logger::log_info("Successfully prepared data for {length(years)} years")
-      return(res)
-    },
-    error = function(e) {
-      logger::log_error("Failed to prepare data list: {e$message}")
-      stop(glue::glue("Data preparation failed: {e$message}"))
+    # Create primary_id based on unique_id where available (2024)
+    if (yr == 2024 && "unique_id" %in% names(df)) {
+      df <- mutate(df, primary_id = unique_id)
     }
-  )
+
+    # Store 2023 unique_id for matching with 2024
+    if (yr == 2023 && "unique_id" %in% names(df)) {
+      df <- mutate(df, unique_id_2023 = unique_id)
+    }
+
+    # Add a deterministic site_id_<year> if not present already
+    site_id_col <- paste0("site_id_", yr)
+    if (!site_id_col %in% names(df)) {
+      df <- mutate(df, !!site_id_col := row_number())
+    }
+
+    df <- mutate(df, across(
+      any_of(CONFIG$evidence_field_priority),
+      ~ if_else(
+        stringr::str_to_upper(stringr::str_trim(as.character(.x))) %in% c("TBC", "N/A", ""),
+        NA_character_,
+        as.character(.x)
+      )
+    ))
+
+    # Keep only relevant columns
+    select(df, any_of(c(
+      "primary_id", "unique_id", "unique_id_2023",
+      CONFIG$core_identifier_cols, site_id_col
+    )))
+  })
+  names(res) <- paste0("df", years)
+
+  logger::log_info("Successfully prepared data for {length(years)} years")
+  res
 }
 
 # Deterministic ("Windfall") Matching
@@ -226,106 +213,98 @@ prepare_data_list <- function(years = CONFIG$years, data_path = CONFIG$data_path
 #' @return List containing joined_data, non_1_to_1_matched_left, non_1_to_1_matched_right
 f_outer_join <- function(df_left, df_right, join_keys,
                          suffix_left = "_left", suffix_right = "_right") {
-  tryCatch(
-    {
-      # Add row IDs to track matches
-      df_left <- mutate(df_left, ..rowid_left = row_number())
-      df_right <- mutate(df_right, ..rowid_right = row_number())
+  # Add row IDs to track matches
+  df_left <- mutate(df_left, ..rowid_left = row_number())
+  df_right <- mutate(df_right, ..rowid_right = row_number())
 
-      # Perform full join
-      joined_df <- suppressWarnings(
-        full_join(df_left, df_right,
-          by = join_keys,
-          suffix = c(suffix_left, suffix_right), multiple = "all",
-          na_matches = "never"
-        )
-      )
+  # Perform full join
+  joined_df <- suppressWarnings(
+    full_join(df_left, df_right,
+      by = join_keys,
+      suffix = c(suffix_left, suffix_right), multiple = "all",
+      na_matches = "never"
+    )
+  )
 
-      # Categorize join results
-      joined_df <- joined_df %>%
-        mutate(join_origin = dplyr::case_when(
-          !is.na(..rowid_left) & is.na(..rowid_right) ~ "left_only",
-          is.na(..rowid_left) & !is.na(..rowid_right) ~ "right_only",
-          !is.na(..rowid_left) & !is.na(..rowid_right) ~ "matched",
-          TRUE ~ NA_character_
-        ))
+  # Categorize join results
+  joined_df <- joined_df %>%
+    mutate(join_origin = dplyr::case_when(
+      !is.na(..rowid_left) & is.na(..rowid_right) ~ "left_only",
+      is.na(..rowid_left) & !is.na(..rowid_right) ~ "right_only",
+      !is.na(..rowid_left) & !is.na(..rowid_right) ~ "matched",
+      TRUE ~ NA_character_
+    ))
 
-      matched_rows <- filter(joined_df, join_origin == "matched")
+  matched_rows <- filter(joined_df, join_origin == "matched")
 
-      # Analyze match types
-      if (nrow(matched_rows) > 0) {
-        match_results <- matched_rows %>%
-          group_by(across(all_of(join_keys))) %>%
-          summarise(
-            n_left = n_distinct(..rowid_left),
-            n_right = n_distinct(..rowid_right), .groups = "drop"
-          ) %>%
-          mutate(match_type = dplyr::case_when(
-            n_left == 1 & n_right == 1 ~ "1_to_1",
-            n_left == 1 ~ "1_to_many",
-            n_right == 1 ~ "many_to_1",
-            TRUE ~ "many_to_many"
-          ))
-
-        joined_df <- left_join(joined_df,
-          select(match_results, all_of(join_keys), match_type),
-          by = join_keys, na_matches = "never"
-        )
-
-        problem_keys <- filter(match_results, match_type != "1_to_1") %>%
-          select(all_of(join_keys))
-      } else {
-        joined_df <- mutate(joined_df, match_type = NA_character_)
-        problem_keys <- tibble()
-      }
-
-      # Helper to collect problematic row indices (unmatched or n:1)
-      get_problem_ids <- function(side) {
-        unmatched_ids <- joined_df %>%
-          filter(join_origin == paste0(side, "_only")) %>%
-          pull(!!sym(paste0("..rowid_", side)))
-
-        matched_problem_ids <- if (nrow(problem_keys) > 0) {
-          matched_rows %>%
-            semi_join(problem_keys, by = join_keys) %>%
-            pull(!!sym(paste0("..rowid_", side))) %>%
-            unique()
-        } else {
-          integer(0)
-        }
-
-        base::union(unmatched_ids, matched_problem_ids)
-      }
-
-      # Get indices of problematic rows
-      problem_left_ids <- get_problem_ids("left")
-      problem_right_ids <- get_problem_ids("right")
-
-      # Create dataframes with problematic rows
-      problem_left_df <- slice(df_left, sort(problem_left_ids)) %>%
-        select(-any_of("..rowid_left"))
-      problem_right_df <- slice(df_right, sort(problem_right_ids)) %>%
-        select(-any_of("..rowid_right"))
-
-      # Finalize joined dataframe
-      final_joined_df <- joined_df %>%
-        mutate(join_keys = if_else(join_origin == "matched" &
-          match_type %in% c("1_to_1", "1_to_many", "many_to_1"),
-        paste0(join_keys, collapse = "|"), NA_character_
-        )) %>%
-        select(-c(..rowid_left, ..rowid_right))
-
-      # Return result
-      return(list(
-        joined_data               = final_joined_df,
-        non_1_to_1_matched_left   = problem_left_df,
-        non_1_to_1_matched_right  = problem_right_df
+  # Analyze match types
+  if (nrow(matched_rows) > 0) {
+    match_results <- matched_rows %>%
+      group_by(across(all_of(join_keys))) %>%
+      summarise(
+        n_left = n_distinct(..rowid_left),
+        n_right = n_distinct(..rowid_right), .groups = "drop"
+      ) %>%
+      mutate(match_type = dplyr::case_when(
+        n_left == 1 & n_right == 1 ~ "1_to_1",
+        n_left == 1 ~ "1_to_many",
+        n_right == 1 ~ "many_to_1",
+        TRUE ~ "many_to_many"
       ))
-    },
-    error = function(e) {
-      logger::log_error("Join operation failed: {e$message}")
-      stop(glue::glue("Full outer join failed: {e$message}"))
+
+    joined_df <- left_join(joined_df,
+      select(match_results, all_of(join_keys), match_type),
+      by = join_keys, na_matches = "never"
+    )
+
+    problem_keys <- filter(match_results, match_type != "1_to_1") %>%
+      select(all_of(join_keys))
+  } else {
+    joined_df <- mutate(joined_df, match_type = NA_character_)
+    problem_keys <- tibble()
+  }
+
+  # Helper to collect problematic row indices (unmatched or n:1)
+  get_problem_ids <- function(side) {
+    unmatched_ids <- joined_df %>%
+      filter(join_origin == paste0(side, "_only")) %>%
+      pull(!!sym(paste0("..rowid_", side)))
+
+    matched_problem_ids <- if (nrow(problem_keys) > 0) {
+      matched_rows %>%
+        semi_join(problem_keys, by = join_keys) %>%
+        pull(!!sym(paste0("..rowid_", side))) %>%
+        unique()
+    } else {
+      integer(0)
     }
+
+    base::union(unmatched_ids, matched_problem_ids)
+  }
+
+  # Get indices of problematic rows
+  problem_left_ids <- get_problem_ids("left")
+  problem_right_ids <- get_problem_ids("right")
+
+  # Create dataframes with problematic rows
+  problem_left_df <- slice(df_left, sort(problem_left_ids)) %>%
+    select(-any_of("..rowid_left"))
+  problem_right_df <- slice(df_right, sort(problem_right_ids)) %>%
+    select(-any_of("..rowid_right"))
+
+  # Finalize joined dataframe
+  final_joined_df <- joined_df %>%
+    mutate(join_keys = if_else(join_origin == "matched" &
+      match_type %in% c("1_to_1", "1_to_many", "many_to_1"),
+    paste0(join_keys, collapse = "|"), NA_character_
+    )) %>%
+    select(-c(..rowid_left, ..rowid_right))
+
+  # Return result
+  list(
+    joined_data               = final_joined_df,
+    non_1_to_1_matched_left   = problem_left_df,
+    non_1_to_1_matched_right  = problem_right_df
   )
 }
 
@@ -525,6 +504,18 @@ build_windfall_matching_levels <- function(
   c(unique_levels, general_levels)
 }
 
+#' Enumerate all left<right reporting-year pairs in matching order
+#' @param years Vector of years to process
+#' @return Dataframe with left_year and right_year columns
+build_year_pairs <- function(years) {
+  expand.grid(
+    left_year = years, right_year = years,
+    stringsAsFactors = FALSE
+  ) %>%
+    filter(left_year < right_year) %>%
+    arrange(desc(right_year), desc(left_year))
+}
+
 #' Run deterministic matching over every left<right year pair
 #' @param years Vector of years to process
 #' @param data_list List of tibbles with one tibble per year
@@ -535,52 +526,42 @@ run_all_windfall_matches <- function(
     data_list, verbose = FALSE) {
   logger::log_info("Running deterministic matching across all year pairs")
 
-  tryCatch(
-    {
-      # Create all possible year pairs (left_year < right_year)
-      year_pairs <- expand.grid(left_year = years, right_year = years, stringsAsFactors = FALSE) %>%
-        filter(left_year < right_year) %>%
-        arrange(desc(right_year), desc(left_year))
+  # Create all possible year pairs (left_year < right_year)
+  year_pairs <- build_year_pairs(years)
 
-      # Build variable combinations and rank them by evidence strength.
-      vars <- CONFIG$evidence_field_priority
-      var_list <- unlist(lapply(seq_along(vars), function(i) combn(vars, i, simplify = FALSE)),
-        recursive = FALSE
-      )
-      config_general <- sort_matching_levels_by_priority(var_list)
-
-      # Map pair -> config list
-      pair_keys <- apply(year_pairs, 1, function(x) paste(x[1], x[2], sep = "_"))
-      configs <- lapply(seq_along(pair_keys), function(i) {
-        build_windfall_matching_levels(
-          left_year = year_pairs$left_year[i],
-          right_year = year_pairs$right_year[i],
-          data_list = data_list,
-          general_levels = config_general
-        )
-      })
-      names(configs) <- pair_keys
-
-      # Run matching for each year pair
-      match_results <- lapply(pair_keys, function(pk) {
-        if (verbose) logger::log_info("Processing year pair: {pk}")
-        perform_windfall_matching(pk,
-          matching_levels = configs[[pk]],
-          data_list = data_list, verbose = verbose
-        )
-      })
-      names(match_results) <- pair_keys
-
-      # Extract just the matches dataframes
-      result <- lapply(match_results, `[[`, "matches")
-      logger::log_info("Completed deterministic matching across {length(pair_keys)} year pairs")
-      return(result)
-    },
-    error = function(e) {
-      logger::log_error("Deterministic matching failed: {e$message}")
-      stop(glue::glue("Windfall matching failed: {e$message}"))
-    }
+  # Build variable combinations and rank them by evidence strength.
+  vars <- CONFIG$evidence_field_priority
+  var_list <- unlist(lapply(seq_along(vars), function(i) combn(vars, i, simplify = FALSE)),
+    recursive = FALSE
   )
+  config_general <- sort_matching_levels_by_priority(var_list)
+
+  # Map pair -> config list
+  pair_keys <- apply(year_pairs, 1, function(x) paste(x[1], x[2], sep = "_"))
+  configs <- lapply(seq_along(pair_keys), function(i) {
+    build_windfall_matching_levels(
+      left_year = year_pairs$left_year[i],
+      right_year = year_pairs$right_year[i],
+      data_list = data_list,
+      general_levels = config_general
+    )
+  })
+  names(configs) <- pair_keys
+
+  # Run matching for each year pair
+  match_results <- lapply(pair_keys, function(pk) {
+    if (verbose) logger::log_info("Processing year pair: {pk}")
+    perform_windfall_matching(pk,
+      matching_levels = configs[[pk]],
+      data_list = data_list, verbose = verbose
+    )
+  })
+  names(match_results) <- pair_keys
+
+  # Extract just the matches dataframes
+  result <- lapply(match_results, `[[`, "matches")
+  logger::log_info("Completed deterministic matching across {length(pair_keys)} year pairs")
+  result
 }
 
 # Graph & Lookup‑Table Construction
@@ -704,126 +685,147 @@ build_lookup_from_matches <- function(
     conflict_resolution = c("fail", "year_constrained_forest")) {
   logger::log_info("Building lookup table from match data")
 
-  tryCatch(
-    {
-      conflict_resolution <- match.arg(conflict_resolution)
-      edges_df <- build_weighted_edges(match_dfs)
+  conflict_resolution <- match.arg(conflict_resolution)
+  edges_df <- build_weighted_edges(match_dfs)
 
-      if (nrow(edges_df) == 0) {
-        logger::log_warn("No usable match edges supplied; returning empty lookup")
-        return(list(
-          lookup_table = empty_lookup_table(CONFIG$years),
-          edge_metadata = empty_edge_metadata(),
-          conflict_audit = empty_conflict_audit(),
-          post_resolution_state = empty_conflict_audit()
-        ))
-      }
+  if (nrow(edges_df) == 0) {
+    logger::log_warn("No usable match edges supplied; returning empty lookup")
+    return(list(
+      lookup_table = empty_lookup_table(CONFIG$years),
+      edge_metadata = empty_edge_metadata(),
+      conflict_audit = empty_conflict_audit(),
+      post_resolution_state = empty_conflict_audit()
+    ))
+  }
 
-      # Keep the old MST only as a pre-resolution audit view, then build the
-      # canonical lookup from the year-constrained forest.
-      logger::log_info("Building unconstrained MST audit view from {nrow(edges_df)} edges")
-      pre_resolution <- build_unconstrained_mst_components(edges_df)
+  # Keep the old MST only as a pre-resolution audit view, then build the
+  # canonical lookup from the year-constrained forest.
+  logger::log_info("Building unconstrained MST audit view from {nrow(edges_df)} edges")
+  pre_resolution <- build_unconstrained_mst_components(edges_df)
 
-      logger::log_info("Building year-constrained maximum spanning forest")
-      constrained_forest <- build_year_constrained_spanning_forest(edges_df)
+  logger::log_info("Building year-constrained maximum spanning forest")
+  constrained_forest <- build_year_constrained_spanning_forest(edges_df)
 
-      kept_edges_for_audit <- attach_pre_resolution_components(
-        constrained_forest$kept_edges,
-        pre_resolution$membership_tbl
-      )
-      dropped_edges_for_audit <- attach_pre_resolution_components(
-        constrained_forest$dropped_edges,
-        pre_resolution$membership_tbl
-      )
-
-      pre_conflict_audit <- build_lookup_conflict_audit(
-        membership_tbl = pre_resolution$membership_tbl,
-        edge_metadata = pre_resolution$edge_metadata,
-        data_list = data_list,
-        kept_edges = kept_edges_for_audit,
-        dropped_edges = dropped_edges_for_audit,
-        resolution_component_scope = "pre"
-      )
-      if (conflict_resolution == "fail" &&
-          nrow(pre_conflict_audit$summary) > 0) {
-        export_conflict_audit(pre_conflict_audit, paths = CONFIG)
-        stop_if_lookup_conflicts(
-          pre_conflict_audit,
-          audit_path = CONFIG$conflict_excel_output,
-          written_files = conflict_audit_files(CONFIG)
-        )
-      }
-
-      edge_metadata <- if (nrow(constrained_forest$kept_edges) > 0) {
-        constrained_forest$kept_edges %>%
-          select(all_of(names(EDGE_METADATA_EXPORT_PROTOTYPE)))
-      } else {
-        empty_edge_metadata()
-      }
-
-      post_conflict_audit <- build_lookup_conflict_audit(
-        membership_tbl = constrained_forest$membership_tbl,
-        edge_metadata = edge_metadata,
-        data_list = data_list,
-        kept_edges = kept_edges_for_audit,
-        dropped_edges = dropped_edges_for_audit,
-        resolution_component_scope = "final"
-      )
-      logger::log_info(
-        "Post-resolution conflict audit found {nrow(post_conflict_audit$summary)} conflicted component-years"
-      )
-      if (nrow(post_conflict_audit$summary) > 0) {
-        # Failure-gated diagnostics: written only at the moment the final
-        # safety net trips, inside the same code path as the stop (KTD3).
-        post_conflict_paths <- post_resolution_conflict_audit_paths(CONFIG)
-        export_conflict_audit(post_conflict_audit, paths = post_conflict_paths)
-        stop_if_lookup_conflicts(
-          post_conflict_audit,
-          audit_path = post_conflict_paths$conflict_excel_output,
-          written_files = conflict_audit_files(post_conflict_paths)
-        )
-      }
-
-      lookup_table <- constrained_forest$membership_tbl %>%
-        group_by(component, year) %>%
-        summarise(
-          site_id = {
-            if (dplyr::n() != 1L) {
-              stop("Year-constrained forest invariant failed: component-year contains multiple site IDs.")
-            }
-            site_id[[1]]
-          },
-          .groups = "drop"
-        ) %>%
-        tidyr::pivot_wider(
-          names_from = year, values_from = site_id,
-          names_prefix = "site_id_", values_fill = NA_character_
-        )
-
-      site_cols <- paste0("site_id_", CONFIG$years)
-      if (!"component" %in% names(lookup_table)) {
-        lookup_table$component <- integer()
-      }
-      for (site_col in setdiff(site_cols, names(lookup_table))) {
-        lookup_table[[site_col]] <- NA_character_
-      }
-      lookup_table <- lookup_table %>%
-        select(component, all_of(site_cols)) %>%
-        arrange(component)
-
-      logger::log_info("Successfully built lookup table with {nrow(lookup_table)} rows")
-      list(
-        lookup_table = lookup_table,
-        edge_metadata = edge_metadata,
-        conflict_audit = pre_conflict_audit,
-        post_resolution_state = post_conflict_audit
-      )
-    },
-    error = function(e) {
-      logger::log_error("Failed to build lookup table: {e$message}")
-      stop(glue::glue("Lookup table construction failed: {e$message}"))
-    }
+  kept_edges_for_audit <- attach_pre_resolution_components(
+    constrained_forest$kept_edges,
+    pre_resolution$membership_tbl
   )
+  dropped_edges_for_audit <- attach_pre_resolution_components(
+    constrained_forest$dropped_edges,
+    pre_resolution$membership_tbl
+  )
+
+  pre_conflict_audit <- build_lookup_conflict_audit(
+    membership_tbl = pre_resolution$membership_tbl,
+    edge_metadata = pre_resolution$edge_metadata,
+    data_list = data_list,
+    kept_edges = kept_edges_for_audit,
+    dropped_edges = dropped_edges_for_audit,
+    resolution_component_scope = "pre"
+  )
+  if (conflict_resolution == "fail" &&
+      nrow(pre_conflict_audit$summary) > 0) {
+    export_conflict_audit(pre_conflict_audit, paths = CONFIG)
+    stop_if_lookup_conflicts(
+      pre_conflict_audit,
+      audit_path = CONFIG$conflict_excel_output,
+      written_files = conflict_audit_files(CONFIG)
+    )
+  }
+
+  edge_metadata <- if (nrow(constrained_forest$kept_edges) > 0) {
+    constrained_forest$kept_edges %>%
+      select(all_of(names(EDGE_METADATA_EXPORT_PROTOTYPE)))
+  } else {
+    empty_edge_metadata()
+  }
+
+  post_conflict_audit <- build_lookup_conflict_audit(
+    membership_tbl = constrained_forest$membership_tbl,
+    edge_metadata = edge_metadata,
+    data_list = data_list,
+    kept_edges = kept_edges_for_audit,
+    dropped_edges = dropped_edges_for_audit,
+    resolution_component_scope = "final"
+  )
+  logger::log_info(
+    "Post-resolution conflict audit found {nrow(post_conflict_audit$summary)} conflicted component-years"
+  )
+  if (nrow(post_conflict_audit$summary) > 0) {
+    # Failure-gated diagnostics: written only at the moment the final
+    # safety net trips, inside the same code path as the stop (KTD3).
+    post_conflict_paths <- post_resolution_conflict_audit_paths(CONFIG)
+    export_conflict_audit(post_conflict_audit, paths = post_conflict_paths)
+    stop_if_lookup_conflicts(
+      post_conflict_audit,
+      audit_path = post_conflict_paths$conflict_excel_output,
+      written_files = conflict_audit_files(post_conflict_paths)
+    )
+  }
+
+  lookup_table <- constrained_forest$membership_tbl %>%
+    group_by(component, year) %>%
+    summarise(
+      site_id = {
+        if (dplyr::n() != 1L) {
+          stop("Year-constrained forest invariant failed: component-year contains multiple site IDs.")
+        }
+        site_id[[1]]
+      },
+      .groups = "drop"
+    ) %>%
+    tidyr::pivot_wider(
+      names_from = year, values_from = site_id,
+      names_prefix = "site_id_", values_fill = NA_character_
+    )
+
+  site_cols <- paste0("site_id_", CONFIG$years)
+  if (!"component" %in% names(lookup_table)) {
+    lookup_table$component <- integer()
+  }
+  for (site_col in setdiff(site_cols, names(lookup_table))) {
+    lookup_table[[site_col]] <- NA_character_
+  }
+  lookup_table <- lookup_table %>%
+    select(component, all_of(site_cols)) %>%
+    arrange(component)
+
+  logger::log_info("Successfully built lookup table with {nrow(lookup_table)} rows")
+  list(
+    lookup_table = lookup_table,
+    edge_metadata = edge_metadata,
+    conflict_audit = pre_conflict_audit,
+    post_resolution_state = post_conflict_audit
+  )
+}
+
+#' Ensure numeric year-specific site_id columns, failing on bad coercions
+#'
+#' Adds any missing site_id_<year> columns as NA and converts existing ones
+#' to numeric, stopping when coercion would silently introduce NAs.
+#' @param lookup_tbl Lookup table tibble
+#' @param site_cols Character vector of site_id_<year> column names
+#' @return Lookup table with all site_cols present and numeric
+ensure_site_id_columns <- function(lookup_tbl, site_cols) {
+  for (site_col in setdiff(site_cols, names(lookup_tbl))) {
+    lookup_tbl[[site_col]] <- NA_real_
+  }
+
+  for (site_col in site_cols) {
+    original <- lookup_tbl[[site_col]]
+    converted <- suppressWarnings(as.numeric(as.character(original)))
+    coercion_failures <- is.na(converted) & !is.na(original)
+    if (any(coercion_failures)) {
+      bad_values <- unique(as.character(original)[coercion_failures])
+      stop(glue::glue(
+        "Non-numeric {site_col} values cannot be used as annual-return ",
+        "site IDs: {paste(utils::head(bad_values, 5), collapse = ', ')}"
+      ))
+    }
+    lookup_tbl[[site_col]] <- converted
+  }
+
+  lookup_tbl
 }
 
 # Helper to append singleton site_ids without matches
@@ -835,22 +837,14 @@ append_singleton_sites <- function(lookup_tbl, data_list) {
   years <- data_list_years(data_list)
   site_cols <- paste0("site_id_", years)
 
-  for (site_col in setdiff(site_cols, names(lookup_tbl))) {
-    lookup_tbl[[site_col]] <- NA_real_
-  }
-  lookup_tbl <- lookup_tbl %>%
-    mutate(across(
-      all_of(site_cols),
-      ~ suppressWarnings(as.numeric(as.character(.)))
-    ))
+  lookup_tbl <- ensure_site_id_columns(lookup_tbl, site_cols)
 
   orphan_rows <- purrr::map_dfr(years, function(yr) {
     col <- paste0("site_id_", yr)
     all_ids <- suppressWarnings(as.numeric(as.character(
       data_list[[paste0("df", yr)]][[col]]
     )))
-    linked_ids <- suppressWarnings(as.numeric(as.character(lookup_tbl[[col]])))
-    missing <- setdiff(all_ids, linked_ids)
+    missing <- setdiff(all_ids, lookup_tbl[[col]])
     if (length(missing) == 0) return(tibble())
     tibble::tibble(!!!setNames(
       purrr::map(years, function(y) if (y == yr) missing else rep(NA_real_, length(missing))),
@@ -872,27 +866,21 @@ append_singleton_sites <- function(lookup_tbl, data_list) {
 assign_canonical_site_ids <- function(lookup_tbl, years = CONFIG$years) {
   site_cols <- paste0("site_id_", years)
 
-  for (site_col in setdiff(site_cols, names(lookup_tbl))) {
-    lookup_tbl[[site_col]] <- NA_real_
-  }
   if (!"component" %in% names(lookup_tbl)) {
     lookup_tbl$component <- NA_integer_
   }
 
-  lookup_tbl <- lookup_tbl %>%
-    mutate(across(
-      all_of(site_cols),
-      ~ suppressWarnings(as.numeric(as.character(.)))
-    ))
+  lookup_tbl <- ensure_site_id_columns(lookup_tbl, site_cols)
 
-  site_id_matrix <- as.data.frame(lookup_tbl[site_cols])
-  first_observed_year <- vapply(seq_len(nrow(lookup_tbl)), function(i) {
-    observed_idx <- which(!is.na(unlist(site_id_matrix[i, ], use.names = FALSE)))
-    if (length(observed_idx) == 0) {
-      return(Inf)
-    }
-    years[observed_idx[1]]
-  }, numeric(1))
+  # One-pass vectorized scan for each row's earliest observed year; rows
+  # with no observed year sort last via Inf.
+  observed <- !is.na(as.matrix(lookup_tbl[site_cols]))
+  first_observed_idx <- max.col(observed, ties.method = "first")
+  first_observed_year <- ifelse(
+    rowSums(observed) > 0,
+    years[first_observed_idx],
+    Inf
+  )
 
   # Stable canonical order: earliest observed annual-return year, then the
   # year-specific annual-return IDs from oldest to newest.
@@ -965,31 +953,23 @@ export_data <- function(
     excel_output = CONFIG$excel_output,
     lookup_parquet = CONFIG$lookup_parquet,
     edge_metadata_parquet = CONFIG$edge_metadata_parquet) {
-  tryCatch(
-    {
-      # Create output directory if it doesn't exist
-      dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  # Create output directory if it doesn't exist
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
-      # 1. Export to parquet files
-      arrow::write_parquet(lookup_tbl, lookup_parquet)
-      logger::log_info("Exported lookup table to parquet: {lookup_parquet}")
+  # 1. Export to parquet files
+  arrow::write_parquet(lookup_tbl, lookup_parquet)
+  logger::log_info("Exported lookup table to parquet: {lookup_parquet}")
 
-      arrow::write_parquet(edges_tbl, edge_metadata_parquet)
-      logger::log_info("Exported edge metadata to parquet: {edge_metadata_parquet}")
+  arrow::write_parquet(edges_tbl, edge_metadata_parquet)
+  logger::log_info("Exported edge metadata to parquet: {edge_metadata_parquet}")
 
-      # 2. Export to Excel (both tables in one file, different sheets)
-      rio::export(
-        list("lookup_table" = lookup_tbl, "edge_metadata" = edges_tbl),
-        excel_output
-      )
-
-      logger::log_info("Exported data to Excel file: {excel_output}")
-    },
-    error = function(e) {
-      logger::log_error("Data export failed: {e$message}")
-      stop(glue::glue("Failed to export data: {e$message}"))
-    }
+  # 2. Export to Excel (both tables in one file, different sheets)
+  rio::export(
+    list("lookup_table" = lookup_tbl, "edge_metadata" = edges_tbl),
+    excel_output
   )
+
+  logger::log_info("Exported data to Excel file: {excel_output}")
 }
 
 # Main Execution
@@ -1009,8 +989,7 @@ main <- function(
     # Setup
     logger::log_info("===== Building Annual Return Lookup Table =====")
     initialise_environment()
-    load_packages()
-    setup_logging()
+    initialise_logging()
 
     # 1. Prepare per‑year data
     data_list <- prepare_data_list()
@@ -1046,13 +1025,7 @@ main <- function(
         train_if_missing = TRUE
       )
       if (!is.null(m_rf)) {
-        year_pairs_df <- expand.grid(
-          left_year = CONFIG$years,
-          right_year = CONFIG$years,
-          stringsAsFactors = FALSE
-        ) %>%
-          filter(left_year < right_year) %>%
-          arrange(desc(right_year), desc(left_year))
+        year_pairs_df <- build_year_pairs(CONFIG$years)
         rf_match_dfs <- run_rf_matching(
           year_pairs_df, data_list, m_rf, unmatched_ids_by_year
         )

@@ -753,8 +753,8 @@ for (key in names(main_overrides)) {
 }
 main_overrides$data_path <- main_fixture_parquet
 
-rf_lazy_env$load_packages <- function() invisible(NULL)
-rf_lazy_env$setup_logging <- function() invisible(NULL)
+rf_lazy_env$initialise_environment <- function() invisible(NULL)
+rf_lazy_env$initialise_logging <- function() invisible(NULL)
 rf_lazy_env$CONFIG <- utils::modifyList(rf_lazy_env$CONFIG, main_overrides)
 
 # Seed stale nonzero audit files: the zero-edge run must overwrite the
@@ -779,6 +779,77 @@ assert_identical(
 assert_true(
   !file.exists(rf_lazy_env$CONFIG$post_resolution_conflict_summary_parquet),
   "A healthy run should remove stale post-resolution audit files instead of writing empty ones."
+)
+
+# ------------------------------------------------------------------------------
+# Bootstrap, site-ID coercion, canonical ordering, single-owner fatal logging
+# ------------------------------------------------------------------------------
+
+assert_error_matching(
+  lookup_env$check_required_packages(c("a_package_that_does_not_exist_123")),
+  "rv sync",
+  "Missing packages should stop with the rv sync message instead of installing."
+)
+
+assert_error_matching(
+  lookup_env$ensure_site_id_columns(
+    tibble(site_id_2021 = c("1", "not-a-number")),
+    "site_id_2021"
+  ),
+  "Non-numeric site_id_2021",
+  "Non-numeric site IDs should stop with a clear error instead of silent NA."
+)
+
+canonical_fixture <- tibble(
+  component = c(1L, 2L, NA),
+  site_id_2021 = c(NA, 7, NA),
+  site_id_2022 = c(3, NA, NA),
+  site_id_2023 = NA_real_,
+  site_id_2024 = NA_real_
+)
+canonical_assigned <- lookup_env$assign_canonical_site_ids(canonical_fixture)
+assert_identical(
+  canonical_assigned$site_id,
+  1:3,
+  "Canonical site IDs should be dense row numbers."
+)
+assert_identical(
+  canonical_assigned$component,
+  c(2L, 1L, NA),
+  "Earliest observed year should order rows, with all-NA rows (Inf branch) last."
+)
+
+# A failure inside prepare_data_list() is logged exactly once, by main().
+log_env <- new.env(parent = globalenv())
+source(
+  here::here("scripts", "R", "03_data_enrichment", "create_annual_return_lookup.R"),
+  local = log_env
+)
+log_env$initialise_environment <- function() invisible(NULL)
+log_env$initialise_logging <- function() invisible(NULL)
+log_env$CONFIG <- utils::modifyList(
+  log_env$CONFIG,
+  list(data_path = tempfile("missing-lookup-input-", fileext = ".parquet"))
+)
+fatal_log_file <- tempfile("lookup-fatal-", fileext = ".log")
+logger::log_appender(logger::appender_file(fatal_log_file))
+fatal_error <- tryCatch(
+  {
+    log_env$main(compute_rf_matching = FALSE)
+    NULL
+  },
+  error = identity
+)
+logger::log_appender(logger::appender_console)
+logger::log_threshold(logger::WARN)
+assert_true(
+  inherits(fatal_error, "error"),
+  "A missing input parquet should fail the run."
+)
+fatal_log_lines <- readLines(fatal_log_file, warn = FALSE)
+assert_identical(
+  sum(grepl("Fatal error", fatal_log_lines, fixed = TRUE)), 1L,
+  "A failure inside prepare_data_list() should be fatally logged exactly once, by main()."
 )
 
 # ------------------------------------------------------------------------------

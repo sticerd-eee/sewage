@@ -376,13 +376,19 @@ build_lookup_conflict_audit <- function(
     ) %>%
     conform_to_prototype(CONFLICT_EDGES_PROTOTYPE)
 
+  # Explicit dispatch on the component namespace: the pre-resolution view
+  # filters on pre_component; the final view filters kept edges on
+  # component and dropped edges on their final_component endpoints. Any
+  # other shape is a caller bug and stops loudly.
   filter_resolution_edges <- function(edge_tbl) {
     if (nrow(edge_tbl) == 0) {
       return(edge_tbl)
     }
 
-    if (resolution_component_scope == "pre" &&
-        "pre_component" %in% names(edge_tbl)) {
+    if (resolution_component_scope == "pre") {
+      if (!"pre_component" %in% names(edge_tbl)) {
+        stop("Pre-resolution edge filtering requires a pre_component column.")
+      }
       return(edge_tbl %>%
         filter(pre_component %in% conflicted_components$component) %>%
         arrange(pre_component, resolution_order))
@@ -403,13 +409,10 @@ build_lookup_conflict_audit <- function(
         arrange(final_component_from, final_component_to, resolution_order))
     }
 
-    if ("pre_component" %in% names(edge_tbl)) {
-      return(edge_tbl %>%
-        filter(pre_component %in% conflicted_components$component) %>%
-        arrange(pre_component, resolution_order))
-    }
-
-    edge_tbl
+    stop(
+      "Final-resolution edge filtering requires a component or ",
+      "final_component_from/final_component_to columns."
+    )
   }
 
   list(

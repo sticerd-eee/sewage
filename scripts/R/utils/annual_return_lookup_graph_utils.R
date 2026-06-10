@@ -42,38 +42,58 @@ vertex_site_id <- function(vertex) {
 #' Attach component and year/site diagnostics to an edge table
 #' @param edge_tbl Edge table with from/to columns
 #' @param membership_tbl Vertex component membership table
+#' @param component_prefix Name prefix for the per-endpoint component columns
+#' @param collapse_component Whether to add a combined component column
+#'   (NA when the endpoints disagree)
 #' @return Edge table with component and parsed endpoint columns
-attach_edge_components <- function(edge_tbl, membership_tbl) {
+attach_edge_components <- function(edge_tbl, membership_tbl,
+                                   component_prefix = "component",
+                                   collapse_component = TRUE) {
+  from_col <- paste0(component_prefix, "_from")
+  to_col <- paste0(component_prefix, "_to")
+
   if (nrow(edge_tbl) == 0) {
-    return(edge_tbl %>%
+    out <- edge_tbl %>%
       mutate(
-        component = integer(),
+        !!from_col := integer(),
+        !!to_col := integer(),
         year_from = integer(),
         site_id_from = character(),
         year_to = integer(),
         site_id_to = character()
-      ))
+      )
+    if (collapse_component) {
+      out <- mutate(out, component = integer())
+    }
+    return(out)
   }
 
   component_lookup <- membership_tbl %>%
     select(vertex, component)
 
-  edge_tbl %>%
+  out <- edge_tbl %>%
     left_join(component_lookup, by = c("from" = "vertex")) %>%
-    rename(component_from = component) %>%
+    rename(!!from_col := component) %>%
     left_join(component_lookup, by = c("to" = "vertex")) %>%
-    rename(component_to = component) %>%
+    rename(!!to_col := component) %>%
     mutate(
-      component = dplyr::if_else(
-        component_from == component_to,
-        component_from,
-        NA_integer_
-      ),
       year_from = vertex_year(from),
       site_id_from = vertex_site_id(from),
       year_to = vertex_year(to),
       site_id_to = vertex_site_id(to)
     )
+
+  if (collapse_component) {
+    out <- out %>%
+      mutate(
+        component = dplyr::if_else(
+          .data[[from_col]] == .data[[to_col]],
+          .data[[from_col]],
+          NA_integer_
+        )
+      )
+  }
+  out
 }
 
 #' Keep the legacy unconstrained MST view for pre-resolution conflict audit
@@ -273,19 +293,11 @@ build_year_constrained_spanning_forest <- function(edges_df) {
   }
 
   if (nrow(dropped_edges) > 0) {
-    component_lookup <- membership_tbl %>%
-      select(vertex, component)
-
     dropped_edges <- dropped_edges %>%
-      left_join(component_lookup, by = c("from" = "vertex")) %>%
-      rename(final_component_from = component) %>%
-      left_join(component_lookup, by = c("to" = "vertex")) %>%
-      rename(final_component_to = component) %>%
-      mutate(
-        year_from = vertex_year(from),
-        site_id_from = vertex_site_id(from),
-        year_to = vertex_year(to),
-        site_id_to = vertex_site_id(to)
+      attach_edge_components(
+        membership_tbl,
+        component_prefix = "final_component",
+        collapse_component = FALSE
       ) %>%
       select(all_of(names(EDGE_RESOLUTION_DROPPED_PROTOTYPE)))
   }
