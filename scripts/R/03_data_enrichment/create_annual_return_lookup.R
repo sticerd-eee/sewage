@@ -87,6 +87,30 @@ CONFIG <- list(
   conflict_excel_output = here::here(
     "data", "processed", "annual_return_lookup_conflicts.xlsx"
   ),
+  post_resolution_conflict_summary_parquet = here::here(
+    "data", "processed",
+    "annual_return_lookup_post_resolution_conflict_summary.parquet"
+  ),
+  post_resolution_conflict_records_parquet = here::here(
+    "data", "processed",
+    "annual_return_lookup_post_resolution_conflict_records.parquet"
+  ),
+  post_resolution_conflict_edges_parquet = here::here(
+    "data", "processed",
+    "annual_return_lookup_post_resolution_conflict_edges.parquet"
+  ),
+  post_resolution_kept_edges_parquet = here::here(
+    "data", "processed",
+    "annual_return_lookup_post_resolution_kept_edges.parquet"
+  ),
+  post_resolution_dropped_edges_parquet = here::here(
+    "data", "processed",
+    "annual_return_lookup_post_resolution_dropped_edges.parquet"
+  ),
+  post_resolution_conflict_excel_output = here::here(
+    "data", "processed",
+    "annual_return_lookup_post_resolution_conflicts.xlsx"
+  ),
   excel_output = here::here(
     "data", "processed", "annual_return_lookup.xlsx"
   ),
@@ -143,6 +167,15 @@ prepare_data_list <- function(years = CONFIG$years, data_path = CONFIG$data_path
         if (!site_id_col %in% names(df)) {
           df <- mutate(df, !!site_id_col := row_number())
         }
+
+        df <- mutate(df, across(
+          any_of(CONFIG$evidence_field_priority),
+          ~ if_else(
+            stringr::str_to_upper(as.character(.x)) %in% c("TBC", "N/A"),
+            NA_character_,
+            as.character(.x)
+          )
+        ))
 
         # Keep only relevant columns
         df <- select(df, any_of(c(
@@ -336,8 +369,8 @@ perform_windfall_matching <- function(pair_key, matching_levels, data_list,
           !!paste0("join_keys_", year_suffix) := join_keys
         ) %>%
         select(
-          !!sym(paste0("site_id_", right_year)),
           !!sym(paste0("site_id_", left_year)),
+          !!sym(paste0("site_id_", right_year)),
           starts_with(paste0("match_level_", year_suffix)),
           starts_with(paste0("match_method_", year_suffix)),
           starts_with(paste0("match_type_", year_suffix)),
@@ -494,7 +527,7 @@ run_all_windfall_matches <- function(
         filter(left_year < right_year) %>%
         arrange(desc(right_year), desc(left_year))
 
-      # Build escalating variable combinations (largest -> smallest)
+      # Build variable combinations and rank them by evidence strength.
       vars <- CONFIG$evidence_field_priority
       var_list <- unlist(lapply(seq_along(vars), function(i) combn(vars, i, simplify = FALSE)),
         recursive = FALSE
@@ -604,16 +637,8 @@ train_rf_linkage_model <- function(
 
       logger::log_info("Preparing training data for years {left_year} and {right_year}")
 
-      # Clean character inputs
-      clean_df <- function(df) {
-        mutate(df, across(
-          all_of(match_vars),
-          ~ if_else(toupper(.) %in% c("TBC", "N/A"), NA_character_, .)
-        )) %>%
-          as.data.table()
-      }
-      dt_left <- clean_df(df_left)
-      dt_right <- clean_df(df_right)
+      dt_left <- as.data.table(df_left)
+      dt_right <- as.data.table(df_right)
 
       # Bring known match labels
       known_matches <- as.data.table(known_matches)[, match_id := .I]
@@ -731,16 +756,8 @@ perform_rf_matching <- function(
 
       logger::log_info("Performing RF matching for years {left_year} and {right_year}")
 
-      # Clean & convert to data.table
-      cleaner <- function(df) {
-        mutate(df, across(
-          all_of(match_vars),
-          ~ if_else(toupper(.) %in% c("TBC", "N/A"), NA_character_, .)
-        )) %>%
-          as.data.table()
-      }
-      dt_left <- cleaner(df_left)
-      dt_right <- cleaner(df_right)
+      dt_left <- as.data.table(df_left)
+      dt_right <- as.data.table(df_right)
 
       # Blocking & comparison
       logger::log_info("Creating candidate pairs using blocking on {blocking_var}")
@@ -796,7 +813,7 @@ perform_rf_matching <- function(
           !!paste0("match_level_", year_suffix) := (1 - !!sym(paste0("match_quality_rf_", year_suffix))) * 100
         ) %>%
         select(
-          !!sym(site_id_right), !!sym(site_id_left),
+          !!sym(site_id_left), !!sym(site_id_right),
           starts_with("match_method_"), starts_with("match_type_"),
           starts_with("join_keys_"), starts_with("match_level_"),
           starts_with("match_quality_rf_")
@@ -946,11 +963,21 @@ collapse_unique_values <- function(x) {
   paste(vals, collapse = "; ")
 }
 
+#' Extract sorted reporting years from a named annual-return data list
+#' @param data_list Named list with entries like df2021
+#' @return Integer vector of reporting years
+data_list_years <- function(data_list) {
+  years <- suppressWarnings(as.integer(sub("^df", "", names(data_list))))
+  sort(years[!is.na(years)])
+}
+
 #' Convert the yearly annual-return data list to an identifier lookup
 #' @param data_list Named list of yearly dataframes
 #' @return Tibble with one row per year-specific annual-return site ID
 build_annual_identifier_lookup <- function(data_list) {
-  purrr::map_dfr(CONFIG$years, function(yr) {
+  years <- data_list_years(data_list)
+
+  purrr::map_dfr(years, function(yr) {
     df <- data_list[[paste0("df", yr)]]
     site_col <- paste0("site_id_", yr)
 
@@ -1154,6 +1181,7 @@ build_year_constrained_spanning_forest <- function(edges_df) {
 
   kept_idx <- integer(nrow(ordered_edges))
   dropped_idx <- integer(nrow(ordered_edges))
+  dropped_reasons <- character(nrow(ordered_edges))
   dropped_duplicate_years <- character(nrow(ordered_edges))
   kept_n <- 0L
   dropped_n <- 0L
@@ -1163,6 +1191,10 @@ build_year_constrained_spanning_forest <- function(edges_df) {
     root_to <- find_root(edge_to_ids[i])
 
     if (root_from == root_to) {
+      dropped_n <- dropped_n + 1L
+      dropped_idx[dropped_n] <- i
+      dropped_reasons[dropped_n] <- "redundant_within_component"
+      dropped_duplicate_years[dropped_n] <- NA_character_
       next
     }
 
@@ -1174,6 +1206,7 @@ build_year_constrained_spanning_forest <- function(edges_df) {
     if (duplicate_year_mask != 0L) {
       dropped_n <- dropped_n + 1L
       dropped_idx[dropped_n] <- i
+      dropped_reasons[dropped_n] <- "duplicate_year_component"
       dropped_duplicate_years[dropped_n] <- paste(
         year_levels[bitwAnd(duplicate_year_mask, year_bits) != 0L],
         collapse = "; "
@@ -1207,6 +1240,51 @@ build_year_constrained_spanning_forest <- function(edges_df) {
       site_id = vertex_site_id(vertex)
     )
 
+  empty_kept_edges <- tibble(
+    component = integer(),
+    year_from = integer(),
+    site_id_from = character(),
+    year_to = integer(),
+    site_id_to = character(),
+    from = character(),
+    to = character(),
+    match_method = character(),
+    match_type = character(),
+    match_level = integer(),
+    join_keys = character(),
+    n_keys = integer(),
+    evidence_field_count = integer(),
+    field_priority_score = numeric(),
+    raw_score = numeric(),
+    edge_priority = integer(),
+    weight = numeric(),
+    resolution_order = integer()
+  )
+
+  empty_dropped_edges <- tibble(
+    final_component_from = integer(),
+    final_component_to = integer(),
+    year_from = integer(),
+    site_id_from = character(),
+    year_to = integer(),
+    site_id_to = character(),
+    from = character(),
+    to = character(),
+    match_method = character(),
+    match_type = character(),
+    match_level = integer(),
+    join_keys = character(),
+    n_keys = integer(),
+    evidence_field_count = integer(),
+    field_priority_score = numeric(),
+    raw_score = numeric(),
+    edge_priority = integer(),
+    weight = numeric(),
+    resolution_order = integer(),
+    drop_reason = character(),
+    duplicate_years = character()
+  )
+
   kept_edges <- if (kept_n > 0) {
     ordered_edges[kept_idx[seq_len(kept_n)], , drop = FALSE] %>%
       attach_edge_components(membership_tbl) %>%
@@ -1217,36 +1295,17 @@ build_year_constrained_spanning_forest <- function(edges_df) {
         raw_score, edge_priority, weight, resolution_order
       )
   } else {
-    tibble(
-      component = integer(),
-      year_from = integer(),
-      site_id_from = character(),
-      year_to = integer(),
-      site_id_to = character(),
-      from = character(),
-      to = character(),
-      match_method = character(),
-      match_type = character(),
-      match_level = integer(),
-      join_keys = character(),
-      n_keys = integer(),
-      evidence_field_count = integer(),
-      field_priority_score = numeric(),
-      raw_score = numeric(),
-      edge_priority = integer(),
-      weight = numeric(),
-      resolution_order = integer()
-    )
+    empty_kept_edges
   }
 
   dropped_edges <- if (dropped_n > 0) {
     ordered_edges[dropped_idx[seq_len(dropped_n)], , drop = FALSE] %>%
       mutate(
-        drop_reason = "duplicate_year_component",
+        drop_reason = dropped_reasons[seq_len(dropped_n)],
         duplicate_years = dropped_duplicate_years[seq_len(dropped_n)]
       )
   } else {
-    tibble()
+    empty_dropped_edges
   }
 
   if (nrow(dropped_edges) > 0) {
@@ -1287,7 +1346,13 @@ build_year_constrained_spanning_forest <- function(edges_df) {
 #' @return Edge table with pre_component diagnostics
 attach_pre_resolution_components <- function(edge_tbl, pre_membership_tbl) {
   if (nrow(edge_tbl) == 0) {
-    return(edge_tbl)
+    return(edge_tbl %>%
+      mutate(
+        pre_component = integer(),
+        pre_component_from = integer(),
+        pre_component_to = integer()
+      ) %>%
+      select(pre_component, pre_component_from, pre_component_to, everything()))
   }
 
   pre_lookup <- pre_membership_tbl %>%
@@ -1314,13 +1379,18 @@ attach_pre_resolution_components <- function(edge_tbl, pre_membership_tbl) {
 #' @param data_list Named list of yearly dataframes
 #' @param kept_edges Constrained-resolution kept edges
 #' @param dropped_edges Constrained-resolution dropped edges
+#' @param resolution_component_scope Component namespace used to filter
+#'   resolution edges: pre-resolution MST components or final forest components
 #' @return List containing summary, records, and edge audit tables
 build_lookup_conflict_audit <- function(
     membership_tbl,
     edge_metadata,
     data_list,
     kept_edges = tibble(),
-    dropped_edges = tibble()) {
+    dropped_edges = tibble(),
+    resolution_component_scope = c("pre", "final")) {
+  resolution_component_scope <- match.arg(resolution_component_scope)
+
   membership_clean <- membership_tbl %>%
     mutate(
       year = as.integer(year),
@@ -1384,9 +1454,9 @@ build_lookup_conflict_audit <- function(
   empty_edges <- tibble(
     component = integer(),
     year_from = integer(),
-    site_id_from = integer(),
+    site_id_from = character(),
     year_to = integer(),
-    site_id_to = integer(),
+    site_id_to = character(),
     match_method = character(),
     match_type = character(),
     match_level = integer(),
@@ -1396,7 +1466,8 @@ build_lookup_conflict_audit <- function(
     field_priority_score = numeric(),
     raw_score = numeric(),
     edge_priority = integer(),
-    weight = numeric()
+    weight = numeric(),
+    resolution_order = integer()
   )
 
   if (nrow(conflict_counts) == 0) {
@@ -1480,18 +1551,23 @@ build_lookup_conflict_audit <- function(
     semi_join(conflicted_components, by = "component") %>%
     mutate(
       year_from = as.integer(year_from),
-      site_id_from = suppressWarnings(as.integer(site_id_from)),
-      year_to = as.integer(year_to),
-      site_id_to = suppressWarnings(as.integer(site_id_to))
+      year_to = as.integer(year_to)
     ) %>%
-    arrange(component, year_from, site_id_from, year_to, site_id_to)
+    arrange(
+      component,
+      year_from,
+      suppressWarnings(as.integer(site_id_from)),
+      year_to,
+      suppressWarnings(as.integer(site_id_to))
+    )
 
   filter_resolution_edges <- function(edge_tbl) {
     if (nrow(edge_tbl) == 0) {
       return(edge_tbl)
     }
 
-    if ("pre_component" %in% names(edge_tbl)) {
+    if (resolution_component_scope == "pre" &&
+        "pre_component" %in% names(edge_tbl)) {
       return(edge_tbl %>%
         filter(pre_component %in% conflicted_components$component) %>%
         arrange(pre_component, resolution_order))
@@ -1501,6 +1577,21 @@ build_lookup_conflict_audit <- function(
       return(edge_tbl %>%
         semi_join(conflicted_components, by = "component") %>%
         arrange(component, resolution_order))
+    }
+
+    if (all(c("final_component_from", "final_component_to") %in% names(edge_tbl))) {
+      return(edge_tbl %>%
+        filter(
+          final_component_from %in% conflicted_components$component |
+            final_component_to %in% conflicted_components$component
+        ) %>%
+        arrange(final_component_from, final_component_to, resolution_order))
+    }
+
+    if ("pre_component" %in% names(edge_tbl)) {
+      return(edge_tbl %>%
+        filter(pre_component %in% conflicted_components$component) %>%
+        arrange(pre_component, resolution_order))
     }
 
     edge_tbl
@@ -1518,12 +1609,8 @@ build_lookup_conflict_audit <- function(
 #' Export annual-return lookup conflict audit tables
 #' @param conflict_audit List from build_lookup_conflict_audit()
 #' @param paths Configuration list with audit output paths
-#' @return Invisibly TRUE if files were written, FALSE otherwise
+#' @return Invisibly TRUE after files are written
 export_conflict_audit <- function(conflict_audit, paths = CONFIG) {
-  if (nrow(conflict_audit$summary) == 0) {
-    return(invisible(FALSE))
-  }
-
   dir.create(paths$output_dir, recursive = TRUE, showWarnings = FALSE)
 
   arrow::write_parquet(conflict_audit$summary, paths$conflict_summary_parquet)
@@ -1549,16 +1636,39 @@ export_conflict_audit <- function(conflict_audit, paths = CONFIG) {
     paths$conflict_excel_output
   )
 
-  logger::log_warn(
-    "Wrote annual-return lookup conflict audit to {paths$conflict_excel_output}"
-  )
+  if (nrow(conflict_audit$summary) == 0) {
+    logger::log_info(
+      "Wrote empty annual-return lookup conflict audit to {paths$conflict_excel_output}"
+    )
+  } else {
+    logger::log_warn(
+      "Wrote annual-return lookup conflict audit to {paths$conflict_excel_output}"
+    )
+  }
   invisible(TRUE)
+}
+
+#' Return output paths for post-resolution conflict audit files
+#' @param paths Configuration list
+#' @return Configuration list with conflict-audit paths remapped
+post_resolution_conflict_audit_paths <- function(paths = CONFIG) {
+  utils::modifyList(paths, list(
+    conflict_summary_parquet = paths$post_resolution_conflict_summary_parquet,
+    conflict_records_parquet = paths$post_resolution_conflict_records_parquet,
+    conflict_edges_parquet = paths$post_resolution_conflict_edges_parquet,
+    resolution_kept_edges_parquet = paths$post_resolution_kept_edges_parquet,
+    resolution_dropped_edges_parquet = paths$post_resolution_dropped_edges_parquet,
+    conflict_excel_output = paths$post_resolution_conflict_excel_output
+  ))
 }
 
 #' Stop lookup construction when ambiguous same-year component conflicts exist
 #' @param conflict_audit List from build_lookup_conflict_audit()
+#' @param audit_path Path to the conflict-audit workbook written for this audit
 #' @return Invisible NULL when no conflicts exist
-stop_if_lookup_conflicts <- function(conflict_audit) {
+stop_if_lookup_conflicts <- function(
+    conflict_audit,
+    audit_path = CONFIG$conflict_excel_output) {
   n_component_years <- nrow(conflict_audit$summary)
   if (n_component_years == 0) {
     return(invisible(NULL))
@@ -1571,7 +1681,8 @@ stop_if_lookup_conflicts <- function(conflict_audit) {
   stop(glue::glue(
     "Annual-return lookup has {n_components} conflicted components ",
     "across {n_component_years} component-years. ",
-    "Conflict audit files were written to data/processed/. ",
+    "Conflict audit files were written to {dirname(audit_path)} ",
+    "(workbook: {basename(audit_path)}). ",
     "Resolve or explicitly split these components before refreshing the canonical lookup."
   ))
 }
@@ -1600,6 +1711,10 @@ empty_edge_metadata <- function() {
     match_type = character(),
     match_level = integer(),
     join_keys = character(),
+    edge_priority = integer(),
+    evidence_field_count = integer(),
+    field_priority_score = numeric(),
+    resolution_order = integer(),
     weight = numeric()
   )
 }
@@ -1668,8 +1783,13 @@ build_lookup_from_matches <- function(
         level_col <- grep("^match_level_", names(df), value = TRUE)
         join_keys_col <- grep("^join_keys_", names(df), value = TRUE)
 
-        yr_l <- stringr::str_extract(site_cols[1], "\\d{4}$")
-        yr_r <- stringr::str_extract(site_cols[2], "\\d{4}$")
+        # Edges are undirected, but exports use chronological endpoint labels.
+        site_years <- as.integer(stringr::str_extract(site_cols, "\\d{4}$"))
+        endpoint_order <- order(site_years)
+        site_cols <- site_cols[endpoint_order]
+        site_years <- site_years[endpoint_order]
+        yr_l <- site_years[1]
+        yr_r <- site_years[2]
 
         df %>%
           filter(!is.na(.data[[join_keys_col]])) %>%
@@ -1737,7 +1857,8 @@ build_lookup_from_matches <- function(
         edge_metadata = pre_resolution$edge_metadata,
         data_list = data_list,
         kept_edges = kept_edges_for_audit,
-        dropped_edges = dropped_edges_for_audit
+        dropped_edges = dropped_edges_for_audit,
+        resolution_component_scope = "pre"
       )
       export_conflict_audit(pre_conflict_audit)
       if (conflict_resolution == "fail") {
@@ -1748,22 +1869,43 @@ build_lookup_from_matches <- function(
         constrained_forest$kept_edges %>%
           select(
             component, year_from, site_id_from, year_to, site_id_to,
-            match_method, match_type, match_level, join_keys, weight
+            match_method, match_type, match_level, join_keys,
+            edge_priority, evidence_field_count, field_priority_score,
+            resolution_order, weight
           )
       } else {
         empty_edge_metadata()
       }
 
+      post_conflict_paths <- post_resolution_conflict_audit_paths()
       post_conflict_audit <- build_lookup_conflict_audit(
         membership_tbl = constrained_forest$membership_tbl,
         edge_metadata = edge_metadata,
-        data_list = data_list
+        data_list = data_list,
+        kept_edges = kept_edges_for_audit,
+        dropped_edges = dropped_edges_for_audit,
+        resolution_component_scope = "final"
       )
-      stop_if_lookup_conflicts(post_conflict_audit)
+      logger::log_info(
+        "Post-resolution conflict audit found {nrow(post_conflict_audit$summary)} conflicted component-years"
+      )
+      export_conflict_audit(post_conflict_audit, paths = post_conflict_paths)
+      stop_if_lookup_conflicts(
+        post_conflict_audit,
+        audit_path = post_conflict_paths$conflict_excel_output
+      )
 
       lookup_table <- constrained_forest$membership_tbl %>%
         group_by(component, year) %>%
-        summarise(site_id = first(site_id), .groups = "drop") %>%
+        summarise(
+          site_id = {
+            if (dplyr::n() != 1L) {
+              stop("Year-constrained forest invariant failed: component-year contains multiple site IDs.")
+            }
+            site_id[[1]]
+          },
+          .groups = "drop"
+        ) %>%
         tidyr::pivot_wider(
           names_from = year, values_from = site_id,
           names_prefix = "site_id_", values_fill = NA_character_
@@ -1796,8 +1938,7 @@ build_lookup_from_matches <- function(
 #' @param data_list Named list of yearly dataframes
 #' @return Extended lookup table including singletons
 append_singleton_sites <- function(lookup_tbl, data_list) {
-  years <- as.integer(sub("^df", "", names(data_list)))
-  years <- sort(years[!is.na(years)])
+  years <- data_list_years(data_list)
   site_cols <- paste0("site_id_", years)
 
   for (site_col in setdiff(site_cols, names(lookup_tbl))) {
@@ -1875,6 +2016,40 @@ assign_canonical_site_ids <- function(lookup_tbl, years = CONFIG$years) {
     select(site_id, component, all_of(site_cols), everything(),
       -first_observed_year, -component_sort
     )
+}
+
+#' Verify that the final lookup preserves one unique row per input annual site
+#' @param lookup_tbl Final lookup table
+#' @param data_list Named list of yearly dataframes
+#' @return Invisibly TRUE when invariants hold
+assert_lookup_year_integrity <- function(lookup_tbl, data_list) {
+  years <- data_list_years(data_list)
+
+  for (yr in years) {
+    site_col <- paste0("site_id_", yr)
+    if (!site_col %in% names(lookup_tbl)) {
+      stop(glue::glue("Final lookup is missing {site_col}."))
+    }
+
+    observed_ids <- lookup_tbl[[site_col]][!is.na(lookup_tbl[[site_col]])]
+    expected_n <- nrow(data_list[[paste0("df", yr)]])
+    observed_n <- length(observed_ids)
+
+    if (observed_n != expected_n) {
+      stop(glue::glue(
+        "Final lookup row-conservation failed for {yr}: ",
+        "expected {expected_n} non-missing {site_col} values, found {observed_n}."
+      ))
+    }
+
+    if (anyDuplicated(as.character(observed_ids)) > 0) {
+      stop(glue::glue(
+        "Final lookup uniqueness failed for {yr}: duplicate {site_col} values found."
+      ))
+    }
+  }
+
+  invisible(TRUE)
 }
 
 
@@ -2014,6 +2189,7 @@ main <- function(
     lookup_tbl <- lookup_res$lookup_table %>%
       append_singleton_sites(data_list) %>%
       assign_canonical_site_ids()
+    assert_lookup_year_integrity(lookup_tbl, data_list)
 
     # 6. Save outputs
     export_data(lookup_tbl, edges_tbl)

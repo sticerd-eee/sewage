@@ -82,6 +82,7 @@ CONFIG <- list(
     "water_company_name" = "water_company",
     "site_name_ea_consents_database" = "site_name_ea",
     "site_name_wa_sc_operational_optional" = "site_name_wa_sc", # Variant 1
+    "site_name_wa_sc_operational_name_optional" = "site_name_wa_sc", # Variant 2
     "ea_permit_reference_ea_consents_database" = "permit_reference_ea",
     "wa_sc_supplementary_permit_ref_optional" = "permit_reference_wa_sc",
     "activity_reference_on_permit_if_1_discharge_on_permit" = "activity_reference", # Variant 1
