@@ -518,6 +518,11 @@ rf_shaped_matches <- tibble(
   match_level_2023_2024 = 5
 )
 
+snapshot_dir <- function(path) {
+  sort(list.files(path, recursive = TRUE, all.files = TRUE))
+}
+files_before_build <- snapshot_dir(builder_dir)
+
 builder_result <- lookup_env$build_lookup_from_matches(
   list(
     windfall = windfall_shaped_matches,
@@ -525,6 +530,13 @@ builder_result <- lookup_env$build_lookup_from_matches(
   ),
   data_list = builder_data_list,
   conflict_resolution = "year_constrained_forest"
+)
+
+# Builder purity: a successful build writes nothing.
+assert_identical(
+  snapshot_dir(builder_dir),
+  files_before_build,
+  "build_lookup_from_matches() should create zero files on a successful run."
 )
 
 assert_true(
@@ -539,66 +551,82 @@ assert_true(
   "RF-shaped matches should survive edge construction with chronological orientation."
 )
 
-pre_summary <- arrow::read_parquet(
-  lookup_env$CONFIG$conflict_summary_parquet
-)
 assert_true(
-  nrow(pre_summary) > 0 && all(pre_summary$year == 2021L),
+  nrow(builder_result$conflict_audit$summary) > 0 &&
+    all(builder_result$conflict_audit$summary$year == 2021L),
   "The shared-2022 fixture should produce a pre-resolution conflict in 2021."
 )
-post_summary <- arrow::read_parquet(
-  lookup_env$CONFIG$post_resolution_conflict_summary_parquet
-)
 assert_identical(
-  nrow(post_summary), 0L,
+  nrow(builder_result$post_resolution_state$summary), 0L,
   "The year-constrained forest should clear all conflicts post-resolution."
 )
 
-# Zero-row (post) and nonzero (pre) exports of every audit family must
-# share identical arrow schemas: kept/dropped pin the n_keys integer fix,
-# and summary/records/edges pin the canonical prototypes (vertex and
-# resolution_order drift resolved).
-parity_families <- list(
-  kept_edges = c("resolution_kept_edges_parquet", "post_resolution_kept_edges_parquet"),
-  dropped_edges = c("resolution_dropped_edges_parquet", "post_resolution_dropped_edges_parquet"),
-  summary = c("conflict_summary_parquet", "post_resolution_conflict_summary_parquet"),
-  records = c("conflict_records_parquet", "post_resolution_conflict_records_parquet"),
-  edges = c("conflict_edges_parquet", "post_resolution_conflict_edges_parquet")
+# Schema parity across a forced-conflict run (nonzero audit) and a clean
+# run (zero-row audit): every audit family must share identical arrow
+# schemas. kept/dropped pin the n_keys integer fix; summary/records/edges
+# pin the canonical prototypes (vertex and resolution_order drift resolved).
+clean_builder_result <- lookup_env$build_lookup_from_matches(
+  list(rf = rf_shaped_matches),
+  data_list = builder_data_list,
+  conflict_resolution = "year_constrained_forest"
 )
-for (family in names(parity_families)) {
-  pre_types <- parquet_arrow_types(
-    lookup_env$CONFIG[[parity_families[[family]][1]]]
+assert_identical(
+  nrow(clean_builder_result$conflict_audit$summary), 0L,
+  "The clean fixture should produce an empty pre-resolution conflict audit."
+)
+conflicted_dir <- file.path(builder_dir, "conflicted")
+clean_dir <- file.path(builder_dir, "clean")
+make_audit_paths <- function(dir) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+  list(
+    output_dir = dir,
+    conflict_summary_parquet = file.path(dir, "summary.parquet"),
+    conflict_records_parquet = file.path(dir, "records.parquet"),
+    conflict_edges_parquet = file.path(dir, "edges.parquet"),
+    resolution_kept_edges_parquet = file.path(dir, "kept.parquet"),
+    resolution_dropped_edges_parquet = file.path(dir, "dropped.parquet"),
+    conflict_excel_output = file.path(dir, "conflicts.xlsx")
   )
-  post_types <- parquet_arrow_types(
-    lookup_env$CONFIG[[parity_families[[family]][2]]]
-  )
+}
+conflicted_paths <- make_audit_paths(conflicted_dir)
+clean_paths <- make_audit_paths(clean_dir)
+lookup_env$export_conflict_audit(builder_result$conflict_audit, paths = conflicted_paths)
+lookup_env$export_conflict_audit(clean_builder_result$conflict_audit, paths = clean_paths)
+
+for (family in c(
+  "conflict_summary_parquet", "conflict_records_parquet",
+  "conflict_edges_parquet", "resolution_kept_edges_parquet",
+  "resolution_dropped_edges_parquet"
+)) {
+  conflicted_types <- parquet_arrow_types(conflicted_paths[[family]])
+  clean_types <- parquet_arrow_types(clean_paths[[family]])
   assert_identical(
-    post_types, pre_types,
+    clean_types, conflicted_types,
     paste0(
-      "Zero-row and nonzero exports of the ", family,
-      " family should share identical arrow schemas."
+      "Zero-row and nonzero exports of ", family,
+      " should share identical arrow schemas."
     )
   )
 }
-for (family in c("kept_edges", "dropped_edges")) {
-  pre_types <- parquet_arrow_types(
-    lookup_env$CONFIG[[parity_families[[family]][1]]]
-  )
+for (family in c("resolution_kept_edges_parquet", "resolution_dropped_edges_parquet")) {
+  conflicted_types <- parquet_arrow_types(conflicted_paths[[family]])
   assert_identical(
-    unname(pre_types[["n_keys"]]), "int32",
-    paste0("The ", family, " family should export n_keys as int32.")
+    unname(conflicted_types[["n_keys"]]), "int32",
+    paste0(family, " should export n_keys as int32.")
   )
 }
 assert_true(
-  "vertex" %in% names(parquet_arrow_types(lookup_env$CONFIG$conflict_records_parquet)),
+  "vertex" %in% names(parquet_arrow_types(conflicted_paths$conflict_records_parquet)),
   "Conflict records should carry the vertex column in both zero-row and nonzero exports."
 )
 assert_true(
-  "resolution_order" %in% names(parquet_arrow_types(lookup_env$CONFIG$conflict_edges_parquet)),
+  "resolution_order" %in% names(parquet_arrow_types(conflicted_paths$conflict_edges_parquet)),
   "Conflict edges should carry resolution_order (NA on the pre-resolution view) in every export."
 )
 
-# Final edge-metadata schema parity between empty and nonzero builds.
+# Final edge-metadata schema parity between empty and nonzero builds; the
+# zero-match path also returns prototype-empty audits so main() can still
+# refresh every audit file on disk.
 empty_builder_result <- lookup_env$build_lookup_from_matches(
   list(),
   data_list = builder_data_list,
@@ -608,6 +636,76 @@ assert_identical(
   column_classes(empty_builder_result$edge_metadata),
   column_classes(builder_result$edge_metadata),
   "Zero-match and nonzero edge metadata should share column names, order, and types."
+)
+assert_identical(
+  vapply(empty_builder_result$conflict_audit, nrow, integer(1)),
+  c(summary = 0L, records = 0L, edges = 0L, kept_edges = 0L, dropped_edges = 0L),
+  "The zero-match path should return prototype-empty audit tables for export."
+)
+
+# Failure gate: a synthetic post-resolution conflict (forest stub returning
+# duplicate same-year sites) writes the diagnostic set and stops with a
+# message naming the files.
+trip_env <- new.env(parent = globalenv())
+source(
+  here::here("scripts", "R", "03_data_enrichment", "create_annual_return_lookup.R"),
+  local = trip_env
+)
+trip_dir <- tempfile("lookup-trip-")
+dir.create(trip_dir, recursive = TRUE, showWarnings = FALSE)
+on.exit(unlink(trip_dir, recursive = TRUE, force = TRUE), add = TRUE)
+trip_overrides <- builder_path_overrides
+for (key in names(trip_overrides)) {
+  if (grepl("parquet$|xlsx$", trip_overrides[[key]])) {
+    trip_overrides[[key]] <- file.path(trip_dir, basename(trip_overrides[[key]]))
+  }
+}
+trip_overrides$output_dir <- trip_dir
+trip_env$CONFIG <- utils::modifyList(trip_env$CONFIG, trip_overrides)
+trip_env$build_year_constrained_spanning_forest <- function(edges_df) {
+  membership <- tibble(
+    vertex = c("2021_1", "2021_2", "2022_5"),
+    component = 1L,
+    year = c(2021L, 2021L, 2022L),
+    site_id = c("1", "2", "5")
+  )
+  forest <- lookup_env$build_year_constrained_spanning_forest(edges_df)
+  forest$membership_tbl <- membership
+  forest
+}
+trip_error <- tryCatch(
+  {
+    trip_env$build_lookup_from_matches(
+      list(windfall = windfall_shaped_matches),
+      data_list = builder_data_list,
+      conflict_resolution = "year_constrained_forest"
+    )
+    NULL
+  },
+  error = identity
+)
+assert_true(
+  inherits(trip_error, "error"),
+  "A post-resolution conflict should stop the build."
+)
+assert_true(
+  grepl("post_resolution_conflict_summary.parquet", conditionMessage(trip_error), fixed = TRUE),
+  "The trip stop message should name the diagnostic files it wrote."
+)
+assert_true(
+  nrow(arrow::read_parquet(trip_env$CONFIG$post_resolution_conflict_summary_parquet)) > 0,
+  "A tripped run should write nonzero post-resolution diagnostics."
+)
+
+# Healthy run after a tripped run: stale post-resolution files are removed
+# and none are recreated.
+stale_removed <- lookup_env$clear_post_resolution_conflict_audit(trip_env$CONFIG)
+assert_true(
+  length(stale_removed) == 6 &&
+    !any(file.exists(lookup_env$conflict_audit_files(
+      lookup_env$post_resolution_conflict_audit_paths(trip_env$CONFIG)
+    ))),
+  "A healthy run should remove every stale post-resolution audit file."
 )
 
 lookup_env$CONFIG <- ORIGINAL_CONFIG
@@ -658,11 +756,29 @@ main_overrides$data_path <- main_fixture_parquet
 rf_lazy_env$load_packages <- function() invisible(NULL)
 rf_lazy_env$setup_logging <- function() invisible(NULL)
 rf_lazy_env$CONFIG <- utils::modifyList(rf_lazy_env$CONFIG, main_overrides)
+
+# Seed stale nonzero audit files: the zero-edge run must overwrite the
+# pre-resolution set with zero-row tables and delete post-resolution files.
+stale_summary <- tibble(component = 1L, year = 2021L)
+arrow::write_parquet(stale_summary, rf_lazy_env$CONFIG$conflict_summary_parquet)
+arrow::write_parquet(
+  stale_summary,
+  rf_lazy_env$CONFIG$post_resolution_conflict_summary_parquet
+)
+
 rf_lazy_env$main(compute_rf_matching = FALSE)
 
 assert_true(
   !exists("perform_rf_matching", envir = rf_lazy_env, inherits = FALSE),
   "A default run (compute_rf_matching = FALSE) should never source the RF utilities."
+)
+assert_identical(
+  nrow(arrow::read_parquet(rf_lazy_env$CONFIG$conflict_summary_parquet)), 0L,
+  "A zero-edge run should overwrite stale pre-resolution audit files with zero-row tables."
+)
+assert_true(
+  !file.exists(rf_lazy_env$CONFIG$post_resolution_conflict_summary_parquet),
+  "A healthy run should remove stale post-resolution audit files instead of writing empty ones."
 )
 
 # ------------------------------------------------------------------------------
@@ -867,12 +983,13 @@ assert_identical(
   "Baseline: 93 dropped edges should be duplicate_year_component drops."
 )
 
-baseline_post_summary <- arrow::read_parquet(
-  ORIGINAL_CONFIG$post_resolution_conflict_summary_parquet
-)
-assert_identical(
-  nrow(baseline_post_summary), 0L,
-  "Baseline: post-resolution conflict audit should be empty."
+# Post-resolution diagnostics are failure-gated (KTD3): a clean run leaves
+# no post-resolution files at all.
+assert_true(
+  !any(file.exists(lookup_env$conflict_audit_files(
+    lookup_env$post_resolution_conflict_audit_paths(ORIGINAL_CONFIG)
+  ))),
+  "Baseline: a clean run should leave no post-resolution audit files in data/processed."
 )
 
 baseline_lookup <- arrow::read_parquet(ORIGINAL_CONFIG$lookup_parquet)

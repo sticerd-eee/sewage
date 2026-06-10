@@ -421,6 +421,58 @@ build_lookup_conflict_audit <- function(
   )
 }
 
+#' Return an all-empty conflict audit built from the canonical prototypes
+#'
+#' Used by zero-edge and zero-match runs so the caller can still refresh
+#' every audit file on disk with zero-row tables.
+#' @return List shaped like build_lookup_conflict_audit() output
+empty_conflict_audit <- function() {
+  list(
+    summary = CONFLICT_SUMMARY_PROTOTYPE,
+    records = CONFLICT_RECORDS_PROTOTYPE,
+    edges = CONFLICT_EDGES_PROTOTYPE,
+    kept_edges = attach_pre_resolution_components(
+      EDGE_RESOLUTION_KEPT_PROTOTYPE, tibble()
+    ),
+    dropped_edges = attach_pre_resolution_components(
+      EDGE_RESOLUTION_DROPPED_PROTOTYPE, tibble()
+    )
+  )
+}
+
+#' List the files export_conflict_audit() writes for a given path set
+#' @param paths Configuration list with audit output paths
+#' @return Character vector of file paths
+conflict_audit_files <- function(paths) {
+  c(
+    paths$conflict_summary_parquet,
+    paths$conflict_records_parquet,
+    paths$conflict_edges_parquet,
+    paths$resolution_kept_edges_parquet,
+    paths$resolution_dropped_edges_parquet,
+    paths$conflict_excel_output
+  )
+}
+
+#' Remove stale post-resolution conflict-audit files after a healthy run
+#'
+#' Post-resolution diagnostics exist only when the final safety net has
+#' tripped; a successful run deletes leftovers from earlier failed runs
+#' instead of writing empty ones.
+#' @param paths Configuration list with audit output paths
+#' @return Invisibly the removed file paths
+clear_post_resolution_conflict_audit <- function(paths) {
+  files <- conflict_audit_files(post_resolution_conflict_audit_paths(paths))
+  existing <- files[file.exists(files)]
+  if (length(existing) > 0) {
+    file.remove(existing)
+    logger::log_info(
+      "Removed {length(existing)} stale post-resolution conflict-audit files"
+    )
+  }
+  invisible(existing)
+}
+
 #' Export annual-return lookup conflict audit tables
 #' @param conflict_audit List from build_lookup_conflict_audit()
 #' @param paths Configuration list with audit output paths
@@ -480,10 +532,13 @@ post_resolution_conflict_audit_paths <- function(paths) {
 #' Stop lookup construction when ambiguous same-year component conflicts exist
 #' @param conflict_audit List from build_lookup_conflict_audit()
 #' @param audit_path Path to the conflict-audit workbook written for this audit
+#' @param written_files Paths of the diagnostic files written for this audit;
+#'   when supplied, the stop message names each file
 #' @return Invisible NULL when no conflicts exist
 stop_if_lookup_conflicts <- function(
     conflict_audit,
-    audit_path) {
+    audit_path,
+    written_files = character(0)) {
   n_component_years <- nrow(conflict_audit$summary)
   if (n_component_years == 0) {
     return(invisible(NULL))
@@ -493,11 +548,21 @@ stop_if_lookup_conflicts <- function(
   logger::log_error(
     "Annual-return lookup has {n_components} conflicted components across {n_component_years} component-years"
   )
+  file_clause <- if (length(written_files) > 0) {
+    glue::glue(
+      "Diagnostic files written to {dirname(audit_path)}: ",
+      "{paste(basename(written_files), collapse = ', ')}. "
+    )
+  } else {
+    glue::glue(
+      "Conflict audit files were written to {dirname(audit_path)} ",
+      "(workbook: {basename(audit_path)}). "
+    )
+  }
   stop(glue::glue(
     "Annual-return lookup has {n_components} conflicted components ",
     "across {n_component_years} component-years. ",
-    "Conflict audit files were written to {dirname(audit_path)} ",
-    "(workbook: {basename(audit_path)}). ",
+    file_clause,
     "Resolve or explicitly split these components before refreshing the canonical lookup."
   ))
 }

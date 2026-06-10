@@ -685,11 +685,19 @@ build_weighted_edges <- function(match_dfs) {
 }
 
 #' Given pairwise match dataframes, build a year-constrained lookup
+#'
+#' Pure on every successful return: yields the lookup, edge metadata, and
+#' audit tables and writes nothing - main() owns all exports. Writes
+#' happen only on the failure path, where the safety net trips: the
+#' diagnostics are exported inside the same code path as the stop, so a
+#' tripped run always leaves its evidence on disk.
 #' @param match_dfs Named list of pairwise match dataframes
 #' @param data_list Named list of yearly dataframes
 #' @param conflict_resolution Same-year conflict policy: fail closed, or
 #'   explicitly split ambiguous components with a year-constrained forest
-#' @return A list containing lookup_table and edge_metadata
+#' @return A list containing lookup_table, edge_metadata, conflict_audit
+#'   (pre-resolution), and post_resolution_state (post-resolution audit;
+#'   all-empty on every successful return)
 build_lookup_from_matches <- function(
     match_dfs,
     data_list,
@@ -705,7 +713,9 @@ build_lookup_from_matches <- function(
         logger::log_warn("No usable match edges supplied; returning empty lookup")
         return(list(
           lookup_table = empty_lookup_table(CONFIG$years),
-          edge_metadata = empty_edge_metadata()
+          edge_metadata = empty_edge_metadata(),
+          conflict_audit = empty_conflict_audit(),
+          post_resolution_state = empty_conflict_audit()
         ))
       }
 
@@ -734,9 +744,14 @@ build_lookup_from_matches <- function(
         dropped_edges = dropped_edges_for_audit,
         resolution_component_scope = "pre"
       )
-      export_conflict_audit(pre_conflict_audit, paths = CONFIG)
-      if (conflict_resolution == "fail") {
-        stop_if_lookup_conflicts(pre_conflict_audit, audit_path = CONFIG$conflict_excel_output)
+      if (conflict_resolution == "fail" &&
+          nrow(pre_conflict_audit$summary) > 0) {
+        export_conflict_audit(pre_conflict_audit, paths = CONFIG)
+        stop_if_lookup_conflicts(
+          pre_conflict_audit,
+          audit_path = CONFIG$conflict_excel_output,
+          written_files = conflict_audit_files(CONFIG)
+        )
       }
 
       edge_metadata <- if (nrow(constrained_forest$kept_edges) > 0) {
@@ -746,7 +761,6 @@ build_lookup_from_matches <- function(
         empty_edge_metadata()
       }
 
-      post_conflict_paths <- post_resolution_conflict_audit_paths(CONFIG)
       post_conflict_audit <- build_lookup_conflict_audit(
         membership_tbl = constrained_forest$membership_tbl,
         edge_metadata = edge_metadata,
@@ -758,11 +772,17 @@ build_lookup_from_matches <- function(
       logger::log_info(
         "Post-resolution conflict audit found {nrow(post_conflict_audit$summary)} conflicted component-years"
       )
-      export_conflict_audit(post_conflict_audit, paths = post_conflict_paths)
-      stop_if_lookup_conflicts(
-        post_conflict_audit,
-        audit_path = post_conflict_paths$conflict_excel_output
-      )
+      if (nrow(post_conflict_audit$summary) > 0) {
+        # Failure-gated diagnostics: written only at the moment the final
+        # safety net trips, inside the same code path as the stop (KTD3).
+        post_conflict_paths <- post_resolution_conflict_audit_paths(CONFIG)
+        export_conflict_audit(post_conflict_audit, paths = post_conflict_paths)
+        stop_if_lookup_conflicts(
+          post_conflict_audit,
+          audit_path = post_conflict_paths$conflict_excel_output,
+          written_files = conflict_audit_files(post_conflict_paths)
+        )
+      }
 
       lookup_table <- constrained_forest$membership_tbl %>%
         group_by(component, year) %>%
@@ -792,7 +812,12 @@ build_lookup_from_matches <- function(
         arrange(component)
 
       logger::log_info("Successfully built lookup table with {nrow(lookup_table)} rows")
-      list(lookup_table = lookup_table, edge_metadata = edge_metadata)
+      list(
+        lookup_table = lookup_table,
+        edge_metadata = edge_metadata,
+        conflict_audit = pre_conflict_audit,
+        post_resolution_state = post_conflict_audit
+      )
     },
     error = function(e) {
       logger::log_error("Failed to build lookup table: {e$message}")
@@ -1043,14 +1068,14 @@ main <- function(
       )
     }
 
-    # 4. Build lookup table
+    # 4. Build lookup table (pure - all file-writes happen below in main)
     lookup_res <- build_lookup_from_matches(
       match_dfs,
       data_list = data_list,
       conflict_resolution = same_year_conflict_resolution
     )
     edges_tbl <- lookup_res$edge_metadata %>%
-      mutate(across(starts_with("site_id") | starts_with("year"), 
+      mutate(across(starts_with("site_id") | starts_with("year"),
                     ~ as.numeric(as.character(.))))
 
     # 5. Append singleton sites with no matches and assign canonical IDs
@@ -1059,7 +1084,12 @@ main <- function(
       assign_canonical_site_ids()
     assert_lookup_year_integrity(lookup_tbl, data_list)
 
-    # 6. Save outputs
+    # 6. Save outputs: pre-resolution audit (zero-row tables on zero-edge
+    # runs, so stale audits never survive), then the lookup and edges.
+    # Post-resolution diagnostics exist only when the safety net tripped;
+    # a healthy run removes leftovers from earlier failed runs.
+    export_conflict_audit(lookup_res$conflict_audit, paths = CONFIG)
+    clear_post_resolution_conflict_audit(CONFIG)
     export_data(lookup_tbl, edges_tbl)
 
     logger::log_info("Lookup table saved (rows: {nrow(lookup_tbl)})")
