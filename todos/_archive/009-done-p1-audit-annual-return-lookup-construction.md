@@ -1,9 +1,10 @@
 ---
-status: pending
+status: done
 priority: p1
 issue_id: "009"
 tags: [code-review, data-integrity, matching, annual-return, r, pipeline]
 dependencies: []
+resolved_date: 2026-06-11
 ---
 
 # Audit annual return lookup construction
@@ -14,14 +15,14 @@ dependencies: []
 
 ## Findings
 
-- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R:852`](../scripts/R/03_data_enrichment/create_annual_return_lookup.R#L852) groups by `(component, year)` and uses `first(site_id)`, so components containing multiple same-year IDs are collapsed without an audit trail.
+- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R:852`](../../scripts/R/03_data_enrichment/create_annual_return_lookup.R#L852) groups by `(component, year)` and uses `first(site_id)`, so components containing multiple same-year IDs are collapsed without an audit trail.
 - A review run on 2026-06-09 found 113 `(component, year)` cases with more than one annual-return ID after deterministic matching and MST construction.
 - The singleton append step later represents every raw annual-return ID exactly once, so rows are not lost outright. The risk is that ambiguous graph components are split partly through `first(site_id)` and partly as singleton canonical sites.
 - Example conflict: one 2024 Anglian Water record was connected to different pre-2024 records through different high-scoring edges for `BRANTHAM - FACTORY LANE (B) TPS`; the current lookup keeps one same-year ID and does not surface the ambiguity.
-- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R:802`](../scripts/R/03_data_enrichment/create_annual_return_lookup.R#L802) assumes every match dataframe has site ID and match metadata columns. If optional RF matching returns a bare zero-column `tibble()`, lookup construction can fail.
-- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R:755`](../scripts/R/03_data_enrichment/create_annual_return_lookup.R#L755) loads `readRDS(model_file)$m_rf`, while training saves `list(model = m_rf, importance = ...)`.
-- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R:1002`](../scripts/R/03_data_enrichment/create_annual_return_lookup.R#L1002) tries to load an existing RF model even when `compute_rf_matching = FALSE`, so the default path can unexpectedly run RF if a model file exists and is loaded successfully.
-- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R:1032`](../scripts/R/03_data_enrichment/create_annual_return_lookup.R#L1032) assigns canonical `site_id` with `row_number()` after graph/pivot output ordering rather than after an explicit stable sort.
+- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R:802`](../../scripts/R/03_data_enrichment/create_annual_return_lookup.R#L802) assumes every match dataframe has site ID and match metadata columns. If optional RF matching returns a bare zero-column `tibble()`, lookup construction can fail.
+- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R:755`](../../scripts/R/03_data_enrichment/create_annual_return_lookup.R#L755) loads `readRDS(model_file)$m_rf`, while training saves `list(model = m_rf, importance = ...)`.
+- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R:1002`](../../scripts/R/03_data_enrichment/create_annual_return_lookup.R#L1002) tries to load an existing RF model even when `compute_rf_matching = FALSE`, so the default path can unexpectedly run RF if a model file exists and is loaded successfully.
+- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R:1032`](../../scripts/R/03_data_enrichment/create_annual_return_lookup.R#L1032) assigns canonical `site_id` with `row_number()` after graph/pivot output ordering rather than after an explicit stable sort.
 
 ## Proposed Solutions
 
@@ -84,7 +85,7 @@ Start with Option 1 and Option 3. The same-year component conflicts should block
 ## Technical Details
 
 **Affected files:**
-- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R`](../scripts/R/03_data_enrichment/create_annual_return_lookup.R)
+- [`scripts/R/03_data_enrichment/create_annual_return_lookup.R`](../../scripts/R/03_data_enrichment/create_annual_return_lookup.R)
 
 **Related components:**
 - `data/processed/annual_return_lookup.parquet`
@@ -97,20 +98,35 @@ Start with Option 1 and Option 3. The same-year component conflicts should block
 
 ## Resources
 
-- Script under review: [`scripts/R/03_data_enrichment/create_annual_return_lookup.R`](../scripts/R/03_data_enrichment/create_annual_return_lookup.R)
-- Downstream lookup consumer: [`scripts/R/03_data_enrichment/create_unique_spill_sites.R`](../scripts/R/03_data_enrichment/create_unique_spill_sites.R)
+- Script under review: [`scripts/R/03_data_enrichment/create_annual_return_lookup.R`](../../scripts/R/03_data_enrichment/create_annual_return_lookup.R)
+- Downstream lookup consumer: [`scripts/R/03_data_enrichment/create_unique_spill_sites.R`](../../scripts/R/03_data_enrichment/create_unique_spill_sites.R)
 
 ## Acceptance Criteria
 
-- [ ] Lookup construction detects and reports all components with more than one site ID for the same year.
-- [ ] The pipeline fails or requires an explicit resolution mode when same-year component conflicts exist.
-- [ ] Conflict diagnostics include component, year, site IDs, edge metadata, match levels, join keys, and enough annual-return identifiers for manual review.
-- [ ] Empty RF match outputs cannot break lookup construction.
-- [ ] RF model loading uses the same object key that model saving writes.
-- [ ] `compute_rf_matching = FALSE` never runs RF matching because a saved model happens to exist.
-- [ ] Canonical `site_id` assignment uses a stable documented ordering.
+- [x] Lookup construction detects and reports all components with more than one site ID for the same year.
+- [x] The pipeline fails or requires an explicit resolution mode when same-year component conflicts exist.
+- [x] Conflict diagnostics include component, year, site IDs, edge metadata, match levels, join keys, and enough annual-return identifiers for manual review.
+- [x] Empty RF match outputs cannot break lookup construction.
+- [x] RF model loading uses the same object key that model saving writes.
+- [x] `compute_rf_matching = FALSE` never runs RF matching because a saved model happens to exist.
+- [x] Canonical `site_id` assignment uses a stable documented ordering.
 
 ## Work Log
+
+### 2026-06-11 - Resolved and Archived
+
+**By:** Codex
+
+**Actions:**
+- Resolved same-year component conflicts with year-constrained graph construction and documented the remaining pre-resolution conflicts as audit evidence rather than canonical lookup data.
+- Added conflict audit outputs and a post-resolution safety gate so any future same-year conflict after resolution fails with diagnostics.
+- Hardened optional RF behavior so RF remains flag-gated, model loading uses the saved `$model` object, and empty RF outputs cannot break lookup construction.
+- Added focused annual-return lookup and combiner contract tests that cover the lookup integrity and RF contract fixes.
+- Moved this completed todo to `todos/_archive/`.
+
+**Learnings:**
+- The annual-return lookup now enforces exact yearly ID coverage and zero duplicate yearly IDs through code and contract tests.
+- The RF path is safe to keep available for evaluated future use while staying off in production by default.
 
 ### 2026-06-09 - Review Discovery
 

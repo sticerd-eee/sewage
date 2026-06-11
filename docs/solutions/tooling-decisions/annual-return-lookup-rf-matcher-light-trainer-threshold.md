@@ -160,7 +160,7 @@ when running pipeline scripts or tests.
   the graph-resolution invariant the RF engine feeds into.
 - `docs/plans/2026-06-10-004-refactor-annual-return-lookup-decomposition-plan.html` —
   refactor plan; unit U4 implements this decision, U8 cross-checks documentation.
-- `todos/009-pending-p1-audit-annual-return-lookup-construction.md` — the audit that opened
+- `todos/_archive/009-done-p1-audit-annual-return-lookup-construction.md` — the audit that opened
   the RF investigation; this doc resolves its RF sub-items.
 - `todos/_archive/008-pending-p1-fix-annual-return-lookup-rf-and-conflict-bugs.md` — the RF
   bug inventory (load-key mismatch, poison labels, empty-tibble contract) behind this decision.

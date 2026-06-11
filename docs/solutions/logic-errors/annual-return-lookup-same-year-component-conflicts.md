@@ -31,19 +31,19 @@ That assumption was false. Some plausible match bridges connected multiple recor
 - Example pattern: one 2024 site connected to different pre-2024 records through different high-scoring deterministic edges.
 
 ## What Didn't Work
-**Checking raw annual-return coverage alone.**  
+**Checking raw annual-return coverage alone.**
 Every raw yearly ID could still appear exactly once after singleton appending. That proved no rows were lost, but not that the canonical graph had resolved ambiguous matches correctly.
 
-**Trusting pairwise one-to-one matches globally.**  
+**Trusting pairwise one-to-one matches globally.**
 Pairwise one-to-one matching does not imply globally valid connected components. Bridge edges can join two otherwise plausible site tracks and create a component with two IDs from the same reporting year.
 
-**Using the unconstrained MST as the canonical graph.**  
+**Using the unconstrained MST as the canonical graph.**
 An MST optimizes edge strength, but it does not encode the lookup invariant: one canonical annual-return site track may contain at most one record per reporting year.
 
-**Stopping at audit-only fail-closed behavior.**  
+**Stopping at audit-only fail-closed behavior.**
 The first fix direction wrote conflict diagnostics and stopped before refreshing canonical outputs. That was useful diagnostically, but the production pipeline needed an algorithmic resolution rather than permanent manual blocking. (session history)
 
-**Building the constrained forest with heavy per-edge data structures.**  
+**Building the constrained forest with heavy per-edge data structures.**
 An early constrained-forest implementation used per-edge tibble/list bookkeeping and was too slow on the full data. The final version uses integer vertex IDs and bitmasks for year membership. (session history)
 
 ## Solution
@@ -156,6 +156,6 @@ A characterization test in `scripts/R/testing/test_annual_return_lookup_contract
 - Remember that pairwise one-to-one record linkage does not guarantee a globally valid canonical entity graph.
 
 ## Related Issues
-- `todos/009-pending-p1-audit-annual-return-lookup-construction.md` records the original review and acceptance criteria.
+- `todos/_archive/009-done-p1-audit-annual-return-lookup-construction.md` records the original review and acceptance criteria.
 - `docs/solutions/best-practices/data-enrichment-readme-standardisation-20260310.md` covers enrichment-layer output inventory discipline; the new conflict-audit outputs are a related documentation surface.
 - `docs/solutions/best-practices/annual-return-combiner-simplification-20260310.md` covers the upstream annual-return data preparation layer.

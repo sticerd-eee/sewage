@@ -12,7 +12,7 @@ Multi-agent code review (2026-06-10) of
 [`scripts/R/03_data_enrichment/create_annual_return_lookup.R`](../scripts/R/03_data_enrichment/create_annual_return_lookup.R)
 at HEAD of `jo/annual_lookup_check`. Follow-up to the Codex review captured in
 [`todos/_archive/008-pending-p1-fix-annual-return-lookup-rf-and-conflict-bugs.md`](_archive/008-pending-p1-fix-annual-return-lookup-rf-and-conflict-bugs.md)
-and [`todos/009-pending-p1-audit-annual-return-lookup-construction.md`](009-pending-p1-audit-annual-return-lookup-construction.md).
+and [`todos/_archive/009-done-p1-audit-annual-return-lookup-construction.md`](009-done-p1-audit-annual-return-lookup-construction.md).
 
 ## Problem Statement
 
