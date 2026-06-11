@@ -37,7 +37,11 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 ### 03_data_enrichment
 
 - `aggregate_spill_stats.R`: builds the main yearly, monthly, and quarterly spill aggregations.
-- `create_annual_return_lookup.R`: constructs cross-year site lookup tables.
+- `create_annual_return_lookup.R`: constructs cross-year site lookup tables. The orchestration lives in the numbered script; graph resolution, conflict audits, and the optional (off-by-default) random-forest matching live in `scripts/R/utils/annual_return_lookup_{graph_utils,audit_utils,rf_matching}.R`. Outputs under `data/processed/`:
+  - `annual_return_lookup.parquet` / `annual_return_lookup.xlsx`: canonical cross-year lookup (one row per canonical site).
+  - `annual_return_lookup_edges.parquet`: kept match edges behind the lookup.
+  - Pre-resolution conflict audit (refreshed every run, zero-row when clean): `annual_return_lookup_conflict_summary.parquet`, `annual_return_lookup_conflict_records.parquet`, `annual_return_lookup_conflict_edges.parquet`, `annual_return_lookup_resolution_kept_edges.parquet`, `annual_return_lookup_resolution_dropped_edges.parquet`, `annual_return_lookup_conflicts.xlsx`.
+  - Post-resolution diagnostics (`annual_return_lookup_post_resolution_*.parquet`, `annual_return_lookup_post_resolution_conflicts.xlsx`): written only when the final same-year safety net trips; a healthy run deletes any stale copies, so their absence is the expected state.
 - `create_unique_spill_sites.R`: builds the canonical spill-sites dataset.
 - `aggregate_rainfall_stats.R`: aggregates rainfall to site-period level.
 - `identify_dry_spills.R`: identifies dry spills using spill and rainfall information.
