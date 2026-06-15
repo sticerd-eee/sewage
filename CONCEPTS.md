@@ -26,3 +26,14 @@ A connected group of Annual-Return Sites implied by pairwise matching evidence. 
 
 ### Same-Year Component Conflict
 A Record-Linkage Component containing more than one Annual-Return Site from the same reporting year. Such a component cannot be collapsed into one Canonical Spill Site without an explicit resolution rule.
+
+## Property-Price Analysis Area
+
+### Near-Overflow Radius
+The straight-line distance threshold within which a property is treated as exposed to a storm overflow, used to build the near-property cross-sections. The main analyses are run at several such thresholds, with the others serving as robustness checks.
+
+### Intensive Margin
+The effect of sewage-spill *intensity* — a continuous exposure measure such as average daily spill count or spill hours — on property values, estimated among properties within the Near-Overflow Radius of an overflow.
+
+### Extensive Margin
+The effect of *proximity itself* — being near versus far from an overflow — on property values, and how the near-versus-far price gap responds to public attention. Contrasts with the Intensive Margin, which varies realized spill intensity rather than proximity.
