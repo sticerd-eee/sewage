@@ -437,7 +437,7 @@ run_for_radius <- function(RAD) {
   # Add colsep and font size for tighter column spacing
   table_latex_count <- sub(
     "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+    "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
     table_latex_count
   )
 
@@ -447,6 +447,11 @@ run_for_radius <- function(RAD) {
     custom_notes_count,
     table_latex_count
   )
+
+  # Distribute available width among columns (X[] instead of Q[]) so the table
+  # auto-fits \linewidth (first column stays natural-width label)
+  table_latex_count <- gsub("Q\\[\\]", "X[c] ", table_latex_count)
+  table_latex_count <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex_count)
 
   output_path_count <- file.path(output_dir, paste0("hedonic_count_continuous_prior_", RAD, "m.tex"))
   writeLines(table_latex_count, output_path_count)
@@ -515,7 +520,7 @@ run_for_radius <- function(RAD) {
   # Add colsep and font size for tighter column spacing
   table_latex_hrs <- sub(
     "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+    "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
     table_latex_hrs
   )
 
@@ -525,6 +530,11 @@ run_for_radius <- function(RAD) {
     custom_notes_hrs,
     table_latex_hrs
   )
+
+  # Distribute available width among columns (X[] instead of Q[]) so the table
+  # auto-fits \linewidth (first column stays natural-width label)
+  table_latex_hrs <- gsub("Q\\[\\]", "X[c] ", table_latex_hrs)
+  table_latex_hrs <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex_hrs)
 
   output_path_hrs <- file.path(output_dir, paste0("hedonic_hrs_continuous_prior_", RAD, "m.tex"))
   writeLines(table_latex_hrs, output_path_hrs)
