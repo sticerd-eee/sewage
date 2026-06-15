@@ -457,7 +457,7 @@ run_for_radius <- function(RAD) {
   # Add colsep and font size for tighter column spacing
   table_latex <- sub(
     "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+    "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
     table_latex
   )
 
