@@ -8,6 +8,9 @@
 #          prices). Each panel includes OLS, Controls, MSOA FE, MSOA FE +
 #          Controls, LSOA FE, and LSOA FE + Controls.
 #
+#          The analysis is run for every radius in RADII (see Configuration);
+#          each radius writes its own radius-suffixed tables.
+#
 # Author: Jacopo Olivieri
 # Date: 2024-12-24
 #
@@ -15,9 +18,9 @@
 #   - data/processed/cross_section/sales/prior_to_sale/ - Cross-sectional sales
 #   - data/processed/cross_section/rentals/prior_to_rental/ - Cross-sectional rentals
 #
-# Outputs:
-#   - output/tables/hedonic_count_continuous_prior.tex
-#   - output/tables/hedonic_hrs_continuous_prior.tex
+# Outputs (one per radius in RADII):
+#   - output/tables/hedonic_count_continuous_prior_<RAD>m.tex
+#   - output/tables/hedonic_hrs_continuous_prior_<RAD>m.tex
 #
 # ==============================================================================
 
@@ -25,7 +28,8 @@
 # ==============================================================================
 # 1. Configuration
 # ==============================================================================
-RAD <- 250L
+# Radii (m) to run. Each radius writes its own suffixed tables; edit to restrict.
+RADII <- c(250L, 500L, 1000L)
 
 
 # ==============================================================================
@@ -60,20 +64,8 @@ if (!dir.exists(output_dir)) {
 }
 
 # ==============================================================================
-# Panel A: Sales
+# 3. Property characteristics (radius-independent; loaded once)
 # ==============================================================================
-
-# Load Sales Data --------------------------------------------------------------
-cat("Loading sales data...\n")
-
-# Cross-section data with spill metrics (prior to sale)
-## Filter for houses with at least one spill site within radius
-dat_cs_sales <- arrow::open_dataset(
-  here::here("data", "processed", "cross_section", "sales", "prior_to_sale")
-) |>
-  filter(radius == RAD) |>
-  filter(n_spill_sites > 0) |> 
-  collect()
 
 # House price data for property characteristics and LSOA
 sales <- import(
@@ -100,46 +92,6 @@ sales <- import(
     duration = forcats::as_factor(duration)
   )
 
-# Prepare Sales Data -----------------------------------------------------------
-cat("Preparing sales data...\n")
-
-dat_sales_clean <- dat_cs_sales |>
-  select(-any_of("price")) |>
-  inner_join(sales, by = "house_id") |>
-  mutate(log_price = log(price)) |>
-  filter(
-    !is.na(spill_count_daily_avg),
-    !is.na(spill_hrs_daily_avg),
-    !is.na(lsoa),
-    !is.na(property_type),
-    !is.na(old_new),
-    !is.na(duration)
-  ) |>
-  mutate(
-    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
-    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
-    property_type = forcats::fct_drop(property_type),
-    old_new = forcats::fct_drop(old_new),
-    duration = forcats::fct_drop(duration)
-  )
-
-cat("  Sales observations:", nrow(dat_sales_clean), "\n")
-
-# ==============================================================================
-# Panel B: Rentals
-# ==============================================================================
-
-# Load Rental Data -------------------------------------------------------------
-cat("Loading rental data...\n")
-
-# Cross-section data with spill metrics (prior to rental)
-dat_cs_rentals <- arrow::open_dataset(
-  here::here("data", "processed", "cross_section", "rentals", "prior_to_rental")
-) |>
-  filter(radius == RAD) |>
-  filter(n_spill_sites > 0) |> 
-  collect()
-
 # Rental price data for property characteristics and LSOA
 rentals <- import(
   here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
@@ -159,363 +111,435 @@ rentals <- import(
     property_type = forcats::as_factor(property_type)
   )
 
-# Prepare Rental Data ----------------------------------------------------------
-cat("Preparing rental data...\n")
-
-dat_rental_clean <- dat_cs_rentals |>
-  select(-any_of("listing_price")) |>
-  inner_join(rentals, by = "rental_id") |>
-  mutate(log_price = log(listing_price)) |>
-  filter(
-    !is.na(spill_count_daily_avg),
-    !is.na(spill_hrs_daily_avg),
-    !is.na(lsoa),
-    !is.na(property_type),
-    !is.na(bedrooms),
-    !is.na(bathrooms)
-  ) |>
-  mutate(
-    lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
-    msoa = forcats::fct_drop(forcats::as_factor(msoa)),
-    property_type = forcats::fct_drop(property_type)
-  )
-
-cat("  Rental observations:", nrow(dat_rental_clean), "\n")
-
-# ==============================================================================
-# Estimate Models: Spill Count Daily Average
-# ==============================================================================
-cat("Estimating spill count models...\n")
-
-# Sales Models
-model_sales_count_1 <- fixest::feols(
-  log_price ~ spill_count_daily_avg,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-model_sales_count_1b <- fixest::feols(
-  log_price ~ spill_count_daily_avg + property_type + old_new + duration,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-model_sales_count_2 <- fixest::feols(
-  log_price ~ spill_count_daily_avg | lsoa,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-model_sales_count_3 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + property_type + old_new + duration | lsoa,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-model_sales_count_4 <- fixest::feols(
-  log_price ~ spill_count_daily_avg | msoa,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-model_sales_count_5 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + property_type + old_new + duration | msoa,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-# Rental Models
-model_rental_count_1 <- fixest::feols(
-  log_price ~ spill_count_daily_avg,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-model_rental_count_1b <- fixest::feols(
-  log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-model_rental_count_2 <- fixest::feols(
-  log_price ~ spill_count_daily_avg | lsoa,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-model_rental_count_3 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms | lsoa,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-model_rental_count_4 <- fixest::feols(
-  log_price ~ spill_count_daily_avg | msoa,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-model_rental_count_5 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms | msoa,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-# ==============================================================================
-# Estimate Models: Spill Hours Daily Average
-# ==============================================================================
-cat("Estimating spill hours models...\n")
-
-# Sales Models
-model_sales_hrs_1 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-model_sales_hrs_1b <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg + property_type + old_new + duration,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-model_sales_hrs_2 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg | lsoa,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-model_sales_hrs_3 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg + property_type + old_new + duration | lsoa,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-model_sales_hrs_4 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg | msoa,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-model_sales_hrs_5 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg + property_type + old_new + duration | msoa,
-  data = dat_sales_clean,
-  vcov = "hetero"
-)
-
-# Rental Models
-model_rental_hrs_1 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-model_rental_hrs_1b <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-model_rental_hrs_2 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg | lsoa,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-model_rental_hrs_3 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms | lsoa,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-model_rental_hrs_4 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg | msoa,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-model_rental_hrs_5 <- fixest::feols(
-  log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms | msoa,
-  data = dat_rental_clean,
-  vcov = "hetero"
-)
-
-# ==============================================================================
-# Export Tables: Spill Count Daily Average
-# ==============================================================================
-cat("Exporting spill count table...\n")
-
-# Coefficient labels
-coef_labels_count <- c(
-  "(Intercept)" = "Constant",
-  "spill_count_daily_avg" = "Daily spill count"
-)
-
-# Goodness of fit map
+# Goodness of fit map (radius-independent)
 gof_map <- tibble::tribble(
   ~raw           , ~clean          , ~fmt ,
   "nobs"         , "Observations"  ,    0 ,
   "adj.r.squared", "Adj. R-squared",    3
 )
 
-# Combined models for joint table
-panels_count <- list(
-  "House Sales" = list(
-    "(1)" = model_sales_count_1,
-    "(2)" = model_sales_count_1b,
-    "(3)" = model_sales_count_4,
-    "(4)" = model_sales_count_5,
-    "(5)" = model_sales_count_2,
-    "(6)" = model_sales_count_3
-  ),
-  "House Rentals" = list(
-    "(7)" = model_rental_count_1,
-    "(8)" = model_rental_count_1b,
-    "(9)" = model_rental_count_4,
-    "(10)" = model_rental_count_5,
-    "(11)" = model_rental_count_2,
-    "(12)" = model_rental_count_3
+
+# ==============================================================================
+# 4. Per-radius analysis
+# ==============================================================================
+run_for_radius <- function(RAD) {
+
+  cat("\n========================== Radius:", RAD, "m ==========================\n")
+
+  # ============================================================================
+  # Panel A: Sales
+  # ============================================================================
+
+  # Load Sales Data ------------------------------------------------------------
+  cat("Loading sales data...\n")
+
+  # Cross-section data with spill metrics (prior to sale)
+  ## Filter for houses with at least one spill site within radius
+  dat_cs_sales <- arrow::open_dataset(
+    here::here("data", "processed", "cross_section", "sales", "prior_to_sale")
+  ) |>
+    filter(radius == RAD) |>
+    filter(n_spill_sites > 0) |>
+    collect()
+
+  # Prepare Sales Data ---------------------------------------------------------
+  cat("Preparing sales data...\n")
+
+  dat_sales_clean <- dat_cs_sales |>
+    select(-any_of("price")) |>
+    inner_join(sales, by = "house_id") |>
+    mutate(log_price = log(price)) |>
+    filter(
+      !is.na(spill_count_daily_avg),
+      !is.na(spill_hrs_daily_avg),
+      !is.na(lsoa),
+      !is.na(property_type),
+      !is.na(old_new),
+      !is.na(duration)
+    ) |>
+    mutate(
+      lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+      msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+      property_type = forcats::fct_drop(property_type),
+      old_new = forcats::fct_drop(old_new),
+      duration = forcats::fct_drop(duration)
+    )
+
+  cat("  Sales observations:", nrow(dat_sales_clean), "\n")
+
+  # ============================================================================
+  # Panel B: Rentals
+  # ============================================================================
+
+  # Load Rental Data -----------------------------------------------------------
+  cat("Loading rental data...\n")
+
+  # Cross-section data with spill metrics (prior to rental)
+  dat_cs_rentals <- arrow::open_dataset(
+    here::here("data", "processed", "cross_section", "rentals", "prior_to_rental")
+  ) |>
+    filter(radius == RAD) |>
+    filter(n_spill_sites > 0) |>
+    collect()
+
+  # Prepare Rental Data --------------------------------------------------------
+  cat("Preparing rental data...\n")
+
+  dat_rental_clean <- dat_cs_rentals |>
+    select(-any_of("listing_price")) |>
+    inner_join(rentals, by = "rental_id") |>
+    mutate(log_price = log(listing_price)) |>
+    filter(
+      !is.na(spill_count_daily_avg),
+      !is.na(spill_hrs_daily_avg),
+      !is.na(lsoa),
+      !is.na(property_type),
+      !is.na(bedrooms),
+      !is.na(bathrooms)
+    ) |>
+    mutate(
+      lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+      msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+      property_type = forcats::fct_drop(property_type)
+    )
+
+  cat("  Rental observations:", nrow(dat_rental_clean), "\n")
+
+  # ============================================================================
+  # Estimate Models: Spill Count Daily Average
+  # ============================================================================
+  cat("Estimating spill count models...\n")
+
+  # Sales Models
+  model_sales_count_1 <- fixest::feols(
+    log_price ~ spill_count_daily_avg,
+    data = dat_sales_clean,
+    vcov = "hetero"
   )
-)
 
-# Add rows for fixed effects and controls
-add_rows <- tibble::tribble(
-  ~term                , ~`(1)` , ~`(2)` , ~`(3)` , ~`(4)` , ~`(5)` , ~`(6)` , ~`(7)` , ~`(8)` , ~`(9)` , ~`(10)`, ~`(11)`, ~`(12)`,
-  "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  ,
-  "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" ,
-  "Time FE"            , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"
-)
-attr(add_rows, "position") <- "coef_end"
-
-# Notes
-custom_notes_count <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
-)
-
-# Export table
-table_latex_count <- modelsummary::modelsummary(
-  panels_count,
-  shape = "cbind",
-  output = "latex",
-  estimate = "{estimate}{stars}",
-  statistic = "({std.error})",
-  stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
-  coef_map = coef_labels_count,
-  gof_map = gof_map,
-  add_rows = add_rows,
-  notes = " ",
-  title = "Effect of Sewage Spills (Count) on Property Values"
-)
-
-# Force table environment to [H]
-table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_count)
-
-# Add label in tabularray format
-table_latex_count <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-count-continuous-prior},",
-  table_latex_count
-)
-
-# Add colsep and font size for tighter column spacing
-table_latex_count <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_count
-)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_count <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_count,
-  table_latex_count
-)
-
-output_path_count <- file.path(output_dir, "hedonic_count_continuous_prior.tex")
-writeLines(table_latex_count, output_path_count)
-
-# ==============================================================================
-# Export Tables: Spill Hours Daily Average
-# ==============================================================================
-cat("Exporting spill hours table...\n")
-
-# Coefficient labels (including controls)
-coef_labels_hrs <- c(
-  "(Intercept)" = "Constant",
-  "spill_hrs_daily_avg" = "Daily spill hours"
-)
-
-# Combined models for joint table
-panels_hrs <- list(
-  "House Sales" = list(
-    "(1)" = model_sales_hrs_1,
-    "(2)" = model_sales_hrs_1b,
-    "(3)" = model_sales_hrs_4,
-    "(4)" = model_sales_hrs_5,
-    "(5)" = model_sales_hrs_2,
-    "(6)" = model_sales_hrs_3
-  ),
-  "House Rentals" = list(
-    "(7)" = model_rental_hrs_1,
-    "(8)" = model_rental_hrs_1b,
-    "(9)" = model_rental_hrs_4,
-    "(10)" = model_rental_hrs_5,
-    "(11)" = model_rental_hrs_2,
-    "(12)" = model_rental_hrs_3
+  model_sales_count_1b <- fixest::feols(
+    log_price ~ spill_count_daily_avg + property_type + old_new + duration,
+    data = dat_sales_clean,
+    vcov = "hetero"
   )
-)
-# Notes
-custom_notes_hrs <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per day recorded across all overflows within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
-)
 
-# Export table
-table_latex_hrs <- modelsummary::modelsummary(
-  panels_hrs,
-  shape = "cbind",
-  output = "latex",
-  estimate = "{estimate}{stars}",
-  statistic = "({std.error})",
-  stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 2,
-  coef_map = coef_labels_hrs,
-  gof_map = gof_map,
-  add_rows = add_rows,
-  notes = " ",
-  title = "Effect of Sewage Spills (Hours) on Property Values"
-)
+  model_sales_count_2 <- fixest::feols(
+    log_price ~ spill_count_daily_avg | lsoa,
+    data = dat_sales_clean,
+    vcov = "hetero"
+  )
 
-# Force table environment to [H]
-table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_hrs)
+  model_sales_count_3 <- fixest::feols(
+    log_price ~ spill_count_daily_avg + property_type + old_new + duration | lsoa,
+    data = dat_sales_clean,
+    vcov = "hetero"
+  )
 
-# Add label in tabularray format
-table_latex_hrs <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-hrs-continuous-prior},",
-  table_latex_hrs
-)
+  model_sales_count_4 <- fixest::feols(
+    log_price ~ spill_count_daily_avg | msoa,
+    data = dat_sales_clean,
+    vcov = "hetero"
+  )
 
-# Add colsep and font size for tighter column spacing
-table_latex_hrs <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_hrs
-)
+  model_sales_count_5 <- fixest::feols(
+    log_price ~ spill_count_daily_avg + property_type + old_new + duration | msoa,
+    data = dat_sales_clean,
+    vcov = "hetero"
+  )
 
-# Replace empty note with custom notes (tabularray format)
-table_latex_hrs <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_hrs,
-  table_latex_hrs
-)
+  # Rental Models
+  model_rental_count_1 <- fixest::feols(
+    log_price ~ spill_count_daily_avg,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
 
-output_path_hrs <- file.path(output_dir, "hedonic_hrs_continuous_prior.tex")
-writeLines(table_latex_hrs, output_path_hrs)
+  model_rental_count_1b <- fixest::feols(
+    log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  model_rental_count_2 <- fixest::feols(
+    log_price ~ spill_count_daily_avg | lsoa,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  model_rental_count_3 <- fixest::feols(
+    log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms | lsoa,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  model_rental_count_4 <- fixest::feols(
+    log_price ~ spill_count_daily_avg | msoa,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  model_rental_count_5 <- fixest::feols(
+    log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms | msoa,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  # ============================================================================
+  # Estimate Models: Spill Hours Daily Average
+  # ============================================================================
+  cat("Estimating spill hours models...\n")
+
+  # Sales Models
+  model_sales_hrs_1 <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg,
+    data = dat_sales_clean,
+    vcov = "hetero"
+  )
+
+  model_sales_hrs_1b <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg + property_type + old_new + duration,
+    data = dat_sales_clean,
+    vcov = "hetero"
+  )
+
+  model_sales_hrs_2 <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg | lsoa,
+    data = dat_sales_clean,
+    vcov = "hetero"
+  )
+
+  model_sales_hrs_3 <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg + property_type + old_new + duration | lsoa,
+    data = dat_sales_clean,
+    vcov = "hetero"
+  )
+
+  model_sales_hrs_4 <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg | msoa,
+    data = dat_sales_clean,
+    vcov = "hetero"
+  )
+
+  model_sales_hrs_5 <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg + property_type + old_new + duration | msoa,
+    data = dat_sales_clean,
+    vcov = "hetero"
+  )
+
+  # Rental Models
+  model_rental_hrs_1 <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  model_rental_hrs_1b <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  model_rental_hrs_2 <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg | lsoa,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  model_rental_hrs_3 <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms | lsoa,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  model_rental_hrs_4 <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg | msoa,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  model_rental_hrs_5 <- fixest::feols(
+    log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms | msoa,
+    data = dat_rental_clean,
+    vcov = "hetero"
+  )
+
+  # ============================================================================
+  # Export Tables: Spill Count Daily Average
+  # ============================================================================
+  cat("Exporting spill count table...\n")
+
+  # Coefficient labels
+  coef_labels_count <- c(
+    "(Intercept)" = "Constant",
+    "spill_count_daily_avg" = "Daily spill count"
+  )
+
+  # Combined models for joint table
+  panels_count <- list(
+    "House Sales" = list(
+      "(1)" = model_sales_count_1,
+      "(2)" = model_sales_count_1b,
+      "(3)" = model_sales_count_4,
+      "(4)" = model_sales_count_5,
+      "(5)" = model_sales_count_2,
+      "(6)" = model_sales_count_3
+    ),
+    "House Rentals" = list(
+      "(7)" = model_rental_count_1,
+      "(8)" = model_rental_count_1b,
+      "(9)" = model_rental_count_4,
+      "(10)" = model_rental_count_5,
+      "(11)" = model_rental_count_2,
+      "(12)" = model_rental_count_3
+    )
+  )
+
+  # Add rows for fixed effects and controls
+  add_rows <- tibble::tribble(
+    ~term                , ~`(1)` , ~`(2)` , ~`(3)` , ~`(4)` , ~`(5)` , ~`(6)` , ~`(7)` , ~`(8)` , ~`(9)` , ~`(10)`, ~`(11)`, ~`(12)`,
+    "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  ,
+    "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" ,
+    "Time FE"            , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"   , "No"
+  )
+  attr(add_rows, "position") <- "coef_end"
+
+  # Notes
+  custom_notes_count <- paste0(
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  )
+
+  # Export table
+  table_latex_count <- modelsummary::modelsummary(
+    panels_count,
+    shape = "cbind",
+    output = "latex",
+    estimate = "{estimate}{stars}",
+    statistic = "({std.error})",
+    stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+    fmt = fmt_decimal(2),
+    coef_map = coef_labels_count,
+    gof_map = gof_map,
+    add_rows = add_rows,
+    notes = " ",
+    title = "Effect of Sewage Spills (Count) on Property Values"
+  )
+
+  # Force table environment to [H]
+  table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_count)
+
+  # Add label in tabularray format
+  table_latex_count <- sub(
+    "caption=\\{([^}]*)\\},",
+    paste0("caption={\\1},\nlabel={tbl:hedonic-count-continuous-prior-", RAD, "m},"),
+    table_latex_count
+  )
+
+  # Add colsep and font size for tighter column spacing
+  table_latex_count <- sub(
+    "(\\{\\s*%% tabularray inner open\\n)",
+    "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+    table_latex_count
+  )
+
+  # Replace empty note with custom notes (tabularray format)
+  table_latex_count <- sub(
+    "note\\{\\}=\\{\\s*\\},",
+    custom_notes_count,
+    table_latex_count
+  )
+
+  output_path_count <- file.path(output_dir, paste0("hedonic_count_continuous_prior_", RAD, "m.tex"))
+  writeLines(table_latex_count, output_path_count)
+
+  # ============================================================================
+  # Export Tables: Spill Hours Daily Average
+  # ============================================================================
+  cat("Exporting spill hours table...\n")
+
+  # Coefficient labels (including controls)
+  coef_labels_hrs <- c(
+    "(Intercept)" = "Constant",
+    "spill_hrs_daily_avg" = "Daily spill hours"
+  )
+
+  # Combined models for joint table
+  panels_hrs <- list(
+    "House Sales" = list(
+      "(1)" = model_sales_hrs_1,
+      "(2)" = model_sales_hrs_1b,
+      "(3)" = model_sales_hrs_4,
+      "(4)" = model_sales_hrs_5,
+      "(5)" = model_sales_hrs_2,
+      "(6)" = model_sales_hrs_3
+    ),
+    "House Rentals" = list(
+      "(7)" = model_rental_hrs_1,
+      "(8)" = model_rental_hrs_1b,
+      "(9)" = model_rental_hrs_4,
+      "(10)" = model_rental_hrs_5,
+      "(11)" = model_rental_hrs_2,
+      "(12)" = model_rental_hrs_3
+    )
+  )
+  # Notes
+  custom_notes_hrs <- paste0(
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per day recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  )
+
+  # Export table
+  table_latex_hrs <- modelsummary::modelsummary(
+    panels_hrs,
+    shape = "cbind",
+    output = "latex",
+    estimate = "{estimate}{stars}",
+    statistic = "({std.error})",
+    stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+    fmt = 2,
+    coef_map = coef_labels_hrs,
+    gof_map = gof_map,
+    add_rows = add_rows,
+    notes = " ",
+    title = "Effect of Sewage Spills (Hours) on Property Values"
+  )
+
+  # Force table environment to [H]
+  table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_hrs)
+
+  # Add label in tabularray format
+  table_latex_hrs <- sub(
+    "caption=\\{([^}]*)\\},",
+    paste0("caption={\\1},\nlabel={tbl:hedonic-hrs-continuous-prior-", RAD, "m},"),
+    table_latex_hrs
+  )
+
+  # Add colsep and font size for tighter column spacing
+  table_latex_hrs <- sub(
+    "(\\{\\s*%% tabularray inner open\\n)",
+    "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
+    table_latex_hrs
+  )
+
+  # Replace empty note with custom notes (tabularray format)
+  table_latex_hrs <- sub(
+    "note\\{\\}=\\{\\s*\\},",
+    custom_notes_hrs,
+    table_latex_hrs
+  )
+
+  output_path_hrs <- file.path(output_dir, paste0("hedonic_hrs_continuous_prior_", RAD, "m.tex"))
+  writeLines(table_latex_hrs, output_path_hrs)
+
+  cat(
+    "  Wrote:", basename(output_path_count), "and",
+    basename(output_path_hrs), "\n"
+  )
+}
+
 
 # ==============================================================================
-# Summary
+# 5. Run for all radii
 # ==============================================================================
+purrr::walk(RADII, run_for_radius)
+
 cat("\nLaTeX tables exported to:", output_dir, "\n")
-cat("  - hedonic_count_continuous_prior.tex\n")
-cat("  - hedonic_hrs_continuous_prior.tex\n")
+cat("  Radii:", paste(RADII, collapse = ", "), "m\n")
