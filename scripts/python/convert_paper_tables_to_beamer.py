@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 TABLE_ENV_RE = re.compile(r"\\begin\{(talltblr|longtblr|tblr)\}")
-CELL_SPAN_RE = re.compile(r"cell\{(\d+)\}\{(\d+)\}=\{([^}]*)\}(?:\{([^}]*)\})?")
+CELL_SPAN_RE = re.compile(r"cell\{([\d,\s-]+)\}\{([\d,\s-]+)\}=\{([^}]*)\}(?:\{([^}]*)\})?")
 SETCELL_RE = re.compile(
     r"^\\SetCell\[(?P<options>[^\]]+)\]\{(?P<style>[^}]*)\}\s*(?P<content>.*)$"
 )
@@ -192,11 +192,24 @@ def parse_alignment(text: str) -> str | None:
     return match.group(1)
 
 
+def expand_index_list(spec: str) -> list[int]:
+    """Expand a tabularray index spec like "2,6,10,14" or "1,3-5" into a list of ints."""
+    indices: list[int] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start, end = part.split("-", 1)
+            indices.extend(range(int(start), int(end) + 1))
+        else:
+            indices.append(int(part))
+    return indices
+
+
 def parse_span_map(inner_options: str) -> dict[tuple[int, int], SpanSpec]:
     span_map: dict[tuple[int, int], SpanSpec] = {}
     for match in CELL_SPAN_RE.finditer(inner_options):
-        row_number = int(match.group(1))
-        col_number = int(match.group(2))
         options_a = match.group(3) or ""
         options_b = match.group(4) or ""
         combined_options = ",".join(filter(None, [options_a, options_b]))
@@ -204,9 +217,12 @@ def parse_span_map(inner_options: str) -> dict[tuple[int, int], SpanSpec]:
         if colspan is None or colspan <= 1:
             continue
         alignment = parse_alignment(combined_options)
-        if alignment is None:
-            alignment = "l" if col_number == 1 else "c"
-        span_map[(row_number, col_number)] = SpanSpec(colspan=colspan, alignment=alignment)
+        # A combined spec like `cell{2,6,10,14}{1}={c=4}{...}` (as modelsummary emits
+        # for rbind panel labels) expands to one span entry per listed row/column.
+        for row_number in expand_index_list(match.group(1)):
+            for col_number in expand_index_list(match.group(2)):
+                align = alignment if alignment is not None else ("l" if col_number == 1 else "c")
+                span_map[(row_number, col_number)] = SpanSpec(colspan=colspan, alignment=align)
     return span_map
 
 
@@ -292,9 +308,22 @@ def is_data_row(row: RowInfo) -> bool:
     return numeric_cells > 0
 
 
-def header_row_count(rows: list[RowInfo]) -> int:
+def is_panel_label_row(
+    row_number: int, span_map: dict[tuple[int, int], SpanSpec], ncols: int
+) -> bool:
+    """True if the row is a full-width panel label: a column-1 span covering all
+    columns (e.g. the rbind panel titles modelsummary emits)."""
+    spec = span_map.get((row_number, 1))
+    return spec is not None and spec.colspan >= ncols
+
+
+def header_row_count(
+    rows: list[RowInfo], span_map: dict[tuple[int, int], SpanSpec], ncols: int
+) -> int:
     for index, row in enumerate(rows, start=1):
-        if is_data_row(row):
+        # Stop at the first data row OR the first full-width panel label, so an
+        # interior panel title is not mistaken for a top column-group header.
+        if is_data_row(row) or is_panel_label_row(index, span_map, ncols):
             return index - 1
     return 0
 
@@ -377,7 +406,7 @@ def convert_table(text: str) -> str:
         convert_row(row=row, row_number=index, span_map=span_map)
         for index, row in enumerate(rows, start=1)
     ]
-    header_rows = header_row_count(rows)
+    header_rows = header_row_count(rows, span_map, ncols)
 
     output_lines = [rf"\begin{{tabular}}{{{alignment}}}"]
     output_lines.append(r"\toprule")
@@ -386,7 +415,10 @@ def convert_table(text: str) -> str:
         row = rows[row_number - 1]
         if row_number > header_rows:
             first_cell = normalize_cell_content(row.raw_cells[0]) if row.raw_cells else ""
-            if first_cell.startswith(r"\textbf{Panel") and row_number != header_rows + 1:
+            is_panel = first_cell.startswith(r"\textbf{Panel") or is_panel_label_row(
+                row_number, span_map, ncols
+            )
+            if is_panel and row_number != header_rows + 1:
                 output_lines.append(r"\midrule")
 
         output_lines.append(converted_row)

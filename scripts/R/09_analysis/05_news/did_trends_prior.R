@@ -452,13 +452,93 @@ run_for_radius <- function(RAD) {
   writeLines(table_latex, output_path)
 
   cat(sprintf("LaTeX table exported to: %s\n", output_path))
+
+  # Return the four preferred models (property controls + MSOA/LSOA FE, month FE)
+  # so the post-loop step can build a cross-radius robustness summary.
+  list(
+    sale_msoa = model_sale_3, sale_lsoa = model_sale_5,
+    rent_msoa = model_rent_3, rent_lsoa = model_rent_5
+  )
 }
 
 
 # ==============================================================================
 # 6. Run for all radii
 # ==============================================================================
-purrr::walk(RADII, run_for_radius)
+models_by_radius <- purrr::map(RADII, run_for_radius)
+names(models_by_radius) <- paste0(RADII, "m")
 
 cat("\nScript completed successfully.\n")
 cat("  Radii:", paste(RADII, collapse = ", "), "m\n")
+
+
+# ==============================================================================
+# 7. Cross-radius robustness summary (preferred specifications only)
+# ==============================================================================
+cat("\nBuilding cross-radius robustness summary...\n")
+
+# Pull one preferred model from every radius; inner names ("250m", ...) become
+# the column headers, the four outcome x FE blocks stack via shape = "rbind".
+pick <- function(slot) lapply(models_by_radius, `[[`, slot)
+summary_panels <- list(
+  "House Sales: property controls + MSOA FE"   = pick("sale_msoa"),
+  "House Sales: property controls + LSOA FE"   = pick("sale_lsoa"),
+  "House Rentals: property controls + MSOA FE" = pick("rent_msoa"),
+  "House Rentals: property controls + LSOA FE" = pick("rent_lsoa")
+)
+
+custom_notes_summary <- paste0(
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the pre/post Google Trends peak estimates to the house-to-site radius. Each column reports estimates for the sample of properties within the stated radius (250m, 500m, or 1000m) of a storm overflow in England, 2021--2023. Each cell is the coefficient on the interaction between the daily spill count and the post-peak indicator (equal to one for transactions on or after August 2022, the peak month for Google Trends searches) from the fully-saturated specification including property controls, the stated location fixed effects, and month fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+)
+
+summary_latex <- modelsummary::modelsummary(
+  summary_panels,
+  shape = "rbind",
+  output = "latex",
+  escape = FALSE,
+  estimate = "{estimate}{stars}",
+  statistic = "({std.error})",
+  stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+  fmt = 3,
+  coef_map = c("spill_count_daily_avg:post" = "{Daily spill count \\\\ $\\times$ Post}"),
+  gof_map = tibble::tribble(
+    ~raw  , ~clean         , ~fmt,
+    "nobs", "Observations" ,    0
+  ),
+  notes = " ",
+  title = "Public Attention and Property Values: Robustness to House-to-Site Radius (Pre/Post Google Trends Peak)"
+)
+
+# Force table environment to [H]
+summary_latex <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", summary_latex)
+
+# Add label in tabularray format
+summary_latex <- sub(
+  "caption=\\{([^}]*)\\},",
+  "caption={\\1},\nlabel={tbl:did-trends-prior-radius-robustness},",
+  summary_latex
+)
+
+# Add colsep and font size for tighter column spacing
+summary_latex <- sub(
+  "(\\{\\s*%% tabularray inner open\\n)",
+  "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
+  summary_latex
+)
+
+# Replace empty note with custom notes (tabularray format)
+summary_latex <- sub(
+  "note\\{\\}=\\{\\s*\\},",
+  custom_notes_summary,
+  summary_latex
+)
+
+# Distribute available width among columns (X[] instead of Q[])
+summary_latex <- gsub("Q\\[\\]", "X[c] ", summary_latex)
+summary_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", summary_latex)
+
+output_path_summary <- file.path(
+  output_dir, "did_trends_prior_radius_robustness.tex"
+)
+writeLines(summary_latex, output_path_summary)
+cat("  Wrote:", basename(output_path_summary), "\n")
