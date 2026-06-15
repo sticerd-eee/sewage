@@ -812,16 +812,16 @@ reactable(
 
 ### Bivariate Plots {#sec-05-03-03-bivariate-plots}
 
-Below I plot the relationship between house prices and spill severity (spill count and spill duration), minimum distance to spill sites, and spill severity weighted by the inverse of the distance to the nearest spill (accounting for the possibility that closer spills have a larger impact on house prices). I do this for a sample of 300,000 houses (approximately 3% of all houses in the dataset) to reduce computation time. I trim the data to the 5th and 95th percentiles of house prices (as I don't believe these belong to the distribution we are interested in).
+Below I plot the relationship between house prices and spill severity (spill count and spill duration), minimum distance to spill sites, and spill severity weighted by the inverse of the distance to the nearest spill (accounting for the possibility that closer spills have a larger impact on house prices). I do this for a reproducible sample of 30,000 houses to reduce computation time. I trim the data to the 5th and 95th percentiles of house prices (as I don't believe these belong to the distribution we are interested in).
 
 For each relationship, I plot a linear regression line and a local regression line (non-parametric) to show potential linear and non-linear relationships.  I present these relationships using data aggregated over all years as well as data aggregated over the trailing 12-month period.
     
 ```{r, bivariate_plots}
-#| eval: false
+#| eval: true
 
 # Sample data for plotting
 set.seed(123)
-sample_size <- 300000
+sample_size <- min(30000, n_distinct(dat_agg_all_trimmed$house_id))
 sample_houses <- unique(dat_agg_all_trimmed$house_id) %>%
   sample(size = sample_size)
 
@@ -1145,4 +1145,3 @@ reactable(
   style = list(maxWidth = "100%", overflowX = "auto")
 )
 ```
-
