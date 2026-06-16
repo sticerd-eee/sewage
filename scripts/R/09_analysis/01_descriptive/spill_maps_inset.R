@@ -2,9 +2,9 @@
 # Spill Maps with London Inset - MSOA-Level Sewage Spill Spatial Distribution
 # ==============================================================================
 #
-# Purpose: Generate static PDF maps showing spill counts by MSOA for 2021-2023
-#          with a London inset panel.
-#          Produces two maps: total spills and dry spills (sum across years).
+# Purpose: Generate static PDF maps showing average annual spill counts by MSOA
+#          for 2021-2023 with a London inset panel.
+#          Produces two maps: all spills and dry spills.
 #
 # Author: Jacopo Olivieri
 # Date: 2026-03-20
@@ -18,8 +18,10 @@
 #   - data/raw/shapefiles/local_authorities_uk_buc/ - London LAD boundaries
 #
 # Outputs:
-#   - output/figures/maps/spill_total_count_2021_2023_london_inset.pdf
-#   - output/figures/maps/dry_spill_total_count_2021_2023_london_inset.pdf
+#   - output/figures/maps/spill_avg_annual_count_2021_2023_london_inset.pdf
+#   - output/figures/maps/dry_spill_avg_annual_count_2021_2023_london_inset.pdf
+#   - output/figures/maps/spill_avg_annual_count_2021_2023_london_inset_slides.pdf
+#   - output/figures/maps/dry_spill_avg_annual_count_2021_2023_london_inset_slides.pdf
 #
 # ==============================================================================
 
@@ -30,11 +32,17 @@
 PLOT_WIDTH <- 7
 PLOT_HEIGHT <- 11
 PLOT_DPI <- 300
+SLIDE_PLOT_WIDTH <- 16
+SLIDE_PLOT_HEIGHT <- 12
+SLIDE_PLOT_DPI <- 300
 TARGET_YEARS <- 2021:2023
 YEAR_RANGE_LABEL <- paste0(min(TARGET_YEARS), "-", max(TARGET_YEARS))
 YEAR_FILENAME_LABEL <- paste(min(TARGET_YEARS), max(TARGET_YEARS), sep = "_")
 NO_SPILL_COLOR <- "grey90"
 VIRIDIS_PALETTE <- "magma"
+RAW_COUNT_LEGEND_BREAKS <- c(1, 10, 100, 2000)
+LOG_COUNT_LEGEND_BREAKS <- log(RAW_COUNT_LEGEND_BREAKS)
+RAW_COUNT_LEGEND_LABELS <- c("1", "10", "100", "2,000")
 LONDON_LAD_PREFIX <- "^E09"
 INSET_PAD_FRACTION <- -0.05
 INSET_SCALE <- 2.9
@@ -50,6 +58,7 @@ INSET_UNITS <- "km"
 
 required_packages <- c(
   "rio",
+  "nanoparquet",
   "tidyverse",
   "here",
   "sf",
@@ -75,25 +84,79 @@ install_if_missing(required_packages)
 # ==============================================================================
 
 # 3.1 Font Setup ---------------------------------------------------------------
+add_libertinus_font <- function() {
+  local_font_files <- c(
+    regular = path.expand("~/Library/Fonts/LibertinusSerif-Regular.ttf"),
+    bold = path.expand("~/Library/Fonts/LibertinusSerif-Bold.ttf"),
+    italic = path.expand("~/Library/Fonts/LibertinusSerif-Italic.ttf"),
+    bolditalic = path.expand("~/Library/Fonts/LibertinusSerif-BoldItalic.ttf")
+  )
+
+  if (all(file.exists(local_font_files))) {
+    do.call(
+      sysfonts::font_add,
+      c(list(family = "libertinus"), as.list(local_font_files))
+    )
+    return(invisible(TRUE))
+  }
+
+  sysfonts::font_add_google("Libertinus Serif", "libertinus", db_cache = TRUE)
+  invisible(TRUE)
+}
+
 showtext::showtext_auto()
 showtext::showtext_opts(dpi = 300)
-sysfonts::font_add_google("Libertinus Serif", "libertinus", db_cache = FALSE)
+add_libertinus_font()
 FONT_FAMILY <- "libertinus"
 
 # 3.2 Publication-Quality Map Theme --------------------------------------------
-theme_map_publication <- function() {
+map_variant_style <- function(variant = c("paper", "slides")) {
+  variant <- match.arg(variant)
+
+  if (variant == "slides") {
+    return(list(
+      legend_title_size = 13,
+      legend_text_size = 11,
+      legend_key_width = 4.0,
+      legend_key_height = 0.55,
+      legend_bar_width = 9.0,
+      legend_bar_height = 0.35,
+      legend_margin = margin(t = 8, b = 2),
+      plot_margin = margin(t = 6, r = 20, b = 8, l = 6)
+    ))
+  }
+
+  list(
+    legend_title_size = 8,
+    legend_text_size = 7,
+    legend_key_width = 2.5,
+    legend_key_height = 0.4,
+    legend_bar_width = 5.0,
+    legend_bar_height = 0.2,
+    legend_margin = margin(t = 15, b = 5),
+    plot_margin = margin(t = 8, r = 25, b = 25, l = 8)
+  )
+}
+
+theme_map_publication <- function(variant = c("paper", "slides")) {
+  style <- map_variant_style(variant)
+
   theme_void(base_family = FONT_FAMILY) +
     theme(
       plot.background = element_rect(fill = "white", color = NA),
       panel.background = element_rect(fill = "white", color = NA),
       legend.position = "bottom",
       legend.direction = "horizontal",
-      legend.title = element_text(size = 10, face = "bold", margin = margin(b = 5)),
-      legend.text = element_text(size = 9),
-      legend.key.width = unit(2.5, "cm"),
-      legend.key.height = unit(0.4, "cm"),
-      legend.margin = margin(t = 15, b = 5),
-      plot.margin = margin(t = 8, r = 25, b = 25, l = 8)
+      legend.title = element_text(
+        size = style$legend_title_size,
+        face = "bold",
+        margin = margin(b = 5)
+      ),
+      legend.text = element_text(size = style$legend_text_size),
+      legend.key.width = unit(style$legend_key_width, "cm"),
+      legend.key.height = unit(style$legend_key_height, "cm"),
+      legend.margin = style$legend_margin,
+      plot.margin = style$plot_margin
     )
 }
 
@@ -173,6 +236,8 @@ cat("  Data loaded successfully\n")
 
 # Aggregate regular spills to MSOA level
 aggregate_spills_to_msoa <- function(data, spill_sites, years) {
+  n_years <- length(years)
+
   # Join spill data with site coordinates
   dat_clean <- left_join(
     select(data, -ngr),
@@ -219,9 +284,13 @@ aggregate_spills_to_msoa <- function(data, spill_sites, years) {
       site_count = replace_na(site_count, 0)
     ) %>%
     mutate(
+      avg_annual_spill_count = spill_count_yr / n_years,
+      avg_annual_spill_hrs = spill_hrs_yr / n_years
+    ) %>%
+    mutate(
       across(
-        c(spill_count_yr, spill_hrs_yr),
-        ~ log1p(.x),
+        c(avg_annual_spill_count, avg_annual_spill_hrs),
+        ~ if_else(.x > 0, log(.x), NA_real_),
         .names = "log_{.col}"
       )
     )
@@ -229,6 +298,8 @@ aggregate_spills_to_msoa <- function(data, spill_sites, years) {
 
 # Aggregate dry spills to MSOA level
 aggregate_dry_spills_to_msoa <- function(data, spill_sites, years) {
+  n_years <- length(years)
+
   # Join spill data with site coordinates
   dat_clean <- left_join(
     select(data, -ngr),
@@ -285,9 +356,13 @@ aggregate_dry_spills_to_msoa <- function(data, spill_sites, years) {
       site_count = replace_na(site_count, 0)
     ) %>%
     mutate(
+      avg_annual_dry_spill_count = dry_spill_count_yr / n_years,
+      avg_annual_dry_spill_hrs = dry_spill_hrs_yr / n_years
+    ) %>%
+    mutate(
       across(
-        c(dry_spill_count_yr, dry_spill_hrs_yr),
-        ~ log1p(.x),
+        c(avg_annual_dry_spill_count, avg_annual_dry_spill_hrs),
+        ~ if_else(.x > 0, log(.x), NA_real_),
         .names = "log_{.col}"
       )
     )
@@ -369,11 +444,20 @@ create_london_inset_config <- function(
   )
 }
 
-plot_static_map_with_inset <- function(data, value_col, legend_title, inset_config) {
-  # Prepare data: set zero values to NA for grey rendering
+plot_static_map_with_inset <- function(
+  data,
+  value_col,
+  legend_title,
+  inset_config,
+  variant = c("paper", "slides")
+) {
+  variant <- match.arg(variant)
+  style <- map_variant_style(variant)
+
+  # Zeros are already represented as NA in the positive-only log columns.
   data_for_map <- data %>%
     mutate(
-      plot_value = if_else(.data[[value_col]] == 0, NA_real_, .data[[value_col]])
+      plot_value = .data[[value_col]]
     )
 
   ggplot() +
@@ -392,15 +476,17 @@ plot_static_map_with_inset <- function(data, value_col, legend_title, inset_conf
     scale_fill_viridis_c(
       option = VIRIDIS_PALETTE,
       direction = -1,
-      limits = c(0, 10),
-      breaks = c(0, 2.5, 5, 7.5, 10),
+      limits = range(LOG_COUNT_LEGEND_BREAKS),
+      breaks = LOG_COUNT_LEGEND_BREAKS,
+      labels = RAW_COUNT_LEGEND_LABELS,
+      oob = scales::squish,
       na.value = NO_SPILL_COLOR,
       name = legend_title,
       guide = guide_colorbar(
         title.position = "top",
         title.hjust = 0.5,
-        barwidth = unit(5, "cm"),
-        barheight = unit(0.2, "cm"),
+        barwidth = unit(style$legend_bar_width, "cm"),
+        barheight = unit(style$legend_bar_height, "cm"),
         frame.colour = NA,
         ticks.colour = "grey40"
       )
@@ -411,11 +497,7 @@ plot_static_map_with_inset <- function(data, value_col, legend_title, inset_conf
       clip = "off",
       datum = NA
     ) +
-    theme_map_publication() +
-    theme(
-      legend.title = element_text(size = 8),
-      legend.text = element_text(size = 7)
-    )
+    theme_map_publication(variant)
 }
 
 
@@ -449,52 +531,101 @@ cat("  London inset configuration prepared\n")
 # ==============================================================================
 cat("Generating maps with London inset...\n")
 
+save_map_pdf <- function(plot, file_name, width, height, dpi = PLOT_DPI) {
+  ggsave(
+    filename = file.path(output_dir, file_name),
+    plot = plot,
+    width = width,
+    height = height,
+    units = "cm",
+    dpi = dpi,
+    device = cairo_pdf
+  )
+  cat("  Saved:", file_name, "\n")
+}
+
 # Regular spill map
 map_spills <- plot_static_map_with_inset(
   msoa_spills,
-  "log_spill_count_yr",
-  "Spill count (log)",
-  london_inset_config
+  "log_avg_annual_spill_count",
+  "Average annual spill count (log scale)",
+  london_inset_config,
+  variant = "paper"
 )
 
 file_name_spills <- paste0(
-  "spill_total_count_",
+  "spill_avg_annual_count_",
   YEAR_FILENAME_LABEL,
   "_london_inset.pdf"
 )
-ggsave(
-  filename = file.path(output_dir, file_name_spills),
-  plot = map_spills,
+save_map_pdf(
+  map_spills,
+  file_name_spills,
   width = PLOT_WIDTH,
-  height = PLOT_HEIGHT,
-  units = "cm",
-  dpi = PLOT_DPI,
-  device = cairo_pdf
+  height = PLOT_HEIGHT
 )
-cat("  Saved:", file_name_spills, "\n")
+
+map_spills_slides <- plot_static_map_with_inset(
+  msoa_spills,
+  "log_avg_annual_spill_count",
+  "Average annual spill count (log scale)",
+  london_inset_config,
+  variant = "slides"
+)
+
+file_name_spills_slides <- paste0(
+  "spill_avg_annual_count_",
+  YEAR_FILENAME_LABEL,
+  "_london_inset_slides.pdf"
+)
+save_map_pdf(
+  map_spills_slides,
+  file_name_spills_slides,
+  width = SLIDE_PLOT_WIDTH,
+  height = SLIDE_PLOT_HEIGHT,
+  dpi = SLIDE_PLOT_DPI
+)
 
 # Dry spill map
 map_dry_spills <- plot_static_map_with_inset(
   msoa_dry_spills,
-  "log_dry_spill_count_yr",
-  "Dry spill count (log)",
-  london_inset_config
+  "log_avg_annual_dry_spill_count",
+  "Average annual dry spill count (log scale)",
+  london_inset_config,
+  variant = "paper"
 )
 
 file_name_dry_spills <- paste0(
-  "dry_spill_total_count_",
+  "dry_spill_avg_annual_count_",
   YEAR_FILENAME_LABEL,
   "_london_inset.pdf"
 )
-ggsave(
-  filename = file.path(output_dir, file_name_dry_spills),
-  plot = map_dry_spills,
+save_map_pdf(
+  map_dry_spills,
+  file_name_dry_spills,
   width = PLOT_WIDTH,
-  height = PLOT_HEIGHT,
-  units = "cm",
-  dpi = PLOT_DPI,
-  device = cairo_pdf
+  height = PLOT_HEIGHT
 )
-cat("  Saved:", file_name_dry_spills, "\n")
+
+map_dry_spills_slides <- plot_static_map_with_inset(
+  msoa_dry_spills,
+  "log_avg_annual_dry_spill_count",
+  "Average annual dry spill count (log scale)",
+  london_inset_config,
+  variant = "slides"
+)
+
+file_name_dry_spills_slides <- paste0(
+  "dry_spill_avg_annual_count_",
+  YEAR_FILENAME_LABEL,
+  "_london_inset_slides.pdf"
+)
+save_map_pdf(
+  map_dry_spills_slides,
+  file_name_dry_spills_slides,
+  width = SLIDE_PLOT_WIDTH,
+  height = SLIDE_PLOT_HEIGHT,
+  dpi = SLIDE_PLOT_DPI
+)
 
 cat("\nAll inset maps generated successfully!\n")
