@@ -400,7 +400,15 @@ def convert_table(text: str) -> str:
     has_group_headers = bool(span_map) or any(parse_setcell(cell) for row in rows for cell in row.raw_cells)
     right_align_numeric = is_descriptive_numeric_table(rows, has_group_headers, ncols)
     alignment = format_alignment(ncols, right_align_numeric)
-    use_resizebox = has_group_headers or ncols >= 8
+    # rbind panel summaries (full-width panel-label rows) are tall, not wide:
+    # stretching them to \linewidth blows their height past the slide, so scale
+    # them to fit within the slide box instead (shrink-only; uses adjustbox).
+    # Every other table keeps the original rule: resize wide/grouped tables to
+    # \linewidth, leave the rest at natural size.
+    has_panel_labels = any(
+        is_panel_label_row(i, span_map, ncols) for i in range(1, len(rows) + 1)
+    )
+    resize_to_width = (has_group_headers or ncols >= 8) and not has_panel_labels
 
     converted_rows = [
         convert_row(row=row, row_number=index, span_map=span_map)
@@ -437,12 +445,13 @@ def convert_table(text: str) -> str:
     output_lines.append(r"\bottomrule")
     output_lines.append(r"\end{tabular}")
 
-    if use_resizebox:
-        wrapped_lines = [r"\resizebox{\linewidth}{!}{%"]
-        wrapped_lines.extend(output_lines[:-1])
-        wrapped_lines.append(output_lines[-1] + "%")
-        wrapped_lines.append("}")
-        return "\n".join(wrapped_lines) + "\n"
+    def _wrap(open_cmd: str) -> str:
+        return "\n".join([open_cmd, *output_lines[:-1], output_lines[-1] + "%", "}"]) + "\n"
+
+    if has_panel_labels:
+        return _wrap(r"\maxsizebox{\linewidth}{0.8\textheight}{%")
+    if resize_to_width:
+        return _wrap(r"\resizebox{\linewidth}{!}{%")
 
     return "\n".join(output_lines) + "\n"
 

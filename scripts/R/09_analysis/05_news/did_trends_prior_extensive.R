@@ -54,6 +54,9 @@ source(
   local = TRUE
 )
 
+# Shared cross-radius robustness-table builder
+source(here::here("scripts", "R", "09_analysis", "utils_radius_robustness_table.R"))
+
 
 # ==============================================================================
 # 1. Configuration
@@ -422,6 +425,61 @@ export_table <- function(models, comparison) {
 
 
 # ==============================================================================
+# 5b. Cross-radius robustness (vary exposure radius; control fixed at 1000-2000m)
+# ==============================================================================
+ROBUSTNESS_RADII <- c(250L, 500L, 1000L)
+
+# Treated = within `rad` m of an overflow; control = fixed 1000-2000m band.
+# Built directly (not via validate_comparison_config, which forbids
+# near_max == far_min) so the 1000m treated band can abut the control with no gap.
+build_comparison_for_radius <- function(rad) {
+  list(
+    comparison_id = paste0("0_", rad, "_vs_1000_2000"),
+    comparison_label = paste0("0-", rad, "m vs 1000-2000m"),
+    near_min = 0L,
+    near_max = as.integer(rad),
+    far_min = 1000L,
+    far_max = 2000L,
+    near_band_label = paste0("0-", rad, "m"),
+    far_band_label = "1000-2000m"
+  )
+}
+
+run_radius_robustness <- function(peak_info) {
+  cat("\nBuilding cross-radius robustness summary (extensive margin)...\n")
+
+  models_by_radius <- lapply(ROBUSTNESS_RADII, function(rad) {
+    comparison_rad <- build_comparison_for_radius(rad)
+    dat <- prepare_sales_analysis_data(comparison_rad, peak_info)
+    dat_rental <- prepare_rental_analysis_data(comparison_rad, peak_info)
+    models <- estimate_models(dat, dat_rental)
+    list(
+      sale_msoa = models$model_sale_3, sale_lsoa = models$model_sale_5,
+      rent_msoa = models$model_rent_3, rent_lsoa = models$model_rent_5
+    )
+  })
+  names(models_by_radius) <- paste0(ROBUSTNESS_RADII, "m")
+
+  custom_notes_summary <- paste0(
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the extensive-margin pre/post Google Trends peak estimates to how overflow exposure is defined. In each column the treated group is properties within the stated distance (250m, 500m, or 1000m) of a storm overflow and the control group is properties 1000--2000m away (England, 2021--2023). Each cell is the coefficient on the interaction between the near (exposed) indicator and the post-peak indicator (equal to one for transactions on or after August 2022, the peak month for Google Trends searches) from the fully-saturated specification including property controls, the stated location fixed effects, and month fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  )
+
+  write_radius_robustness_table(
+    models_by_radius = models_by_radius,
+    radii            = ROBUSTNESS_RADII,
+    coef_map         = c("near_bin:post" = "{Near bin \\\\ $\\times$ Post}"),
+    custom_notes     = custom_notes_summary,
+    label            = "tbl:did-trends-prior-extensive-radius-robustness",
+    title            = "Public Attention and Property Values: Robustness to Exposure Radius (Pre/Post Google Trends Peak, Extensive Margin)",
+    output_path      = here::here("output", "tables", "did_trends_prior_extensive_radius_robustness.tex"),
+    fmt              = 3,
+    escape           = FALSE
+  )
+  cat("  Wrote: did_trends_prior_extensive_radius_robustness.tex\n")
+}
+
+
+# ==============================================================================
 # 6. Main Workflow
 # ==============================================================================
 main <- function() {
@@ -438,6 +496,8 @@ main <- function() {
   dat_rental <- prepare_rental_analysis_data(comparison, peak_info)
   models <- estimate_models(dat, dat_rental)
   export_table(models, comparison)
+
+  run_radius_robustness(peak_info)
 
   cat("\nScript completed successfully.\n")
 
