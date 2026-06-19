@@ -1,0 +1,210 @@
+---
+title: "Output-specific research figure sizing and verification"
+date: 2026-06-19
+category: design-patterns
+module: Research figure exports (R/ggplot2; paper + Beamer)
+problem_type: design_pattern
+component: documentation
+severity: medium
+applies_when:
+  - "A figure is used in both the manuscript and Beamer slides"
+  - "Labels are readable in the source PDF but too small after LaTeX inclusion"
+  - "Annotations overlap plotted series, vertical reference lines, or panel margins"
+  - "Choosing between PDF, PNG, and SVG for paper or slide graphics"
+related_components:
+  - tooling
+  - latex
+  - beamer
+  - overleaf
+tags: [r, ggplot2, figures, latex, beamer, pdf, verification, sizing]
+---
+
+# Output-specific research figure sizing and verification
+
+## Context
+
+The public-attention figure started as one large PDF export that was scaled down
+inside the manuscript. At the manuscript inclusion size, axis labels, event
+labels, and the legend were hard to read from a distance. The same figure also
+needed to work in `slides/short_pres.tex`, where `width=0.75\linewidth` left too
+much white space and `width=0.95\linewidth` made the Beamer frame noticeably
+overfull once the title and notes were included.
+
+The important lesson is that readability is determined at the final LaTeX
+inclusion size, not at the standalone PDF size opened in a viewer. A figure that
+looks acceptable by itself can fail once it is embedded in the paper or slides.
+
+## Guidance
+
+Use PDF as the canonical export for paper and Beamer figures. It keeps vector
+lines and text crisp under LaTeX scaling. Use PNG only as a rendered preview or
+for contexts that require raster images. Avoid SVG as the project default for
+LaTeX/Overleaf outputs because font handling and conversion paths are more
+fragile than direct PDF inclusion.
+
+Create separate figure variants when the same underlying plot is used in
+different output media. For `google_trends_article_counts_combined`, the paper
+and slide variants share the same data and plotting function but have separate
+settings for filename, dimensions, font sizes, line widths, axis titles, margins,
+and annotation positions:
+
+```r
+PLOT_VARIANTS <- list(
+  paper = list(
+    file_name = "google_trends_article_counts_combined.pdf",
+    width_cm = 14.5,
+    height_cm = 9.0,
+    axis_title_size = 9.5,
+    axis_text_size = 8.5,
+    legend_text_size = 8.5,
+    event_text_size_pt = 8.5,
+    line_width = 0.55,
+    event_positions = list(
+      event1 = list(label_date = "2021-08-01", label_y = 60, line_y = 60)
+    )
+  ),
+  slides = list(
+    file_name = "google_trends_article_counts_combined_slides.pdf",
+    width_cm = 13.2,
+    height_cm = 6.6,
+    axis_title_size = 10,
+    axis_text_size = 8.5,
+    legend_text_size = 9,
+    event_text_size_pt = 7.8,
+    line_width = 0.65,
+    event_positions = list(
+      event1 = list(label_date = "2021-08-01", label_y = 65, line_y = 65)
+    )
+  )
+)
+```
+
+Treat these values as output-specific starting points, not universal font rules.
+The check that matters is the rendered manuscript or slide page. In the final
+public-attention figure, the slide PDF is designed for a Beamer call near:
+
+```tex
+\includegraphics[width=0.9\linewidth,keepaspectratio]{google_trends_article_counts_combined_slides.pdf}
+```
+
+For the tested frame, `0.9\linewidth` was the better compromise: it fills the
+slide substantially, keeps the notes visible, and produces a smaller overfull
+warning than `0.95\linewidth`. If the notes, title, or theme changes, re-run the
+same verification rather than carrying the width forward by habit.
+
+Do not solve label-line collisions with white text boxes. Move the annotation
+geometry instead. Store label x positions, label y positions, and dashed-line
+heights in variant-specific settings, then place labels in data space. This lets
+the paper and slide versions differ when the same annotation needs different
+spacing after resizing.
+
+For event labels:
+
+- Put each label on the side of the reference line with the most open space.
+- Keep the label anchor close to its dashed line when that is the visual cue.
+- Raise or lower the dashed line and text independently when nearby series
+  peaks would otherwise run through the label.
+- Inspect the rendered result; ggplot coordinates that look mathematically tidy
+  can still be visually wrong.
+
+Verify in three layers before copying to Overleaf:
+
+1. Regenerate the PDFs from the source script.
+2. Render each standalone PDF to PNG with `pdftoppm` and inspect the image.
+3. Compile temporary LaTeX wrappers that match the real manuscript and Beamer
+   inclusion sizes, render those PDFs to PNG, and inspect the embedded result.
+
+Use temporary files outside the repo, for example under
+`/private/tmp/sewage-figure-resize-check/`, and delete them after verification.
+The verification target should be the actual call-site geometry, such as
+`.9\linewidth` in the manuscript and the exact Beamer frame used in
+`slides/short_pres.tex`.
+
+Useful verification commands:
+
+```bash
+Rscript --vanilla scripts/R/09_analysis/01_descriptive/google_trends_article_counts_combined.R
+```
+
+```bash
+pdfinfo output/figures/google_trends_article_counts_combined.pdf
+```
+
+```bash
+pdfinfo output/figures/google_trends_article_counts_combined_slides.pdf
+```
+
+```bash
+pdftoppm -png -r 220 output/figures/google_trends_article_counts_combined_slides.pdf /private/tmp/sewage-figure-resize-check/slides-direct
+```
+
+```bash
+latexmk -pdf -interaction=nonstopmode -halt-on-error slide_check.tex
+```
+
+Keep the R script project-local. It should write to `output/figures/`; do not
+hard-code a Dropbox or Overleaf path into the script. Copying final PDFs into
+the Overleaf `figures/` directory is a release step, not part of figure
+generation.
+
+## Why This Matters
+
+Figures in this project often carry substantive interpretation through labels,
+event markers, legends, and small time-series movements. If the export is sized
+for a standalone viewer rather than for its final LaTeX context, the reader sees
+small text, wasted slide space, or labels crossing the data. Those are not
+cosmetic failures: they change how quickly a seminar audience or paper reader
+can understand the empirical point.
+
+Separate paper and slide exports also prevent a false compromise. The manuscript
+needs a compact figure with readable labels after inclusion in a text page.
+Slides need a wider figure that uses Beamer space efficiently and remains
+legible from a distance. One PDF can rarely be optimal for both.
+
+## When to Apply
+
+- Any ggplot figure that appears in both the manuscript and the slide deck.
+- Any figure with direct annotations, event labels, or vertical reference lines.
+- Any figure where LaTeX scales the graphic substantially away from its exported
+  size.
+- Any time a figure is being tuned by eye in a standalone PDF viewer rather than
+  in the rendered paper or slide context.
+
+## Examples
+
+The public-attention figure ended with these conventions:
+
+| Output | File | Export size | Intended inclusion |
+|--------|------|-------------|--------------------|
+| Paper | `google_trends_article_counts_combined.pdf` | `14.5 x 9.0 cm` | manuscript figure at about `.9\linewidth` |
+| Slides | `google_trends_article_counts_combined_slides.pdf` | `13.2 x 6.6 cm` | Beamer frame at `0.9\linewidth` |
+
+The slide-specific export is deliberately not just the paper PDF scaled up. It
+uses its own filename, aspect ratio, labels, line widths, and event positions so
+the Beamer call can be simple and stable.
+
+Temporary Beamer check:
+
+```tex
+\begin{frame}[c,label=app-media-figure]{Public attention to sewage spills over time}
+  \centering
+  \includegraphics[width=0.9\linewidth,keepaspectratio]{google_trends_article_counts_combined_slides.pdf}
+  \vspace{-0.5em}
+  \notes[0.9]{Monthly public attention to sewage spills in England, 2018--2024. Pink line: Google Trends search interest for ``sewage spill'' on a 0--100 scale. Teal line: UK LexisNexis article counts, scaled so the peak aligns with Google Trends.}
+\end{frame}
+```
+
+## Related
+
+- `docs/solutions/design-patterns/fit-wide-latex-regression-tables.md` covers
+  the analogous table lesson: fit should be handled structurally at the output
+  boundary rather than by trial-and-error shrinking.
+- `docs/solutions/build-errors/overleaf-beamer-local-vscode-compile-paths.md`
+  covers how Beamer resolves graphic paths when compiling locally versus in
+  Overleaf.
+- `docs/solutions/design-patterns/parameterize-analysis-scripts-over-a-config-vector.md`
+  covers the broader pattern of parameterizing analysis scripts over named
+  output variants.
+- GitHub issue search was attempted for related figure/LaTeX issues, but the
+  local environment could not connect to `api.github.com`; no issue reference
+  was used.
