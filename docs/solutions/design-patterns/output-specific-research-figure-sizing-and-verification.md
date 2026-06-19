@@ -49,6 +49,15 @@ export the slide maps near their half-panel display size, keep the substantive
 legend titles, and tune the legend font back down after checking the rendered
 Beamer frame.
 
+The spill phase diagrams exposed the same scaling problem through a different
+geometry. The heatmap panel is square because it uses fixed coordinates, but
+the original paper PDF was exported on a much wider canvas. When the manuscript
+included that wide PDF at `.9\linewidth`, LaTeX shrank the whole graphic,
+including the axis text, legend, and cell labels. The fix was not to make the
+source fonts huge. It was to make the paper export close to the actual
+manuscript display width, reduce wasted horizontal canvas, and then use
+moderate text sizes similar to the public-attention figure.
+
 ## Guidance
 
 Use PDF as the canonical export for paper and Beamer figures. It keeps vector
@@ -106,6 +115,64 @@ For the tested frame, `0.9\linewidth` was the better compromise: it fills the
 slide substantially, keeps the notes visible, and produces a smaller overfull
 warning than `0.95\linewidth`. If the notes, title, or theme changes, re-run the
 same verification rather than carrying the width forward by habit.
+
+For fixed-aspect plots such as phase diagrams, inspect both the object geometry
+and the LaTeX call site before choosing dimensions. The effective rendered text
+size is approximately:
+
+```text
+effective_text_size_pt = source_text_size_pt * displayed_width / native_pdf_width
+```
+
+That ratio explains why `spill_count_persistence.pdf` looked smaller than
+`google_trends_article_counts_combined.pdf` in the manuscript even when their
+source font settings were close. The phase diagram had a much wider native PDF,
+so the same `.9\linewidth` inclusion applied more shrinkage. A square heatmap
+inside a wide canvas is especially vulnerable: the panel may be fixed and
+well-proportioned, while the surrounding canvas silently determines the scale at
+which all text is embedded.
+
+For the spill persistence phase diagrams, keep the paper export close to the
+manuscript-native width and keep the slide export close to the Beamer column
+where it is actually shown:
+
+```r
+PLOT_VARIANTS <- list(
+  paper = list(
+    width_cm = 14.5,
+    height_cm = 11.5,
+    axis_title_size = 9.5,
+    axis_text_size = 8.5,
+    legend_title_size = 9.5,
+    legend_text_size = 8.5,
+    cell_text_size_pt = 8.8,
+    legend_title_position = "top"
+  ),
+  slides = list(
+    width_cm = 7.2,
+    height_cm = 6.5,
+    axis_title_size = 9.5,
+    axis_text_size = 8.5,
+    legend_title_size = 8.5,
+    legend_text_size = 7.5,
+    cell_text_size_pt = 8.0,
+    legend_title_position = "top"
+  )
+)
+```
+
+The paper dimensions produce PDFs around `411 x 325 pt`, close to the
+public-attention paper figure's native width. The slide dimensions produce PDFs
+around `204 x 184 pt`, matching the right-hand Beamer column use case. Because
+the slide canvas is already close to final display size, slide source fonts
+should not be inflated. Earlier slide settings with larger axis, legend, and
+cell-label text looked too big because there was little remaining LaTeX
+downscaling to absorb them.
+
+For horizontal colorbar legends, put the title above the bar when space is
+tight. This avoids left-title crowding where the title and first tick can read
+as one string, while preserving a visible legend in both paper and slide
+variants.
 
 For side-by-side map panels, the slide export should usually be smaller, not
 larger. In `spill_maps_inset.R`, the slide maps are not full-slide figures: they
@@ -198,6 +265,14 @@ pdfinfo output/figures/google_trends_article_counts_combined_slides.pdf
 ```
 
 ```bash
+pdfinfo output/figures/spill_count_persistence.pdf
+```
+
+```bash
+pdfinfo output/figures/spill_count_persistence_slides.pdf
+```
+
+```bash
 pdftoppm -png -r 220 output/figures/google_trends_article_counts_combined_slides.pdf /private/tmp/sewage-figure-resize-check/slides-direct
 ```
 
@@ -253,12 +328,17 @@ The public-attention figure ended with these conventions:
 | Slides | `google_trends_article_counts_combined_slides.pdf` | `13.2 x 6.6 cm` | Beamer frame at `0.9\linewidth` |
 | Paper map | `spill_avg_annual_count_2021_2023_london_inset.pdf` | `7.0 x 9.7 cm` | manuscript subfigure at `0.43\textwidth` |
 | Slide map | `spill_avg_annual_count_2021_2023_london_inset_slides.pdf` | `7.0 x 5.6 cm` | Beamer subfigure at `0.49\textwidth` |
+| Paper phase diagram | `spill_count_persistence.pdf` | `14.5 x 11.5 cm` | manuscript figure at `.9\linewidth` |
+| Slide phase diagram | `spill_count_persistence_slides.pdf` | `7.2 x 6.5 cm` | Beamer right-hand column at `width=\linewidth` |
 
 The slide-specific export is deliberately not just the paper PDF scaled up. It
 uses its own filename, aspect ratio, labels, line widths, and event positions so
 the Beamer call can be simple and stable. For map panels, the slide-specific
 export is also not necessarily larger than the paper export: it should match the
-panel geometry in which Beamer will display it.
+panel geometry in which Beamer will display it. For fixed-aspect heatmaps, the
+paper-specific export can also be smaller than a generic large plotting canvas:
+matching the manuscript inclusion size protects labels without requiring
+oversized source typography.
 
 Temporary Beamer check:
 

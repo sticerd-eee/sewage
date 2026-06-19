@@ -13,7 +13,9 @@
 #
 # Outputs:
 #   - output/figures/spill_count_persistence.pdf
+#   - output/figures/spill_count_persistence_slides.pdf
 #   - output/figures/spill_hours_persistence.pdf
+#   - output/figures/spill_hours_persistence_slides.pdf
 #
 # Note: Years are hardcoded to 2021-2023 period
 #
@@ -23,10 +25,49 @@
 # ==============================================================================
 # 1. Configuration
 # ==============================================================================
-PLOT_WIDTH <- 18 * 1.618
-PLOT_HEIGHT <- 18
 PLOT_DPI <- 300
 VIRIDIS_PALETTE <- "magma"
+FONT_FAMILY <- "libertinus"
+GG_TEXT_SIZE_PT <- 2.845276
+
+PLOT_VARIANTS <- list(
+  paper = list(
+    width_cm = 14.5,
+    height_cm = 11.5,
+    base_size = 9.5,
+    axis_title_size = 9.5,
+    axis_text_size = 8.5,
+    legend_title_size = 9.5,
+    legend_text_size = 8.5,
+    cell_text_size_pt = 8.8,
+    tile_linewidth = 0.5,
+    axis_x_title = "State in Year t",
+    axis_y_title = "State in Year t+1",
+    legend_title = "Transition Probability",
+    legend_title_position = "top",
+    legend_key_width = 3.6,
+    legend_key_height = 0.30,
+    plot_margin = ggplot2::margin(t = 3, r = 3, b = 2, l = 3, unit = "pt")
+  ),
+  slides = list(
+    width_cm = 7.2,
+    height_cm = 6.5,
+    base_size = 9.5,
+    axis_title_size = 9.5,
+    axis_text_size = 8.5,
+    legend_title_size = 8.5,
+    legend_text_size = 7.5,
+    cell_text_size_pt = 8,
+    tile_linewidth = 0.35,
+    axis_x_title = "State at t",
+    axis_y_title = "State at t + 1",
+    legend_title = "Transition Probability",
+    legend_title_position = "top",
+    legend_key_width = 3.6,
+    legend_key_height = 0.28,
+    plot_margin = ggplot2::margin(t = 2, r = 2, b = 1, l = 2, unit = "pt")
+  )
+)
 
 # ==============================================================================
 # 2. Package Management
@@ -60,7 +101,42 @@ install_if_missing(required_packages)
 # 3.1 Font Setup ---------------------------------------------------------------
 showtext::showtext_auto()
 showtext::showtext_opts(dpi = 300)
-sysfonts::font_add_google("Libertinus Serif", "libertinus", db_cache = FALSE)
+
+add_libertinus_font <- function() {
+  local_font_files <- c(
+    regular = path.expand("~/Library/Fonts/LibertinusSerif-Regular.ttf"),
+    bold = path.expand("~/Library/Fonts/LibertinusSerif-Bold.ttf"),
+    italic = path.expand("~/Library/Fonts/LibertinusSerif-Italic.ttf"),
+    bolditalic = path.expand("~/Library/Fonts/LibertinusSerif-BoldItalic.ttf")
+  )
+
+  if (all(file.exists(local_font_files))) {
+    do.call(
+      sysfonts::font_add,
+      c(list(family = FONT_FAMILY), as.list(local_font_files))
+    )
+    return(FONT_FAMILY)
+  }
+
+  tryCatch(
+    {
+      sysfonts::font_add_google(
+        "Libertinus Serif",
+        FONT_FAMILY,
+        db_cache = TRUE
+      )
+      FONT_FAMILY
+    },
+    error = function(e) {
+      warning(
+        "Libertinus Serif font unavailable; falling back to the default serif font."
+      )
+      "serif"
+    }
+  )
+}
+
+FONT_FAMILY <- add_libertinus_font()
 
 # 3.2 Output Directory ---------------------------------------------------------
 output_dir <- here::here("output", "figures")
@@ -68,23 +144,46 @@ if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
-# 3.3 ggplot Theme -------------------------------------------------------------
-theme_pref <- theme_minimal() +
-  theme(
-    text = element_text(size = 10, family = "libertinus"),
-    axis.title = element_text(face = "bold", size = 12, family = "libertinus"),
-    axis.text = element_text(face = "bold", size = 10, family = "libertinus"),
-    panel.grid = element_blank(),
-    panel.background = element_rect(fill = "white", color = NA),
-    plot.background = element_rect(fill = "white", color = NA),
-    legend.position = "bottom",
-    legend.title = element_text(face = "bold", size = 12, family = "libertinus"),
-    legend.text = element_text(size = 10, family = "libertinus"),
-    legend.background = element_rect(fill = "white", color = NA),
-    plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
-  )
+# 3.3 Helper Functions ---------------------------------------------------------
 
-# 3.4 Helper Functions ---------------------------------------------------------
+pt_to_gg_text_size <- function(size_pt) {
+  size_pt / GG_TEXT_SIZE_PT
+}
+
+theme_phase_diagram <- function(settings) {
+  theme_minimal(base_family = FONT_FAMILY, base_size = settings$base_size) +
+    theme(
+      text = element_text(family = FONT_FAMILY),
+      axis.title = element_text(
+        face = "bold",
+        size = settings$axis_title_size,
+        family = FONT_FAMILY
+      ),
+      axis.text = element_text(
+        face = "bold",
+        size = settings$axis_text_size,
+        family = FONT_FAMILY
+      ),
+      panel.grid = element_blank(),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.title = element_text(
+        face = "bold",
+        size = settings$legend_title_size,
+        family = FONT_FAMILY
+      ),
+      legend.text = element_text(
+        size = settings$legend_text_size,
+        family = FONT_FAMILY
+      ),
+      legend.background = element_rect(fill = "white", color = NA),
+      legend.box.spacing = grid::unit(0, "pt"),
+      legend.margin = ggplot2::margin(t = 0, r = 0, b = 0, l = 0, unit = "pt"),
+      plot.margin = settings$plot_margin
+    )
+}
 
 # Bin spill metrics by year (0 or quartiles for positive values)
 bin_spills_by_year <- function(data, metric_col) {
@@ -151,7 +250,7 @@ calc_transition_matrix <- function(transitions_data) {
 }
 
 # Create phase diagram heatmap
-plot_phase_diagram <- function(trans_prob_data) {
+plot_phase_diagram <- function(trans_prob_data, settings) {
   # Define state order
   state_levels <- c("0", "Q1", "Q2", "Q3", "Q4")
 
@@ -179,12 +278,12 @@ plot_phase_diagram <- function(trans_prob_data) {
     plot_data,
     aes(x = state_current, y = state_next, fill = probability)
   ) +
-    geom_tile(color = "white", linewidth = 0.5) +
+    geom_tile(color = "white", linewidth = settings$tile_linewidth) +
     geom_text(
       aes(label = pct_label),
       color = "black",
-      size = 3.5,
-      #fontface = "bold"
+      size = pt_to_gg_text_size(settings$cell_text_size_pt),
+      family = FONT_FAMILY
     ) +
     scale_fill_viridis_c(
       option = VIRIDIS_PALETTE,
@@ -193,14 +292,38 @@ plot_phase_diagram <- function(trans_prob_data) {
       begin = 0.15,
       end = 1,
       labels = scales::percent_format(accuracy = 1),
-      name = "Transition\nProbability"
+      name = settings$legend_title,
+      guide = guide_colorbar(
+        title.position = settings$legend_title_position,
+        title.hjust = 0.5,
+        label.position = "bottom",
+        barwidth = grid::unit(settings$legend_key_width, "cm"),
+        barheight = grid::unit(settings$legend_key_height, "cm"),
+        ticks = TRUE
+      )
     ) +
     labs(
-      x = "State in Year t",
-      y = "State in Year t+1"
+      x = settings$axis_x_title,
+      y = settings$axis_y_title
     ) +
-    theme_pref +
+    theme_phase_diagram(settings) +
     coord_fixed()
+}
+
+save_phase_diagram <- function(trans_prob_data, file_name, settings) {
+  p <- plot_phase_diagram(trans_prob_data, settings)
+
+  ggsave(
+    filename = file.path(output_dir, file_name),
+    plot = p,
+    width = settings$width_cm,
+    height = settings$height_cm,
+    dpi = PLOT_DPI,
+    units = "cm",
+    device = cairo_pdf
+  )
+
+  cat("  Saved:", file_name, "\n")
 }
 
 # ==============================================================================
@@ -243,32 +366,32 @@ trans_prob_hrs <- calc_transition_matrix(transitions_hrs)
 # ==============================================================================
 cat("Generating phase diagrams...\n")
 
-# Spill Count Phase Diagram
-p_count <- plot_phase_diagram(trans_prob_count)
-
-file_name_count <- "spill_count_persistence.pdf"
-ggsave(
-  filename = here::here(output_dir, file_name_count),
-  plot = p_count,
-  width = PLOT_WIDTH,
-  height = PLOT_HEIGHT,
-  dpi = PLOT_DPI,
-  unit = "cm"
+plot_specs <- list(
+  list(
+    data = trans_prob_count,
+    file_name = "spill_count_persistence.pdf",
+    settings = PLOT_VARIANTS$paper
+  ),
+  list(
+    data = trans_prob_count,
+    file_name = "spill_count_persistence_slides.pdf",
+    settings = PLOT_VARIANTS$slides
+  ),
+  list(
+    data = trans_prob_hrs,
+    file_name = "spill_hours_persistence.pdf",
+    settings = PLOT_VARIANTS$paper
+  ),
+  list(
+    data = trans_prob_hrs,
+    file_name = "spill_hours_persistence_slides.pdf",
+    settings = PLOT_VARIANTS$slides
+  )
 )
-cat("  Saved:", file_name_count, "\n")
 
-# Spill Hours Phase Diagram
-p_hrs <- plot_phase_diagram(trans_prob_hrs)
-
-file_name_hrs <- "spill_hours_persistence.pdf"
-ggsave(
-  filename = here::here(output_dir, file_name_hrs),
-  plot = p_hrs,
-  width = PLOT_WIDTH,
-  height = PLOT_HEIGHT,
-  dpi = PLOT_DPI,
-  unit = "cm"
+purrr::walk(
+  plot_specs,
+  \(spec) save_phase_diagram(spec$data, spec$file_name, spec$settings)
 )
-cat("  Saved:", file_name_hrs, "\n")
 
 cat("\nAll phase diagrams generated successfully!\n")
