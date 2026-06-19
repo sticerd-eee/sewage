@@ -1,6 +1,7 @@
 ---
 title: "Output-specific research figure sizing and verification"
 date: 2026-06-19
+last_updated: 2026-06-19
 category: design-patterns
 module: Research figure exports (R/ggplot2; paper + Beamer)
 problem_type: design_pattern
@@ -10,13 +11,16 @@ applies_when:
   - "A figure is used in both the manuscript and Beamer slides"
   - "Labels are readable in the source PDF but too small after LaTeX inclusion"
   - "Annotations overlap plotted series, vertical reference lines, or panel margins"
+  - "A map or choropleth is shown as a side-by-side half-width Beamer panel"
+  - "Standalone map exports have excessive whitespace after tightening labels"
   - "Choosing between PDF, PNG, and SVG for paper or slide graphics"
 related_components:
   - tooling
   - latex
   - beamer
   - overleaf
-tags: [r, ggplot2, figures, latex, beamer, pdf, verification, sizing]
+  - maps
+tags: [r, ggplot2, figures, maps, latex, beamer, pdf, verification, sizing]
 ---
 
 # Output-specific research figure sizing and verification
@@ -33,6 +37,17 @@ overfull once the title and notes were included.
 The important lesson is that readability is determined at the final LaTeX
 inclusion size, not at the standalone PDF size opened in a viewer. A figure that
 looks acceptable by itself can fail once it is embedded in the paper or slides.
+
+The same issue recurred for the sewage-spill choropleth maps. The slide assets
+`spill_avg_annual_count_2021_2023_london_inset_slides.pdf` and
+`dry_spill_avg_annual_count_2021_2023_london_inset_slides.pdf` were initially
+exported as large slide-style PDFs, then used side by side in
+`slides/short_pres.tex` as `0.49\textwidth` subfigures. Beamer shrank each map
+to a half-slide panel, making legend labels too small. A first pass then
+overcorrected by making the legend dominate the maps. The final fix was to
+export the slide maps near their half-panel display size, keep the substantive
+legend titles, and tune the legend font back down after checking the rendered
+Beamer frame.
 
 ## Guidance
 
@@ -92,6 +107,54 @@ slide substantially, keeps the notes visible, and produces a smaller overfull
 warning than `0.95\linewidth`. If the notes, title, or theme changes, re-run the
 same verification rather than carrying the width forward by habit.
 
+For side-by-side map panels, the slide export should usually be smaller, not
+larger. In `spill_maps_inset.R`, the slide maps are not full-slide figures: they
+are included as two `0.49\textwidth` subfigures on the same Beamer frame. The
+working export therefore uses a half-panel-native canvas:
+
+```r
+PLOT_WIDTH <- 7
+PLOT_HEIGHT <- 9.7
+
+# Slide maps are used as side-by-side half-width Beamer panels.
+# Export near that final display size so LaTeX does not shrink labels away.
+SLIDE_PLOT_WIDTH <- 7.0
+SLIDE_PLOT_HEIGHT <- 5.6
+```
+
+The corresponding slide legend settings keep the labels readable without making
+the colorbar the visual subject of the map:
+
+```r
+if (variant == "slides") {
+  return(list(
+    legend_title_size = 8.8,
+    legend_text_size = 8.3,
+    legend_key_width = 2.0,
+    legend_key_height = 0.30,
+    legend_bar_width = 4.8,
+    legend_bar_height = 0.20,
+    legend_margin = margin(t = 0, b = 0),
+    plot_margin = margin(t = 1, r = 2, b = 1, l = 2)
+  ))
+}
+```
+
+Do not shorten labels merely to solve a layout problem when the title carries
+substantive meaning. For the map slides, the final legend titles stayed explicit:
+
+```r
+"Average annual spill count (log)"
+"Average annual dry spill count (log)"
+```
+
+At the same time, fix paper whitespace separately. The non-slide map variant
+needed a shorter paper canvas and tighter margins, not larger text. Its final
+settings used `PLOT_HEIGHT <- 9.7`, `legend_margin = margin(t = 6, b = 0)`, and
+`plot_margin = margin(t = 2, r = 8, b = 4, l = 3)`. Treat canvas dimensions,
+plot margins, legend margins, and legend font sizes as separate controls; do not
+try to solve all fit problems by changing only text size.
+
 Do not solve label-line collisions with white text boxes. Move the annotation
 geometry instead. Store label x positions, label y positions, and dashed-line
 heights in variant-specific settings, then place labels in data space. This lets
@@ -142,10 +205,16 @@ pdftoppm -png -r 220 output/figures/google_trends_article_counts_combined_slides
 latexmk -pdf -interaction=nonstopmode -halt-on-error slide_check.tex
 ```
 
+For the side-by-side map slide, use a temporary Beamer wrapper that preserves
+the actual `0.49\textwidth` subfigure geometry and the notes block. A standalone
+PDF render can look good while the combined frame still clips tick labels or
+pushes notes off the slide.
+
 Keep the R script project-local. It should write to `output/figures/`; do not
 hard-code a Dropbox or Overleaf path into the script. Copying final PDFs into
-the Overleaf `figures/` directory is a release step, not part of figure
-generation.
+the Overleaf `figures/` or `maps/` directory is a release step, not part of
+figure generation. When iterating on local output, leave the Dropbox/Overleaf
+folder untouched until the final assets are chosen.
 
 ## Why This Matters
 
@@ -159,11 +228,15 @@ can understand the empirical point.
 Separate paper and slide exports also prevent a false compromise. The manuscript
 needs a compact figure with readable labels after inclusion in a text page.
 Slides need a wider figure that uses Beamer space efficiently and remains
-legible from a distance. One PDF can rarely be optimal for both.
+legible from a distance. For side-by-side map panels, "slide-specific" may mean
+a smaller half-panel-native PDF rather than a wider full-slide PDF. One PDF can
+rarely be optimal for both.
 
 ## When to Apply
 
 - Any ggplot figure that appears in both the manuscript and the slide deck.
+- Any map or choropleth whose paper version is included as a manuscript panel
+  but whose slide version is included side by side with another map.
 - Any figure with direct annotations, event labels, or vertical reference lines.
 - Any figure where LaTeX scales the graphic substantially away from its exported
   size.
@@ -178,10 +251,14 @@ The public-attention figure ended with these conventions:
 |--------|------|-------------|--------------------|
 | Paper | `google_trends_article_counts_combined.pdf` | `14.5 x 9.0 cm` | manuscript figure at about `.9\linewidth` |
 | Slides | `google_trends_article_counts_combined_slides.pdf` | `13.2 x 6.6 cm` | Beamer frame at `0.9\linewidth` |
+| Paper map | `spill_avg_annual_count_2021_2023_london_inset.pdf` | `7.0 x 9.7 cm` | manuscript subfigure at `0.43\textwidth` |
+| Slide map | `spill_avg_annual_count_2021_2023_london_inset_slides.pdf` | `7.0 x 5.6 cm` | Beamer subfigure at `0.49\textwidth` |
 
 The slide-specific export is deliberately not just the paper PDF scaled up. It
 uses its own filename, aspect ratio, labels, line widths, and event positions so
-the Beamer call can be simple and stable.
+the Beamer call can be simple and stable. For map panels, the slide-specific
+export is also not necessarily larger than the paper export: it should match the
+panel geometry in which Beamer will display it.
 
 Temporary Beamer check:
 
@@ -191,6 +268,29 @@ Temporary Beamer check:
   \includegraphics[width=0.9\linewidth,keepaspectratio]{google_trends_article_counts_combined_slides.pdf}
   \vspace{-0.5em}
   \notes[0.9]{Monthly public attention to sewage spills in England, 2018--2024. Pink line: Google Trends search interest for ``sewage spill'' on a 0--100 scale. Teal line: UK LexisNexis article counts, scaled so the peak aligns with Google Trends.}
+\end{frame}
+```
+
+Temporary Beamer check for side-by-side maps:
+
+```tex
+\begin{frame}{Sewage spills are widespread and dispersed}
+  \vfill
+  \centering
+  \begin{figure}
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{spill_avg_annual_count_2021_2023_london_inset_slides.pdf}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{dry_spill_avg_annual_count_2021_2023_london_inset_slides.pdf}
+    \end{subfigure}
+  \end{figure}
+
+  \notes[0.95]{Average annual sewage spill counts aggregated to MSOAs in England over 2021--2023.}
 \end{frame}
 ```
 
