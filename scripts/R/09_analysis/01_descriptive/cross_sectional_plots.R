@@ -18,6 +18,8 @@
 # Outputs:
 #   - output/figures/sales_{variable}_{method}.pdf - Sales bivariate plots
 #   - output/figures/rental_{variable}_{method}.pdf - Rental bivariate plots
+#   - output/figures/sales_{variable}_{method}_slides.pdf - Slide-optimized plots
+#   - output/figures/rental_{variable}_{method}_slides.pdf - Slide-optimized plots
 #
 # ==============================================================================
 
@@ -33,6 +35,9 @@ RADII_TO_INCLUDE <- c(250, 500, 1000)
 PLOT_WIDTH <- 16
 PLOT_HEIGHT <- 12
 PLOT_DPI <- 300
+SLIDE_PLOT_WIDTH <- 6.8
+SLIDE_PLOT_HEIGHT <- 3.25
+SLIDE_PLOT_DPI <- 300
 
 # Smoothing method options:
 #   c("lm", "loess") - both linear and local regression (default)
@@ -53,7 +58,8 @@ required_packages <- c(
   "viridis",
   "data.table",
   "scales",
-  "showtext"
+  "showtext",
+  "sysfonts"
 )
 
 install_if_missing <- function(packages) {
@@ -72,7 +78,38 @@ install_if_missing(required_packages)
 # 3.1 Font Setup ---------------------------------------------------------------
 showtext::showtext_auto()
 showtext::showtext_opts(dpi = 300)
-sysfonts::font_add_google("Libertinus Serif", "libertinus", db_cache = FALSE)
+
+add_libertinus_font <- function() {
+  local_font_files <- c(
+    regular = path.expand("~/Library/Fonts/LibertinusSerif-Regular.ttf"),
+    bold = path.expand("~/Library/Fonts/LibertinusSerif-Bold.ttf"),
+    italic = path.expand("~/Library/Fonts/LibertinusSerif-Italic.ttf"),
+    bolditalic = path.expand("~/Library/Fonts/LibertinusSerif-BoldItalic.ttf")
+  )
+
+  if (all(file.exists(local_font_files))) {
+    do.call(
+      sysfonts::font_add,
+      c(list(family = "libertinus"), as.list(local_font_files))
+    )
+    return("libertinus")
+  }
+
+  tryCatch(
+    {
+      sysfonts::font_add_google("Libertinus Serif", "libertinus", db_cache = TRUE)
+      "libertinus"
+    },
+    error = function(e) {
+      warning(
+        "Libertinus Serif font unavailable; falling back to the default serif font."
+      )
+      "serif"
+    }
+  )
+}
+
+FONT_FAMILY <- add_libertinus_font()
 
 # 3.2 Output Directory ---------------------------------------------------------
 output_dir <- here::here("output", "figures")
@@ -80,29 +117,84 @@ if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
-# 3.3 ggplot Theme -------------------------------------------------------------
-theme_pref <- theme_minimal() +
-  theme(
-    text = element_text(size = 10, family = "Libertinus Serif"),
-    plot.title = element_text(
-      face = "bold",
-      size = 12,
-      family = "Libertinus Serif",
-      margin = ggplot2::margin(b = 9, unit = "pt")
-    ),
-    axis.title = element_text(face = "bold", size = 12, family = "Libertinus Serif"),
-    axis.text = element_text(size = 10, family = "Libertinus Serif"),
-    panel.grid.minor = element_blank(),
-    panel.grid.major.x = element_line(color = "gray95"),
-    panel.grid.major.y = element_line(color = "gray95"),
-    panel.background = element_rect(fill = "white", color = NA),
-    plot.background = element_rect(fill = "white", color = NA),
-    legend.position = "bottom",
-    legend.title = element_text(face = "bold", size = 12, family = "Libertinus Serif"),
-    legend.text = element_text(size = 10, family = "Libertinus Serif"),
-    legend.background = element_rect(fill = "white", color = NA),
-    plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
+# 3.3 Publication-Quality Plot Theme ------------------------------------------
+plot_variant_style <- function(variant = c("paper", "slides")) {
+  variant <- match.arg(variant)
+
+  if (variant == "slides") {
+    return(list(
+      base_size = 7.5,
+      plot_title_size = 8.5,
+      axis_title_size = 8,
+      axis_text_size = 7.2,
+      legend_title_size = 7.6,
+      legend_text_size = 7.2,
+      legend_key_width = 0.30,
+      legend_key_height = 0.13,
+      smooth_linewidth = 0.5,
+      plot_margin = margin(t = 2, r = 6, b = 1, l = 8, unit = "pt")
+    ))
+  }
+
+  list(
+    base_size = 10,
+    plot_title_size = 12,
+    axis_title_size = 12,
+    axis_text_size = 10,
+    legend_title_size = 12,
+    legend_text_size = 10,
+    legend_key_width = 0.8,
+    legend_key_height = 0.3,
+    smooth_linewidth = 0.8,
+    plot_margin = margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
   )
+}
+
+theme_cs_publication <- function(variant = c("paper", "slides")) {
+  style <- plot_variant_style(variant)
+
+  theme_minimal(base_family = FONT_FAMILY, base_size = style$base_size) +
+    theme(
+      text = element_text(family = FONT_FAMILY),
+      plot.title = element_text(
+        face = "bold",
+        size = style$plot_title_size,
+        margin = ggplot2::margin(b = 9, unit = "pt")
+      ),
+      axis.title = element_text(face = "bold", size = style$axis_title_size),
+      axis.text = element_text(size = style$axis_text_size),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = "gray95"),
+      panel.grid.major.y = element_line(color = "gray95"),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.title = element_text(face = "bold", size = style$legend_title_size),
+      legend.text = element_text(size = style$legend_text_size),
+      legend.key.width = unit(style$legend_key_width, "cm"),
+      legend.key.height = unit(style$legend_key_height, "cm"),
+      legend.background = element_rect(fill = "white", color = NA),
+      plot.margin = style$plot_margin
+    )
+}
+
+slide_axis_label <- function(label) {
+  replacements <- c(
+    "Minimum Distance to Spill Site (m)" = "Distance to spill site (m)",
+    "Spill Count (count)" = "Spill count",
+    "Spill Duration (hours)" = "Spill duration (hours)",
+    "Inverse Spill Count - Distance (count/m)" = "Spill count / distance",
+    "Sale Price (£)" = "Sale (£)",
+    "Rent Listing Price (£/month)" = "Rent (£)"
+  )
+
+  if (label %in% names(replacements)) {
+    return(unname(replacements[[label]]))
+  }
+
+  label
+}
 
 # 3.4 Plotting Function --------------------------------------------------------
 create_cs_plot <- function(
@@ -111,8 +203,17 @@ create_cs_plot <- function(
   x_label,
   y_var,
   y_label,
-  method = c("lm", "loess")
+  method = c("lm", "loess"),
+  variant = c("paper", "slides")
 ) {
+  variant <- match.arg(variant)
+  style <- plot_variant_style(variant)
+
+  if (variant == "slides") {
+    x_label <- slide_axis_label(x_label)
+    y_label <- slide_axis_label(y_label)
+  }
+
   # Base plot
   p <- ggplot(
     plot_data,
@@ -125,16 +226,29 @@ create_cs_plot <- function(
       y = y_label,
       color = "Radius"
     ) +
-    theme_pref +
-    theme(legend.position = "bottom")
+    theme_cs_publication(variant)
 
   # Add smoothing lines
   if (length(method) == 1) {
-    p <- p + geom_smooth(method = method, se = TRUE, linewidth = 0.8)
+    p <- p +
+      geom_smooth(
+        method = method,
+        se = TRUE,
+        linewidth = style$smooth_linewidth
+      )
   } else {
     p <- p +
-      geom_smooth(method = method[1], se = TRUE, linewidth = 0.8) +
-      geom_smooth(method = method[2], se = FALSE, linewidth = 0.8, linetype = 5)
+      geom_smooth(
+        method = method[1],
+        se = TRUE,
+        linewidth = style$smooth_linewidth
+      ) +
+      geom_smooth(
+        method = method[2],
+        se = FALSE,
+        linewidth = style$smooth_linewidth,
+        linetype = 5
+      )
   }
 
   return(p)
@@ -154,11 +268,16 @@ house_price_data <- import(
 )
 
 # Trim to 5th-95th percentiles
+sale_price_bounds <- quantile(
+  house_price_data$price,
+  probs = c(0.05, 0.95),
+  na.rm = TRUE
+)
 house_price_data_trimmed <- house_price_data %>%
-  filter(between(
+  filter(dplyr::between(
     price,
-    quantile(price, 0.05, na.rm = TRUE),
-    quantile(price, 0.95, na.rm = TRUE)
+    sale_price_bounds[[1]],
+    sale_price_bounds[[2]]
   ))
 trimmed_house_ids <- unique(house_price_data_trimmed$house_id)
 
@@ -182,7 +301,7 @@ if (is.null(SAMPLE_SIZE)) {
 }
 
 # Filter and prepare data
-plot_data_sales <- dat_agg_sales %>%
+plot_data_sales <- dat_agg_sales_trimmed %>%
   filter(house_id %in% sample_houses) %>%
   filter(radius %in% RADII_TO_INCLUDE) %>%
   mutate(
@@ -206,11 +325,16 @@ zoopla_rentals <- import(
 )
 
 # Trim to 5th-95th percentiles
+rental_price_bounds <- quantile(
+  zoopla_rentals$listing_price,
+  probs = c(0.05, 0.95),
+  na.rm = TRUE
+)
 zoopla_rentals_trimmed <- zoopla_rentals %>%
-  filter(between(
+  filter(dplyr::between(
     listing_price,
-    quantile(listing_price, 0.05, na.rm = TRUE),
-    quantile(listing_price, 0.95, na.rm = TRUE)
+    rental_price_bounds[[1]],
+    rental_price_bounds[[2]]
   ))
 trimmed_rental_ids <- unique(zoopla_rentals_trimmed$rental_id)
 
@@ -222,7 +346,10 @@ dat_agg_rentals <- open_dataset(
 
 # Filter to trimmed rental IDs
 dat_agg_rentals_trimmed <- dat_agg_rentals %>%
-  filter(rental_id %in% trimmed_rental_ids)
+  filter(
+    rental_id %in% trimmed_rental_ids,
+    dplyr::between(rent, rental_price_bounds[[1]], rental_price_bounds[[2]])
+  )
 
 # Sample rentals (or use all if SAMPLE_SIZE is NULL)
 if (is.null(SAMPLE_SIZE)) {
@@ -234,7 +361,7 @@ if (is.null(SAMPLE_SIZE)) {
 }
 
 # Filter and prepare data
-plot_data_rentals <- dat_agg_rentals %>%
+plot_data_rentals <- dat_agg_rentals_trimmed %>%
   filter(rental_id %in% sample_rentals) %>%
   filter(radius %in% RADII_TO_INCLUDE) %>%
   mutate(
@@ -282,32 +409,63 @@ method_suffix <- if (length(SMOOTHING_METHODS) == 2) {
   "_loess"
 }
 
+save_plot_pdf <- function(plot, file_name, width, height, dpi = PLOT_DPI) {
+  ggsave(
+    filename = file.path(output_dir, file_name),
+    plot = plot,
+    width = width,
+    height = height,
+    dpi = dpi,
+    units = "cm",
+    device = cairo_pdf
+  )
+  cat("  Saved:", file_name, "\n")
+}
+
 # Generate Sales Plots
 cat("Generating sales plots...\n")
 for (var_name in names(plot_specs)) {
   spec <- plot_specs[[var_name]]
 
-  # Create plot
+  # Create paper plot
   p <- create_cs_plot(
     plot_data_sales,
     spec$var,
     spec$label,
     "price",
     "Sale Price (£)",
-    method = SMOOTHING_METHODS
+    method = SMOOTHING_METHODS,
+    variant = "paper"
   )
 
-  # Save plot
+  # Save paper plot
   file_name <- paste0("sales_", var_name, method_suffix, ".pdf")
-  ggsave(
-    filename = here::here(output_dir, file_name),
-    plot = p,
+  save_plot_pdf(
+    p,
+    file_name,
     width = PLOT_WIDTH,
-    height = PLOT_HEIGHT,
-    dpi = PLOT_DPI,
-    units = "cm"
+    height = PLOT_HEIGHT
   )
-  cat("  Saved:", file_name, "\n")
+
+  # Create and save slide plot
+  p_slides <- create_cs_plot(
+    plot_data_sales,
+    spec$var,
+    spec$label,
+    "price",
+    "Sale Price (£)",
+    method = SMOOTHING_METHODS,
+    variant = "slides"
+  )
+
+  file_name_slides <- paste0("sales_", var_name, method_suffix, "_slides.pdf")
+  save_plot_pdf(
+    p_slides,
+    file_name_slides,
+    width = SLIDE_PLOT_WIDTH,
+    height = SLIDE_PLOT_HEIGHT,
+    dpi = SLIDE_PLOT_DPI
+  )
 }
 
 # Generate Rental Plots
@@ -315,27 +473,45 @@ cat("Generating rental plots...\n")
 for (var_name in names(plot_specs)) {
   spec <- plot_specs[[var_name]]
 
-  # Create plot
+  # Create paper plot
   p <- create_cs_plot(
     plot_data_rentals,
     spec$var,
     spec$label,
     "listing_price",
     "Rent Listing Price (£/month)",
-    method = SMOOTHING_METHODS
+    method = SMOOTHING_METHODS,
+    variant = "paper"
   )
 
-  # Save plot
+  # Save paper plot
   file_name <- paste0("rental_", var_name, method_suffix, ".pdf")
-  ggsave(
-    filename = here::here(output_dir, file_name),
-    plot = p,
+  save_plot_pdf(
+    p,
+    file_name,
     width = PLOT_WIDTH,
-    height = PLOT_HEIGHT,
-    dpi = PLOT_DPI,
-    units = "cm"
+    height = PLOT_HEIGHT
   )
-  cat("  Saved:", file_name, "\n")
+
+  # Create and save slide plot
+  p_slides <- create_cs_plot(
+    plot_data_rentals,
+    spec$var,
+    spec$label,
+    "listing_price",
+    "Rent Listing Price (£/month)",
+    method = SMOOTHING_METHODS,
+    variant = "slides"
+  )
+
+  file_name_slides <- paste0("rental_", var_name, method_suffix, "_slides.pdf")
+  save_plot_pdf(
+    p_slides,
+    file_name_slides,
+    width = SLIDE_PLOT_WIDTH,
+    height = SLIDE_PLOT_HEIGHT,
+    dpi = SLIDE_PLOT_DPI
+  )
 }
 
 cat("\nAll plots generated\n")
