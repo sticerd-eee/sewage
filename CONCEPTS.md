@@ -37,3 +37,14 @@ The effect of sewage-spill *intensity* — a continuous exposure measure such as
 
 ### Extensive Margin
 The effect of *proximity itself* — being near versus far from an overflow — on property values, and how the near-versus-far price gap responds to public attention. Contrasts with the Intensive Margin, which varies realized spill intensity rather than proximity.
+
+## Public Attention Area
+
+### Public Attention
+The project-level construct for how salient sewage spills are to the public over time, proxied by search interest and media coverage rather than by physical spill activity itself.
+
+### Google Trends Search Interest
+A normalized time-series proxy for public search attention to sewage spills, used as one component of Public Attention.
+
+### UK Media Article Count
+A time-series proxy for media coverage of sewage spills, used alongside Google Trends Search Interest to measure Public Attention.

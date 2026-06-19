@@ -1,5 +1,5 @@
 ---
-title: "Fit wide LaTeX regression tables: X[c] columns for paper, resizebox for slides"
+title: "Fit wide LaTeX regression tables: X[c] columns for paper, call-site resizebox for slides"
 date: 2026-06-15
 category: design-patterns
 module: LaTeX table output (modelsummary/tabularray; paper + slides)
@@ -15,7 +15,7 @@ related_components:
 tags: [latex, tabularray, talltblr, modelsummary, table-formatting, resizebox, beamer]
 ---
 
-# Fit wide LaTeX regression tables: X[c] columns for paper, resizebox for slides
+# Fit wide LaTeX regression tables: X[c] columns for paper, call-site resizebox for slides
 
 ## Context
 
@@ -53,10 +53,11 @@ then use font/colsep only for density.
    owns the width, set a small `cells = {font = \fontsize{8pt}{9pt}\selectfont}`
    and `colsep=2pt` for readability and whitespace — not to prevent overflow.
 
-4. **Slides (plain `tabular`): use `\resizebox`.** The beamer-table converter
-   (`scripts/python/convert_paper_tables_to_beamer.py`) rewrites the `talltblr`
-   into a plain `tabular` with caption/notes outside and wraps it in
-   `\resizebox{\linewidth}{!}{...}` — the correct tool for that environment.
+4. **Slides (plain `tabular`): use call-site `\resizebox`.** The beamer-table
+   converter (`scripts/python/convert_paper_tables_to_beamer.py`) rewrites the
+   `talltblr` into a plain `tabular` fragment. Slide decks then size each table
+   with `\inputslidetable[<x>]{...}`, which expands to
+   `\resizebox{<x>\linewidth}{!}{...}` and defaults to `x = 1`.
 
 ## Why This Matters
 
@@ -92,9 +93,9 @@ Same table family, two environments, two fit mechanisms:
 | Output | Environment | Caption/notes | Fit mechanism |
 |--------|-------------|---------------|---------------|
 | Paper  | `talltblr`  | inside env    | `X[c]` elastic columns |
-| Slide  | plain `tabular` | outside env | `\resizebox{\linewidth}{!}{...}` |
+| Slide  | plain `tabular` | outside env | `\inputslidetable[<x>]{...}` call-site resizing |
 
 ## Related
 
 - `docs/solutions/design-patterns/parameterize-analysis-scripts-over-a-config-vector.md` — companion pattern; mentions the `X[c]` rewrite as an adjacent sub-pattern (this doc is the full treatment).
-- `scripts/python/convert_paper_tables_to_beamer.py` — converts paper `talltblr` tables into resizebox-wrapped slide `tabular`s.
+- `scripts/python/convert_paper_tables_to_beamer.py` — converts paper `talltblr` tables into plain slide `tabular` fragments.

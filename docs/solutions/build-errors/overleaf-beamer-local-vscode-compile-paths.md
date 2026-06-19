@@ -162,6 +162,10 @@ the build. It preserves the visible divider slide without depending on
 - `docs/solutions/design-patterns/fit-wide-latex-regression-tables.md` covers a
   different Beamer/LaTeX concern: fitting wide regression tables on slides. It
   is related to slide robustness but does not cover compile path portability.
+- `docs/solutions/design-patterns/output-specific-research-figure-sizing-and-verification.md`
+  covers the separate figure-sizing problem exposed by these same map assets:
+  paper and Beamer slide PDFs need output-specific dimensions, margins, and
+  legend sizes, especially when maps are used as side-by-side half-slide panels.
 - `docs/solutions/design-patterns/parameterize-analysis-scripts-over-a-config-vector.md`
   covers output naming discipline for generated LaTeX artifacts, which helps
   prevent stale or clobbered slide inputs.

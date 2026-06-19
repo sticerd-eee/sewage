@@ -30,10 +30,12 @@
 # 1. Configuration
 # ==============================================================================
 PLOT_WIDTH <- 7
-PLOT_HEIGHT <- 11
+PLOT_HEIGHT <- 9.7
 PLOT_DPI <- 300
-SLIDE_PLOT_WIDTH <- 16
-SLIDE_PLOT_HEIGHT <- 12
+# Slide maps are used as side-by-side half-width Beamer panels.
+# Export near that final display size so LaTeX does not shrink labels away.
+SLIDE_PLOT_WIDTH <- 7.0
+SLIDE_PLOT_HEIGHT <- 5.6
 SLIDE_PLOT_DPI <- 300
 TARGET_YEARS <- 2021:2023
 YEAR_RANGE_LABEL <- paste0(min(TARGET_YEARS), "-", max(TARGET_YEARS))
@@ -115,14 +117,14 @@ map_variant_style <- function(variant = c("paper", "slides")) {
 
   if (variant == "slides") {
     return(list(
-      legend_title_size = 13,
-      legend_text_size = 11,
-      legend_key_width = 4.0,
-      legend_key_height = 0.55,
-      legend_bar_width = 9.0,
-      legend_bar_height = 0.35,
-      legend_margin = margin(t = 8, b = 2),
-      plot_margin = margin(t = 6, r = 20, b = 8, l = 6)
+      legend_title_size = 8.8,
+      legend_text_size = 8.3,
+      legend_key_width = 2.0,
+      legend_key_height = 0.30,
+      legend_bar_width = 4.8,
+      legend_bar_height = 0.20,
+      legend_margin = margin(t = 0, b = 0),
+      plot_margin = margin(t = 1, r = 2, b = 1, l = 2)
     ))
   }
 
@@ -133,8 +135,8 @@ map_variant_style <- function(variant = c("paper", "slides")) {
     legend_key_height = 0.4,
     legend_bar_width = 5.0,
     legend_bar_height = 0.2,
-    legend_margin = margin(t = 15, b = 5),
-    plot_margin = margin(t = 8, r = 25, b = 25, l = 8)
+    legend_margin = margin(t = 6, b = 0),
+    plot_margin = margin(t = 2, r = 8, b = 4, l = 3)
   )
 }
 
@@ -548,7 +550,7 @@ save_map_pdf <- function(plot, file_name, width, height, dpi = PLOT_DPI) {
 map_spills <- plot_static_map_with_inset(
   msoa_spills,
   "log_avg_annual_spill_count",
-  "Average annual spill count (log scale)",
+  "Average annual spill count (log)",
   london_inset_config,
   variant = "paper"
 )
@@ -568,7 +570,7 @@ save_map_pdf(
 map_spills_slides <- plot_static_map_with_inset(
   msoa_spills,
   "log_avg_annual_spill_count",
-  "Average annual spill count (log scale)",
+  "Average annual spill count (log)",
   london_inset_config,
   variant = "slides"
 )
@@ -590,7 +592,7 @@ save_map_pdf(
 map_dry_spills <- plot_static_map_with_inset(
   msoa_dry_spills,
   "log_avg_annual_dry_spill_count",
-  "Average annual dry spill count (log scale)",
+  "Average annual dry spill count (log)",
   london_inset_config,
   variant = "paper"
 )
@@ -610,7 +612,7 @@ save_map_pdf(
 map_dry_spills_slides <- plot_static_map_with_inset(
   msoa_dry_spills,
   "log_avg_annual_dry_spill_count",
-  "Average annual dry spill count (log scale)",
+  "Average annual dry spill count (log)",
   london_inset_config,
   variant = "slides"
 )
