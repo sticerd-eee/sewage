@@ -103,6 +103,127 @@ load_articles_data <- function(path, start_month_id = 1L, end_month_id = 36L) {
     )
 }
 
+#' Validate trailing article-count window sizes
+#'
+#' @param windows Integer vector of trailing window lengths in months.
+#' @return Sorted unique positive integer window lengths.
+normalise_article_windows <- function(windows) {
+  windows <- as.integer(windows)
+
+  if (length(windows) == 0L || any(is.na(windows)) || any(windows <= 0L)) {
+    stop("`windows` must contain positive integer month counts.", call. = FALSE)
+  }
+
+  sort(unique(windows))
+}
+
+#' Build a complete monthly article-count grid
+#'
+#' @param articles Monthly article counts with `month_id` and `article_count`.
+#' @param windows Integer vector of trailing window lengths in months.
+#' @param start_month_id Integer first analysis month.
+#' @param end_month_id Integer last analysis month.
+#' @return Tibble with one row per month, absent source months filled with zero.
+build_windowed_article_grid <- function(
+  articles,
+  windows = c(3L, 6L, 12L),
+  start_month_id = 1L,
+  end_month_id = 36L
+) {
+  windows <- normalise_article_windows(windows)
+  grid_start <- start_month_id - max(windows)
+
+  if (end_month_id < start_month_id) {
+    stop("`end_month_id` must be greater than or equal to `start_month_id`.",
+         call. = FALSE)
+  }
+
+  monthly_counts <- articles |>
+    dplyr::select("month_id", "article_count") |>
+    dplyr::group_by(.data$month_id) |>
+    dplyr::summarise(
+      article_count = sum(.data$article_count, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  tibble::tibble(month_id = seq.int(grid_start, end_month_id)) |>
+    dplyr::left_join(monthly_counts, by = "month_id") |>
+    dplyr::mutate(
+      article_count = dplyr::coalesce(.data$article_count, 0L)
+    ) |>
+    dplyr::arrange(.data$month_id)
+}
+
+#' Add inclusive trailing article-count windows to a complete grid
+#'
+#' @param article_grid Tibble returned by `build_windowed_article_grid()`.
+#' @param windows Integer vector of trailing window lengths in months.
+#' @return Input grid with `articles_<k>m` and `log_articles_<k>m` columns.
+add_trailing_article_windows <- function(
+  article_grid,
+  windows = c(3L, 6L, 12L)
+) {
+  windows <- normalise_article_windows(windows)
+
+  out <- article_grid |>
+    dplyr::arrange(.data$month_id) |>
+    dplyr::mutate(.article_cum_all = cumsum(.data$article_count))
+
+  for (window in windows) {
+    count_col <- paste0("articles_", window, "m")
+    log_col <- paste0("log_articles_", window, "m")
+
+    out <- out |>
+      dplyr::mutate(
+        "{count_col}" :=
+          .data$.article_cum_all - dplyr::lag(.data$.article_cum_all, window),
+        "{log_col}" := log(.data[[count_col]])
+      )
+  }
+
+  out |>
+    dplyr::select(-".article_cum_all")
+}
+
+#' Load cumulative and windowed LexisNexis article counts
+#'
+#' @param path Character path to the monthly article parquet.
+#' @param windows Integer vector of trailing window lengths in months.
+#' @param start_month_id Integer first month to retain.
+#' @param end_month_id Integer last month to retain.
+#' @return Tibble keyed by `month_id` with cumulative and trailing-window counts.
+load_windowed_articles_data <- function(
+  path,
+  windows = c(3L, 6L, 12L),
+  start_month_id = 1L,
+  end_month_id = 36L
+) {
+  windows <- normalise_article_windows(windows)
+
+  article_grid <- arrow::read_parquet(path) |>
+    build_windowed_article_grid(
+      windows = windows,
+      start_month_id = start_month_id,
+      end_month_id = end_month_id
+    ) |>
+    add_trailing_article_windows(windows = windows)
+
+  article_grid |>
+    dplyr::filter(
+      .data$month_id >= start_month_id,
+      .data$month_id <= end_month_id
+    ) |>
+    dplyr::mutate(
+      cumulative_articles = cumsum(.data$article_count),
+      log_cumulative_articles = log(.data$cumulative_articles)
+    ) |>
+    dplyr::relocate(
+      "cumulative_articles",
+      "log_cumulative_articles",
+      .after = "article_count"
+    )
+}
+
 #' Load the Google Trends peak period
 #'
 #' @param path Character path to the Google Trends workbook.
