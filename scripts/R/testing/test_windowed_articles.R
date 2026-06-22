@@ -60,6 +60,27 @@ windowed_articles <- load_windowed_articles_data(
   end_month_id = END_MONTH_ID
 )
 
+expected_window_count <- function(month_id, window) {
+  window_months <- seq.int(month_id - window + 1L, month_id)
+  sum(complete_grid$article_count[complete_grid$month_id %in% window_months])
+}
+
+for (window in normalise_article_windows(WINDOWS)) {
+  count_col <- paste0("articles_", window, "m")
+  expected_counts <- vapply(
+    windowed_articles$month_id,
+    expected_window_count,
+    numeric(1),
+    window = window
+  )
+
+  stopifnot(isTRUE(all.equal(
+    as.numeric(windowed_articles[[count_col]]),
+    expected_counts,
+    tolerance = 0
+  )))
+}
+
 month_1 <- windowed_articles |>
   dplyr::filter(.data$month_id == 1L)
 month_3 <- windowed_articles |>
@@ -78,17 +99,15 @@ stopifnot(
   all(is.finite(windowed_articles$log_articles_12m))
 )
 
+window_count_columns <- paste0("articles_", normalise_article_windows(WINDOWS), "m")
+window_log_columns <- paste0("log_", window_count_columns)
+
 expected_columns <- c(
   "month_id",
   "article_count",
   "cumulative_articles",
   "log_cumulative_articles",
-  "articles_3m",
-  "log_articles_3m",
-  "articles_6m",
-  "log_articles_6m",
-  "articles_12m",
-  "log_articles_12m"
+  as.vector(rbind(window_count_columns, window_log_columns))
 )
 stopifnot(all(expected_columns %in% names(windowed_articles)))
 

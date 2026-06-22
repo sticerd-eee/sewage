@@ -79,11 +79,13 @@ scripts/R/09_analysis/05_news/did_trends_full.R
 scripts/R/09_analysis/05_news/did_trends_prior.R
 scripts/R/09_analysis/05_news/es_trends_prior.R
 scripts/R/09_analysis/05_news/did_articles_prior.R
+scripts/R/09_analysis/05_news/did_articles_windowed_prior.R
 scripts/R/09_analysis/05_news/did_articles_lag4_prior.R
 scripts/R/09_analysis/05_news/did_trends_full_extensive.R
 scripts/R/09_analysis/05_news/did_trends_prior_extensive.R
 scripts/R/09_analysis/05_news/es_trends_prior_extensive.R
 scripts/R/09_analysis/05_news/did_articles_prior_extensive.R
+scripts/R/09_analysis/05_news/did_articles_windowed_prior_extensive.R
 scripts/R/09_analysis/05_news/did_articles_lag4_prior_extensive.R
 
 # 06_upstream_downstream

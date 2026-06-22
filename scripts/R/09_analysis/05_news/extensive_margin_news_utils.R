@@ -425,7 +425,12 @@ comparison_note_text <- function(comparison) {
 #' @param notes Preformatted tabularray note string.
 #' @param width Optional width string, e.g. `0.9\\\\linewidth`.
 #' @return Patched LaTeX table.
-patch_modelsummary_latex <- function(table_latex, label, notes, width = NULL) {
+patch_modelsummary_latex <- function(table_latex,
+                                     label,
+                                     notes,
+                                     width = NULL,
+                                     colsep = "3pt",
+                                     cell_font = "\\fontsize{11pt}{12pt}\\selectfont") {
   width_prefix <- if (is.null(width)) {
     ""
   } else {
@@ -444,16 +449,34 @@ patch_modelsummary_latex <- function(table_latex, label, notes, width = NULL) {
     table_latex
   )
 
-  table_latex <- sub(
-    "(\\{\\s*%% tabularray inner open\\n)",
-    paste0(
-      "\\1",
-      width_prefix,
-      "colsep=3pt,\n",
-      "cells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n"
-    ),
-    table_latex
+  inner_open <- regexpr("\\{\\s*%% tabularray inner open\\n", table_latex, perl = TRUE)
+  if (inner_open[[1]] < 0L) {
+    stop("Could not find tabularray inner-open block in modelsummary output.",
+         call. = FALSE)
+  }
+
+  layout_patch <- paste0(
+    width_prefix,
+    "colsep=",
+    colsep,
+    ",\n",
+    "cells   = {font = ",
+    cell_font,
+    "},\n"
   )
+  insert_at <- inner_open[[1]] + attr(inner_open, "match.length") - 1L
+  table_latex <- paste0(
+    substr(table_latex, 1L, insert_at),
+    layout_patch,
+    substr(table_latex, insert_at + 1L, nchar(table_latex))
+  )
+
+  if (
+    !grepl("\\fontsize", table_latex, fixed = TRUE) ||
+      !grepl("\\selectfont", table_latex, fixed = TRUE)
+  ) {
+    stop("Patched LaTeX table is missing expected font commands.", call. = FALSE)
+  }
 
   table_latex <- sub(
     "note\\{\\}=\\{\\s*\\},",
