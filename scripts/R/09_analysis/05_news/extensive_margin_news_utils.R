@@ -478,10 +478,39 @@ patch_modelsummary_latex <- function(table_latex,
     stop("Patched LaTeX table is missing expected font commands.", call. = FALSE)
   }
 
-  table_latex <- sub(
-    "note\\{\\}=\\{\\s*\\},",
-    notes,
-    table_latex
+  note_match <- regexpr("note\\{\\}=\\{\\s*\\},", table_latex, perl = TRUE)
+  if (note_match[[1]] < 0L) {
+    stop("Could not find empty tabularray note block in modelsummary output.",
+         call. = FALSE)
+  }
+  collapse_doubled_backslashes <- function(x) {
+    chars <- strsplit(x, "", useBytes = TRUE)[[1]]
+    slash <- intToUtf8(92L)
+    out <- character(0L)
+    i <- 1L
+
+    while (i <= length(chars)) {
+      out <- c(out, chars[[i]])
+      if (
+        identical(chars[[i]], slash) &&
+          i < length(chars) &&
+          identical(chars[[i + 1L]], slash)
+      ) {
+        i <- i + 2L
+      } else {
+        i <- i + 1L
+      }
+    }
+
+    paste0(out, collapse = "")
+  }
+
+  note_start <- note_match[[1]]
+  note_end <- note_start + attr(note_match, "match.length") - 1L
+  table_latex <- paste0(
+    substr(table_latex, 1L, note_start - 1L),
+    collapse_doubled_backslashes(notes),
+    substr(table_latex, note_end + 1L, nchar(table_latex))
   )
 
   table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
