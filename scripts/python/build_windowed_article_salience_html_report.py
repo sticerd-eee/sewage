@@ -300,9 +300,11 @@ def build_summary_html() -> str:
             (
                 '    <p class="sec-intro">This section reports only the coefficient '
                 "of interest from each public-attention specification. Full "
-                "regression tables appear below.</p>"
+                "regression tables appear below; the model specifications are "
+                "repeated here so the summary coefficients can be read directly.</p>"
             ),
             '    <h3 class="subsec" id="summary-intensive">Intensive margin</h3>',
+            _equations_html(["windowed_intensive"]),
             render_summary_table(
                 "intensive",
                 MEASURES,
@@ -310,6 +312,7 @@ def build_summary_html() -> str:
                 intensive_note,
             ),
             '    <h3 class="subsec" id="summary-extensive">Extensive margin</h3>',
+            _equations_html(["windowed_extensive"]),
             render_summary_table(
                 "extensive",
                 EXTENSIVE_MEASURES,

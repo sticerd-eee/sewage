@@ -122,3 +122,4 @@ table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex)
 - `docs/solutions/developer-experience/exploratory-extensive-margin-news-notebook-render-stabilisation-20260319.md` — same `05_news` scripts; `fixest` radius-bin context.
 - `docs/solutions/developer-experience/exploratory-extensive-margin-news-notebook-plot-first-comparison-refactor-20260319.md` — config-driven comparison grid + radius-cap context.
 - GitHub issue #15 — the motivating task (re-run intensive-margin results at a 500m threshold); this pattern satisfies it without clobbering the 250m outputs.
+- `docs/solutions/design-patterns/analysis-results-static-html-reports.md` — the radius-suffixed artifacts this pattern produces are consumed by the radius-sweep results report (`scripts/python/build_intensive_margin_html_report.py`), which writes the swept radius generically as the buffer `B` in its specifications.
