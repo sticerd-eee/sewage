@@ -31,11 +31,7 @@ the report.
 from __future__ import annotations
 
 import html
-import os
 import re
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 
 # --------------------------------------------------------------------------- #
@@ -75,14 +71,17 @@ def fam(base: str, title: str) -> dict:
             "files": [f"{base}_{r}.tex" for r in RADII]}
 
 
-def one(file: str) -> dict:
-    """A block = a single standalone table (e.g. a cross-radius robustness summary)."""
-    return {"kind": "single", "file": file}
+def one(file: str, spec: str = None) -> dict:
+    """A block = a single standalone table (e.g. a cross-radius robustness summary).
+
+    `spec` optionally pairs an equation key with this table (rendered under its caption).
+    """
+    return {"kind": "single", "file": file, "spec": spec}
 
 
-def synth(fn: str, title: str) -> dict:
+def synth(fn: str, title: str, spec: str = None) -> dict:
     """A block built by a synthesis function rather than read from a .tex file."""
-    return {"kind": "synth", "fn": fn, "title": title}
+    return {"kind": "synth", "fn": fn, "title": title, "spec": spec}
 
 
 # Lead section: the cross-radius SUMMARY tables for the main spec, by analysis.
@@ -100,7 +99,7 @@ SUMMARY = {
             "id": "summary-hedonics",
             "title": "Cross-sectional hedonics",
             "blocks": [
-                one("hedonic_count_continuous_prior_radius_robustness.tex"),
+                one("hedonic_count_continuous_prior_radius_robustness.tex", spec="hedonic"),
             ],
         },
         {
@@ -108,17 +107,19 @@ SUMMARY = {
             "title": "Upstream vs downstream",
             "blocks": [
                 synth("ud_summary",
-                      "Upstream vs downstream spill exposure: robustness to house-to-site radius"),
+                      "Upstream vs downstream spill exposure: robustness to house-to-site radius",
+                      spec="updown"),
                 synth("nearest_summary",
-                      "Nearest spill site: robustness to house-to-site radius"),
+                      "Nearest spill site: robustness to house-to-site radius",
+                      spec="nearest"),
             ],
         },
         {
             "id": "summary-public-attention",
             "title": "Public attention",
             "blocks": [
-                one("did_trends_prior_radius_robustness.tex"),
-                one("did_articles_prior_radius_robustness.tex"),
+                one("did_trends_prior_radius_robustness.tex", spec="news_discrete"),
+                one("did_articles_prior_radius_robustness.tex", spec="news_cont"),
             ],
         },
     ],
@@ -129,12 +130,16 @@ SECTIONS = [
     {
         "id": "cross-sectional-hedonics",
         "title": "Cross-sectional hedonics",
-        "specs": ["hedonic"],
-        "blocks": [
-            fam("hedonic_count_continuous_prior", "Daily spill count"),
-            fam("hedonic_hrs_continuous_prior", "Daily spill hours"),
-        ],
         "subsections": [
+            {
+                "id": "hedonics-baseline",
+                "title": "Baseline",
+                "specs": ["hedonic"],
+                "blocks": [
+                    fam("hedonic_count_continuous_prior", "Daily spill count"),
+                    fam("hedonic_hrs_continuous_prior", "Daily spill hours"),
+                ],
+            },
             {
                 "id": "hedonics-robustness",
                 "title": "Robustness",
@@ -207,12 +212,16 @@ SECTIONS = [
     {
         "id": "public-attention",
         "title": "Public attention",
-        "specs": ["news_discrete", "news_cont"],
-        "blocks": [
-            fam("did_trends_prior", "Pre/post Google Trends peak"),
-            fam("did_articles_prior", "Log cumulative news coverage"),
-        ],
         "subsections": [
+            {
+                "id": "public-attention-main",
+                "title": "Main specifications",
+                "specs": ["news_discrete", "news_cont"],
+                "blocks": [
+                    fam("did_trends_prior", "Pre/post Google Trends peak"),
+                    fam("did_articles_prior", "Log cumulative news coverage"),
+                ],
+            },
             {
                 "id": "public-attention-robustness",
                 "title": "Robustness (extensive margin)",
@@ -594,13 +603,11 @@ def build_toc() -> str:
 
 
 def render_block(block: dict) -> tuple[str, int]:
-    """Render one block: a 3-radii family, a single table, or a synthesized table."""
-    if block["kind"] == "synth":
-        if block["fn"] == "ud_summary":
-            return render_ud_summary()
-        if block["fn"] == "nearest_summary":
-            return render_nearest_summary()
-        return "", 0
+    """Render one block: a 3-radii family, a single table, or a synthesized table.
+
+    A `spec` on the block pairs an equation with the table: it is inserted directly
+    after the figure caption (used for the per-table equations in the Summary).
+    """
     if block["kind"] == "fam":
         figs, n = [], 0
         for fname in block["files"]:
@@ -621,12 +628,28 @@ def render_block(block: dict) -> tuple[str, int]:
             f"    </section>"
         )
         return html_block, n
-    fname = block["file"]
-    path = TABLES_DIR / fname
-    if not path.exists():
-        print(f"  WARNING: missing table, skipping: {fname}")
-        return "", 0
-    return render_table(parse_table(path), fname), 1
+
+    if block["kind"] == "synth":
+        if block["fn"] == "ud_summary":
+            html_block, n = render_ud_summary()
+        elif block["fn"] == "nearest_summary":
+            html_block, n = render_nearest_summary()
+        else:
+            return "", 0
+    else:  # single table
+        fname = block["file"]
+        path = TABLES_DIR / fname
+        if not path.exists():
+            print(f"  WARNING: missing table, skipping: {fname}")
+            return "", 0
+        html_block, n = render_table(parse_table(path), fname), 1
+
+    # Pair an equation with the table, placed right under its caption.
+    spec = block.get("spec")
+    if spec:
+        eqn = equations_html([spec], where=False)
+        html_block = html_block.replace("</figcaption>", "</figcaption>\n" + eqn, 1)
+    return html_block, n
 
 
 def render_blocks(blocks: list) -> tuple[str, int]:
@@ -780,77 +803,27 @@ def render_nearest_summary() -> tuple[str, int]:
 
 
 # --------------------------------------------------------------------------- #
-# Regression specifications (paper equations) -> inline SVG
+# Regression specifications (paper equations) -> MathJax
 # --------------------------------------------------------------------------- #
 
-TEXBIN = "/Library/TeX/texbin"
-EQ_CACHE = Path(__file__).resolve().parent / "equation_cache"
-
 EQUATIONS = {
-    "hedonic": r"\log p_{it}=\alpha+\beta\,\overline{S}^{250}_{it}+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\varepsilon_{it}",
-    "hedonic_qtr": r"\log p_{it}=\alpha+\beta\,\overline{S}^{250}_{it}+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\lambda_{q(t)}+\varepsilon_{it}",
-    "updown": r"\log p_{it}=\alpha+\beta_U\,\overline{S}^{U,250}_{it}+\beta_D\,\overline{S}^{D,250}_{it}+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\varepsilon_{it}",
+    "hedonic": r"\log p_{it}=\alpha+\beta\,\overline{S}^{B}_{it}+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\varepsilon_{it}",
+    "hedonic_qtr": r"\log p_{it}=\alpha+\beta\,\overline{S}^{B}_{it}+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\lambda_{q(t)}+\varepsilon_{it}",
+    "updown": r"\log p_{it}=\alpha+\beta_U\,\overline{S}^{U,B}_{it}+\beta_D\,\overline{S}^{D,B}_{it}+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\varepsilon_{it}",
     "updown_weighted": (
         r"\begin{aligned}"
         r"\log p_{it}&=\alpha+\beta_U\,\overline{S}^{U,w}_{it}+\beta_D\,\overline{S}^{D,w}_{it}"
         r"+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\varepsilon_{it},\\[2pt]"
-        r"\overline{S}^{U,w}_{it}&=\frac{1}{D_t}\sum_{c\in\mathcal{C}^{U,250}_{i}}\omega_{ic}"
+        r"\overline{S}^{U,w}_{it}&=\frac{1}{D_t}\sum_{c\in\mathcal{C}^{U,B}_{i}}\omega_{ic}"
         r"\sum_{\tau=t_0}^{t}S_{c\tau},\qquad\omega_{ic}=\frac{1}{d_{ic}}"
         r"\end{aligned}"
     ),
     "nearest": r"\log p_{it}=\alpha+\beta_D\,\overline{S}^{N}_{it}+\theta\,U_i+\beta_{UD}\bigl(\overline{S}^{N}_{it}\times U_i\bigr)+\rho\,d_i+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\varepsilon_{it}",
-    "news_discrete": r"\log p_{it}=\alpha+\beta\,\overline{S}^{250}_{it}+\kappa\bigl(\overline{S}^{250}_{it}\times \mathit{Post}_t\bigr)+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\lambda_{m(t)}+\varepsilon_{it}",
-    "news_cont": r"\log p_{it}=\alpha+\beta\,\overline{S}^{250}_{it}+\kappa\bigl(\overline{S}^{250}_{it}\times A_t\bigr)+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\lambda_{m(t)}+\varepsilon_{it}",
+    "news_discrete": r"\log p_{it}=\alpha+\beta\,\overline{S}^{B}_{it}+\kappa\bigl(\overline{S}^{B}_{it}\times \mathit{Post}_t\bigr)+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\lambda_{m(t)}+\varepsilon_{it}",
+    "news_cont": r"\log p_{it}=\alpha+\beta\,\overline{S}^{B}_{it}+\kappa\bigl(\overline{S}^{B}_{it}\times A_t\bigr)+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\lambda_{m(t)}+\varepsilon_{it}",
     "extensive_discrete": r"\log p_{it}=\alpha+\phi\,\mathrm{Near}_i+\kappa\bigl(\mathrm{Near}_i\times \mathit{Post}_t\bigr)+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\lambda_{m(t)}+\varepsilon_{it}",
     "extensive_cont": r"\log p_{it}=\alpha+\phi\,\mathrm{Near}_i+\kappa\bigl(\mathrm{Near}_i\times A_t\bigr)+\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\lambda_{m(t)}+\varepsilon_{it}",
 }
-
-
-def _compile_equation(latex: str) -> str:
-    """Compile a LaTeX equation to a self-contained inline SVG (paths, no fonts)."""
-    latexbin, dvisvgm = f"{TEXBIN}/latex", f"{TEXBIN}/dvisvgm"
-    if not (os.path.exists(latexbin) and os.path.exists(dvisvgm)):
-        return ""
-    doc = (
-        "\\documentclass[border=2pt,12pt]{standalone}\n"
-        "\\usepackage{amsmath,amssymb}\n"
-        "\\begin{document}\n"
-        f"$\\displaystyle {latex}$\n"
-        "\\end{document}\n"
-    )
-    tmp = tempfile.mkdtemp()
-    env = dict(os.environ, PATH=f"{TEXBIN}:{os.environ.get('PATH', '')}")
-    try:
-        (Path(tmp) / "eq.tex").write_text(doc)
-        subprocess.run(
-            [latexbin, "-interaction=nonstopmode", "-halt-on-error", "eq.tex"],
-            cwd=tmp, env=env, capture_output=True, text=True,
-        )
-        if not (Path(tmp) / "eq.dvi").exists():
-            return ""
-        subprocess.run(
-            [dvisvgm, "--no-fonts", "--exact-bbox", "-o", "eq.svg", "eq.dvi"],
-            cwd=tmp, env=env, capture_output=True, text=True,
-        )
-        svg_file = Path(tmp) / "eq.svg"
-        if not svg_file.exists():
-            return ""
-        svg = svg_file.read_text()
-        return svg[svg.find("<svg"):].strip()
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def equation_svg(key: str) -> str:
-    """Return cached inline SVG for an equation, compiling it once if needed."""
-    cache = EQ_CACHE / f"{key}.svg"
-    if cache.exists():
-        return cache.read_text()
-    svg = _compile_equation(EQUATIONS[key])
-    if svg:
-        EQ_CACHE.mkdir(parents=True, exist_ok=True)
-        cache.write_text(svg)
-    return svg
 
 
 # "where" definitions for each equation's terms (slide/paper style). Each entry is
@@ -862,7 +835,8 @@ _REF_HEDONIC = ("remaining terms", "as in the baseline hedonic specification")
 DEFS = {
     "hedonic": [
         ("<em>p</em><sub>it</sub>", "log sale price (sales) or log weekly asking rent (rentals) for transaction <em>i</em> on date <em>t</em>"),
-        ('<span class="ov">S</span><sup>250</sup><sub>it</sub>', "average daily spill events across overflows within 250&nbsp;m, January 2021 to the transaction date"),
+        ('<span class="ov">S</span><sup>B</sup><sub>it</sub>', "average daily spill events across overflows within radius buffer <em>B</em>, January 2021 to the transaction date"),
+        ("<em>B</em>", "house-to-site radius buffer (250, 500, or 1000&nbsp;m)"),
         ("<em>β</em>", "coefficient of interest — the change in log price/rent per one-unit increase in average daily spill exposure"),
         ("<strong>X</strong><sub>i</sub>, <em>γ</em>", "property characteristics (type, size, tenure, new-build status) and their coefficients"),
         ("<em>δ</em><sub>ℓ(i)</sub>", "location fixed effects (e.g. MSOA or LSOA)"),
@@ -873,7 +847,7 @@ DEFS = {
         _REF_HEDONIC,
     ],
     "updown": [
-        ('<span class="ov">S</span><sup>U,250</sup><sub>it</sub>, <span class="ov">S</span><sup>D,250</sup><sub>it</sub>', "average daily spill exposure from upstream / downstream overflows within 250&nbsp;m"),
+        ('<span class="ov">S</span><sup>U,B</sup><sub>it</sub>, <span class="ov">S</span><sup>D,B</sup><sub>it</sub>', "average daily spill exposure from upstream / downstream overflows within radius buffer <em>B</em>"),
         ("<em>β</em><sub>U</sub>, <em>β</em><sub>D</sub>", "upstream / downstream price gradients"),
         _REF_HEDONIC,
     ],
@@ -926,17 +900,16 @@ def _where_html(key: str) -> str:
     )
 
 
-def equations_html(keys: list) -> str:
+def equations_html(keys: list, where: bool = True) -> str:
     parts = []
     for k in keys:
-        svg = equation_svg(k)
-        if svg:
-            parts.append(f'    <div class="eqn">{svg}</div>')
-        else:
-            parts.append(f'    <div class="eqn"><code>{html.escape(EQUATIONS[k])}</code></div>')
-        where = _where_html(k)
+        parts.append(
+            f'    <div class="eqn mathjax">\\[\n{html.escape(EQUATIONS[k])}\n\\]</div>'
+        )
         if where:
-            parts.append(where)
+            w = _where_html(k)
+            if w:
+                parts.append(w)
     return "\n".join(parts)
 
 
@@ -987,6 +960,18 @@ def build_section_html(sec: dict) -> tuple[str, int]:
     return "\n".join(parts), n
 
 
+MATHJAX_HEAD = r"""  <script>
+    window.MathJax = {
+      tex: {
+        displayMath: [["\\[", "\\]"]],
+        inlineMath: [["\\(", "\\)"]],
+        processEscapes: true
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>"""
+
+
 def build_html(toc: str, summary_html: str, sections_html: str, n_tables: int) -> str:
     return f"""<!doctype html>
 <html lang="en">
@@ -994,6 +979,7 @@ def build_html(toc: str, summary_html: str, sections_html: str, n_tables: int) -
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Results tables &mdash; house-to-site radius sweep</title>
+{MATHJAX_HEAD}
   <style>{CSS}  </style>
 </head>
 <body>

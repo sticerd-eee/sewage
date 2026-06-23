@@ -13,7 +13,7 @@ applies_when:
 related_components:
   - tooling
   - scripts/R/09_analysis
-tags: [reports, html, regression-tables, model-outputs, verification, research-workflow]
+tags: [reports, html, regression-tables, model-outputs, verification, research-workflow, mathjax, tabularray, latex-parsing, radius-sweep, notation]
 ---
 
 # Static HTML result reports from generated analysis outputs
@@ -31,6 +31,14 @@ plan said the current generated LaTeX tables were authoritative, the first
 static report was verified with an HTML parser and spot checks, and later report
 revisions adjusted presentation without modifying analysis scripts or outputs
 (session history).
+
+The intensive-margin report was later expanded into a full house-to-site
+radius-sweep results report (`scripts/python/build_intensive_margin_html_report.py`):
+~100 per-radius `tabularray` tables parsed straight from `output/tables/*.tex`,
+grouped into a preferred-spec Summary plus per-analysis sections (cross-sectional
+hedonics, upstream/downstream, public attention), with synthesized cross-radius
+summaries where no `*_radius_robustness` artifact existed, and MathJax-rendered
+regression specifications. Points 9-13 below record what that build added.
 
 ## Guidance
 
@@ -77,6 +85,45 @@ Keep the report generation contract narrow:
    splicing for inserted notes over regex replacement strings that can swallow
    backslashes. Add content checks for the commands, labels, and formula strings
    the report depends on.
+9. **Parse the existing LaTeX tables into HTML rather than re-rendering models.**
+   For `tabularray` artifacts, parse them directly and make the parser
+   environment-agnostic: detect body rows as source lines ending in `\\` (works
+   for both `talltblr` and standalone `longtblr`, with or without the
+   `%% tabularray inner` comment markers); derive the column count by counting
+   cells in a body row (robust to `Q[]` vs `X[c]` colspecs); read column spanners
+   and full-width panel rows from the `cell{R}{C}={c=N}` directives; and clean
+   cells uniformly (`\num{}`, `\textbf{}`, `\quad`, in-cell `\\`, trailing `***`
+   stars, real minus signs, thousands grouping for plain integers only).
+10. **Synthesize a cross-radius summary when no summary artifact exists.** Some
+    analyses ship a `*_radius_robustness` table; others (upstream/downstream,
+    nearest-site) do not. Build that summary inside the report by pulling the
+    specific coefficient+SE cells from the per-radius tables -- e.g. the preferred
+    property-controls + MSOA/LSOA columns of the unweighted panel -- and lay it out
+    like the real summary tables. Verify the synthesized cells against the source
+    `.tex` cell-by-cell, since this is the one place the report computes rather than
+    transcribes.
+11. **Use generic notation for the swept parameter in the specifications.** Write
+    the estimating equations with a symbol for the swept value (e.g. radius buffer
+    `B`, the [Near-Overflow Radius](../../../CONCEPTS.md)) rather than one
+    hard-coded value such as `250`, because the same specification is estimated
+    across the whole sweep. Keep the actual values in the per-radius result tables'
+    captions/notes and column labels -- only the specifications go generic -- and
+    define the symbol once in the term list.
+12. **Render equations with MathJax, not pre-rendered images.** Embed the paper's
+    LaTeX inside `\[ ... \]` (HTML-escaped) in a `<div class="eqn mathjax">` and
+    load MathJax 3 (`tex-chtml`) from a CDN, matching the config in the reference
+    report. This is simpler and far more maintainable than compiling LaTeX to
+    inline SVG (the approach tried first and discarded); the trade-off is that
+    equation typesetting needs network access when the report is opened, while
+    tables/layout/text stay self-contained.
+13. **Source equations from the paper/slides; reconstruct from code when none is
+    written.** Take each spec verbatim from the manuscript where it exists; for
+    robustness specs the paper only describes in prose (quarter-of-sale FE, the
+    extensive-margin near-far DiD), reconstruct the equation from the actual
+    `feols`/`feglm` formula. Define every term as the slides do (a compact
+    "where" list), and place each equation under the heading it documents:
+    per-subsection in the detail sections, and per-table -- directly under the
+    table caption -- in the Summary.
 
 ## Why This Matters
 
@@ -180,6 +227,12 @@ is intended to stay ASCII-compatible: `&minus;`, `&times;`, `&ndash;`, and
 - `docs/solutions/developer-experience/exploratory-extensive-margin-news-notebook-plot-first-comparison-refactor-20260319.md`
   -- adjacent lesson on making result reports readable before presenting the
   full audit trail.
+- `scripts/python/build_intensive_margin_html_report.py` -- builder for the
+  radius-sweep results report: parses `tabularray` `.tex` into HTML, synthesizes
+  cross-radius summaries, and renders the regression specifications with MathJax.
+  Reusable: re-run after the tables are regenerated.
+- `CONCEPTS.md` -- defines the Radius Buffer `B`, Directional/Nearest-Site
+  Exposure, and Cross-Radius Robustness Summary vocabulary these reports use.
 - `docs/reports/2026-06-22-001-intensive-margin-results-tables-report.html` --
   reference structure for coefficient summaries plus full tables.
 - `docs/reports/2026-06-23-001-windowed-article-salience-results-report.html` --

@@ -30,7 +30,16 @@ A Record-Linkage Component containing more than one Annual-Return Site from the 
 ## Property-Price Analysis Area
 
 ### Near-Overflow Radius
-The straight-line distance threshold within which a property is treated as exposed to a storm overflow, used to build the near-property cross-sections. The main analyses are run at several such thresholds, with the others serving as robustness checks.
+The straight-line distance threshold within which a property is treated as exposed to a storm overflow, used to build the near-property cross-sections. The main analyses are run at several such thresholds, with the others serving as robustness checks. In regression specifications it is written generically as the radius buffer **B**, which takes the values 250, 500, and 1000 m across the sweep; each individual result table still reports its specific radius.
+
+### Directional Spill Exposure
+Spill exposure split by whether the contributing overflow lies upstream or downstream of the property along the river network — used to separate same-river pollution transport from generic proximity. Estimated unweighted and in an inverse-river-distance-weighted variant.
+
+### Nearest-Site Exposure
+Spill exposure measured from the single nearest overflow to a property (rather than aggregated over all overflows within the Near-Overflow Radius), typically with an upstream indicator and a river-distance control. The *one-site* sample restricts attention to properties with exactly one overflow within the radius.
+
+### Cross-Radius Robustness Summary
+A compact table reporting the preferred specification's coefficient(s) of interest across all radius buffers (250/500/1000 m) side by side. Produced as a `*_radius_robustness` artifact for the headline hedonic and public-attention analyses; for analyses without such an artifact (e.g. Directional Spill Exposure, Nearest-Site Exposure), the results report synthesizes one from the per-radius tables.
 
 ### Intensive Margin
 The effect of sewage-spill *intensity* — a continuous exposure measure such as average daily spill count or spill hours — on property values, estimated among properties within the Near-Overflow Radius of an overflow.
