@@ -48,3 +48,6 @@ A normalized time-series proxy for public search attention to sewage spills, use
 
 ### UK Media Article Count
 A time-series proxy for media coverage of sewage spills, used alongside Google Trends Search Interest to measure Public Attention.
+
+### Windowed Article Count
+A trailing-window salience measure: the UK Media Article Count summed over the past 3, 6, or 12 months up to and including a transaction's month. Contrasts with the cumulative article count (summed from the start of the sample), which rises mechanically over time; windowed counts fluctuate, capturing recent rather than accumulated attention. Built on a gap-filled monthly grid because the source stores only months with at least one article.
