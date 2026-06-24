@@ -18,6 +18,7 @@ Output:
 
 from __future__ import annotations
 
+import csv
 import html
 import re
 from pathlib import Path
@@ -31,6 +32,10 @@ OUTPUT_PATH = (
     / "docs"
     / "reports"
     / "2026-06-23-001-windowed-article-salience-results-report.html"
+)
+EFFECT_SIZE_PATH = TABLES_DIR / "did_articles_windowed_prior_effect_sizes.csv"
+EXTENSIVE_EFFECT_SIZE_PATH = (
+    TABLES_DIR / "did_articles_windowed_prior_extensive_effect_sizes.csv"
 )
 
 REPORT_DATE = "2026-06-23"
@@ -49,6 +54,46 @@ EXTENSIVE_MEASURES = [
     ("6m", "did_articles_windowed_prior_extensive_6m.tex"),
     ("12m", "did_articles_windowed_prior_extensive_12m.tex"),
 ]
+
+EFFECT_ROW_SPECS = {
+    "intensive": [
+        (
+            "effect_iqr_pct",
+            "effect_iqr_se_pct",
+            "IQR salience<br>&times; 1 SD spills (%)",
+        ),
+        (
+            "effect_sd_pct",
+            "effect_sd_se_pct",
+            "1 SD salience<br>&times; 1 SD spills (%)",
+        ),
+    ],
+    "extensive": [
+        ("effect_iqr_pct", "effect_iqr_se_pct", "IQR salience (%)"),
+        ("effect_sd_pct", "effect_sd_se_pct", "1 SD salience (%)"),
+    ],
+}
+
+SUMMARY_EFFECT_CSS = """
+    tbody tr.serow th.rowlab,
+    tbody tr.serow td,
+    tbody tr.effectse th.rowlab,
+    tbody tr.effectse td,
+    tbody tr.statrow:has(> th.rowlab:empty) th.rowlab,
+    tbody tr.statrow:has(> th.rowlab:empty) td {
+      color: var(--muted);
+      background: #f4f7f7;
+    }
+    tbody tr.effectrow th.rowlab,
+    tbody tr.effectrow td {
+      color: var(--muted);
+      background: #fbfcfc;
+      font-size: 12px;
+    }
+    tbody tr.effectrow th.rowlab { padding-left: 20px; }
+    ol.summary-scale { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 0 0 18px 22px; padding: 0; max-width: 1100px; }
+    ol.summary-scale li { margin: 3px 0; }
+"""
 
 EQUATIONS = {
     "article_salience": (
@@ -187,6 +232,93 @@ def render_measure_table(filename: str, measure: str) -> str:
     return _postprocess_table_math(rendered)
 
 
+def load_effect_sizes(
+    path: Path,
+    expected_margin: str,
+) -> dict[tuple[str, str, str], dict[str, str]]:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing effect-size summary: {path}. Re-run the corresponding "
+            "windowed article R script before rebuilding the HTML report."
+        )
+
+    rows: dict[tuple[str, str, str], dict[str, str]] = {}
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        required = {
+            "margin",
+            "market",
+            "fixed_effects",
+            "measure",
+            "p_value",
+            "effect_iqr_pct",
+            "effect_iqr_se_pct",
+            "effect_sd_pct",
+            "effect_sd_se_pct",
+        }
+        missing = required.difference(reader.fieldnames or [])
+        if missing:
+            raise ValueError(
+                f"Effect-size summary {path} is missing columns: "
+                f"{', '.join(sorted(missing))}"
+            )
+
+        for row in reader:
+            if row["margin"] != expected_margin:
+                raise ValueError(
+                    f"Expected margin {expected_margin!r} in {path}, "
+                    f"found {row['margin']!r}."
+                )
+            key = (row["fixed_effects"], row["market"], row["measure"])
+            rows[key] = row
+
+    return rows
+
+
+def _format_effect(value: str) -> str:
+    number = float(value)
+    rounded = round(number, 2)
+    if rounded == 0:
+        rounded = 0.0
+    return f"{rounded:.2f}".replace("-", "−")
+
+
+def _stars_from_p_value(value: str) -> str:
+    p_value = float(value)
+    if p_value < 0.01:
+        return '<sup class="stars">***</sup>'
+    if p_value < 0.05:
+        return '<sup class="stars">**</sup>'
+    if p_value < 0.1:
+        return '<sup class="stars">*</sup>'
+    return ""
+
+
+def _summary_effect_rows(
+    effect_sizes: dict[tuple[str, str, str], dict[str, str]],
+    fe: str,
+    measures: list[str],
+    estimate_metric: str,
+    se_metric: str,
+) -> tuple[list[str], list[str]]:
+    estimate_cells: list[str] = []
+    se_cells: list[str] = []
+    for market in ("sales", "rentals"):
+        for measure in measures:
+            key = (fe, market, measure)
+            if key not in effect_sizes:
+                raise ValueError(
+                    "Missing effect-size row for "
+                    f"fixed_effects={fe!r}, market={market!r}, measure={measure!r}"
+                )
+            row = effect_sizes[key]
+            estimate_cells.append(
+                f"{_format_effect(row[estimate_metric])}{_stars_from_p_value(row['p_value'])}"
+            )
+            se_cells.append(f"({_format_effect(row[se_metric])})")
+    return estimate_cells, se_cells
+
+
 def _find_interaction_row(parsed: dict, label_fragment: str) -> tuple[list[str], list[str]]:
     body = parsed["body"]
     for idx, row in enumerate(body):
@@ -220,7 +352,13 @@ def _summary_cells(files: list[tuple[str, str]], label_fragment: str, fe: str) -
     return sales + rentals, sales_se + rentals_se
 
 
-def render_summary_table(kind: str, files: list[tuple[str, str]], row_label: str, note: str) -> str:
+def render_summary_table(
+    kind: str,
+    files: list[tuple[str, str]],
+    row_label: str,
+    note: str,
+    effect_sizes: dict[tuple[str, str, str], dict[str, str]],
+) -> str:
     table_id = f"summary-{kind}-table"
     caption = (
         "Intensive margin: daily spill count &times; article salience"
@@ -243,9 +381,27 @@ def render_summary_table(kind: str, files: list[tuple[str, str]], row_label: str
             [
                 f'      <tr class="panel-row"><th class="panel-head" colspan="9">{fe_label}</th></tr>',
                 f'      <tr><th scope="row" class="rowlab">{row_label}</th>{coef_html}</tr>',
-                f'      <tr class="statrow"><th scope="row" class="rowlab"></th>{se_html}</tr>',
+                f'      <tr class="statrow serow"><th scope="row" class="rowlab"></th>{se_html}</tr>',
             ]
         )
+        for estimate_metric, se_metric, effect_label in EFFECT_ROW_SPECS[kind]:
+            effect_cells, effect_se_cells = _summary_effect_rows(
+                effect_sizes,
+                fe,
+                measures,
+                estimate_metric,
+                se_metric,
+            )
+            effect_html = "".join(f"<td>{cell}</td>" for cell in effect_cells)
+            effect_se_html = "".join(f"<td>{cell}</td>" for cell in effect_se_cells)
+            rows.append(
+                f'      <tr class="effectrow"><th scope="row" class="rowlab">'
+                f"{effect_label}</th>{effect_html}</tr>"
+            )
+            rows.append(
+                f'      <tr class="statrow effectse"><th scope="row" '
+                f'class="rowlab"></th>{effect_se_html}</tr>'
+            )
 
     return f"""  <figure class="tbl" id="{table_id}">
     <figcaption>{caption}</figcaption>
@@ -282,26 +438,65 @@ def build_toc() -> str:
 
 
 def build_summary_html() -> str:
-    intensive_note = (
-        "<strong>Notes:</strong> Each cell reports the coefficient of interest from "
-        "the stated fixed-effect specification; LSOA-clustered standard errors are "
-        "in parentheses. The coefficient of interest is daily spill count &times; "
-        "log article salience. Cumulative and windowed article measures differ in "
-        "scale, so compare signs and precision rather than raw magnitudes. "
-        "*** p&lt;0.01, ** p&lt;0.05, * p&lt;0.1."
+    intensive_effect_sizes = load_effect_sizes(EFFECT_SIZE_PATH, "intensive")
+    extensive_effect_sizes = load_effect_sizes(
+        EXTENSIVE_EFFECT_SIZE_PATH,
+        "extensive",
     )
-    extensive_note = intensive_note.replace(
-        "daily spill count &times; log article salience",
-        "near bin &times; log article salience",
+    intensive_note = (
+        "<strong>Notes:</strong> The coefficient row reports the coefficient of "
+        "interest from the stated fixed-effect specification; LSOA-clustered "
+        "standard errors are in parentheses. Effect rows transform the same "
+        "coefficient into approximate percent changes using transaction-sample "
+        "contrasts: the IQR salience row uses the interquartile range of the "
+        "article measure, and the 1 SD salience row uses its standard deviation; "
+        "both intensive-margin rows also scale by one standard deviation of daily "
+        "spill exposure. Scaled standard errors are in parentheses under each "
+        "effect row, and significance stars inherit the underlying interaction "
+        "p-value. Raw coefficients are not directly comparable across "
+        "salience windows because the article measures differ in empirical "
+        "support. *** p&lt;0.01, ** p&lt;0.05, * p&lt;0.1."
+    )
+    extensive_note = (
+        "<strong>Notes:</strong> The coefficient row reports the coefficient of "
+        "interest from the stated fixed-effect specification; LSOA-clustered "
+        "standard errors are in parentheses. Effect rows transform the same "
+        "coefficient into approximate percent changes in the near-far price/rent "
+        "gap using transaction-sample contrasts: the IQR salience row uses "
+        "the interquartile range of the article measure, and the 1 SD salience "
+        "row uses its standard deviation. Scaled standard errors are in "
+        "parentheses under each effect row, and significance stars inherit the "
+        "underlying interaction p-value. Raw coefficients are not directly "
+        "comparable across salience windows because the article measures differ "
+        "in empirical support. *** p&lt;0.01, ** p&lt;0.05, * p&lt;0.1."
     )
     return "\n".join(
         [
             '    <h2 id="summary">Summary<a class="toptop" href="#top">top</a></h2>',
             (
-                '    <p class="sec-intro">This section reports only the coefficient '
-                "of interest from each public-attention specification. Full "
-                "regression tables appear below; the model specifications are "
-                "repeated here so the summary coefficients can be read directly.</p>"
+                '    <p class="sec-intro">This section reports the coefficient '
+                "of interest from each public-attention specification and "
+                "comparable effect-size transformations. Full regression tables "
+                "appear below; the model specifications are repeated here so the "
+                "summary coefficients can be read directly.</p>"
+            ),
+            (
+                '    <p class="sec-intro">The summary tables also report scaled '
+                "effect sizes, allowing the cumulative, three-month, six-month, "
+                "and twelve-month salience measures to be compared on a common "
+                "empirical scale.</p>"
+            ),
+            (
+                '    <ol class="summary-scale">'
+                "<li><strong>Intensive margin:</strong> the scaled rows show the "
+                "implied percentage change associated with an interquartile-range "
+                "or one-standard-deviation increase in article salience, evaluated "
+                "at a one-standard-deviation increase in daily spill exposure.</li>"
+                "<li><strong>Extensive margin:</strong> the scaled rows show the "
+                "implied percentage change in the near&ndash;far price or rent gap "
+                "associated with an interquartile-range or one-standard-deviation "
+                "increase in article salience.</li>"
+                "</ol>"
             ),
             '    <h3 class="subsec" id="summary-intensive">Intensive margin</h3>',
             _equations_html(["windowed_intensive"]),
@@ -310,6 +505,7 @@ def build_summary_html() -> str:
                 MEASURES,
                 "Daily spill count<br>&times; log (Articles measure)",
                 intensive_note,
+                intensive_effect_sizes,
             ),
             '    <h3 class="subsec" id="summary-extensive">Extensive margin</h3>',
             _equations_html(["windowed_extensive"]),
@@ -318,6 +514,7 @@ def build_summary_html() -> str:
                 EXTENSIVE_MEASURES,
                 "Near bin<br>&times; log (Articles measure)",
                 extensive_note,
+                extensive_effect_sizes,
             ),
         ]
     )
@@ -395,7 +592,7 @@ def build_html(summary_html: str, sections_html: str) -> str:
     }};
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
-  <style>{base.CSS}  </style>
+  <style>{base.CSS}{SUMMARY_EFFECT_CSS}  </style>
 </head>
 <body>
   <div class="page" id="top">
@@ -415,7 +612,8 @@ def build_html(summary_html: str, sections_html: str) -> str:
 {sections_html}
     </main>
     <footer>
-      Generated from <code>output/tables/*.tex</code> by
+      Generated from <code>output/tables/*.tex</code> and
+      <code>output/tables/*effect_sizes.csv</code> by
       <code>scripts/python/build_windowed_article_salience_html_report.py</code>.
       Re-run the windowed article scripts, then this builder, to refresh after
       the tables are regenerated. Significance:

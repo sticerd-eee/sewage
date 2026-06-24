@@ -20,6 +20,7 @@
 #
 # Outputs:
 #   - output/tables/did_articles_windowed_prior_extensive_<WIN>m.tex
+#   - output/tables/did_articles_windowed_prior_extensive_effect_sizes.csv
 #
 # ==============================================================================
 
@@ -51,6 +52,13 @@ source(
   here::here("scripts", "R", "09_analysis", "05_news", "extensive_margin_news_utils.R"),
   local = TRUE
 )
+source(
+  here::here(
+    "scripts", "R", "09_analysis", "05_news",
+    "windowed_article_effect_size_utils.R"
+  ),
+  local = TRUE
+)
 
 
 # ==============================================================================
@@ -77,7 +85,10 @@ CONFIG <- list(
   rental_lookup_path = here::here(
     "data", "processed", "zoopla", "spill_rental_lookup.parquet"
   ),
-  output_dir = here::here("output", "tables")
+  output_dir = here::here("output", "tables"),
+  effect_size_output_path = here::here(
+    "output", "tables", "did_articles_windowed_prior_extensive_effect_sizes.csv"
+  )
 )
 
 
@@ -338,6 +349,15 @@ estimate_models <- function(dat, dat_rental, salience_col) {
   models
 }
 
+preferred_models <- function(models) {
+  list(
+    sale_msoa = models$model_sale_3,
+    sale_lsoa = models$model_sale_5,
+    rent_msoa = models$model_rent_3,
+    rent_lsoa = models$model_rent_5
+  )
+}
+
 
 # ==============================================================================
 # 6. Export Table
@@ -480,7 +500,7 @@ run_for_window <- function(window, comparison, dat, dat_rental) {
   models <- estimate_models(dat, dat_rental, salience_col)
   export_table(models, comparison, window, salience_col)
 
-  invisible(models)
+  preferred_models(models)
 }
 
 
@@ -503,12 +523,39 @@ main <- function() {
   dat <- prepare_sales_analysis_data(comparison, articles)
   dat_rental <- prepare_rental_analysis_data(comparison, articles)
 
-  purrr::walk(
+  models_by_window <- purrr::map(
     CONFIG$windows,
     run_for_window,
     comparison = comparison,
     dat = dat,
     dat_rental = dat_rental
+  )
+  names(models_by_window) <- paste0(CONFIG$windows, "m")
+
+  salience_cols <- c(
+    "Cumulative" = "log_cumulative_articles",
+    "3m" = "log_articles_3m",
+    "6m" = "log_articles_6m",
+    "12m" = "log_articles_12m"
+  )
+  cumulative_models <- estimate_models(
+    dat,
+    dat_rental,
+    salience_cols[["Cumulative"]]
+  ) |>
+    preferred_models()
+  models_by_measure <- stats::setNames(
+    c(list(cumulative_models), models_by_window[names(salience_cols)[-1L]]),
+    names(salience_cols)
+  )
+  write_windowed_article_effect_sizes(
+    models_by_measure = models_by_measure,
+    salience_cols = salience_cols,
+    sales_data = dat,
+    rental_data = dat_rental,
+    interaction_term_fn = interaction_term,
+    margin = "extensive",
+    output_path = CONFIG$effect_size_output_path
   )
 
   cat("\nScript completed successfully.\n")
@@ -518,7 +565,10 @@ main <- function() {
   invisible(
     list(
       windows = CONFIG$windows,
-      comparison = comparison$comparison_label
+      comparison = comparison$comparison_label,
+      models_by_window = models_by_window,
+      models_by_measure = models_by_measure,
+      effect_size_output_path = CONFIG$effect_size_output_path
     )
   )
 }

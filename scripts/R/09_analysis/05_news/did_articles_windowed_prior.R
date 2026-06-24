@@ -21,6 +21,7 @@
 # Outputs:
 #   - output/tables/did_articles_windowed_prior_<WIN>m.tex
 #   - output/tables/did_articles_windowed_prior_comparison.tex
+#   - output/tables/did_articles_windowed_prior_effect_sizes.csv
 #
 # ==============================================================================
 
@@ -53,6 +54,13 @@ source(
   here::here("scripts", "R", "09_analysis", "05_news", "extensive_margin_news_utils.R"),
   local = TRUE
 )
+source(
+  here::here(
+    "scripts", "R", "09_analysis", "05_news",
+    "windowed_article_effect_size_utils.R"
+  ),
+  local = TRUE
+)
 
 
 # ==============================================================================
@@ -74,7 +82,10 @@ CONFIG <- list(
   ),
   sales_path = here::here("data", "processed", "house_price.parquet"),
   rental_path = here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
-  output_dir = here::here("output", "tables")
+  output_dir = here::here("output", "tables"),
+  effect_size_output_path = here::here(
+    "output", "tables", "did_articles_windowed_prior_effect_sizes.csv"
+  )
 )
 
 
@@ -748,6 +759,21 @@ main <- function() {
   models_by_measure <- comparison_specs(dat, dat_rental, models_by_window)
   write_window_comparison_table(models_by_measure)
   print_window_comparison_summary(models_by_measure)
+  write_windowed_article_effect_sizes(
+    models_by_measure = models_by_measure,
+    salience_cols = c(
+      "Cumulative" = "log_cumulative_articles",
+      "3m" = "log_articles_3m",
+      "6m" = "log_articles_6m",
+      "12m" = "log_articles_12m"
+    ),
+    sales_data = dat,
+    rental_data = dat_rental,
+    interaction_term_fn = interaction_term,
+    margin = "intensive",
+    output_path = CONFIG$effect_size_output_path,
+    spill_col = "spill_count_daily_avg"
+  )
 
   cat("\nScript completed successfully.\n")
   cat("  Windows:", paste(CONFIG$windows, collapse = ", "), "months\n")
@@ -757,7 +783,9 @@ main <- function() {
     list(
       windows = CONFIG$windows,
       radius = CONFIG$radius,
-      models_by_window = models_by_window
+      models_by_window = models_by_window,
+      models_by_measure = models_by_measure,
+      effect_size_output_path = CONFIG$effect_size_output_path
     )
   )
 }
