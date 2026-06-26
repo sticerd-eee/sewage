@@ -7,7 +7,7 @@
 #          sites located in either upstream or downstream river waters of the
 #          property.
 #          Panel A: unweighted spill counts and hours. Panel B: spill counts and
-#          hours are weighted by inverse river distance from spill site to 
+#          hours are weighted by inverse river distance from spill site to
 #          property. Each panel includes OLS, Controls, FE, and FE + Controls.
 #
 # Author: Alina Zeltikova
@@ -140,8 +140,8 @@ dat_sales_clean <- dat_cs_sales |>
   inner_join(upstream_downstream_sales, by = c("house_id", "site_id")) |>
   mutate(log_price = log(price)) |>
   filter(
-    !is.na(spill_count_daily_avg),
-    !is.na(spill_hrs_daily_avg),
+    !is.na(spill_count_weekly_avg),
+    !is.na(spill_hrs_weekly_avg),
     !is.na(lsoa),
     !is.na(msoa),
     !is.na(property_type),
@@ -160,11 +160,11 @@ dat_sales_clean <- dat_cs_sales |>
 cat("  Sales observations (house-site pairs):", nrow(dat_sales_clean), "\n")
 
 # Keep properties with only one spill site -------------------------------------
-dat_one_site_sales <- dat_sales_clean |> 
+dat_one_site_sales <- dat_sales_clean |>
   group_by(house_id) |>
   filter(n() == 1) |>
   ungroup() |>
-  mutate(log_price = log(price)) 
+  mutate(log_price = log(price))
 
 # ==============================================================================
 # Panel B: Rentals
@@ -215,7 +215,7 @@ upstream_downstream_rentals <- import(path_upstream_downstream_rentals)
 upstream_downstream_rentals <- upstream_downstream_rentals |>
   mutate(direction=ifelse(direction==-1, 1,0), # Upstream/Downstream to binary
          dist_river_m = abs(signed_dist_m))|>
-  filter(spill_lateral_m <= 250 & rental_lateral_m <= 250 & dist_river_m <= 1000 & spill_house_euclid_m <= RAD) |>
+  filter(spill_lateral_m <= 250 & rental_lateral_m <= 250 & dist_river_m <= 1000 & spill_rental_euclid_m <= RAD) |>
   distinct()
 
 # Prepare Rental Data ----------------------------------------------------------
@@ -227,8 +227,8 @@ dat_rental_clean <- dat_cs_rentals |>
   inner_join(upstream_downstream_rentals, by = c("rental_id", "site_id")) |>
   mutate(log_price = log(listing_price)) |>
   filter(
-    !is.na(spill_count_daily_avg),
-    !is.na(spill_hrs_daily_avg),
+    !is.na(spill_count_weekly_avg),
+    !is.na(spill_hrs_weekly_avg),
     !is.na(lsoa),
     !is.na(msoa),
     !is.na(property_type),
@@ -246,13 +246,88 @@ cat("  Rental observations (rental-site pairs):", nrow(dat_rental_clean), "\n")
 
 # Keep properties with only one spill site -------------------------------------
 dat_one_site_rentals <- dat_rental_clean |>
-  group_by(rental_id) |> 
+  group_by(rental_id) |>
   filter(n() == 1) |>
   ungroup() |>
-  mutate(log_price = log(listing_price)) 
+  mutate(log_price = log(listing_price))
 
 # ==============================================================================
-# Export Tables: Spill Count Daily Average, One Site 
+# Run Models
+# ==============================================================================
+
+run_direction_models <- function(dat_sales, dat_rentals, suffix = "") {
+  # Sales: Count, no distance control
+  assign(paste0("model_sales_count_ns_1", suffix), feols(log_price ~ spill_count_weekly_avg * direction, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_count_ns_1b", suffix), feols(log_price ~ spill_count_weekly_avg * direction + property_type + old_new + duration, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_count_ns_2", suffix), feols(log_price ~ spill_count_weekly_avg * direction | lsoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_count_ns_2b", suffix), feols(log_price ~ spill_count_weekly_avg * direction | msoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_count_ns_3", suffix), feols(log_price ~ spill_count_weekly_avg * direction + property_type + old_new + duration | lsoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_count_ns_3b", suffix), feols(log_price ~ spill_count_weekly_avg * direction + property_type + old_new + duration | msoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+
+  # Sales: Count, distance control
+  assign(paste0("model_sales_count_ns_4", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_count_ns_4b", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m + property_type + old_new + duration, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_count_ns_5", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m | lsoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_count_ns_5b", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m | msoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_count_ns_6", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m + property_type + old_new + duration | lsoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_count_ns_6b", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m + property_type + old_new + duration | msoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+
+  # Sales: Hours, no distance control
+  assign(paste0("model_sales_hrs_ns_1", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_hrs_ns_1b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + property_type + old_new + duration, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_hrs_ns_2", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction | lsoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_hrs_ns_2b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction | msoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_hrs_ns_3", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + property_type + old_new + duration | lsoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_hrs_ns_3b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + property_type + old_new + duration | msoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+
+  # Sales: Hours, distance control
+  assign(paste0("model_sales_hrs_ns_4", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_hrs_ns_4b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m + property_type + old_new + duration, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_hrs_ns_5", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m | lsoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_hrs_ns_5b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m | msoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_hrs_ns_6", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m + property_type + old_new + duration | lsoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_sales_hrs_ns_6b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m + property_type + old_new + duration | msoa, data = dat_sales, vcov = "hetero"), envir = .GlobalEnv)
+
+  # Rentals: Count, no distance control
+  assign(paste0("model_rentals_count_ns_1", suffix), feols(log_price ~ spill_count_weekly_avg * direction, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_count_ns_1b", suffix), feols(log_price ~ spill_count_weekly_avg * direction + property_type + bedrooms + bathrooms, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_count_ns_2", suffix), feols(log_price ~ spill_count_weekly_avg * direction | lsoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_count_ns_2b", suffix), feols(log_price ~ spill_count_weekly_avg * direction | msoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_count_ns_3", suffix), feols(log_price ~ spill_count_weekly_avg * direction + property_type + bedrooms + bathrooms | lsoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_count_ns_3b", suffix), feols(log_price ~ spill_count_weekly_avg * direction + property_type + bedrooms + bathrooms | msoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+
+  # Rentals: Count, distance control
+  assign(paste0("model_rentals_count_ns_4", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_count_ns_4b", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m + property_type + bedrooms + bathrooms, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_count_ns_5", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m | lsoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_count_ns_5b", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m | msoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_count_ns_6", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m + property_type + bedrooms + bathrooms | lsoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_count_ns_6b", suffix), feols(log_price ~ spill_count_weekly_avg * direction + dist_river_m + property_type + bedrooms + bathrooms | msoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+
+  # Rentals: Hours, no distance control
+  assign(paste0("model_rentals_hrs_ns_1", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_hrs_ns_1b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + property_type + bedrooms + bathrooms, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_hrs_ns_2", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction | lsoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_hrs_ns_2b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction | msoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_hrs_ns_3", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + property_type + bedrooms + bathrooms | lsoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_hrs_ns_3b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + property_type + bedrooms + bathrooms | msoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+
+  # Rentals: Hours, distance control
+  assign(paste0("model_rentals_hrs_ns_4", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_hrs_ns_4b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m + property_type + bedrooms + bathrooms, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_hrs_ns_5", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m | lsoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_hrs_ns_5b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m | msoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_hrs_ns_6", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m + property_type + bedrooms + bathrooms | lsoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+  assign(paste0("model_rentals_hrs_ns_6b", suffix), feols(log_price ~ spill_hrs_weekly_avg * direction + dist_river_m + property_type + bedrooms + bathrooms | msoa, data = dat_rentals, vcov = "hetero"), envir = .GlobalEnv)
+
+  invisible(NULL)
+}
+
+cat("Estimating one spill site models...\n")
+run_direction_models(dat_one_site_sales, dat_one_site_rentals, "_one")
+
+# ==============================================================================
+# Export Tables: Spill Count Daily Average, One Site
 # ==============================================================================
 
 cat("Exporting spill count one site table...\n")
@@ -260,9 +335,9 @@ cat("Exporting spill count one site table...\n")
 # Coefficient labels
 coef_labels_count <- c(
   "(Intercept)" = "Constant",
-  "spill_count_daily_avg" = "Daily spill count", 
+  "spill_count_weekly_avg" = "Spills per week (avg.)",
   "direction" = "Upstream spill site",
-  "spill_count_daily_avg:direction" = "{Daily count \\\\ $\\times$ Upstream}"
+  "spill_count_weekly_avg:direction" = "{Count per week \\\\ $\\times$ Upstream}"
 )
 # Goodness of fit map
 gof_map <- tibble::tribble(
@@ -293,12 +368,12 @@ panels_count <- list(
 add_rows <- tibble::tribble(
   ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" , ~"(9)" , ~"(10)" , ~"(11)" , ~"(12)" ,
   "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"   , "No"    , "Yes"   ,
-  "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"  
+  "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"
 )
 attr(add_rows, "position") <- "coef_end"
 # Notes
 custom_notes_count <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample is restricted to properties with exactly one storm overflow within 250m in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded at the single overflow within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample is restricted to properties with exactly one storm overflow within 250m in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded at the single overflow within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 # Export table
 table_latex_count <- modelsummary::modelsummary(
@@ -313,7 +388,7 @@ table_latex_count <- modelsummary::modelsummary(
   gof_map = gof_map,
   add_rows = add_rows,
   notes = " ",
-  escape = FALSE,  
+  escape = FALSE,
   title = "Effect of Sewage Spills (Count) on Property Values by Direction: One Site Sample"
 )
 # Force table environment to [H]
@@ -349,9 +424,9 @@ cat("Exporting spill count one site + distance table...\n")
 # Coefficient labels
 coef_labels_count <- c(
   "(Intercept)" = "Constant",
-  "spill_count_daily_avg" = "Daily spill count", 
+  "spill_count_weekly_avg" = "Spills per week (avg.)",
   "direction" = "Upstream spill site",
-  "spill_count_daily_avg:direction" = "{Daily count \\\\ $\\times$ Upstream}",
+  "spill_count_weekly_avg:direction" = "{Count per week \\\\ $\\times$ Upstream}",
   "dist_river_m" = "River distance"
 )
 # Goodness of fit map
@@ -383,12 +458,12 @@ panels_count <- list(
 add_rows <- tibble::tribble(
   ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" , ~"(9)" , ~"(10)" , ~"(11)" , ~"(12)" ,
   "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"   , "No"    , "Yes"   ,
-  "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"   
+  "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"
 )
 attr(add_rows, "position") <- "coef_end"
 # Notes
 custom_notes_count <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample is restricted to properties with exactly one storm overflow within 250m in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded at the single overflow within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample is restricted to properties with exactly one storm overflow within 250m in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded at the single overflow within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 # Export table
 table_latex_count <- modelsummary::modelsummary(
@@ -403,7 +478,7 @@ table_latex_count <- modelsummary::modelsummary(
   gof_map = gof_map,
   add_rows = add_rows,
   notes = " ",
-  escape = FALSE,  
+  escape = FALSE,
   title = "Effect of Sewage Spills (Count) on Property Values by Direction and Distance: One Site Sample"
 )
 # Force table environment to [H]
@@ -431,7 +506,7 @@ writeLines(table_latex_count, output_path_count)
 record_export(output_path_count)
 
 # ==============================================================================
-# Export Tables: Spill Hours Daily Average, One Site 
+# Export Tables: Spill Hours Daily Average, One Site
 # ==============================================================================
 
 cat("Exporting spill hours one site table...\n")
@@ -439,9 +514,9 @@ cat("Exporting spill hours one site table...\n")
 # Coefficient labels
 coef_labels_hrs <- c(
   "(Intercept)" = "Constant",
-  "spill_hrs_daily_avg" = "Daily spill hours", 
+  "spill_hrs_weekly_avg" = "Spill hours per week (avg.)",
   "direction" = "Upstream spill site",
-  "spill_hrs_daily_avg:direction" = "{Daily hours \\\\ $\\times$ Upstream}"
+  "spill_hrs_weekly_avg:direction" = "{Hours per week \\\\ $\\times$ Upstream}"
 )
 # Goodness of fit map
 gof_map <- tibble::tribble(
@@ -472,12 +547,12 @@ panels_hrs <- list(
 add_rows <- tibble::tribble(
   ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" , ~"(9)" , ~"(10)" , ~"(11)" , ~"(12)" ,
   "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"   , "No"    , "Yes"   ,
-  "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"  
+  "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"
 )
 attr(add_rows, "position") <- "coef_end"
 # Notes
 custom_notes_hrs <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample is restricted to properties with exactly one storm overflow within 250m in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per day recorded at the single overflow within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample is restricted to properties with exactly one storm overflow within 250m in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded at the single overflow within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 # Export table
 table_latex_hrs <- modelsummary::modelsummary(
@@ -492,7 +567,7 @@ table_latex_hrs <- modelsummary::modelsummary(
   gof_map = gof_map,
   add_rows = add_rows,
   notes = " ",
-  escape = FALSE,  
+  escape = FALSE,
   title = "Effect of Sewage Spills (Hours) on Property Values by Direction: One Site Sample"
 )
 # Force table environment to [H]
@@ -528,9 +603,9 @@ cat("Exporting spill hours one site + distance table...\n")
 # Coefficient labels
 coef_labels_hrs <- c(
   "(Intercept)" = "Constant",
-  "spill_hrs_daily_avg" = "Daily spill hours", 
+  "spill_hrs_weekly_avg" = "Spill hours per week (avg.)",
   "direction" = "Upstream spill site",
-  "spill_hrs_daily_avg:direction" = "{Daily hours \\\\ $\\times$ Upstream}",
+  "spill_hrs_weekly_avg:direction" = "{Hours per week \\\\ $\\times$ Upstream}",
   "dist_river_m" = "River distance"
 )
 # Goodness of fit map
@@ -562,12 +637,12 @@ panels_hrs <- list(
 add_rows <- tibble::tribble(
   ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" , ~"(9)" , ~"(10)" , ~"(11)" , ~"(12)" ,
   "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"   , "No"    , "Yes"   ,
-  "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"   
+  "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"
 )
 attr(add_rows, "position") <- "coef_end"
 # Notes
 custom_notes_hrs <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample is restricted to properties with exactly one storm overflow within 250m in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per day recorded at the single overflow within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample is restricted to properties with exactly one storm overflow within 250m in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded at the single overflow within 250m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 # Export table
 table_latex_hrs <- modelsummary::modelsummary(
@@ -582,7 +657,7 @@ table_latex_hrs <- modelsummary::modelsummary(
   gof_map = gof_map,
   add_rows = add_rows,
   notes = " ",
-  escape = FALSE,  
+  escape = FALSE,
   title = "Effect of Sewage Spills (Hours) on Property Values by Direction and Distance: One Site Sample"
 )
 # Force table environment to [H]

@@ -197,7 +197,7 @@ ud_rentals_raw <- import(
 # 750-1000m ring is all three equal to zero. Writing the formula as
 #   spill * direction * near0 + spill * direction * near1 + spill * direction * near2
 # reproduces the fully-saturated ring interaction with predictable coefficient
-# names (e.g. spill_count_daily_avg:direction:near0).
+# names (e.g. spill_count_weekly_avg:direction:near0).
 
 add_ring_dummies <- function(df) {
   df |>
@@ -241,7 +241,7 @@ dat_nearest_sales <- dat_cs_sales |>
   inner_join(upstream_downstream_sales, by = c("house_id", "site_id")) |>
   mutate(log_price = log(price)) |>
   filter(
-    !is.na(spill_count_daily_avg), !is.na(spill_hrs_daily_avg),
+    !is.na(spill_count_weekly_avg), !is.na(spill_hrs_weekly_avg),
     !is.na(lsoa), !is.na(msoa), !is.na(property_type), !is.na(old_new),
     !is.na(duration), !is.na(direction), !is.na(distance_m)
   ) |>
@@ -289,7 +289,7 @@ dat_nearest_rentals <- dat_cs_rentals |>
   inner_join(upstream_downstream_rentals, by = c("rental_id", "site_id")) |>
   mutate(log_price = log(listing_price)) |>
   filter(
-    !is.na(spill_count_daily_avg), !is.na(spill_hrs_daily_avg),
+    !is.na(spill_count_weekly_avg), !is.na(spill_hrs_weekly_avg),
     !is.na(lsoa), !is.na(msoa), !is.na(property_type), !is.na(bedrooms),
     !is.na(bathrooms), !is.na(direction), !is.na(distance_m)
   ) |>
@@ -315,102 +315,102 @@ cat("  Rental nearest-site properties:", nrow(dat_nearest_rentals), "\n")
 cat("Estimating spill count models...\n")
 
 model_sales_count_1 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_count_1b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + property_type + old_new + duration,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + property_type + old_new + duration,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_count_2 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 | lsoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 | lsoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_count_2b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 | msoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 | msoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_count_3 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + property_type + old_new + duration | lsoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + property_type + old_new + duration | lsoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_count_3b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + property_type + old_new + duration | msoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + property_type + old_new + duration | msoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 # with river-distance control
 model_sales_count_4 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_count_4b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m + property_type + old_new + duration,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m + property_type + old_new + duration,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_count_5 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m | lsoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m | lsoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_count_5b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m | msoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m | msoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_count_6 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m + property_type + old_new + duration | lsoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m + property_type + old_new + duration | lsoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_count_6b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m + property_type + old_new + duration | msoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m + property_type + old_new + duration | msoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 
 # ---- Spill Count: Rentals --------------------------------------------------
 model_rentals_count_1 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_1b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + property_type + bedrooms + bathrooms,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + property_type + bedrooms + bathrooms,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_2 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 | lsoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 | lsoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_2b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 | msoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 | msoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_3 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + property_type + bedrooms + bathrooms | lsoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + property_type + bedrooms + bathrooms | lsoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_3b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + property_type + bedrooms + bathrooms | msoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + property_type + bedrooms + bathrooms | msoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_4 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_4b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_5 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m | lsoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m | lsoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_5b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m | msoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m | msoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_6 <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms | lsoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms | lsoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_count_6b <- feols(
-  log_price ~ spill_count_daily_avg * direction * near0 + spill_count_daily_avg * direction * near1 + spill_count_daily_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms | msoa,
+  log_price ~ spill_count_weekly_avg * direction * near0 + spill_count_weekly_avg * direction * near1 + spill_count_weekly_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms | msoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 
@@ -418,101 +418,101 @@ model_rentals_count_6b <- feols(
 cat("Estimating spill hours models...\n")
 
 model_sales_hrs_1 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_1b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + property_type + old_new + duration,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + property_type + old_new + duration,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_2 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 | lsoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 | lsoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_2b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 | msoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 | msoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_3 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + property_type + old_new + duration | lsoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + property_type + old_new + duration | lsoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_3b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + property_type + old_new + duration | msoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + property_type + old_new + duration | msoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_4 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_4b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m + property_type + old_new + duration,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m + property_type + old_new + duration,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_5 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m | lsoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m | lsoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_5b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m | msoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m | msoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_6 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m + property_type + old_new + duration | lsoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m + property_type + old_new + duration | lsoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 model_sales_hrs_6b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m + property_type + old_new + duration | msoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m + property_type + old_new + duration | msoa,
   data = dat_nearest_sales, vcov = "hetero"
 )
 
 # ---- Spill Hours: Rentals --------------------------------------------------
 model_rentals_hrs_1 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_1b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + property_type + bedrooms + bathrooms,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + property_type + bedrooms + bathrooms,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_2 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 | lsoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 | lsoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_2b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 | msoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 | msoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_3 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + property_type + bedrooms + bathrooms | lsoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + property_type + bedrooms + bathrooms | lsoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_3b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + property_type + bedrooms + bathrooms | msoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + property_type + bedrooms + bathrooms | msoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_4 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_4b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_5 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m | lsoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m | lsoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_5b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m | msoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m | msoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_6 <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms | lsoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms | lsoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 model_rentals_hrs_6b <- feols(
-  log_price ~ spill_hrs_daily_avg * direction * near0 + spill_hrs_daily_avg * direction * near1 + spill_hrs_daily_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms | msoa,
+  log_price ~ spill_hrs_weekly_avg * direction * near0 + spill_hrs_weekly_avg * direction * near1 + spill_hrs_weekly_avg * direction * near2 + dist_river_m + property_type + bedrooms + bathrooms | msoa,
   data = dat_nearest_rentals, vcov = "hetero"
 )
 
@@ -559,7 +559,7 @@ build_coef_map <- function(spill_var, spill_label, with_dist) {
 
 # ---- Table 1: Count (no distance control) ----------------------------------
 cat("Exporting Table 1 (count)...\n")
-coef_labels_count <- build_coef_map("spill_count_daily_avg", "Daily spill count", with_dist = FALSE)
+coef_labels_count <- build_coef_map("spill_count_weekly_avg", "Spills per week (avg.)", with_dist = FALSE)
 panels_count <- list(
   "House Sales" = list(
     "(1)" = model_sales_count_1, "(2)" = model_sales_count_1b,
@@ -584,7 +584,7 @@ tbl <- modelsummary::modelsummary(
 tbl <- postprocess_table(
   tbl,
   label = "tbl:ud-decay-ring-triple-count",
-  notes = make_notes("Spill exposure is the average number of spill events per day (12/24 count) at the nearest overflow from January 2021 to the transaction date.")
+  notes = make_notes("Spill exposure is the average number of spill events per week (12/24 count) at the nearest overflow from January 2021 to the transaction date.")
 )
 out_path <- file.path(output_dir, "ud_decay_ring_triple_count.tex")
 writeLines(tbl, out_path)
@@ -592,7 +592,7 @@ record_export(out_path)
 
 # ---- Table 2: Count + river distance ---------------------------------------
 cat("Exporting Table 2 (count + river distance)...\n")
-coef_labels_count_dist <- build_coef_map("spill_count_daily_avg", "Daily spill count", with_dist = TRUE)
+coef_labels_count_dist <- build_coef_map("spill_count_weekly_avg", "Spills per week (avg.)", with_dist = TRUE)
 panels_count_dist <- list(
   "House Sales" = list(
     "(1)" = model_sales_count_4, "(2)" = model_sales_count_4b,
@@ -617,7 +617,7 @@ tbl <- modelsummary::modelsummary(
 tbl <- postprocess_table(
   tbl,
   label = "tbl:ud-decay-ring-triple-count-distance",
-  notes = make_notes("Spill exposure is the average number of spill events per day (12/24 count) at the nearest overflow from January 2021 to the transaction date.")
+  notes = make_notes("Spill exposure is the average number of spill events per week (12/24 count) at the nearest overflow from January 2021 to the transaction date.")
 )
 out_path <- file.path(output_dir, "ud_decay_ring_triple_count_distance.tex")
 writeLines(tbl, out_path)
@@ -625,7 +625,7 @@ record_export(out_path)
 
 # ---- Table 3: Hours (no distance control) ----------------------------------
 cat("Exporting Table 3 (hours)...\n")
-coef_labels_hrs <- build_coef_map("spill_hrs_daily_avg", "Daily spill hours", with_dist = FALSE)
+coef_labels_hrs <- build_coef_map("spill_hrs_weekly_avg", "Spill hours per week (avg.)", with_dist = FALSE)
 panels_hrs <- list(
   "House Sales" = list(
     "(1)" = model_sales_hrs_1, "(2)" = model_sales_hrs_1b,
@@ -650,7 +650,7 @@ tbl <- modelsummary::modelsummary(
 tbl <- postprocess_table(
   tbl,
   label = "tbl:ud-decay-ring-triple-hrs",
-  notes = make_notes("Spill exposure is the average total spill hours per day at the nearest overflow from January 2021 to the transaction date.")
+  notes = make_notes("Spill exposure is the average total spill hours per week at the nearest overflow from January 2021 to the transaction date.")
 )
 out_path <- file.path(output_dir, "ud_decay_ring_triple_hrs.tex")
 writeLines(tbl, out_path)
@@ -658,7 +658,7 @@ record_export(out_path)
 
 # ---- Table 4: Hours + river distance ---------------------------------------
 cat("Exporting Table 4 (hours + river distance)...\n")
-coef_labels_hrs_dist <- build_coef_map("spill_hrs_daily_avg", "Daily spill hours", with_dist = TRUE)
+coef_labels_hrs_dist <- build_coef_map("spill_hrs_weekly_avg", "Spill hours per week (avg.)", with_dist = TRUE)
 panels_hrs_dist <- list(
   "House Sales" = list(
     "(1)" = model_sales_hrs_4, "(2)" = model_sales_hrs_4b,
@@ -683,7 +683,7 @@ tbl <- modelsummary::modelsummary(
 tbl <- postprocess_table(
   tbl,
   label = "tbl:ud-decay-ring-triple-hrs-distance",
-  notes = make_notes("Spill exposure is the average total spill hours per day at the nearest overflow from January 2021 to the transaction date.")
+  notes = make_notes("Spill exposure is the average total spill hours per week at the nearest overflow from January 2021 to the transaction date.")
 )
 out_path <- file.path(output_dir, "ud_decay_ring_triple_hrs_distance.tex")
 writeLines(tbl, out_path)

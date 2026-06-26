@@ -159,8 +159,8 @@ dat_sales_clean <- dat_cs_sales |>
   inner_join(upstream_downstream_sales, by = c("house_id", "site_id")) |>
   mutate(log_price = log(price)) |>
   filter(
-    !is.na(spill_count_daily_avg),
-    !is.na(spill_hrs_daily_avg),
+    !is.na(spill_count_weekly_avg),
+    !is.na(spill_hrs_weekly_avg),
     !is.na(lsoa),
     !is.na(msoa),
     !is.na(property_type),
@@ -248,8 +248,8 @@ dat_rental_clean <- dat_cs_rentals |>
   inner_join(upstream_downstream_rentals, by = c("rental_id", "site_id")) |>
   mutate(log_price = log(listing_price)) |>
   filter(
-    !is.na(spill_count_daily_avg),
-    !is.na(spill_hrs_daily_avg),
+    !is.na(spill_count_weekly_avg),
+    !is.na(spill_hrs_weekly_avg),
     !is.na(lsoa),
     !is.na(msoa),
     !is.na(property_type),
@@ -309,45 +309,45 @@ estimate_bin <- function(near_label) {
   
   list(
     # Sales: spill count - no control by distance
-    sales_count_1  = feols(log_price ~ spill_count_daily_avg * direction * bin_near, data = dat_sales_pair, vcov = "hetero"),
-    sales_count_1b = feols(log_price ~ spill_count_daily_avg * direction * bin_near + property_type + old_new + duration, data = dat_sales_pair, vcov = "hetero"),
-    sales_count_2b = feols(log_price ~ spill_count_daily_avg * direction * bin_near | msoa, data = dat_sales_pair, vcov = "hetero"),
-    sales_count_3b = feols(log_price ~ spill_count_daily_avg * direction * bin_near + property_type + old_new + duration | msoa, data = dat_sales_pair, vcov = "hetero"),
+    sales_count_1  = feols(log_price ~ spill_count_weekly_avg * direction * bin_near, data = dat_sales_pair, vcov = "hetero"),
+    sales_count_1b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + property_type + old_new + duration, data = dat_sales_pair, vcov = "hetero"),
+    sales_count_2b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near | msoa, data = dat_sales_pair, vcov = "hetero"),
+    sales_count_3b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + property_type + old_new + duration | msoa, data = dat_sales_pair, vcov = "hetero"),
     # Sales: spill count - control for river distance
-    sales_count_4  = feols(log_price ~ spill_count_daily_avg * direction * bin_near + dist_river_m, data = dat_sales_pair, vcov = "hetero"),
-    sales_count_4b = feols(log_price ~ spill_count_daily_avg * direction * bin_near + dist_river_m + property_type + old_new + duration, data = dat_sales_pair, vcov = "hetero"),
-    sales_count_5b = feols(log_price ~ spill_count_daily_avg * direction * bin_near + dist_river_m | msoa, data = dat_sales_pair, vcov = "hetero"),
-    sales_count_6b = feols(log_price ~ spill_count_daily_avg * direction * bin_near + dist_river_m + property_type + old_new + duration | msoa, data = dat_sales_pair, vcov = "hetero"),
+    sales_count_4  = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + dist_river_m, data = dat_sales_pair, vcov = "hetero"),
+    sales_count_4b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + dist_river_m + property_type + old_new + duration, data = dat_sales_pair, vcov = "hetero"),
+    sales_count_5b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + dist_river_m | msoa, data = dat_sales_pair, vcov = "hetero"),
+    sales_count_6b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + dist_river_m + property_type + old_new + duration | msoa, data = dat_sales_pair, vcov = "hetero"),
     # Sales: spill hours - no control by distance
-    sales_hrs_1  = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near, data = dat_sales_pair, vcov = "hetero"),
-    sales_hrs_1b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + property_type + old_new + duration, data = dat_sales_pair, vcov = "hetero"),
-    sales_hrs_2b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near | msoa, data = dat_sales_pair, vcov = "hetero"),
-    sales_hrs_3b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + property_type + old_new + duration | msoa, data = dat_sales_pair, vcov = "hetero"),
+    sales_hrs_1  = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near, data = dat_sales_pair, vcov = "hetero"),
+    sales_hrs_1b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + property_type + old_new + duration, data = dat_sales_pair, vcov = "hetero"),
+    sales_hrs_2b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near | msoa, data = dat_sales_pair, vcov = "hetero"),
+    sales_hrs_3b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + property_type + old_new + duration | msoa, data = dat_sales_pair, vcov = "hetero"),
     # Sales: spill hours - control for river distance
-    sales_hrs_4  = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + dist_river_m, data = dat_sales_pair, vcov = "hetero"),
-    sales_hrs_4b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + dist_river_m + property_type + old_new + duration, data = dat_sales_pair, vcov = "hetero"),
-    sales_hrs_5b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + dist_river_m | msoa, data = dat_sales_pair, vcov = "hetero"),
-    sales_hrs_6b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + dist_river_m + property_type + old_new + duration | msoa, data = dat_sales_pair, vcov = "hetero"),
+    sales_hrs_4  = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + dist_river_m, data = dat_sales_pair, vcov = "hetero"),
+    sales_hrs_4b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + dist_river_m + property_type + old_new + duration, data = dat_sales_pair, vcov = "hetero"),
+    sales_hrs_5b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + dist_river_m | msoa, data = dat_sales_pair, vcov = "hetero"),
+    sales_hrs_6b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + dist_river_m + property_type + old_new + duration | msoa, data = dat_sales_pair, vcov = "hetero"),
     # Rentals: spill count - no control by distance
-    rentals_count_1  = feols(log_price ~ spill_count_daily_avg * direction * bin_near, data = dat_rental_pair, vcov = "hetero"),
-    rentals_count_1b = feols(log_price ~ spill_count_daily_avg * direction * bin_near + property_type + bedrooms + bathrooms, data = dat_rental_pair, vcov = "hetero"),
-    rentals_count_2b = feols(log_price ~ spill_count_daily_avg * direction * bin_near | msoa, data = dat_rental_pair, vcov = "hetero"),
-    rentals_count_3b = feols(log_price ~ spill_count_daily_avg * direction * bin_near + property_type + bedrooms + bathrooms | msoa, data = dat_rental_pair, vcov = "hetero"),
+    rentals_count_1  = feols(log_price ~ spill_count_weekly_avg * direction * bin_near, data = dat_rental_pair, vcov = "hetero"),
+    rentals_count_1b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + property_type + bedrooms + bathrooms, data = dat_rental_pair, vcov = "hetero"),
+    rentals_count_2b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near | msoa, data = dat_rental_pair, vcov = "hetero"),
+    rentals_count_3b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + property_type + bedrooms + bathrooms | msoa, data = dat_rental_pair, vcov = "hetero"),
     # Rentals: spill count - control for river distance
-    rentals_count_4  = feols(log_price ~ spill_count_daily_avg * direction * bin_near + dist_river_m, data = dat_rental_pair, vcov = "hetero"),
-    rentals_count_4b = feols(log_price ~ spill_count_daily_avg * direction * bin_near + dist_river_m + property_type + bedrooms + bathrooms, data = dat_rental_pair, vcov = "hetero"),
-    rentals_count_5b = feols(log_price ~ spill_count_daily_avg * direction * bin_near + dist_river_m | msoa, data = dat_rental_pair, vcov = "hetero"),
-    rentals_count_6b = feols(log_price ~ spill_count_daily_avg * direction * bin_near + dist_river_m + property_type + bedrooms + bathrooms | msoa, data = dat_rental_pair, vcov = "hetero"),
+    rentals_count_4  = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + dist_river_m, data = dat_rental_pair, vcov = "hetero"),
+    rentals_count_4b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + dist_river_m + property_type + bedrooms + bathrooms, data = dat_rental_pair, vcov = "hetero"),
+    rentals_count_5b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + dist_river_m | msoa, data = dat_rental_pair, vcov = "hetero"),
+    rentals_count_6b = feols(log_price ~ spill_count_weekly_avg * direction * bin_near + dist_river_m + property_type + bedrooms + bathrooms | msoa, data = dat_rental_pair, vcov = "hetero"),
     # Rentals: spill hours - no control by distance
-    rentals_hrs_1  = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near, data = dat_rental_pair, vcov = "hetero"),
-    rentals_hrs_1b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + property_type + bedrooms + bathrooms, data = dat_rental_pair, vcov = "hetero"),
-    rentals_hrs_2b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near | msoa, data = dat_rental_pair, vcov = "hetero"),
-    rentals_hrs_3b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + property_type + bedrooms + bathrooms | msoa, data = dat_rental_pair, vcov = "hetero"),
+    rentals_hrs_1  = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near, data = dat_rental_pair, vcov = "hetero"),
+    rentals_hrs_1b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + property_type + bedrooms + bathrooms, data = dat_rental_pair, vcov = "hetero"),
+    rentals_hrs_2b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near | msoa, data = dat_rental_pair, vcov = "hetero"),
+    rentals_hrs_3b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + property_type + bedrooms + bathrooms | msoa, data = dat_rental_pair, vcov = "hetero"),
     # Rentals: spill hours - control for river distance
-    rentals_hrs_4  = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + dist_river_m, data = dat_rental_pair, vcov = "hetero"),
-    rentals_hrs_4b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + dist_river_m + property_type + bedrooms + bathrooms, data = dat_rental_pair, vcov = "hetero"),
-    rentals_hrs_5b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + dist_river_m | msoa, data = dat_rental_pair, vcov = "hetero"),
-    rentals_hrs_6b = feols(log_price ~ spill_hrs_daily_avg * direction * bin_near + dist_river_m + property_type + bedrooms + bathrooms | msoa, data = dat_rental_pair, vcov = "hetero")
+    rentals_hrs_4  = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + dist_river_m, data = dat_rental_pair, vcov = "hetero"),
+    rentals_hrs_4b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + dist_river_m + property_type + bedrooms + bathrooms, data = dat_rental_pair, vcov = "hetero"),
+    rentals_hrs_5b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + dist_river_m | msoa, data = dat_rental_pair, vcov = "hetero"),
+    rentals_hrs_6b = feols(log_price ~ spill_hrs_weekly_avg * direction * bin_near + dist_river_m + property_type + bedrooms + bathrooms | msoa, data = dat_rental_pair, vcov = "hetero")
   )
 }
 
@@ -436,18 +436,18 @@ cat("Exporting spill count table...\n")
 # Coefficient labels
 coef_labels_count <- c(
   "(Intercept)"                              = "Constant",
-  "spill_count_daily_avg"                    = "Daily spill count",
+  "spill_count_weekly_avg"                    = "Spills per week (avg.)",
   "direction"                                = "Upstream",
   "bin_near"                                 = "Near ring",
-  "spill_count_daily_avg:direction"          = "Count $\\times$ Upstream",
-  "spill_count_daily_avg:bin_near"           = "Count $\\times$ Near",
+  "spill_count_weekly_avg:direction"          = "Count $\\times$ Upstream",
+  "spill_count_weekly_avg:bin_near"           = "Count $\\times$ Near",
   "direction:bin_near"                       = "Upstream $\\times$ Near",
-  "spill_count_daily_avg:direction:bin_near" = "{Count $\\times$ Upstream \\\\ $\\times$ Near}"
+  "spill_count_weekly_avg:direction:bin_near" = "{Count $\\times$ Upstream \\\\ $\\times$ Near}"
 )
 
 # Notes
 custom_notes_count <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents nearest-site difference-in-differences estimates of the relationship between sewage spill exposure and property values in England, 2021--2023. Each column group pools one near ring (0--250m, 250--500m, 500--750m) with the common 750--1000m reference ring; ``Near ring'' equals one for properties in the near ring and zero in the reference. Each property is matched to its single nearest overflow within 250m (lateral) of a river and 1000m of each other along the river. The dependent variable is the log transaction price in Panel A and the log weekly asking rent in Panel B. Spill exposure is measured as the average number of spill events per day (12/24 count) recorded at the nearest overflow from January 2021 to the transaction date. ``Upstream'' equals one when the site is upstream of the property along the river; the triple interaction (count $\\\\times$ upstream $\\\\times$ near ring) gives the difference in the upstream spill gradient between the near ring and the reference. Property controls include type, new build status and tenure for sales; and type, bedrooms and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents nearest-site difference-in-differences estimates of the relationship between sewage spill exposure and property values in England, 2021--2023. Each column group pools one near ring (0--250m, 250--500m, 500--750m) with the common 750--1000m reference ring; ``Near ring'' equals one for properties in the near ring and zero in the reference. Each property is matched to its single nearest overflow within 250m (lateral) of a river and 1000m of each other along the river. The dependent variable is the log transaction price in Panel A and the log weekly asking rent in Panel B. Spill exposure is measured as the average number of spill events per week (12/24 count) recorded at the nearest overflow from January 2021 to the transaction date. ``Upstream'' equals one when the site is upstream of the property along the river; the triple interaction (count $\\\\times$ upstream $\\\\times$ near ring) gives the difference in the upstream spill gradient between the near ring and the reference. Property controls include type, new build status and tenure for sales; and type, bedrooms and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Models without river-distance control
@@ -496,18 +496,18 @@ cat("Exporting spill hours table...\n")
 # Coefficient labels
 coef_labels_hrs <- c(
   "(Intercept)"                            = "Constant",
-  "spill_hrs_daily_avg"                    = "Daily spill hours",
+  "spill_hrs_weekly_avg"                    = "Spill hours per week (avg.)",
   "direction"                              = "Upstream",
   "bin_near"                               = "Near ring",
-  "spill_hrs_daily_avg:direction"          = "Hours $\\times$ Upstream",
-  "spill_hrs_daily_avg:bin_near"           = "Hours $\\times$ Near",
+  "spill_hrs_weekly_avg:direction"          = "Hours $\\times$ Upstream",
+  "spill_hrs_weekly_avg:bin_near"           = "Hours $\\times$ Near",
   "direction:bin_near"                     = "Upstream $\\times$ Near",
-  "spill_hrs_daily_avg:direction:bin_near" = "{Hours $\\times$ Upstream \\\\ $\\times$ Near}"
+  "spill_hrs_weekly_avg:direction:bin_near" = "{Hours $\\times$ Upstream \\\\ $\\times$ Near}"
 )
 
 # Notes
 custom_notes_hrs <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents nearest-site difference-in-differences estimates of the relationship between sewage spill exposure and property values in England, 2021--2023. Each column group pools one near ring (0--250m, 250--500m, 500--750m) with the common 750--1000m reference ring; ``Near ring'' equals one for properties in the near ring and zero in the reference. Each property is matched to its single nearest overflow within 250m (lateral) of a river and 1000m of each other along the river. The dependent variable is the log transaction price in Panel A and the log weekly asking rent in Panel B. Spill exposure is measured as the average total number of spill hours per day recorded at the nearest overflow from January 2021 to the transaction date. ``Upstream'' equals one when the site is upstream of the property along the river; the triple interaction (hours $\\\\times$ upstream $\\\\times$ near ring) gives the difference in the upstream spill gradient between the near ring and the reference. Property controls include type, new build status and tenure for sales; and type, bedrooms and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents nearest-site difference-in-differences estimates of the relationship between sewage spill exposure and property values in England, 2021--2023. Each column group pools one near ring (0--250m, 250--500m, 500--750m) with the common 750--1000m reference ring; ``Near ring'' equals one for properties in the near ring and zero in the reference. Each property is matched to its single nearest overflow within 250m (lateral) of a river and 1000m of each other along the river. The dependent variable is the log transaction price in Panel A and the log weekly asking rent in Panel B. Spill exposure is measured as the average total number of spill hours per week recorded at the nearest overflow from January 2021 to the transaction date. ``Upstream'' equals one when the site is upstream of the property along the river; the triple interaction (hours $\\\\times$ upstream $\\\\times$ near ring) gives the difference in the upstream spill gradient between the near ring and the reference. Property controls include type, new build status and tenure for sales; and type, bedrooms and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Models without river-distance control
