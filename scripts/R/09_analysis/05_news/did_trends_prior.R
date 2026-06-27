@@ -57,6 +57,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 
 # ==============================================================================
 # 3. Setup
@@ -414,7 +417,7 @@ run_for_radius <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = 3,
+    fmt = fmt_table,
     coef_map = coef_labels,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -422,33 +425,11 @@ run_for_radius <- function(RAD) {
     title = "Effect of Sewage Spills on Property Values: Pre/Post Google Trends Peak (Prior to Transaction)"
   )
 
-  # Force table environment to [H]
-  table_latex <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex)
-
-  # Add label in tabularray format
-  table_latex <- sub(
-    "caption=\\{([^}]*)\\},",
-    paste0("caption={\\1},\nlabel={tbl:did-trends-prior-", RAD, "m},"),
-    table_latex
+  table_latex <- fit_tblr_latex(
+    table_latex,
+    label = paste0("tbl:did-trends-prior-", RAD, "m"),
+    notes = custom_notes
   )
-
-  # Add colsep and font size for tighter column spacing
-  table_latex <- sub(
-    "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
-    table_latex
-  )
-
-  # Replace empty note with custom notes (tabularray format)
-  table_latex <- sub(
-    "note\\{\\}=\\{\\s*\\},",
-    custom_notes,
-    table_latex
-  )
-
-  # Distribute available width among columns (X[] instead of Q[])
-  table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
-  table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex)
 
   # Write to file
   output_path <- file.path(output_dir, paste0("did_trends_prior_", RAD, "m.tex"))
@@ -492,7 +473,7 @@ write_radius_robustness_table(
   label            = "tbl:did-trends-prior-radius-robustness",
   title            = "Public Attention and Property Values: Robustness to House-to-Site Radius (Pre/Post Google Trends Peak)",
   output_path      = file.path(output_dir, "did_trends_prior_radius_robustness.tex"),
-  fmt              = 3,
+  fmt              = fmt_table,
   escape           = FALSE
 )
 cat("  Wrote: did_trends_prior_radius_robustness.tex\n")

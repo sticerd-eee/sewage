@@ -83,6 +83,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 # ==============================================================================
 # 3. Setup
 # ==============================================================================
@@ -99,19 +102,13 @@ record_export <- function(path) {
 # Post-process modelsummary LaTeX output (tabularray styling, as in the earlier
 # upstream/downstream scripts).
 postprocess_table <- function(latex_str, label, notes) {
-  latex_str <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", latex_str)
-  latex_str <- sub(
-    "caption=\\{([^}]*)\\},",
-    paste0("caption={\\1},\nlabel={", label, "},"),
-    latex_str
+  fit_tblr_latex(
+    latex_str,
+    label = label,
+    notes = notes,
+    hspan = "even",
+    rowsep = "0.1pt"
   )
-  latex_str <- sub(
-    "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1hspan = even,\ncolsep=2pt,\nrowsep=0.1pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-    latex_str
-  )
-  latex_str <- sub("note\\{\\}=\\{\\s*\\},", notes, latex_str)
-  latex_str
 }
 
 make_notes <- function(bin_lab, measure_text) {
@@ -670,7 +667,7 @@ run_all_models <- function(bin_lab) {
     estimate  = "{estimate}{stars}",
     statistic = "({std.error})",
     stars     = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt       = fmt_decimal(2),
+    fmt       = fmt_table,
     coef_map  = coef_labels_count,
     gof_map   = gof_map,
     add_rows  = add_rows,
@@ -726,7 +723,7 @@ run_all_models <- function(bin_lab) {
     estimate  = "{estimate}{stars}",
     statistic = "({std.error})",
     stars     = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt       = fmt_decimal(2),
+    fmt       = fmt_table,
     coef_map  = coef_labels_count_dist,
     gof_map   = gof_map,
     add_rows  = add_rows,
@@ -781,7 +778,7 @@ run_all_models <- function(bin_lab) {
     estimate  = "{estimate}{stars}",
     statistic = "({std.error})",
     stars     = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt       = fmt_decimal(2),
+    fmt       = fmt_table,
     coef_map  = coef_labels_hrs,
     gof_map   = gof_map,
     add_rows  = add_rows,
@@ -837,7 +834,7 @@ run_all_models <- function(bin_lab) {
     estimate  = "{estimate}{stars}",
     statistic = "({std.error})",
     stars     = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt       = fmt_decimal(2),
+    fmt       = fmt_table,
     coef_map  = coef_labels_hrs_dist,
     gof_map   = gof_map,
     add_rows  = add_rows,
@@ -869,4 +866,3 @@ for (b in RING_LABELS) {
 # ==============================================================================
 cat("\nLaTeX tables exported to:", output_dir, "\n")
 for (f in exported_files) cat("  - ", f, "\n", sep = "")
-

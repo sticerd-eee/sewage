@@ -74,6 +74,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 # ==============================================================================
 # 3. Setup
 # ==============================================================================
@@ -386,7 +389,7 @@ export_did_table <- function(models_sales, models_rentals, coef_map, title, labe
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_map,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -402,26 +405,11 @@ export_did_table <- function(models_sales, models_rentals, coef_map, title, labe
   )
   
   table_latex <- as.character(out)
-  
-  # Force table environment to [H]
-  table_latex <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex)
-  
-  # Add label in tabularray format
-  table_latex <- sub(
-    "caption=\\{([^}]*)\\},",
-    paste0("caption={\\1},\nlabel={", label, "},"),
-    table_latex
+  table_latex <- fit_tblr_latex(
+    table_latex,
+    label = label,
+    notes = notes
   )
-  
-  # Add colsep and font size for tighter column spacing
-  table_latex <- sub(
-    "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-    table_latex
-  )
-  
-  # Replace empty note with custom notes (tabularray format)
-  table_latex <- sub("note\\{\\}=\\{\\s*\\},", notes, table_latex)
   
   output_path <- file.path(output_dir, fname)
   writeLines(table_latex, output_path)

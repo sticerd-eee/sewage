@@ -66,6 +66,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 # ==============================================================================
 # 3. Setup
 # ==============================================================================
@@ -636,25 +639,12 @@ run_all_models <- function(RAD) {
   
   # Post-process modelsummary LaTeX output
   postprocess_table <- function(latex_str, label, notes) {
-    # Force [H] placement
-    latex_str <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", latex_str)
-    # Add label
-    latex_str <- sub(
-      "caption=\\{([^}]*)\\},",
-      paste0("caption={\\1},\nlabel={", label, "},"),
-      latex_str
-    )
-    # Add colsep, rowsep, hspan and font size
-    latex_str <- sub(
-      "(\\{\\s*%% tabularray inner open\\n)",
-      "\\1hspan = even,\ncolsep=2pt,\nrowsep=0.1pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-      latex_str
-    )
-    # Replace empty note with custom notes
-    latex_str <- sub(
-      "note\\{\\}=\\{\\s*\\},",
-      notes,
-      latex_str
+    latex_str <- fit_tblr_latex(
+      latex_str,
+      label = label,
+      notes = notes,
+      hspan = "even",
+      rowsep = "0.1pt"
     )
     # Add indentation
     latex_str <- gsub("Upstream &", "\\\\quad Upstream &", latex_str)
@@ -739,7 +729,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count,
     gof_map = gof_map,
     add_rows = add_rows_count_8,
@@ -799,7 +789,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count_w,
     gof_map = gof_map,
     add_rows = add_rows_count_w_8,
@@ -857,7 +847,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count,
     gof_map = gof_map,
     add_rows = add_rows_count_12,
@@ -915,7 +905,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count_w,
     gof_map = gof_map,
     add_rows = add_rows_count_w_12,
@@ -975,7 +965,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_hrs,
     gof_map = gof_map,
     add_rows = add_rows_hrs_8,
@@ -1035,7 +1025,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_hrs_w,
     gof_map = gof_map,
     add_rows = add_rows_hrs_w_8,
@@ -1093,7 +1083,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_hrs,
     gof_map = gof_map,
     add_rows = add_rows_hrs_12,
@@ -1151,7 +1141,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_hrs_w,
     gof_map = gof_map,
     add_rows = add_rows_hrs_w_12,
@@ -1176,6 +1166,11 @@ run_all_models <- function(RAD) {
   cat("  Exporting combined count MSOA panel table...\n")
   
   # Extract coefficients from each model
+  format_panel_num <- function(x, digits = 3) {
+    out <- formatC(x, format = "f", digits = digits)
+    sub("^-0\\.000$", "0.000", out)
+  }
+
   extract_coefs <- function(model, coef_names, label_map) {
     s <- summary(model, vcov = "hetero")
     ct <- coeftable(s)
@@ -1192,18 +1187,15 @@ run_all_models <- function(RAD) {
           else if (pv < 0.1) stars <- "*"
         }
         rows[[label_map[cname]]] <- list(
-          est = paste0("\\num{", formatC(est, format = "f", digits = 2), "}", stars),
-          se  = paste0("(\\num{", formatC(se, format = "f", digits = 2), "})")
+          est = paste0("\\num{", format_panel_num(est), "}", stars),
+          se  = paste0("(\\num{", format_panel_num(se), "})")
         )
       } else {
         rows[[label_map[cname]]] <- list(est = "", se = "")
       }
     }
     rows[["nobs"]] <- format(nobs(model), big.mark = "")
-    rows[["adj_r2"]] <- formatC(
-      fixest::r2(model, type = "ar2"),
-      format = "f", digits = 3
-    )
+    rows[["adj_r2"]] <- format_panel_num(fixest::r2(model, type = "ar2"))
     rows
   }
   
@@ -1285,8 +1277,8 @@ run_all_models <- function(RAD) {
     "hspan = even,\n",
     "colsep=2pt,\n",
     "rowsep=0.1pt,\n",
-    "cells   = {font = \\fontsize{11pt}{12pt}\\selectfont},\n",
-    "colspec={Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]},\n",
+    "cells   = {font = \\fontsize{8pt}{9pt}\\selectfont},\n",
+    "colspec={l *{12}{X[c]}},\n",
     "hline{1}={1-13}{solid, black, 0.1em},\n",
     "hline{2}={2-7,8-13}{solid, black, 0.05em},\n",
     "hline{3}={1-13}{solid, black, 0.05em},\n",
@@ -1403,8 +1395,8 @@ run_all_models <- function(RAD) {
     "hspan = even,\n",
     "colsep=2pt,\n",
     "rowsep=0.1pt,\n",
-    "cells   = {font = \\fontsize{11pt}{12pt}\\selectfont},\n",
-    "colspec={Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]},\n",
+    "cells   = {font = \\fontsize{8pt}{9pt}\\selectfont},\n",
+    "colspec={l *{12}{X[c]}},\n",
     "hline{1}={1-13}{solid, black, 0.1em},\n",
     "hline{2}={2-7,8-13}{solid, black, 0.05em},\n",
     "hline{3}={1-13}{solid, black, 0.05em},\n",

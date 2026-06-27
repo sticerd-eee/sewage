@@ -60,6 +60,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 # Output Directory Setup -------------------------------------------------------
 output_dir <- here::here("output", "tables")
 if (!dir.exists(output_dir)) {
@@ -423,7 +426,7 @@ run_for_radius <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -431,34 +434,11 @@ run_for_radius <- function(RAD) {
     title = "Effect of Sewage Spills (Count) on Property Values with Quarter FE"
   )
 
-  # Force table environment to [H]
-  table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_count)
-
-  # Add label in tabularray format
-  table_latex_count <- sub(
-    "caption=\\{([^}]*)\\},",
-    paste0("caption={\\1},\nlabel={tbl:hedonic-count-continuous-prior-qtr-fe-", RAD, "m},"),
-    table_latex_count
+  table_latex_count <- fit_tblr_latex(
+    table_latex_count,
+    label = paste0("tbl:hedonic-count-continuous-prior-qtr-fe-", RAD, "m"),
+    notes = custom_notes_count
   )
-
-  # Add colsep and font size for tighter column spacing
-  table_latex_count <- sub(
-    "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
-    table_latex_count
-  )
-
-  # Replace empty note with custom notes (tabularray format)
-  table_latex_count <- sub(
-    "note\\{\\}=\\{\\s*\\},",
-    custom_notes_count,
-    table_latex_count
-  )
-
-  # Distribute available width among columns (X[] instead of Q[]) so the table
-  # auto-fits \linewidth (first column stays natural-width label)
-  table_latex_count <- gsub("Q\\[\\]", "X[c] ", table_latex_count)
-  table_latex_count <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex_count)
 
   output_path_count <- file.path(output_dir, paste0("hedonic_count_continuous_prior_qtr_fe_", RAD, "m.tex"))
   writeLines(table_latex_count, output_path_count)
@@ -506,7 +486,7 @@ run_for_radius <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = 2,
+    fmt = fmt_table,
     coef_map = coef_labels_hrs,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -514,34 +494,11 @@ run_for_radius <- function(RAD) {
     title = "Effect of Sewage Spills (Hours) on Property Values with Quarter FE"
   )
 
-  # Force table environment to [H]
-  table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_hrs)
-
-  # Add label in tabularray format
-  table_latex_hrs <- sub(
-    "caption=\\{([^}]*)\\},",
-    paste0("caption={\\1},\nlabel={tbl:hedonic-hrs-continuous-prior-qtr-fe-", RAD, "m},"),
-    table_latex_hrs
+  table_latex_hrs <- fit_tblr_latex(
+    table_latex_hrs,
+    label = paste0("tbl:hedonic-hrs-continuous-prior-qtr-fe-", RAD, "m"),
+    notes = custom_notes_hrs
   )
-
-  # Add colsep and font size for tighter column spacing
-  table_latex_hrs <- sub(
-    "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
-    table_latex_hrs
-  )
-
-  # Replace empty note with custom notes (tabularray format)
-  table_latex_hrs <- sub(
-    "note\\{\\}=\\{\\s*\\},",
-    custom_notes_hrs,
-    table_latex_hrs
-  )
-
-  # Distribute available width among columns (X[] instead of Q[]) so the table
-  # auto-fits \linewidth (first column stays natural-width label)
-  table_latex_hrs <- gsub("Q\\[\\]", "X[c] ", table_latex_hrs)
-  table_latex_hrs <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex_hrs)
 
   output_path_hrs <- file.path(output_dir, paste0("hedonic_hrs_continuous_prior_qtr_fe_", RAD, "m.tex"))
   writeLines(table_latex_hrs, output_path_hrs)

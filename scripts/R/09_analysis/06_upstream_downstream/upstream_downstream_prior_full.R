@@ -56,6 +56,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 # ==============================================================================
 # 3. Setup
 # ==============================================================================
@@ -674,7 +677,7 @@ table_latex_count <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
+  fmt = fmt_table,
   coef_map = coef_labels_count,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -683,33 +686,13 @@ table_latex_count <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Unweighted Count) on Property Values by Direction"
 )
 
-# Force table environment to [H]
-table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_count)
-
-# Add label in tabularray format
-table_latex_count <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-count-continuous-prior-direction},",
-  table_latex_count
+table_latex_count <- fit_tblr_latex(
+  table_latex_count,
+  label = "tbl:hedonic-count-continuous-prior-direction",
+  notes = custom_notes_count
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex_count <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_count
-)
-
-# # Add indentation
 table_latex_count <- gsub("Upstream &", "\\\\quad Upstream &", table_latex_count)
 table_latex_count <- gsub("Downstream &", "\\\\quad Downstream &", table_latex_count)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_count <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_count,
-  table_latex_count
-)
 
 output_path_count <- file.path(output_dir, "hedonic_count_continuous_prior_direction.tex")
 writeLines(table_latex_count, output_path_count)
@@ -774,7 +757,7 @@ table_latex_count <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
+  fmt = fmt_table,
   coef_map = coef_labels_count,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -783,33 +766,13 @@ table_latex_count <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Weighted Count) on Property Values by Direction"
 )
 
-# Force table environment to [H]
-table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_count)
-
-# Add label in tabularray format
-table_latex_count <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-count-continuous-prior-direction-weighted},",
-  table_latex_count
+table_latex_count <- fit_tblr_latex(
+  table_latex_count,
+  label = "tbl:hedonic-count-continuous-prior-direction-weighted",
+  notes = custom_notes_count
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex_count <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_count
-)
-
-# # Add indentation
 table_latex_count <- gsub("Upstream &", "\\\\quad Upstream &", table_latex_count)
 table_latex_count <- gsub("Downstream &", "\\\\quad Downstream &", table_latex_count)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_count <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_count,
-  table_latex_count
-)
 
 output_path_count <- file.path(output_dir, "hedonic_count_continuous_prior_direction_weighted.tex")
 writeLines(table_latex_count, output_path_count)
@@ -879,7 +842,7 @@ table_latex_count <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
+  fmt = fmt_table,
   coef_map = coef_labels_count,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -888,33 +851,13 @@ table_latex_count <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Unweighted Count) on Property Values by Direction"
 )
 
-# Force table environment to [H]
-table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_count)
-
-# Add label in tabularray format
-table_latex_count <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-count-continuous-prior-direction-msoa},",
-  table_latex_count
+table_latex_count <- fit_tblr_latex(
+  table_latex_count,
+  label = "tbl:hedonic-count-continuous-prior-direction-msoa",
+  notes = custom_notes_count
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex_count <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_count
-)
-
-# # Add indentation
 table_latex_count <- gsub("Upstream &", "\\\\quad Upstream &", table_latex_count)
 table_latex_count <- gsub("Downstream &", "\\\\quad Downstream &", table_latex_count)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_count <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_count,
-  table_latex_count
-)
 
 output_path_count <- file.path(output_dir, "hedonic_count_continuous_prior_direction_msoa.tex")
 writeLines(table_latex_count, output_path_count)
@@ -983,7 +926,7 @@ table_latex_count <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
+  fmt = fmt_table,
   coef_map = coef_labels_count,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -992,33 +935,13 @@ table_latex_count <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Weighted Count) on Property Values by Direction"
 )
 
-# Force table environment to [H]
-table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_count)
-
-# Add label in tabularray format
-table_latex_count <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-count-continuous-prior-direction-weighted-msoa},",
-  table_latex_count
+table_latex_count <- fit_tblr_latex(
+  table_latex_count,
+  label = "tbl:hedonic-count-continuous-prior-direction-weighted-msoa",
+  notes = custom_notes_count
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex_count <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_count
-)
-
-# # Add indentation
 table_latex_count <- gsub("Upstream &", "\\\\quad Upstream &", table_latex_count)
 table_latex_count <- gsub("Downstream &", "\\\\quad Downstream &", table_latex_count)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_count <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_count,
-  table_latex_count
-)
 
 output_path_count <- file.path(output_dir, "hedonic_count_continuous_prior_direction_weighted_msoa.tex")
 writeLines(table_latex_count, output_path_count)
@@ -1083,7 +1006,7 @@ table_latex_hrs <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
+  fmt = fmt_table,
   coef_map = coef_labels_hrs,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -1092,33 +1015,13 @@ table_latex_hrs <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Unweighted Hours) on Property Values by Direction"
 )
 
-# Force table environment to [H]
-table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_hrs)
-
-# Add label in tabularray format
-table_latex_hrs <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-hrs-continuous-prior-direction},",
-  table_latex_hrs
+table_latex_hrs <- fit_tblr_latex(
+  table_latex_hrs,
+  label = "tbl:hedonic-hrs-continuous-prior-direction",
+  notes = custom_notes_hrs
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex_hrs <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_hrs
-)
-
-# # Add indentation
 table_latex_hrs <- gsub("Upstream &", "\\\\quad Upstream &", table_latex_hrs)
 table_latex_hrs <- gsub("Downstream &", "\\\\quad Downstream &", table_latex_hrs)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_hrs <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_hrs,
-  table_latex_hrs
-)
 
 output_path_hrs <- file.path(output_dir, "hedonic_hrs_continuous_prior_direction.tex")
 writeLines(table_latex_hrs, output_path_hrs)
@@ -1183,7 +1086,7 @@ table_latex_hrs <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
+  fmt = fmt_table,
   coef_map = coef_labels_hrs,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -1192,33 +1095,13 @@ table_latex_hrs <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Weighted hours) on Property Values by Direction"
 )
 
-# Force table environment to [H]
-table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_hrs)
-
-# Add label in tabularray format
-table_latex_hrs <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-hrs-continuous-prior-direction-weighted},",
-  table_latex_hrs
+table_latex_hrs <- fit_tblr_latex(
+  table_latex_hrs,
+  label = "tbl:hedonic-hrs-continuous-prior-direction-weighted",
+  notes = custom_notes_hrs
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex_hrs <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_hrs
-)
-
-# # Add indentation
 table_latex_hrs <- gsub("Upstream &", "\\\\quad Upstream &", table_latex_hrs)
 table_latex_hrs <- gsub("Downstream &", "\\\\quad Downstream &", table_latex_hrs)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_hrs <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_hrs,
-  table_latex_hrs
-)
 
 output_path_hrs <- file.path(output_dir, "hedonic_hrs_continuous_prior_direction_weighted.tex")
 writeLines(table_latex_hrs, output_path_hrs)
@@ -1286,7 +1169,7 @@ table_latex_hrs <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
+  fmt = fmt_table,
   coef_map = coef_labels_hrs,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -1295,33 +1178,13 @@ table_latex_hrs <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Unweighted Hours) on Property Values by Direction"
 )
 
-# Force table environment to [H]
-table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_hrs)
-
-# Add label in tabularray format
-table_latex_hrs <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-hrs-continuous-prior-direction-msoa},",
-  table_latex_hrs
+table_latex_hrs <- fit_tblr_latex(
+  table_latex_hrs,
+  label = "tbl:hedonic-hrs-continuous-prior-direction-msoa",
+  notes = custom_notes_hrs
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex_hrs <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_hrs
-)
-
-# Add indentation
 table_latex_hrs <- gsub("Upstream &", "\\\\quad Upstream &", table_latex_hrs)
 table_latex_hrs <- gsub("Downstream &", "\\\\quad Downstream &", table_latex_hrs)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_hrs <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_hrs,
-  table_latex_hrs
-)
 
 output_path_hrs <- file.path(output_dir, "hedonic_hrs_continuous_prior_direction_msoa.tex")
 writeLines(table_latex_hrs, output_path_hrs)
@@ -1390,7 +1253,7 @@ table_latex_hrs <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
+  fmt = fmt_table,
   coef_map = coef_labels_hrs,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -1399,33 +1262,13 @@ table_latex_hrs <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Weighted hours) on Property Values by Direction"
 )
 
-# Force table environment to [H]
-table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_hrs)
-
-# Add label in tabularray format
-table_latex_hrs <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-hrs-continuous-prior-direction-weighted-msoa},",
-  table_latex_hrs
+table_latex_hrs <- fit_tblr_latex(
+  table_latex_hrs,
+  label = "tbl:hedonic-hrs-continuous-prior-direction-weighted-msoa",
+  notes = custom_notes_hrs
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex_hrs <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_hrs
-)
-
-# Add indentation
 table_latex_hrs <- gsub("Upstream &", "\\\\quad Upstream &", table_latex_hrs)
 table_latex_hrs <- gsub("Downstream &", "\\\\quad Downstream &", table_latex_hrs)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_hrs <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_hrs,
-  table_latex_hrs
-)
 
 output_path_hrs <- file.path(output_dir, "hedonic_hrs_continuous_prior_direction_weighted_msoa.tex")
 writeLines(table_latex_hrs, output_path_hrs)

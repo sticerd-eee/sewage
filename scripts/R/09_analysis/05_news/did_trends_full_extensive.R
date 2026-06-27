@@ -49,6 +49,9 @@ REQUIRED_PACKAGES <- c(
 
 check_required_packages(REQUIRED_PACKAGES)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 source(
   here::here("scripts", "R", "09_analysis", "05_news", "extensive_margin_news_utils.R"),
   local = TRUE
@@ -349,7 +352,7 @@ export_table <- function(models, comparison) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = 3,
+    fmt = fmt_table,
     coef_map = coef_labels,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -365,7 +368,7 @@ export_table <- function(models, comparison) {
     table_latex = table_latex,
     label = CONFIG$table_label,
     notes = custom_notes,
-    width = "0.9\\\\linewidth"
+    width = "0.9\\linewidth"
   )
 
   ensure_output_dir(CONFIG$output_path)

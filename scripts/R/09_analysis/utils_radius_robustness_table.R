@@ -23,6 +23,10 @@
 # `custom_notes`: full `note{}={...},` string in sub()-replacement form (use \\\\).
 # `escape`: FALSE when coef_map labels contain LaTeX math.
 
+if (!exists("fit_tblr_latex", mode = "function")) {
+  source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+}
+
 write_radius_robustness_table <- function(models_by_radius,
                                           radii,
                                           coef_map,
@@ -30,7 +34,7 @@ write_radius_robustness_table <- function(models_by_radius,
                                           label,
                                           title,
                                           output_path,
-                                          fmt = 2,
+                                          fmt = fmt_table,
                                           escape = TRUE) {
   rad_names <- paste0(radii, "m")
   n_rad <- length(radii)
@@ -75,21 +79,11 @@ write_radius_robustness_table <- function(models_by_radius,
   tinytable::save_tt(tab, tmp, overwrite = TRUE)
   latex <- paste(readLines(tmp), collapse = "\n")
 
-  # Patches (same idiom as the per-radius tables).
-  latex <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", latex)
-  latex <- sub(
-    "caption=\\{([^}]*)\\},",
-    paste0("caption={\\1},\nlabel={", label, "},"),
-    latex
+  latex <- fit_tblr_latex(
+    latex,
+    label = label,
+    notes = custom_notes
   )
-  latex <- sub(
-    "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
-    latex
-  )
-  latex <- sub("note\\{\\}=\\{\\s*\\},", custom_notes, latex)
-  latex <- gsub("Q\\[\\]", "X[c] ", latex)
-  latex <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", latex)
 
   writeLines(latex, output_path)
   invisible(output_path)

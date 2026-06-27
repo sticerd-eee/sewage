@@ -396,7 +396,7 @@ export_table <- function(models, comparison) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = 3,
+    fmt = fmt_table,
     coef_map = coef_labels,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -472,7 +472,7 @@ run_radius_robustness <- function(peak_info) {
     label            = "tbl:did-trends-prior-extensive-radius-robustness",
     title            = "Public Attention and Property Values: Robustness to Exposure Radius (Pre/Post Google Trends Peak, Extensive Margin)",
     output_path      = here::here("output", "tables", "did_trends_prior_extensive_radius_robustness.tex"),
-    fmt              = 3,
+    fmt              = fmt_table,
     escape           = FALSE
   )
   cat("  Wrote: did_trends_prior_extensive_radius_robustness.tex\n")

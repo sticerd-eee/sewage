@@ -59,6 +59,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 # ==============================================================================
 # 3. Setup
 # ==============================================================================
@@ -553,27 +556,14 @@ run_all_models <- function(RAD) {
   
   # Post-process modelsummary LaTeX output
   postprocess_table <- function(latex_str, label, notes, rad_label) {
-    # Force [H] placement
-    latex_str <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", latex_str)
-    # Add label
-    latex_str <- sub(
-      "caption=\\{([^}]*)\\},",
-      paste0("caption={\\1},\nlabel={", label, "},"),
-      latex_str
+    force(rad_label)
+    fit_tblr_latex(
+      latex_str,
+      label = label,
+      notes = notes,
+      hspan = "even",
+      rowsep = "0.1pt"
     )
-    # Add colsep, rowsep, hspan and font size
-    latex_str <- sub(
-      "(\\{\\s*%% tabularray inner open\\n)",
-      "\\1hspan = even,\ncolsep=2pt,\nrowsep=0.1pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-      latex_str
-    )
-    # Replace empty note with custom notes
-    latex_str <- sub(
-      "note\\{\\}=\\{\\s*\\},",
-      notes,
-      latex_str
-    )
-    latex_str
   }
   
   # Build notes string
@@ -632,7 +622,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -691,7 +681,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count_dist,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -749,7 +739,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_hrs,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -808,7 +798,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_hrs_dist,
     gof_map = gof_map,
     add_rows = add_rows,
