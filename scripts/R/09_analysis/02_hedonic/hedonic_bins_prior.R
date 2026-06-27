@@ -53,6 +53,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 # Output Directory Setup -------------------------------------------------------
 output_dir <- here::here("output", "tables")
 if (!dir.exists(output_dir)) {
@@ -410,7 +413,7 @@ table_latex_count <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 3,
+  fmt = fmt_table,
   coef_map = coef_labels_count,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -418,14 +421,9 @@ table_latex_count <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Count) on Property Values"
 )
 
-# Force table environment to [H]
-table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_count)
-
-# Add label in tabularray format
-table_latex_count <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-count-bins-prior},",
-  table_latex_count
+table_latex_count <- fit_tblr_latex(
+  table_latex_count,
+  label = "tbl:hedonic-count-bins-prior"
 )
 
 output_path_count <- file.path(output_dir, "hedonic_count_bins_prior.tex")
@@ -483,7 +481,7 @@ table_latex_hrs <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 3,
+  fmt = fmt_table,
   coef_map = coef_labels_hrs,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -491,14 +489,9 @@ table_latex_hrs <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Hours) on Property Values"
 )
 
-# Force table environment to [H]
-table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_hrs)
-
-# Add label in tabularray format
-table_latex_hrs <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-hrs-bins-prior},",
-  table_latex_hrs
+table_latex_hrs <- fit_tblr_latex(
+  table_latex_hrs,
+  label = "tbl:hedonic-hrs-bins-prior"
 )
 
 output_path_hrs <- file.path(output_dir, "hedonic_hrs_bins_prior.tex")

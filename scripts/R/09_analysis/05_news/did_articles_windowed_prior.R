@@ -50,6 +50,9 @@ REQUIRED_PACKAGES <- c(
 
 check_required_packages(REQUIRED_PACKAGES)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 source(
   here::here("scripts", "R", "09_analysis", "05_news", "extensive_margin_news_utils.R"),
   local = TRUE
@@ -115,7 +118,7 @@ salience_description <- function(window) {
 }
 
 interaction_term <- function(salience_col) {
-  paste0("spill_count_daily_avg:", salience_col)
+  paste0("spill_count_weekly_avg:", salience_col)
 }
 
 make_formula <- function(rhs, fixed_effects = NULL) {
@@ -203,7 +206,7 @@ prepare_sales_analysis_data <- function(rad, articles, sales) {
     dplyr::inner_join(articles, by = "month_id") |>
     dplyr::mutate(log_price = log(.data$price.y)) |>
     dplyr::filter(
-      !is.na(.data$spill_count_daily_avg),
+      !is.na(.data$spill_count_weekly_avg),
       dplyr::if_all(dplyr::all_of(log_cols), is.finite),
       !is.na(.data$lsoa),
       !is.na(.data$month_id),
@@ -218,11 +221,11 @@ prepare_sales_analysis_data <- function(rad, articles, sales) {
 
   cat(sprintf("  Final sales dataset: %d transactions\n", nrow(dat)))
   cat(sprintf(
-    "  Spill count daily avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
-    mean(dat$spill_count_daily_avg, na.rm = TRUE),
-    stats::sd(dat$spill_count_daily_avg, na.rm = TRUE),
-    min(dat$spill_count_daily_avg, na.rm = TRUE),
-    max(dat$spill_count_daily_avg, na.rm = TRUE)
+    "  Spill count weekly avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
+    mean(dat$spill_count_weekly_avg, na.rm = TRUE),
+    stats::sd(dat$spill_count_weekly_avg, na.rm = TRUE),
+    min(dat$spill_count_weekly_avg, na.rm = TRUE),
+    max(dat$spill_count_weekly_avg, na.rm = TRUE)
   ))
 
   dat
@@ -246,7 +249,7 @@ prepare_rental_analysis_data <- function(rad, articles, rentals) {
     dplyr::inner_join(articles, by = "month_id") |>
     dplyr::mutate(log_price = log(.data$listing_price.y)) |>
     dplyr::filter(
-      !is.na(.data$spill_count_daily_avg),
+      !is.na(.data$spill_count_weekly_avg),
       dplyr::if_all(dplyr::all_of(log_cols), is.finite),
       !is.na(.data$lsoa),
       !is.na(.data$month_id),
@@ -261,11 +264,11 @@ prepare_rental_analysis_data <- function(rad, articles, rentals) {
 
   cat(sprintf("  Final rental dataset: %d transactions\n", nrow(dat_rental)))
   cat(sprintf(
-    "  Spill count daily avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
-    mean(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-    stats::sd(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-    min(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-    max(dat_rental$spill_count_daily_avg, na.rm = TRUE)
+    "  Spill count weekly avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
+    mean(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+    stats::sd(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+    min(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+    max(dat_rental$spill_count_weekly_avg, na.rm = TRUE)
   ))
 
   dat_rental
@@ -281,14 +284,14 @@ estimate_models <- function(dat, dat_rental, salience_col) {
   interaction <- interaction_term(salience_col)
 
   sales_controls <- paste0(
-    "spill_count_daily_avg + ",
+    "spill_count_weekly_avg + ",
     salience_col,
     " + ",
     interaction,
     " + property_type + old_new + duration"
   )
   rental_controls <- paste0(
-    "spill_count_daily_avg + ",
+    "spill_count_weekly_avg + ",
     salience_col,
     " + ",
     interaction,
@@ -297,7 +300,7 @@ estimate_models <- function(dat, dat_rental, salience_col) {
 
   models <- list(
     model_sale_1 = fixest::feols(
-      make_formula(paste0("spill_count_daily_avg + ", salience_col, " + ", interaction)),
+      make_formula(paste0("spill_count_weekly_avg + ", salience_col, " + ", interaction)),
       data = dat,
       vcov = ~lsoa
     ),
@@ -307,14 +310,14 @@ estimate_models <- function(dat, dat_rental, salience_col) {
       vcov = ~lsoa
     ),
     model_sale_2 = fixest::feols(
-      make_formula(paste0("spill_count_daily_avg + ", interaction), "msoa + month_id"),
+      make_formula(paste0("spill_count_weekly_avg + ", interaction), "msoa + month_id"),
       data = dat,
       vcov = ~lsoa
     ),
     model_sale_3 = fixest::feols(
       make_formula(
         paste0(
-          "spill_count_daily_avg + ",
+          "spill_count_weekly_avg + ",
           interaction,
           " + property_type + old_new + duration"
         ),
@@ -324,14 +327,14 @@ estimate_models <- function(dat, dat_rental, salience_col) {
       vcov = ~lsoa
     ),
     model_sale_4 = fixest::feols(
-      make_formula(paste0("spill_count_daily_avg + ", interaction), "lsoa + month_id"),
+      make_formula(paste0("spill_count_weekly_avg + ", interaction), "lsoa + month_id"),
       data = dat,
       vcov = ~lsoa
     ),
     model_sale_5 = fixest::feols(
       make_formula(
         paste0(
-          "spill_count_daily_avg + ",
+          "spill_count_weekly_avg + ",
           interaction,
           " + property_type + old_new + duration"
         ),
@@ -341,7 +344,7 @@ estimate_models <- function(dat, dat_rental, salience_col) {
       vcov = ~lsoa
     ),
     model_rent_1 = fixest::feols(
-      make_formula(paste0("spill_count_daily_avg + ", salience_col, " + ", interaction)),
+      make_formula(paste0("spill_count_weekly_avg + ", salience_col, " + ", interaction)),
       data = dat_rental,
       vcov = ~lsoa
     ),
@@ -351,14 +354,14 @@ estimate_models <- function(dat, dat_rental, salience_col) {
       vcov = ~lsoa
     ),
     model_rent_2 = fixest::feols(
-      make_formula(paste0("spill_count_daily_avg + ", interaction), "msoa + month_id"),
+      make_formula(paste0("spill_count_weekly_avg + ", interaction), "msoa + month_id"),
       data = dat_rental,
       vcov = ~lsoa
     ),
     model_rent_3 = fixest::feols(
       make_formula(
         paste0(
-          "spill_count_daily_avg + ",
+          "spill_count_weekly_avg + ",
           interaction,
           " + property_type + bedrooms + bathrooms"
         ),
@@ -368,14 +371,14 @@ estimate_models <- function(dat, dat_rental, salience_col) {
       vcov = ~lsoa
     ),
     model_rent_4 = fixest::feols(
-      make_formula(paste0("spill_count_daily_avg + ", interaction), "lsoa + month_id"),
+      make_formula(paste0("spill_count_weekly_avg + ", interaction), "lsoa + month_id"),
       data = dat_rental,
       vcov = ~lsoa
     ),
     model_rent_5 = fixest::feols(
       make_formula(
         paste0(
-          "spill_count_daily_avg + ",
+          "spill_count_weekly_avg + ",
           interaction,
           " + property_type + bedrooms + bathrooms"
         ),
@@ -410,14 +413,14 @@ export_window_table <- function(models, window, rad, salience_col) {
   interaction <- interaction_term(salience_col)
   salience_label <- paste0("$\\log (\\text{Articles}_{", window, "m})$")
   interaction_label <- paste0(
-    "{Daily spill count \\\\ $\\times$ ",
+    "{Spills per week (avg.) \\\\ $\\times$ ",
     "$\\log (\\text{Articles}_{",
     window,
     "m})$}"
   )
 
   coef_labels <- c(
-    "spill_count_daily_avg" = "Daily spill count",
+    "spill_count_weekly_avg" = "Spills per week (avg.)",
     stats::setNames(salience_label, salience_col),
     stats::setNames(interaction_label, interaction)
   )
@@ -443,7 +446,7 @@ export_window_table <- function(models, window, rad, salience_col) {
   custom_notes <- paste0(
     "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within ",
     rad,
-    "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within ",
+    "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ",
     rad,
     "m from January 2021 to the transaction date. ",
     salience_label,
@@ -479,7 +482,7 @@ export_window_table <- function(models, window, rad, salience_col) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = 3,
+    fmt = fmt_table,
     coef_map = coef_labels,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -495,9 +498,7 @@ export_window_table <- function(models, window, rad, salience_col) {
   table_latex <- patch_modelsummary_latex(
     table_latex = table_latex,
     label = paste0("tbl:did-articles-windowed-prior-", window, "m"),
-    notes = custom_notes,
-    colsep = "2pt",
-    cell_font = "\\fontsize{8pt}{9pt}\\selectfont"
+    notes = custom_notes
   )
 
   output_path <- file.path(
@@ -589,7 +590,7 @@ write_window_comparison_table <- function(models_by_measure) {
     "\\end{tblr}",
     "\\vspace{0.3em}",
     "\\begin{minipage}{\\linewidth}",
-    "\\footnotesize \\textbf{Notes:} Each cell reports the coefficient on the interaction between daily spill count and the stated public-attention measure, with LSOA-clustered standard errors in parentheses. All models are estimated at the 250m radius on the same 2021--2023 transaction samples and include property controls, the stated location fixed effects, and month fixed effects. Article-count measures differ in scale, so the comparison is intended to read the sign and significance pattern across windows rather than raw magnitudes. *** p<0.01, ** p<0.05, * p<0.1.",
+    "\\footnotesize \\textbf{Notes:} Each cell reports the coefficient on the interaction between weekly spill count and the stated public-attention measure, with LSOA-clustered standard errors in parentheses. All models are estimated at the 250m radius on the same 2021--2023 transaction samples and include property controls, the stated location fixed effects, and month fixed effects. Article-count measures differ in scale, so the comparison is intended to read the sign and significance pattern across windows rather than raw magnitudes. *** p<0.01, ** p<0.05, * p<0.1.",
     "\\end{minipage}",
     "\\end{table}"
   )
@@ -772,7 +773,7 @@ main <- function() {
     interaction_term_fn = interaction_term,
     margin = "intensive",
     output_path = CONFIG$effect_size_output_path,
-    spill_col = "spill_count_daily_avg"
+    spill_col = "spill_count_weekly_avg"
   )
 
   cat("\nScript completed successfully.\n")

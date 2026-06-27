@@ -10,6 +10,10 @@
 #
 # ==============================================================================
 
+if (!exists("fit_tblr_latex", mode = "function")) {
+  source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+}
+
 #' Validate and enrich the distance-band comparison configuration
 #'
 #' @param comparison Named list with `near_min`, `near_max`, `far_min`,
@@ -429,94 +433,16 @@ patch_modelsummary_latex <- function(table_latex,
                                      label,
                                      notes,
                                      width = NULL,
-                                     colsep = "3pt",
-                                     cell_font = "\\fontsize{11pt}{12pt}\\selectfont") {
-  width_prefix <- if (is.null(width)) {
-    ""
-  } else {
-    paste0("width=", width, ",\n")
-  }
-
-  table_latex <- sub(
-    "\\\\begin\\{table\\}",
-    "\\\\begin{table}[H]",
-    table_latex
+                                     colsep = NULL,
+                                     cell_font = NULL) {
+  fit_tblr_latex(
+    table_latex,
+    label = label,
+    notes = notes,
+    width = width,
+    colsep = colsep,
+    cell_font = cell_font
   )
-
-  table_latex <- sub(
-    "caption=\\{([^}]*)\\},",
-    paste0("caption={\\1},\nlabel={", label, "},"),
-    table_latex
-  )
-
-  inner_open <- regexpr("\\{\\s*%% tabularray inner open\\n", table_latex, perl = TRUE)
-  if (inner_open[[1]] < 0L) {
-    stop("Could not find tabularray inner-open block in modelsummary output.",
-         call. = FALSE)
-  }
-
-  layout_patch <- paste0(
-    width_prefix,
-    "colsep=",
-    colsep,
-    ",\n",
-    "cells   = {font = ",
-    cell_font,
-    "},\n"
-  )
-  insert_at <- inner_open[[1]] + attr(inner_open, "match.length") - 1L
-  table_latex <- paste0(
-    substr(table_latex, 1L, insert_at),
-    layout_patch,
-    substr(table_latex, insert_at + 1L, nchar(table_latex))
-  )
-
-  if (
-    !grepl("\\fontsize", table_latex, fixed = TRUE) ||
-      !grepl("\\selectfont", table_latex, fixed = TRUE)
-  ) {
-    stop("Patched LaTeX table is missing expected font commands.", call. = FALSE)
-  }
-
-  note_match <- regexpr("note\\{\\}=\\{\\s*\\},", table_latex, perl = TRUE)
-  if (note_match[[1]] < 0L) {
-    stop("Could not find empty tabularray note block in modelsummary output.",
-         call. = FALSE)
-  }
-  collapse_doubled_backslashes <- function(x) {
-    chars <- strsplit(x, "", useBytes = TRUE)[[1]]
-    slash <- intToUtf8(92L)
-    out <- character(0L)
-    i <- 1L
-
-    while (i <= length(chars)) {
-      out <- c(out, chars[[i]])
-      if (
-        identical(chars[[i]], slash) &&
-          i < length(chars) &&
-          identical(chars[[i + 1L]], slash)
-      ) {
-        i <- i + 2L
-      } else {
-        i <- i + 1L
-      }
-    }
-
-    paste0(out, collapse = "")
-  }
-
-  note_start <- note_match[[1]]
-  note_end <- note_start + attr(note_match, "match.length") - 1L
-  table_latex <- paste0(
-    substr(table_latex, 1L, note_start - 1L),
-    collapse_doubled_backslashes(notes),
-    substr(table_latex, note_end + 1L, nchar(table_latex))
-  )
-
-  table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
-  table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex)
-
-  table_latex
 }
 
 #' Build a coefficient map for event-study `i()` terms

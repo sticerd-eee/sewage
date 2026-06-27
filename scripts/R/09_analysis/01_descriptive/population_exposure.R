@@ -276,7 +276,7 @@ tex_lines <- c(
   "colsep=3pt,",
   "rowsep=0.5pt,",
   "cells={font=\\fontsize{11pt}{12pt}\\selectfont},",
-  "colspec={Q[l]Q[c]Q[c]Q[c]Q[c]Q[c]Q[c]},",
+  "colspec={l *{6}{X[c]}},",
   "hline{1}={1-7}{solid, black, 0.1em},",
   "hline{2}={1-7}{solid, black, 0.05em},",
   "hline{5}={1-7}{solid, black, 0.1em},",

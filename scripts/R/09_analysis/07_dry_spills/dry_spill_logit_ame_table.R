@@ -508,7 +508,7 @@ latex_lines <- c(
   "colsep=3pt,",
   "rowsep=0pt,",
   "cells={font=\\fontsize{11pt}{12pt}\\selectfont, valign=m},",
-  "colspec={Q[l,0.18\\linewidth]Q[c,0.205\\linewidth]Q[c,0.205\\linewidth]Q[c,0.205\\linewidth]Q[c,0.205\\linewidth]},",
+  "colspec={l X[c] X[c] X[c] X[c]},",
   "hline{1}={1-5}{solid, black, 0.1em},",
   "hline{2}={2-3}{solid, black, 0.05em},",
   "hline{2}={4-5}{solid, black, 0.05em},",

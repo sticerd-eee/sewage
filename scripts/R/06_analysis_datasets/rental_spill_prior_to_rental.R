@@ -371,7 +371,9 @@ create_prior_to_rental_db <- function(data) {
   # Compute daily averages per site-rental
   result[, `:=`(
     spill_count_daily_avg = spill_count / n_days_in_window,
-    spill_hrs_daily_avg = spill_hrs / n_days_in_window
+    spill_hrs_daily_avg = spill_hrs / n_days_in_window,
+    spill_count_weekly_avg = (spill_count / n_days_in_window) * 7,
+    spill_hrs_weekly_avg = (spill_hrs / n_days_in_window) * 7
   )]
   
   logger::log_info("Rows with missing sites (spill metrics set to NA): {result[site_missing == TRUE, .N]}")

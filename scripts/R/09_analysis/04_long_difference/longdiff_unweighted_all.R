@@ -52,6 +52,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 
 # Output Directory Setup -------------------------------------------------------
 output_dir <- here::here("output", "tables")
@@ -328,40 +331,19 @@ table_latex <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 3,
+  fmt = fmt_table,
   coef_map = coef_labels,
   gof_map = gof_map,
   notes = " ",
   title = "Long Difference: Effect of Changes in Sewage Spills on Property Values"
 )
 
-# Force table environment to [H]
-table_latex <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex)
-
-# Add label in tabularray format
-table_latex <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:longdiff-unweighted-all},",
-  table_latex
+table_latex <- fit_tblr_latex(
+  table_latex,
+  label = "tbl:longdiff-unweighted-all",
+  notes = custom_notes,
+  width = "0.9\\linewidth"
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1width=0.9\\\\linewidth,\ncolsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex
-)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes,
-  table_latex
-)
-
-# Distribute available width among columns (X[] instead of Q[])
-table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
-table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={X[l] ", table_latex)
 
 # Write to file
 output_path <- file.path(output_dir, "longdiff_unweighted_all.tex")

@@ -60,6 +60,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 # Output Directory Setup -------------------------------------------------------
 output_dir <- here::here("output", "tables")
 if (!dir.exists(output_dir)) {
@@ -153,8 +156,8 @@ run_for_radius <- function(RAD) {
     inner_join(sales, by = "house_id") |>
     mutate(log_price = log(price)) |>
     filter(
-      !is.na(spill_count_daily_avg),
-      !is.na(spill_hrs_daily_avg),
+      !is.na(spill_count_weekly_avg),
+      !is.na(spill_hrs_weekly_avg),
       !is.na(lsoa),
       !is.na(property_type),
       !is.na(old_new),
@@ -195,8 +198,8 @@ run_for_radius <- function(RAD) {
     inner_join(rentals, by = "rental_id") |>
     mutate(log_price = log(listing_price)) |>
     filter(
-      !is.na(spill_count_daily_avg),
-      !is.na(spill_hrs_daily_avg),
+      !is.na(spill_count_weekly_avg),
+      !is.na(spill_hrs_weekly_avg),
       !is.na(lsoa),
       !is.na(property_type),
       !is.na(bedrooms),
@@ -219,74 +222,74 @@ run_for_radius <- function(RAD) {
 
   # Sales Models
   model_sales_count_1 <- fixest::feols(
-    log_price ~ spill_count_daily_avg,
+    log_price ~ spill_count_weekly_avg,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   model_sales_count_1b <- fixest::feols(
-    log_price ~ spill_count_daily_avg + property_type + old_new + duration | qtr_id,
+    log_price ~ spill_count_weekly_avg + property_type + old_new + duration | qtr_id,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   model_sales_count_2 <- fixest::feols(
-    log_price ~ spill_count_daily_avg | lsoa + qtr_id,
+    log_price ~ spill_count_weekly_avg | lsoa + qtr_id,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   model_sales_count_3 <- fixest::feols(
-    log_price ~ spill_count_daily_avg + property_type + old_new + duration | lsoa + qtr_id,
+    log_price ~ spill_count_weekly_avg + property_type + old_new + duration | lsoa + qtr_id,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   model_sales_count_4 <- fixest::feols(
-    log_price ~ spill_count_daily_avg | msoa + qtr_id,
+    log_price ~ spill_count_weekly_avg | msoa + qtr_id,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   model_sales_count_5 <- fixest::feols(
-    log_price ~ spill_count_daily_avg + property_type + old_new + duration | msoa + qtr_id,
+    log_price ~ spill_count_weekly_avg + property_type + old_new + duration | msoa + qtr_id,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   # Rental Models
   model_rental_count_1 <- fixest::feols(
-    log_price ~ spill_count_daily_avg,
+    log_price ~ spill_count_weekly_avg,
     data = dat_rental_clean,
     vcov = "hetero"
   )
 
   model_rental_count_1b <- fixest::feols(
-    log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms | qtr_id,
+    log_price ~ spill_count_weekly_avg + property_type + bedrooms + bathrooms | qtr_id,
     data = dat_rental_clean,
     vcov = "hetero"
   )
 
   model_rental_count_2 <- fixest::feols(
-    log_price ~ spill_count_daily_avg | lsoa + qtr_id,
+    log_price ~ spill_count_weekly_avg | lsoa + qtr_id,
     data = dat_rental_clean,
     vcov = "hetero"
   )
 
   model_rental_count_3 <- fixest::feols(
-    log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms | lsoa + qtr_id,
+    log_price ~ spill_count_weekly_avg + property_type + bedrooms + bathrooms | lsoa + qtr_id,
     data = dat_rental_clean,
     vcov = "hetero"
   )
 
   model_rental_count_4 <- fixest::feols(
-    log_price ~ spill_count_daily_avg | msoa + qtr_id,
+    log_price ~ spill_count_weekly_avg | msoa + qtr_id,
     data = dat_rental_clean,
     vcov = "hetero"
   )
 
   model_rental_count_5 <- fixest::feols(
-    log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms | msoa + qtr_id,
+    log_price ~ spill_count_weekly_avg + property_type + bedrooms + bathrooms | msoa + qtr_id,
     data = dat_rental_clean,
     vcov = "hetero"
   )
@@ -298,74 +301,74 @@ run_for_radius <- function(RAD) {
 
   # Sales Models
   model_sales_hrs_1 <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg,
+    log_price ~ spill_hrs_weekly_avg,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   model_sales_hrs_1b <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg + property_type + old_new + duration | qtr_id,
+    log_price ~ spill_hrs_weekly_avg + property_type + old_new + duration | qtr_id,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   model_sales_hrs_2 <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg | lsoa + qtr_id,
+    log_price ~ spill_hrs_weekly_avg | lsoa + qtr_id,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   model_sales_hrs_3 <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg + property_type + old_new + duration | lsoa + qtr_id,
+    log_price ~ spill_hrs_weekly_avg + property_type + old_new + duration | lsoa + qtr_id,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   model_sales_hrs_4 <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg | msoa + qtr_id,
+    log_price ~ spill_hrs_weekly_avg | msoa + qtr_id,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   model_sales_hrs_5 <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg + property_type + old_new + duration | msoa + qtr_id,
+    log_price ~ spill_hrs_weekly_avg + property_type + old_new + duration | msoa + qtr_id,
     data = dat_sales_clean,
     vcov = "hetero"
   )
 
   # Rental Models
   model_rental_hrs_1 <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg,
+    log_price ~ spill_hrs_weekly_avg,
     data = dat_rental_clean,
     vcov = "hetero"
   )
 
   model_rental_hrs_1b <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms | qtr_id,
+    log_price ~ spill_hrs_weekly_avg + property_type + bedrooms + bathrooms | qtr_id,
     data = dat_rental_clean,
     vcov = "hetero"
   )
 
   model_rental_hrs_2 <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg | lsoa + qtr_id,
+    log_price ~ spill_hrs_weekly_avg | lsoa + qtr_id,
     data = dat_rental_clean,
     vcov = "hetero"
   )
 
   model_rental_hrs_3 <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms | lsoa + qtr_id,
+    log_price ~ spill_hrs_weekly_avg + property_type + bedrooms + bathrooms | lsoa + qtr_id,
     data = dat_rental_clean,
     vcov = "hetero"
   )
 
   model_rental_hrs_4 <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg | msoa + qtr_id,
+    log_price ~ spill_hrs_weekly_avg | msoa + qtr_id,
     data = dat_rental_clean,
     vcov = "hetero"
   )
 
   model_rental_hrs_5 <- fixest::feols(
-    log_price ~ spill_hrs_daily_avg + property_type + bedrooms + bathrooms | msoa + qtr_id,
+    log_price ~ spill_hrs_weekly_avg + property_type + bedrooms + bathrooms | msoa + qtr_id,
     data = dat_rental_clean,
     vcov = "hetero"
   )
@@ -378,7 +381,7 @@ run_for_radius <- function(RAD) {
   # Coefficient labels
   coef_labels_count <- c(
     "(Intercept)" = "Constant",
-    "spill_count_daily_avg" = "Daily spill count"
+    "spill_count_weekly_avg" = "Spills per week (avg.)"
   )
 
   # Combined models for joint table
@@ -412,7 +415,7 @@ run_for_radius <- function(RAD) {
 
   # Notes
   custom_notes_count <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values with quarter fixed effects. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Quarter fixed effects are included in all specifications except column 1 (plain OLS). Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values with quarter fixed effects. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Quarter fixed effects are included in all specifications except column 1 (plain OLS). Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Export table
@@ -423,7 +426,7 @@ run_for_radius <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -431,34 +434,11 @@ run_for_radius <- function(RAD) {
     title = "Effect of Sewage Spills (Count) on Property Values with Quarter FE"
   )
 
-  # Force table environment to [H]
-  table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_count)
-
-  # Add label in tabularray format
-  table_latex_count <- sub(
-    "caption=\\{([^}]*)\\},",
-    paste0("caption={\\1},\nlabel={tbl:hedonic-count-continuous-prior-qtr-fe-", RAD, "m},"),
-    table_latex_count
+  table_latex_count <- fit_tblr_latex(
+    table_latex_count,
+    label = paste0("tbl:hedonic-count-continuous-prior-qtr-fe-", RAD, "m"),
+    notes = custom_notes_count
   )
-
-  # Add colsep and font size for tighter column spacing
-  table_latex_count <- sub(
-    "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
-    table_latex_count
-  )
-
-  # Replace empty note with custom notes (tabularray format)
-  table_latex_count <- sub(
-    "note\\{\\}=\\{\\s*\\},",
-    custom_notes_count,
-    table_latex_count
-  )
-
-  # Distribute available width among columns (X[] instead of Q[]) so the table
-  # auto-fits \linewidth (first column stays natural-width label)
-  table_latex_count <- gsub("Q\\[\\]", "X[c] ", table_latex_count)
-  table_latex_count <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex_count)
 
   output_path_count <- file.path(output_dir, paste0("hedonic_count_continuous_prior_qtr_fe_", RAD, "m.tex"))
   writeLines(table_latex_count, output_path_count)
@@ -471,7 +451,7 @@ run_for_radius <- function(RAD) {
   # Coefficient labels (including controls)
   coef_labels_hrs <- c(
     "(Intercept)" = "Constant",
-    "spill_hrs_daily_avg" = "Daily spill hours"
+    "spill_hrs_weekly_avg" = "Spill hours per week (avg.)"
   )
 
   # Combined models for joint table
@@ -495,7 +475,7 @@ run_for_radius <- function(RAD) {
   )
   # Notes
   custom_notes_hrs <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values with quarter fixed effects. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per day recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Quarter fixed effects are included in all specifications except column 1 (plain OLS). Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values with quarter fixed effects. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Quarter fixed effects are included in all specifications except column 1 (plain OLS). Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Export table
@@ -506,7 +486,7 @@ run_for_radius <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = 2,
+    fmt = fmt_table,
     coef_map = coef_labels_hrs,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -514,34 +494,11 @@ run_for_radius <- function(RAD) {
     title = "Effect of Sewage Spills (Hours) on Property Values with Quarter FE"
   )
 
-  # Force table environment to [H]
-  table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_hrs)
-
-  # Add label in tabularray format
-  table_latex_hrs <- sub(
-    "caption=\\{([^}]*)\\},",
-    paste0("caption={\\1},\nlabel={tbl:hedonic-hrs-continuous-prior-qtr-fe-", RAD, "m},"),
-    table_latex_hrs
+  table_latex_hrs <- fit_tblr_latex(
+    table_latex_hrs,
+    label = paste0("tbl:hedonic-hrs-continuous-prior-qtr-fe-", RAD, "m"),
+    notes = custom_notes_hrs
   )
-
-  # Add colsep and font size for tighter column spacing
-  table_latex_hrs <- sub(
-    "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
-    table_latex_hrs
-  )
-
-  # Replace empty note with custom notes (tabularray format)
-  table_latex_hrs <- sub(
-    "note\\{\\}=\\{\\s*\\},",
-    custom_notes_hrs,
-    table_latex_hrs
-  )
-
-  # Distribute available width among columns (X[] instead of Q[]) so the table
-  # auto-fits \linewidth (first column stays natural-width label)
-  table_latex_hrs <- gsub("Q\\[\\]", "X[c] ", table_latex_hrs)
-  table_latex_hrs <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex_hrs)
 
   output_path_hrs <- file.path(output_dir, paste0("hedonic_hrs_continuous_prior_qtr_fe_", RAD, "m.tex"))
   writeLines(table_latex_hrs, output_path_hrs)

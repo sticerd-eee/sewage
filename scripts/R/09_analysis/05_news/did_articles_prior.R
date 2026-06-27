@@ -55,6 +55,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 
 # ==============================================================================
 # 3. Setup
@@ -159,7 +162,7 @@ run_for_radius <- function(RAD) {
     ) |>
     mutate(log_price = log(price.y)) |>
     filter(
-      !is.na(spill_count_daily_avg),
+      !is.na(spill_count_weekly_avg),
       is.finite(log_cumulative_articles),
       !is.na(lsoa),
       !is.na(month_id),
@@ -179,11 +182,11 @@ run_for_radius <- function(RAD) {
     )
 
   cat(sprintf("  Final sales dataset: %d transactions\n", nrow(dat)))
-  cat(sprintf("  Spill count daily avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
-              mean(dat$spill_count_daily_avg, na.rm = TRUE),
-              sd(dat$spill_count_daily_avg, na.rm = TRUE),
-              min(dat$spill_count_daily_avg, na.rm = TRUE),
-              max(dat$spill_count_daily_avg, na.rm = TRUE)))
+  cat(sprintf("  Spill count weekly avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
+              mean(dat$spill_count_weekly_avg, na.rm = TRUE),
+              sd(dat$spill_count_weekly_avg, na.rm = TRUE),
+              min(dat$spill_count_weekly_avg, na.rm = TRUE),
+              max(dat$spill_count_weekly_avg, na.rm = TRUE)))
   cat(sprintf("  Cumulative articles: mean=%.1f, sd=%.1f, min=%d, max=%d\n",
               mean(dat$cumulative_articles, na.rm = TRUE),
               sd(dat$cumulative_articles, na.rm = TRUE),
@@ -218,7 +221,7 @@ run_for_radius <- function(RAD) {
     ) |>
     mutate(log_price = log(listing_price.y)) |>
     filter(
-      !is.na(spill_count_daily_avg),
+      !is.na(spill_count_weekly_avg),
       is.finite(log_cumulative_articles),
       !is.na(lsoa),
       !is.na(month_id),
@@ -236,11 +239,11 @@ run_for_radius <- function(RAD) {
     )
 
   cat(sprintf("  Final rental dataset: %d transactions\n", nrow(dat_rental)))
-  cat(sprintf("  Spill count daily avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
-              mean(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-              sd(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-              min(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-              max(dat_rental$spill_count_daily_avg, na.rm = TRUE)))
+  cat(sprintf("  Spill count weekly avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
+              mean(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+              sd(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+              min(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+              max(dat_rental$spill_count_weekly_avg, na.rm = TRUE)))
   cat(sprintf("  Cumulative articles: mean=%.1f, sd=%.1f, min=%d, max=%d\n",
               mean(dat_rental$cumulative_articles, na.rm = TRUE),
               sd(dat_rental$cumulative_articles, na.rm = TRUE),
@@ -261,8 +264,8 @@ run_for_radius <- function(RAD) {
 
   # Model 1: No controls, no FE
   model_sale_1 <- fixest::feols(
-    log_price ~ spill_count_daily_avg + log_cumulative_articles +
-                spill_count_daily_avg:log_cumulative_articles,
+    log_price ~ spill_count_weekly_avg + log_cumulative_articles +
+                spill_count_weekly_avg:log_cumulative_articles,
     data = dat,
     vcov = ~lsoa
   )
@@ -270,8 +273,8 @@ run_for_radius <- function(RAD) {
 
   # Model 1b: Property controls, no FE
   model_sale_1b <- fixest::feols(
-    log_price ~ spill_count_daily_avg + log_cumulative_articles +
-                spill_count_daily_avg:log_cumulative_articles +
+    log_price ~ spill_count_weekly_avg + log_cumulative_articles +
+                spill_count_weekly_avg:log_cumulative_articles +
                 property_type + old_new + duration,
     data = dat,
     vcov = ~lsoa
@@ -280,8 +283,8 @@ run_for_radius <- function(RAD) {
 
   # Model 2: MSOA + Month FE only
   model_sale_2 <- fixest::feols(
-    log_price ~ spill_count_daily_avg +
-                spill_count_daily_avg:log_cumulative_articles | msoa + month_id,
+    log_price ~ spill_count_weekly_avg +
+                spill_count_weekly_avg:log_cumulative_articles | msoa + month_id,
     data = dat,
     vcov = ~lsoa
   )
@@ -289,8 +292,8 @@ run_for_radius <- function(RAD) {
 
   # Model 3: MSOA + Month FE + property controls
   model_sale_3 <- fixest::feols(
-    log_price ~ spill_count_daily_avg +
-                spill_count_daily_avg:log_cumulative_articles +
+    log_price ~ spill_count_weekly_avg +
+                spill_count_weekly_avg:log_cumulative_articles +
                 property_type + old_new + duration | msoa + month_id,
     data = dat,
     vcov = ~lsoa
@@ -299,8 +302,8 @@ run_for_radius <- function(RAD) {
 
   # Model 4: LSOA + Month FE only
   model_sale_4 <- fixest::feols(
-    log_price ~ spill_count_daily_avg +
-                spill_count_daily_avg:log_cumulative_articles | lsoa + month_id,
+    log_price ~ spill_count_weekly_avg +
+                spill_count_weekly_avg:log_cumulative_articles | lsoa + month_id,
     data = dat,
     vcov = ~lsoa
   )
@@ -308,8 +311,8 @@ run_for_radius <- function(RAD) {
 
   # Model 5: LSOA + Month FE + property controls
   model_sale_5 <- fixest::feols(
-    log_price ~ spill_count_daily_avg +
-                spill_count_daily_avg:log_cumulative_articles +
+    log_price ~ spill_count_weekly_avg +
+                spill_count_weekly_avg:log_cumulative_articles +
                 property_type + old_new + duration | lsoa + month_id,
     data = dat,
     vcov = ~lsoa
@@ -320,8 +323,8 @@ run_for_radius <- function(RAD) {
 
   # Model 4: No controls, no FE
   model_rent_1 <- fixest::feols(
-    log_price ~ spill_count_daily_avg + log_cumulative_articles +
-                spill_count_daily_avg:log_cumulative_articles,
+    log_price ~ spill_count_weekly_avg + log_cumulative_articles +
+                spill_count_weekly_avg:log_cumulative_articles,
     data = dat_rental,
     vcov = ~lsoa
   )
@@ -329,8 +332,8 @@ run_for_radius <- function(RAD) {
 
   # Model 4b: Property controls, no FE
   model_rent_1b <- fixest::feols(
-    log_price ~ spill_count_daily_avg + log_cumulative_articles +
-                spill_count_daily_avg:log_cumulative_articles +
+    log_price ~ spill_count_weekly_avg + log_cumulative_articles +
+                spill_count_weekly_avg:log_cumulative_articles +
                 property_type + bedrooms + bathrooms,
     data = dat_rental,
     vcov = ~lsoa
@@ -339,8 +342,8 @@ run_for_radius <- function(RAD) {
 
   # Model 2: MSOA + Month FE only
   model_rent_2 <- fixest::feols(
-    log_price ~ spill_count_daily_avg +
-                spill_count_daily_avg:log_cumulative_articles | msoa + month_id,
+    log_price ~ spill_count_weekly_avg +
+                spill_count_weekly_avg:log_cumulative_articles | msoa + month_id,
     data = dat_rental,
     vcov = ~lsoa
   )
@@ -348,8 +351,8 @@ run_for_radius <- function(RAD) {
 
   # Model 3: MSOA + Month FE + property controls
   model_rent_3 <- fixest::feols(
-    log_price ~ spill_count_daily_avg +
-                spill_count_daily_avg:log_cumulative_articles +
+    log_price ~ spill_count_weekly_avg +
+                spill_count_weekly_avg:log_cumulative_articles +
                 property_type + bedrooms + bathrooms | msoa + month_id,
     data = dat_rental,
     vcov = ~lsoa
@@ -358,8 +361,8 @@ run_for_radius <- function(RAD) {
 
   # Model 4: LSOA + Month FE only
   model_rent_4 <- fixest::feols(
-    log_price ~ spill_count_daily_avg +
-                spill_count_daily_avg:log_cumulative_articles | lsoa + month_id,
+    log_price ~ spill_count_weekly_avg +
+                spill_count_weekly_avg:log_cumulative_articles | lsoa + month_id,
     data = dat_rental,
     vcov = ~lsoa
   )
@@ -367,8 +370,8 @@ run_for_radius <- function(RAD) {
 
   # Model 5: LSOA + Month FE + property controls
   model_rent_5 <- fixest::feols(
-    log_price ~ spill_count_daily_avg +
-                spill_count_daily_avg:log_cumulative_articles +
+    log_price ~ spill_count_weekly_avg +
+                spill_count_weekly_avg:log_cumulative_articles +
                 property_type + bedrooms + bathrooms | lsoa + month_id,
     data = dat_rental,
     vcov = ~lsoa
@@ -384,9 +387,9 @@ run_for_radius <- function(RAD) {
 
   # Coefficient labels
   coef_labels <- c(
-    "spill_count_daily_avg" = "Daily spill count",
+    "spill_count_weekly_avg" = "Spills per week (avg.)",
     "log_cumulative_articles" = "$\\log (\\text{Articles})$",
-    "spill_count_daily_avg:log_cumulative_articles" = "{Daily spill count \\\\ $\\times$ $\\log (\\text{Articles})$}"
+    "spill_count_weekly_avg:log_cumulative_articles" = "{Spills per week (avg.) \\\\ $\\times$ $\\log (\\text{Articles})$}"
   )
 
   # Add rows for fixed effects
@@ -404,7 +407,7 @@ run_for_radius <- function(RAD) {
 
   # Notes
   custom_notes <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. $\\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative UK news coverage of sewage spills from LexisNexis from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. $\\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative UK news coverage of sewage spills from LexisNexis from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Set option to avoid siunitx wrapping
@@ -439,7 +442,7 @@ run_for_radius <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = 3,
+    fmt = fmt_table,
     coef_map = coef_labels,
     gof_map = gof_map,
     add_rows = add_rows,
@@ -447,33 +450,11 @@ run_for_radius <- function(RAD) {
     title = "Effect of Sewage Spills on Property Values: Log Cumulative Media Coverage (Prior to Transaction)"
   )
 
-  # Force table environment to [H]
-  table_latex <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex)
-
-  # Add label in tabularray format
-  table_latex <- sub(
-    "caption=\\{([^}]*)\\},",
-    paste0("caption={\\1},\nlabel={tbl:did-articles-prior-", RAD, "m},"),
-    table_latex
+  table_latex <- fit_tblr_latex(
+    table_latex,
+    label = paste0("tbl:did-articles-prior-", RAD, "m"),
+    notes = custom_notes
   )
-
-  # Add colsep and font size for tighter column spacing
-  table_latex <- sub(
-    "(\\{\\s*%% tabularray inner open\\n)",
-    "\\1colsep=2pt,\ncells   = {font = \\\\fontsize{8pt}{9pt}\\\\selectfont},\n",
-    table_latex
-  )
-
-  # Replace empty note with custom notes (tabularray format)
-  table_latex <- sub(
-    "note\\{\\}=\\{\\s*\\},",
-    custom_notes,
-    table_latex
-  )
-
-  # Distribute available width among columns (X[] instead of Q[])
-  table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
-  table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex)
 
   # Write to file
   output_path <- file.path(output_dir, paste0("did_articles_prior_", RAD, "m.tex"))
@@ -506,21 +487,21 @@ cat("  Radii:", paste(RADII, collapse = ", "), "m\n")
 cat("\nBuilding cross-radius robustness summary...\n")
 
 custom_notes_summary <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the cumulative media coverage estimates to the house-to-site radius. Each column reports estimates for the sample of properties within the stated radius (250m, 500m, or 1000m) of a storm overflow in England, 2021--2023. Each cell is the coefficient on the interaction between the daily spill count and $\\\\log (\\\\text{Articles})$, the natural logarithm of cumulative UK news coverage of sewage spills from January 2021 to the transaction month, from the fully-saturated specification including property controls, the stated location fixed effects, and month fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the cumulative media coverage estimates to the house-to-site radius. Each column reports estimates for the sample of properties within the stated radius (250m, 500m, or 1000m) of a storm overflow in England, 2021--2023. Each cell is the coefficient on the interaction between the weekly spill count and $\\\\log (\\\\text{Articles})$, the natural logarithm of cumulative UK news coverage of sewage spills from January 2021 to the transaction month, from the fully-saturated specification including property controls, the stated location fixed effects, and month fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 write_radius_robustness_table(
   models_by_radius = models_by_radius,
   radii            = RADII,
   coef_map         = c(
-    "spill_count_daily_avg:log_cumulative_articles" =
-      "{Daily spill count \\\\ $\\times$ $\\log (\\text{Articles})$}"
+    "spill_count_weekly_avg:log_cumulative_articles" =
+      "{Spills per week (avg.) \\\\ $\\times$ $\\log (\\text{Articles})$}"
   ),
   custom_notes     = custom_notes_summary,
   label            = "tbl:did-articles-prior-radius-robustness",
   title            = "Media Coverage and Property Values: Robustness to House-to-Site Radius (Log Cumulative Coverage)",
   output_path      = file.path(output_dir, "did_articles_prior_radius_robustness.tex"),
-  fmt              = 3,
+  fmt              = fmt_table,
   escape           = FALSE
 )
 cat("  Wrote: did_articles_prior_radius_robustness.tex\n")
