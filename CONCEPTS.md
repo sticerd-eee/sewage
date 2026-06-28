@@ -32,6 +32,11 @@ A Record-Linkage Component containing more than one Annual-Return Site from the 
 ### Near-Overflow Radius
 The straight-line distance threshold within which a property is treated as exposed to a storm overflow, used to build the near-property cross-sections. The main analyses are run at several such thresholds, with the others serving as robustness checks. In regression specifications it is written generically as the radius buffer **B**, which takes the values 250, 500, and 1000 m across the sweep; each individual result table still reports its specific radius.
 
+### Spill Exposure
+A property's continuous measure of nearby storm-overflow activity — spill count and spill hours at the overflows within its Near-Overflow Radius — expressed as a daily average over the exposure window.
+
+The daily average is the stored canonical form; headline coefficients are reported in per-week units (one extra spill, or spill-hour, per week), the reporting contrast chosen because it sits near one standard deviation and is interpretable. Directional Spill Exposure and Nearest-Site Exposure are variants that split or restrict which overflows contribute.
+
 ### Directional Spill Exposure
 Spill exposure split by whether the contributing overflow lies upstream or downstream of the property along the river network — used to separate same-river pollution transport from generic proximity. Estimated unweighted and in an inverse-river-distance-weighted variant.
 
