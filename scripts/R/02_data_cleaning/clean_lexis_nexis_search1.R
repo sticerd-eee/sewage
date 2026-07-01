@@ -17,7 +17,7 @@ CONFIG <- list(
   base_year = 2021,
   input_dir = here::here("data", "raw", "lexis_nexis", "search_1"),
   output_dir = here::here("data", "processed", "lexis_nexis"),
-  pdf_converter_path = here::here("news_lexisnexis", "scripts", "nexis_pdf_conversion.R"),
+  pdf_converter_path = here::here("scripts", "R", "02_data_cleaning", "nexis_pdf_conversion.R"),
   pdf_files = c(
     "search_1_1.PDF",
     "search_1_2.PDF",
@@ -67,7 +67,7 @@ setup_logging <- function() {
 # Data Loading Functions
 ############################################################
 
-#' Source the PDF conversion function from news_lexisnexis scripts
+#' Source the PDF conversion function from the co-located conversion helper
 #' @return NULL
 load_pdf_converter <- function() {
   if (!file.exists(CONFIG$pdf_converter_path)) {
