@@ -63,6 +63,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 
 # ==============================================================================
 # 3. Setup
@@ -160,7 +163,7 @@ dat <- dat_cs_sales |>
     event_qtr = as.integer(qtr_id - PEAK_QTR_ID)
   ) |>
   filter(
-    !is.na(spill_count_daily_avg),
+    !is.na(spill_count_weekly_avg),
     !is.na(lsoa),
     !is.na(qtr_id),
     !is.na(latitude),
@@ -180,11 +183,11 @@ dat <- dat_cs_sales |>
 
 cat(sprintf("  Final sales dataset: %d transactions\n", nrow(dat)))
 cat(sprintf("  Event window [%d, %d] quarters from peak\n", EVENT_MIN, EVENT_MAX))
-cat(sprintf("  Spill count daily avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
-            mean(dat$spill_count_daily_avg, na.rm = TRUE),
-            sd(dat$spill_count_daily_avg, na.rm = TRUE),
-            min(dat$spill_count_daily_avg, na.rm = TRUE),
-            max(dat$spill_count_daily_avg, na.rm = TRUE)))
+cat(sprintf("  Spill count weekly avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
+            mean(dat$spill_count_weekly_avg, na.rm = TRUE),
+            sd(dat$spill_count_weekly_avg, na.rm = TRUE),
+            min(dat$spill_count_weekly_avg, na.rm = TRUE),
+            max(dat$spill_count_weekly_avg, na.rm = TRUE)))
 
 # 4.5 Load cross-section rental data (prior to rental) ------------------------
 cat("Loading cross-section rental data...\n")
@@ -221,7 +224,7 @@ dat_rental <- dat_cs_rentals |>
     event_qtr = as.integer(qtr_id - PEAK_QTR_ID)
   ) |>
   filter(
-    !is.na(spill_count_daily_avg),
+    !is.na(spill_count_weekly_avg),
     !is.na(lsoa),
     !is.na(qtr_id),
     !is.na(latitude),
@@ -239,11 +242,11 @@ dat_rental <- dat_cs_rentals |>
 
 cat(sprintf("  Final rental dataset: %d transactions\n", nrow(dat_rental)))
 cat(sprintf("  Event window [%d, %d] quarters from peak\n", EVENT_MIN, EVENT_MAX))
-cat(sprintf("  Spill count daily avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
-            mean(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-            sd(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-            min(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-            max(dat_rental$spill_count_daily_avg, na.rm = TRUE)))
+cat(sprintf("  Spill count weekly avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
+            mean(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+            sd(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+            min(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+            max(dat_rental$spill_count_weekly_avg, na.rm = TRUE)))
 
 
 # ==============================================================================
@@ -251,7 +254,7 @@ cat(sprintf("  Spill count daily avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
 # ==============================================================================
 cat("\nEstimating regression models...\n")
 
-event_term <- paste0("i(event_qtr, spill_count_daily_avg, ref = ", EVENT_REF, ")")
+event_term <- paste0("i(event_qtr, spill_count_weekly_avg, ref = ", EVENT_REF, ")")
 
 # 5.1 Sales models ------------------------------------------------------------
 
@@ -374,9 +377,9 @@ attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Event time is measured in quarters relative to the Google Trends peak quarter. Estimates report the interaction between daily average spill count and event-time dummies, with the quarter immediately before the peak (t = -1) as the reference period. ",
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Event time is measured in quarters relative to the Google Trends peak quarter. Estimates report the interaction between average spills per week and event-time dummies, with the quarter immediately before the peak (t = -1) as the reference period. ",
   sprintf("The event window is [%d, %d] quarters. ", EVENT_MIN, EVENT_MAX),
-  "Daily avg. spill count measures the average total number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Standard errors clustered at the LSOA level in parentheses. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "Spills per week (avg.) measures the average number of spill events per week (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Standard errors clustered at the LSOA level in parentheses. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Set option to avoid siunitx wrapping
@@ -405,7 +408,7 @@ table_latex <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 3,
+  fmt = fmt_table,
   coef_map = coef_labels,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -413,33 +416,12 @@ table_latex <- modelsummary::modelsummary(
   title = "Event Study of Spill Exposure Around Google Trends Peak (Prior to Transaction)"
 )
 
-# Force table environment to [H]
-table_latex <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex)
-
-# Add label in tabularray format
-table_latex <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:es-trends-prior},",
-  table_latex
+table_latex <- fit_tblr_latex(
+  table_latex,
+  label = "tbl:es-trends-prior",
+  notes = custom_notes,
+  width = "0.9\\linewidth"
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1width=0.9\\\\linewidth,\ncolsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex
-)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes,
-  table_latex
-)
-
-# Distribute available width among columns (X[] instead of Q[])
-table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
-table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex)
 
 # Write to file
 output_path <- file.path(output_dir, "es_trends_prior.tex")
@@ -493,11 +475,11 @@ build_event_plot <- function(model, subtitle, caption) {
 }
 
 sales_caption <- paste0(
-  "log_price ~ i(event_qtr, spill_count_daily_avg, ref = ", EVENT_REF,
+  "log_price ~ i(event_qtr, spill_count_weekly_avg, ref = ", EVENT_REF,
   ") + property controls | lsoa + qtr_id"
 )
 rentals_caption <- paste0(
-  "log_price ~ i(event_qtr, spill_count_daily_avg, ref = ", EVENT_REF,
+  "log_price ~ i(event_qtr, spill_count_weekly_avg, ref = ", EVENT_REF,
   ") + property controls | lsoa + qtr_id"
 )
 

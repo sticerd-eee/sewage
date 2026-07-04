@@ -751,11 +751,11 @@ reactable(
 ### Bivariate Plots {#sec-03-03-zoopla-bivariate}
 
 ```{r, bivariate_plots}
-#| eval: false
+#| eval: true
 
 # Sample data for plotting
 set.seed(123)
-sample_size <- 300000
+sample_size <- min(30000, n_distinct(dat_agg_all_trimmed$rental_id))
 sample_rentals <- unique(dat_agg_all_trimmed$rental_id) %>%
   sample(size = sample_size)
 

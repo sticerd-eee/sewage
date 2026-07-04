@@ -52,6 +52,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 
 # ==============================================================================
 # 3. Setup
@@ -128,7 +131,7 @@ dat <- dat_cs_sales |>
   ) |>
   mutate(log_price = log(price.y)) |>
   filter(
-    !is.na(spill_count_daily_avg),
+    !is.na(spill_count_weekly_avg),
     is.finite(log_cumulative_articles),
     !is.na(lsoa),
     !is.na(qtr_id),
@@ -148,11 +151,11 @@ dat <- dat_cs_sales |>
 
 cat(sprintf("  Final sales dataset: %d transactions\n", nrow(dat)))
 cat(sprintf("  (Excluded transactions from first %d months of 2021)\n", LAG_MONTHS))
-cat(sprintf("  Spill count daily avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
-            mean(dat$spill_count_daily_avg, na.rm = TRUE),
-            sd(dat$spill_count_daily_avg, na.rm = TRUE),
-            min(dat$spill_count_daily_avg, na.rm = TRUE),
-            max(dat$spill_count_daily_avg, na.rm = TRUE)))
+cat(sprintf("  Spill count weekly avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
+            mean(dat$spill_count_weekly_avg, na.rm = TRUE),
+            sd(dat$spill_count_weekly_avg, na.rm = TRUE),
+            min(dat$spill_count_weekly_avg, na.rm = TRUE),
+            max(dat$spill_count_weekly_avg, na.rm = TRUE)))
 cat(sprintf("  Lagged cumulative articles: mean=%.1f, sd=%.1f, min=%d, max=%d\n",
             mean(dat$cumulative_articles, na.rm = TRUE),
             sd(dat$cumulative_articles, na.rm = TRUE),
@@ -202,7 +205,7 @@ dat_rental <- dat_cs_rentals |>
   ) |>
   mutate(log_price = log(listing_price.y)) |>
   filter(
-    !is.na(spill_count_daily_avg),
+    !is.na(spill_count_weekly_avg),
     is.finite(log_cumulative_articles),
     !is.na(lsoa),
     !is.na(qtr_id),
@@ -220,11 +223,11 @@ dat_rental <- dat_cs_rentals |>
 
 cat(sprintf("  Final rental dataset: %d transactions\n", nrow(dat_rental)))
 cat(sprintf("  (Excluded transactions from first %d months of 2021)\n", LAG_MONTHS))
-cat(sprintf("  Spill count daily avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
-            mean(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-            sd(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-            min(dat_rental$spill_count_daily_avg, na.rm = TRUE),
-            max(dat_rental$spill_count_daily_avg, na.rm = TRUE)))
+cat(sprintf("  Spill count weekly avg: mean=%.4f, sd=%.4f, min=%.4f, max=%.4f\n",
+            mean(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+            sd(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+            min(dat_rental$spill_count_weekly_avg, na.rm = TRUE),
+            max(dat_rental$spill_count_weekly_avg, na.rm = TRUE)))
 cat(sprintf("  Lagged cumulative articles: mean=%.1f, sd=%.1f, min=%d, max=%d\n",
             mean(dat_rental$cumulative_articles, na.rm = TRUE),
             sd(dat_rental$cumulative_articles, na.rm = TRUE),
@@ -246,8 +249,8 @@ cat("\nEstimating regression models...\n")
 
 # Model 1: No controls, no FE
 model_sale_1 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + log_cumulative_articles +
-              spill_count_daily_avg:log_cumulative_articles,
+  log_price ~ spill_count_weekly_avg + log_cumulative_articles +
+              spill_count_weekly_avg:log_cumulative_articles,
   data = dat,
   vcov = ~lsoa
 )
@@ -255,8 +258,8 @@ cat("  Sales Model 1 (no controls, no FE) estimated\n")
 
 # Model 2: LSOA + Quarter FE only
 model_sale_2 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + log_cumulative_articles +
-              spill_count_daily_avg:log_cumulative_articles | lsoa + qtr_id,
+  log_price ~ spill_count_weekly_avg + log_cumulative_articles +
+              spill_count_weekly_avg:log_cumulative_articles | lsoa + qtr_id,
   data = dat,
   vcov = ~lsoa
 )
@@ -264,8 +267,8 @@ cat("  Sales Model 2 (FE only) estimated\n")
 
 # Model 3: LSOA + Quarter FE + property controls
 model_sale_3 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + log_cumulative_articles +
-              spill_count_daily_avg:log_cumulative_articles +
+  log_price ~ spill_count_weekly_avg + log_cumulative_articles +
+              spill_count_weekly_avg:log_cumulative_articles +
               property_type + old_new + duration | lsoa + qtr_id,
   data = dat,
   vcov = ~lsoa
@@ -276,8 +279,8 @@ cat("  Sales Model 3 (FE + controls) estimated\n")
 
 # Model 4: No controls, no FE
 model_rent_1 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + log_cumulative_articles +
-              spill_count_daily_avg:log_cumulative_articles,
+  log_price ~ spill_count_weekly_avg + log_cumulative_articles +
+              spill_count_weekly_avg:log_cumulative_articles,
   data = dat_rental,
   vcov = ~lsoa
 )
@@ -285,8 +288,8 @@ cat("  Rental Model 1 (no controls, no FE) estimated\n")
 
 # Model 5: LSOA + Quarter FE only
 model_rent_2 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + log_cumulative_articles +
-              spill_count_daily_avg:log_cumulative_articles | lsoa + qtr_id,
+  log_price ~ spill_count_weekly_avg + log_cumulative_articles +
+              spill_count_weekly_avg:log_cumulative_articles | lsoa + qtr_id,
   data = dat_rental,
   vcov = ~lsoa
 )
@@ -294,8 +297,8 @@ cat("  Rental Model 2 (FE only) estimated\n")
 
 # Model 6: LSOA + Quarter FE + property controls
 model_rent_3 <- fixest::feols(
-  log_price ~ spill_count_daily_avg + log_cumulative_articles +
-              spill_count_daily_avg:log_cumulative_articles +
+  log_price ~ spill_count_weekly_avg + log_cumulative_articles +
+              spill_count_weekly_avg:log_cumulative_articles +
               property_type + bedrooms + bathrooms | lsoa + qtr_id,
   data = dat_rental,
   vcov = ~lsoa
@@ -312,9 +315,9 @@ cat("\nExporting regression table...\n")
 
 # Coefficient labels
 coef_labels <- c(
-  "spill_count_daily_avg" = "Daily avg. spill count",
+  "spill_count_weekly_avg" = "Spills per week (avg.)",
   "log_cumulative_articles" = "Log cumulative articles (4-mo lag)",
-  "spill_count_daily_avg:log_cumulative_articles" = "{Daily avg. spill count \\\\ $\\times$ Log cumulative articles}"
+  "spill_count_weekly_avg:log_cumulative_articles" = "{Spills per week (avg.) \\\\ $\\times$ Log cumulative articles}"
 )
 
 # Goodness of fit map
@@ -335,7 +338,7 @@ attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Daily avg. spill count measures the average total number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Log cumulative articles (4-month lag) is the natural log of the total number of UK news articles about sewage from January 2021 to 4 months before the transaction (LexisNexis). Standard errors clustered at the LSOA level in parentheses. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Spills per week (avg.) measures the average number of spill events per week (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Log cumulative articles (4-month lag) is the natural log of the total number of UK news articles about sewage from January 2021 to 4 months before the transaction (LexisNexis). Standard errors clustered at the LSOA level in parentheses. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Set option to avoid siunitx wrapping
@@ -364,7 +367,7 @@ table_latex <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 3,
+  fmt = fmt_table,
   coef_map = coef_labels,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -372,33 +375,12 @@ table_latex <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills on Property Values: 4-Month Lagged Log Cumulative Media Coverage"
 )
 
-# Force table environment to [H]
-table_latex <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex)
-
-# Add label in tabularray format
-table_latex <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:did-articles-lag4-prior},",
-  table_latex
+table_latex <- fit_tblr_latex(
+  table_latex,
+  label = "tbl:did-articles-lag4-prior",
+  notes = custom_notes,
+  width = "0.9\\linewidth"
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1width=0.9\\\\linewidth,\ncolsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex
-)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes,
-  table_latex
-)
-
-# Distribute available width among columns (X[] instead of Q[])
-table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
-table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex)
 
 # Write to file
 output_path <- file.path(output_dir, "did_articles_lag4_prior.tex")

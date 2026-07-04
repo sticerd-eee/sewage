@@ -57,6 +57,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 
 # ==============================================================================
 # 3. Setup
@@ -487,7 +490,7 @@ table_latex_count <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
+  fmt = fmt_table,
   coef_map = coef_labels_count,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -495,28 +498,10 @@ table_latex_count <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Count) on Property Values"
 )
 
-# Force table environment to [H]
-table_latex_count <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_count)
-
-# Add label in tabularray format
-table_latex_count <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-count-bins-full},",
-  table_latex_count
-)
-
-# Add colsep and font size for tighter column spacing
-table_latex_count <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_count
-)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_count <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_count,
-  table_latex_count
+table_latex_count <- fit_tblr_latex(
+  table_latex_count,
+  label = "tbl:hedonic-count-bins-full",
+  notes = custom_notes_count
 )
 
 output_path_count <- file.path(output_dir, "hedonic_count_bins_full.tex")
@@ -570,7 +555,7 @@ table_latex_hrs <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = fmt_decimal(2),
+  fmt = fmt_table,
   coef_map = coef_labels_hrs,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -578,28 +563,10 @@ table_latex_hrs <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills (Hours) on Property Values"
 )
 
-# Force table environment to [H]
-table_latex_hrs <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex_hrs)
-
-# Add label in tabularray format
-table_latex_hrs <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:hedonic-hrs-bins-full},",
-  table_latex_hrs
-)
-
-# Add colsep and font size for tighter column spacing
-table_latex_hrs <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1colsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex_hrs
-)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex_hrs <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes_hrs,
-  table_latex_hrs
+table_latex_hrs <- fit_tblr_latex(
+  table_latex_hrs,
+  label = "tbl:hedonic-hrs-bins-full",
+  notes = custom_notes_hrs
 )
 
 output_path_hrs <- file.path(output_dir, "hedonic_hrs_bins_full.tex")

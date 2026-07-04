@@ -1,0 +1,1079 @@
+---
+author: "Jacopo Olivieri"
+date: 2026-06-11
+editor: source
+format: html
+number-sections: true
+number-depth: 4
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: false
+---
+
+# Scaled Effects for Identification Strategies {#sec-scaled-effects}
+
+This chapter rescales the preferred spill-count specifications in the identification-strategy comparison table. Effects are reported for a 1-SD increase in the relevant exposure variable and for a move from the 25th to the 75th percentile of that same variable in the estimation sample.
+
+```{r setup}
+rv_library_candidates <- file.path(
+  unique(c(normalizePath(".", mustWork = FALSE), normalizePath("..", mustWork = FALSE))),
+  "rv", "library", "4.6", "arm64"
+)
+rv_library_candidates <- rv_library_candidates[dir.exists(rv_library_candidates)]
+if (length(rv_library_candidates) > 0) {
+  .libPaths(c(rv_library_candidates[[1]], .libPaths()))
+}
+
+project_root_candidates <- unique(c(
+  normalizePath(".", mustWork = FALSE),
+  normalizePath("..", mustWork = FALSE)
+))
+project_root_candidates <- project_root_candidates[
+  file.exists(file.path(project_root_candidates, "rproject.toml"))
+]
+if (length(project_root_candidates) == 0) {
+  stop("Could not find repository root containing rproject.toml.", call. = FALSE)
+}
+PROJECT_ROOT <- project_root_candidates[[1]]
+root_path <- function(...) file.path(PROJECT_ROOT, ...)
+
+required_packages <- c(
+  "arrow",
+  "data.table",
+  "dplyr",
+  "fixest",
+  "forcats",
+  "knitr",
+  "purrr",
+  "readr",
+  "readxl",
+  "stringr",
+  "tibble",
+  "tidyr"
+)
+
+missing_packages <- required_packages[
+  !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
+]
+if (length(missing_packages) > 0) {
+  stop(
+    "Missing required package(s): ",
+    paste(missing_packages, collapse = ", "),
+    call. = FALSE
+  )
+}
+
+invisible(lapply(required_packages, library, character.only = TRUE))
+
+options(scipen = 999)
+
+RAD <- 250L
+YEAR_START <- 2021L
+YEAR_END <- 2023L
+SPILL_WINDOW <- 4L
+WARMUP_QUARTERS <- SPILL_WINDOW
+DEPRECIATION_RATE <- 0.01
+RIVER_DIST_CAP <- 1000L
+```
+
+```{r helpers}
+resolve_upstream_file <- function(file_name) {
+  repo_path <- root_path(
+    "upstream_downstream", "output", "18-03", "river_filter", file_name
+  )
+
+  data_root <- normalizePath(root_path("data"), mustWork = TRUE)
+  storage_path <- file.path(
+    dirname(data_root),
+    "upstream_downstream", "output", "18-03", "river_filter", file_name
+  )
+
+  candidates <- c(repo_path, storage_path)
+  existing <- candidates[file.exists(candidates)]
+
+  if (length(existing) == 0) {
+    stop(
+      "Missing upstream/downstream signed-pair input: ", file_name, "\n",
+      "Checked:\n  - ", paste(candidates, collapse = "\n  - "), "\n",
+      "Restore or regenerate the signed-pair files before rendering this chapter.",
+      call. = FALSE
+    )
+  }
+
+  existing[[1]]
+}
+
+drop_fixest_removed_obs <- function(data, model) {
+  removed <- unlist(model$obs_selection, use.names = FALSE)
+  removed <- suppressWarnings(as.integer(removed))
+  removed <- removed[!is.na(removed)]
+  removed <- abs(removed[removed < 0])
+
+  if (length(removed) == 0) {
+    return(data)
+  }
+
+  data[-removed, , drop = FALSE]
+}
+
+skewness <- function(x) {
+  x <- x[is.finite(x)]
+  x_sd <- stats::sd(x)
+
+  if (length(x) < 3 || is.na(x_sd) || x_sd == 0) {
+    return(NA_real_)
+  }
+
+  mean(((x - mean(x)) / x_sd)^3)
+}
+
+summarise_exposure <- function(x) {
+  x <- x[is.finite(x)]
+  qs <- stats::quantile(
+    x,
+    probs = c(0.25, 0.50, 0.75, 0.95, 0.99),
+    na.rm = TRUE,
+    names = FALSE
+  )
+
+  tibble::tibble(
+    n = length(x),
+    mean = mean(x),
+    sd = stats::sd(x),
+    skew = skewness(x),
+    p25 = qs[[1]],
+    p50 = qs[[2]],
+    p75 = qs[[3]],
+    p95 = qs[[4]],
+    p99 = qs[[5]]
+  )
+}
+
+scaled_percent_effect <- function(beta, scale) {
+  100 * (exp(beta * scale) - 1)
+}
+
+format_number <- function(x, digits = 3) {
+  ifelse(
+    is.na(x),
+    "",
+    formatC(x, format = "f", digits = digits, big.mark = ",")
+  )
+}
+
+format_percent <- function(x) {
+  ifelse(
+    is.na(x),
+    "",
+    ifelse(abs(x) < 0.05, "0.0%", paste0(format_number(x, 1), "%"))
+  )
+}
+
+format_contrast <- function(scale, unit_type) {
+  dplyr::case_when(
+    unit_type == "daily_count" ~ paste0(
+      format_number(scale, 3),
+      " spills/day, about ",
+      format_number(scale * 365.25, 0),
+      " spills/year"
+    ),
+    unit_type == "annual_delta" ~ paste0(
+      format_number(scale, 2),
+      " annual spills"
+    ),
+    unit_type == "four_quarter_delta" ~ paste0(
+      format_number(scale, 2),
+      " spills over the four-quarter window"
+    ),
+    TRUE ~ format_number(scale, 2)
+  )
+}
+
+format_range_contrast <- function(p25, p75, unit_type) {
+  delta <- p75 - p25
+
+  dplyr::case_when(
+    unit_type == "daily_count" ~ paste0(
+      format_number(p25, 3),
+      " to ",
+      format_number(p75, 3),
+      " spills/day, a change of about ",
+      format_number(delta * 365.25, 0),
+      " spills/year"
+    ),
+    unit_type == "annual_delta" ~ paste0(
+      format_number(p25, 2),
+      " to ",
+      format_number(p75, 2),
+      " annual spills"
+    ),
+    unit_type == "four_quarter_delta" ~ paste0(
+      format_number(p25, 2),
+      " to ",
+      format_number(p75, 2),
+      " spills over the four-quarter window"
+    ),
+    TRUE ~ paste0(format_number(p25, 2), " to ", format_number(p75, 2))
+  )
+}
+
+scale_phrase <- function(contrast) {
+  ifelse(
+    contrast == "sd",
+    "a 1-SD increase",
+    "a P25-to-P75 increase"
+  )
+}
+
+direction_word <- function(effect, beta) {
+  sign_value <- ifelse(is.na(effect) || abs(effect) < 0.05, beta, effect)
+  ifelse(sign_value < 0, "lower", "higher")
+}
+
+format_abs_percent <- function(effect) {
+  format_percent(abs(effect))
+}
+
+format_abs_points <- function(effect) {
+  format_number(abs(effect), 1)
+}
+
+make_interpretation <- function(template_id, contrast, effect, beta) {
+  scale <- scale_phrase(contrast)
+  scale_no_article <- sub("^a ", "", scale)
+  direction <- direction_word(effect, beta)
+  percent <- format_abs_percent(effect)
+  points <- format_abs_points(effect)
+
+  dplyr::case_when(
+    template_id == "sales_hedonic" ~ paste0(
+      "Among sold properties in the same LSOA and with the same observed ",
+      "characteristics, ", scale,
+      " in average daily spill exposure across storm overflows within 250m ",
+      "between January 2021 and the sale date is associated with a ",
+      percent, " ", direction, " transaction price."
+    ),
+    template_id == "sales_long" ~ paste0(
+      "Among 250 m x 250 m grid cells with house-sale transactions in both ",
+      "2021 and 2023, ", scale,
+      " between 2021 and 2023 in the average annual number of sewage spills ",
+      "within 250 m of a cell's sold properties is associated with mean ",
+      "sale-price growth over the same period that is ",
+      points, " percentage points ", direction, "."
+    ),
+    template_id == "sales_repeat" ~ paste0(
+      "A ", scale_no_article,
+      " between consecutive sales in the total number of spills recorded ",
+      "across storm overflows within 250 m during the four quarters preceding ",
+      "each sale is associated with depreciation-adjusted price growth between ",
+      "those sales that is ", percent, " ", direction, "."
+    ),
+    template_id == "sales_upstream" ~ paste0(
+      "Among sold properties in the same MSOA, with the same observed ",
+      "characteristics and river distance to the nearest storm overflow, ",
+      scale, " in average daily spill exposure at that site, averaged from ",
+      "January 2021 to the sale date, is associated with a ",
+      percent, " ", direction,
+      " sale price when the site lies upstream rather than downstream of the ",
+      "property."
+    ),
+    template_id == "sales_publicity" ~ paste0(
+      "Among sold properties in the same LSOA and month, with the same ",
+      "observed characteristics, ", scale,
+      " in average daily spill exposure across storm overflows within 250m ",
+      "between January 2021 and the sale date is associated with a ",
+      "transaction price ", percent, " ", direction,
+      " after the August 2022 peak in sewage media coverage than before."
+    ),
+    template_id == "rentals_hedonic" ~ paste0(
+      "Among rental properties in the same LSOA and with the same observed ",
+      "characteristics, ", scale,
+      " in average daily spill exposure across storm overflows within 250m ",
+      "between January 2021 and the letting date is associated with a ",
+      percent, " ", direction, " weekly asking rent."
+    ),
+    template_id == "rentals_long" ~ paste0(
+      "Among 250 m x 250 m grid cells with rental listings in both 2021 and ",
+      "2023, ", scale,
+      " between 2021 and 2023 in the average annual number of sewage spills ",
+      "within 250 m of a cell's listed rental properties is associated with ",
+      "growth in mean weekly asking rent over the same period that is ",
+      points, " percentage points ", direction, "."
+    ),
+    template_id == "rentals_repeat" ~ paste0(
+      "A ", scale_no_article,
+      " between consecutive rental listings in the total number of spills ",
+      "recorded across storm overflows within 250 m during the four quarters ",
+      "preceding each listing is associated with depreciation-adjusted growth ",
+      "in weekly asking rent between those listings that is ",
+      points, " percentage points ", direction, "."
+    ),
+    template_id == "rentals_upstream" ~ paste0(
+      "Among rental properties in the same MSOA, with the same observed ",
+      "characteristics and river distance to the nearest storm overflow, ",
+      scale, " in average daily spill exposure at that site, averaged from ",
+      "January 2021 to the letting date, is associated with a ",
+      percent, " ", direction,
+      " weekly asking rent when the site lies upstream rather than downstream ",
+      "of the property."
+    ),
+    template_id == "rentals_publicity" ~ paste0(
+      "Among rental properties in the same LSOA and month, with the same ",
+      "observed characteristics, ", scale,
+      " in average daily spill exposure across storm overflows within 250m ",
+      "between January 2021 and the letting date is associated with a weekly ",
+      "asking rent ", percent, " ", direction,
+      " after the August 2022 peak in sewage media coverage than before."
+    ),
+    TRUE ~ ""
+  )
+}
+
+extract_result <- function(
+  strategy,
+  market,
+  model,
+  data,
+  coefficient,
+  exposure,
+  exposure_label,
+  unit_type,
+  interpretation_id
+) {
+  retained_data <- drop_fixest_removed_obs(data, model)
+  exposure_values <- retained_data[[exposure]]
+  exposure_stats <- summarise_exposure(exposure_values)
+  beta <- unname(stats::coef(model)[[coefficient]])
+
+  sd_scale <- exposure_stats$sd
+  iqr_scale <- exposure_stats$p75 - exposure_stats$p25
+
+  sd_effect <- scaled_percent_effect(beta, sd_scale)
+  iqr_effect <- scaled_percent_effect(beta, iqr_scale)
+
+  scaled <- tibble::tibble(
+    market = market,
+    strategy = strategy,
+    raw_coefficient = beta,
+    effect_1sd = sd_effect,
+    interpretation_1sd = make_interpretation(
+      interpretation_id, "sd", sd_effect, beta
+    ),
+    effect_p25_p75 = iqr_effect,
+    interpretation_p25_p75 = make_interpretation(
+      interpretation_id, "iqr", iqr_effect, beta
+    )
+  )
+
+  exposure_summary <- exposure_stats |>
+    dplyr::mutate(
+      market = market,
+      strategy = strategy,
+      main_variable = exposure_label,
+      .before = 1
+    )
+
+  list(scaled = scaled, exposure = exposure_summary)
+}
+
+render_table <- function(data, caption) {
+  knitr::kable(
+    data,
+    format = "html",
+    caption = caption,
+    escape = TRUE,
+    align = "ll"
+  )
+}
+```
+
+```{r data-loading}
+sales_controls <- arrow::read_parquet(
+  root_path("data", "processed", "house_price.parquet")
+) |>
+  dplyr::select(
+    house_id, transaction_id, price, month_id, qtr_id,
+    latitude, longitude, lsoa, msoa, property_type, old_new, duration
+  ) |>
+  dplyr::mutate(
+    property_type = forcats::as_factor(property_type),
+    old_new = forcats::as_factor(old_new),
+    duration = forcats::as_factor(duration)
+  )
+
+rental_controls <- arrow::read_parquet(
+  root_path("data", "processed", "zoopla", "zoopla_rentals.parquet")
+) |>
+  dplyr::select(
+    rental_id, listing_price, month_id, qtr_id,
+    latitude, longitude, lsoa, msoa, property_type, bedrooms, bathrooms
+  ) |>
+  dplyr::mutate(
+    property_type = forcats::as_factor(property_type)
+  )
+
+cross_section_sales <- arrow::open_dataset(
+  root_path("data", "processed", "cross_section", "sales", "prior_to_sale")
+) |>
+  dplyr::filter(radius == RAD, n_spill_sites > 0) |>
+  dplyr::collect()
+
+cross_section_rentals <- arrow::open_dataset(
+  root_path("data", "processed", "cross_section", "rentals", "prior_to_rental")
+) |>
+  dplyr::filter(radius == RAD, n_spill_sites > 0) |>
+  dplyr::collect()
+
+house_site_sales <- arrow::open_dataset(
+  root_path("data", "processed", "cross_section", "sales", "prior_to_sale_house_site")
+) |>
+  dplyr::filter(radius == RAD) |>
+  dplyr::collect()
+
+rental_site_rentals <- arrow::open_dataset(
+  root_path("data", "processed", "cross_section", "rentals", "prior_to_rental_rental_site")
+) |>
+  dplyr::filter(radius == RAD) |>
+  dplyr::collect()
+```
+
+```{r sample-builders}
+build_sales_prior_sample <- function() {
+  cross_section_sales |>
+    dplyr::select(-dplyr::any_of("price")) |>
+    dplyr::inner_join(sales_controls, by = "house_id") |>
+    dplyr::mutate(log_price = log(price)) |>
+    dplyr::filter(
+      !is.na(spill_count_daily_avg),
+      !is.na(spill_hrs_daily_avg),
+      !is.na(lsoa),
+      !is.na(property_type),
+      !is.na(old_new),
+      !is.na(duration),
+      is.finite(log_price)
+    ) |>
+    dplyr::mutate(
+      lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+      msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+      property_type = forcats::fct_drop(property_type),
+      old_new = forcats::fct_drop(old_new),
+      duration = forcats::fct_drop(duration)
+    )
+}
+
+build_rental_prior_sample <- function() {
+  cross_section_rentals |>
+    dplyr::select(-dplyr::any_of("listing_price")) |>
+    dplyr::inner_join(rental_controls, by = "rental_id") |>
+    dplyr::mutate(log_price = log(listing_price)) |>
+    dplyr::filter(
+      !is.na(spill_count_daily_avg),
+      !is.na(spill_hrs_daily_avg),
+      !is.na(lsoa),
+      !is.na(property_type),
+      !is.na(bedrooms),
+      !is.na(bathrooms),
+      is.finite(log_price)
+    ) |>
+    dplyr::mutate(
+      lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+      msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+      property_type = forcats::fct_drop(property_type)
+    )
+}
+
+build_long_difference <- function(data) {
+  start <- data |>
+    dplyr::filter(year == YEAR_START) |>
+    dplyr::select(
+      grid_cell_id,
+      mean_log_price_start = mean_log_price,
+      mean_spill_count_start = mean_spill_count
+    )
+
+  end <- data |>
+    dplyr::filter(year == YEAR_END) |>
+    dplyr::select(
+      grid_cell_id,
+      mean_log_price_end = mean_log_price,
+      mean_spill_count_end = mean_spill_count
+    )
+
+  start |>
+    dplyr::inner_join(end, by = "grid_cell_id") |>
+    dplyr::mutate(
+      delta_log_price = mean_log_price_end - mean_log_price_start,
+      delta_spill_count = mean_spill_count_end - mean_spill_count_start
+    ) |>
+    dplyr::filter(
+      !is.na(delta_log_price),
+      !is.na(delta_spill_count)
+    )
+}
+
+build_repeat_pairs <- function(market) {
+  agg_spill <- arrow::read_parquet(
+    root_path("data", "processed", "agg_spill_stats", "agg_spill_qtr.parquet")
+  ) |>
+    dplyr::select(site_id, qtr_id, spill_count_qt)
+
+  agg_spill_dt <- data.table::as.data.table(agg_spill)
+  data.table::setorder(agg_spill_dt, site_id, qtr_id)
+
+  agg_spill_dt[
+    ,
+    spill_count_roll_raw := data.table::frollsum(
+      spill_count_qt,
+      n = SPILL_WINDOW,
+      align = "right"
+    ),
+    by = site_id
+  ]
+  agg_spill_dt[
+    ,
+    spill_count_roll := data.table::shift(
+      spill_count_roll_raw,
+      n = 1,
+      type = "lag"
+    ),
+    by = site_id
+  ]
+
+  agg_spill <- tibble::as_tibble(
+    agg_spill_dt[, .(site_id, qtr_id, spill_count_roll)]
+  )
+
+  if (market == "sales") {
+    repeat_ids <- arrow::read_parquet(
+      root_path("data", "processed", "repeated_transactions", "repeated_sales.parquet")
+    )
+
+    transactions <- sales_controls |>
+      dplyr::select(house_id, transaction_id, price, qtr_id, latitude, longitude)
+
+    lookup <- arrow::read_parquet(
+      root_path("data", "processed", "spill_house_lookup.parquet")
+    ) |>
+      dplyr::filter(distance_m <= RAD) |>
+      dplyr::select(house_id, site_id, distance_m)
+
+    panel <- repeat_ids |>
+      dplyr::inner_join(transactions, by = "house_id") |>
+      dplyr::group_by(repeat_id) |>
+      dplyr::filter(dplyr::n() > 1) |>
+      dplyr::ungroup() |>
+      dplyr::semi_join(lookup, by = "house_id") |>
+      dplyr::inner_join(lookup, by = "house_id", relationship = "many-to-many") |>
+      dplyr::inner_join(agg_spill, by = c("site_id", "qtr_id")) |>
+      dplyr::group_by(house_id, transaction_id, repeat_id, qtr_id, price, latitude, longitude) |>
+      dplyr::summarise(
+        spill_count_roll = sum(spill_count_roll, na.rm = TRUE),
+        .groups = "drop"
+      ) |>
+      dplyr::filter(qtr_id > WARMUP_QUARTERS)
+
+    panel |>
+      dplyr::arrange(repeat_id, qtr_id) |>
+      dplyr::group_by(repeat_id) |>
+      dplyr::mutate(
+        lag_price = dplyr::lag(price),
+        lag_qtr_id = dplyr::lag(qtr_id),
+        lag_spill_count_roll = dplyr::lag(spill_count_roll)
+      ) |>
+      dplyr::filter(!is.na(lag_price)) |>
+      dplyr::ungroup() |>
+      dplyr::mutate(
+        years_between = (qtr_id - lag_qtr_id) / 4,
+        log_price_ratio = log(price) - log(lag_price),
+        r = log_price_ratio + DEPRECIATION_RATE * years_between,
+        delta_spill_count = spill_count_roll - lag_spill_count_roll
+      ) |>
+      dplyr::filter(
+        !is.na(r),
+        !is.na(delta_spill_count),
+        !is.na(latitude),
+        !is.na(longitude),
+        !is.na(qtr_id),
+        !is.na(lag_qtr_id)
+      )
+  } else {
+    repeat_ids <- arrow::read_parquet(
+      root_path("data", "processed", "repeated_transactions", "repeated_rentals.parquet")
+    )
+
+    transactions <- rental_controls |>
+      dplyr::select(rental_id, listing_price, qtr_id, latitude, longitude)
+
+    lookup <- arrow::read_parquet(
+      root_path("data", "processed", "zoopla", "spill_rental_lookup.parquet")
+    ) |>
+      dplyr::filter(distance_m <= RAD) |>
+      dplyr::select(rental_id, site_id, distance_m)
+
+    panel <- repeat_ids |>
+      dplyr::inner_join(transactions, by = "rental_id") |>
+      dplyr::group_by(repeat_id) |>
+      dplyr::filter(dplyr::n() > 1) |>
+      dplyr::ungroup() |>
+      dplyr::semi_join(lookup, by = "rental_id") |>
+      dplyr::inner_join(lookup, by = "rental_id", relationship = "many-to-many") |>
+      dplyr::inner_join(agg_spill, by = c("site_id", "qtr_id")) |>
+      dplyr::group_by(rental_id, repeat_id, qtr_id, listing_price, latitude, longitude) |>
+      dplyr::summarise(
+        spill_count_roll = sum(spill_count_roll, na.rm = TRUE),
+        .groups = "drop"
+      ) |>
+      dplyr::filter(qtr_id > WARMUP_QUARTERS)
+
+    panel |>
+      dplyr::arrange(repeat_id, qtr_id) |>
+      dplyr::group_by(repeat_id) |>
+      dplyr::mutate(
+        lag_price = dplyr::lag(listing_price),
+        lag_qtr_id = dplyr::lag(qtr_id),
+        lag_spill_count_roll = dplyr::lag(spill_count_roll)
+      ) |>
+      dplyr::filter(!is.na(lag_price)) |>
+      dplyr::ungroup() |>
+      dplyr::mutate(
+        years_between = (qtr_id - lag_qtr_id) / 4,
+        log_price_ratio = log(listing_price) - log(lag_price),
+        r = log_price_ratio + DEPRECIATION_RATE * years_between,
+        delta_spill_count = spill_count_roll - lag_spill_count_roll
+      ) |>
+      dplyr::filter(
+        !is.na(r),
+        !is.na(delta_spill_count),
+        !is.na(latitude),
+        !is.na(longitude),
+        !is.na(qtr_id),
+        !is.na(lag_qtr_id)
+      )
+  }
+}
+
+build_bmn_formula <- function(data) {
+  data <- data |>
+    dplyr::mutate(
+      qtr_id_num = as.integer(qtr_id),
+      lag_qtr_id_num = as.integer(lag_qtr_id)
+    )
+
+  all_qtrs <- sort(unique(c(data$qtr_id_num, data$lag_qtr_id_num)))
+
+  for (q in all_qtrs[-1]) {
+    col_name <- paste0("time_", q)
+    data[[col_name]] <- dplyr::case_when(
+      data$qtr_id_num == q ~ 1L,
+      data$lag_qtr_id_num == q ~ -1L,
+      TRUE ~ 0L
+    )
+  }
+
+  time_formula <- paste0("time_", all_qtrs[-1], collapse = " + ")
+
+  list(
+    data = data,
+    formula = stats::as.formula(paste("r ~ delta_spill_count +", time_formula))
+  )
+}
+
+build_upstream_samples <- function() {
+  ud_sales_raw <- readr::read_csv(
+    resolve_upstream_file("spill_house_signed.csv"),
+    show_col_types = FALSE
+  )
+  ud_rentals_raw <- readr::read_csv(
+    resolve_upstream_file("spill_rental_signed.csv"),
+    show_col_types = FALSE
+  )
+
+  ud_sales <- ud_sales_raw |>
+    dplyr::mutate(
+      direction = ifelse(direction == -1, 1, 0),
+      dist_river_m = abs(signed_dist_m)
+    ) |>
+    dplyr::filter(
+      spill_lateral_m <= RAD,
+      house_lateral_m <= RAD,
+      dist_river_m <= RIVER_DIST_CAP,
+      spill_house_euclid_m <= RAD
+    ) |>
+    dplyr::distinct()
+
+  ud_rentals <- ud_rentals_raw |>
+    dplyr::mutate(
+      direction = ifelse(direction == -1, 1, 0),
+      dist_river_m = abs(signed_dist_m)
+    ) |>
+    dplyr::filter(
+      spill_lateral_m <= RAD,
+      rental_lateral_m <= RAD,
+      dist_river_m <= RIVER_DIST_CAP,
+      spill_rental_euclid_m <= RAD
+    ) |>
+    dplyr::distinct()
+
+  sales <- house_site_sales |>
+    dplyr::select(-dplyr::any_of("price")) |>
+    dplyr::inner_join(sales_controls, by = "house_id") |>
+    dplyr::inner_join(ud_sales, by = c("house_id", "site_id")) |>
+    dplyr::mutate(log_price = log(price)) |>
+    dplyr::filter(
+      !is.na(spill_count_daily_avg),
+      !is.na(spill_hrs_daily_avg),
+      !is.na(lsoa),
+      !is.na(msoa),
+      !is.na(property_type),
+      !is.na(old_new),
+      !is.na(duration),
+      !is.na(direction),
+      is.finite(log_price)
+    ) |>
+    dplyr::mutate(
+      lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+      msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+      property_type = forcats::fct_drop(property_type),
+      old_new = forcats::fct_drop(old_new),
+      duration = forcats::fct_drop(duration)
+    ) |>
+    dplyr::arrange(house_id, distance_m) |>
+    dplyr::group_by(house_id) |>
+    dplyr::slice_head(n = 1) |>
+    dplyr::ungroup()
+
+  rentals <- rental_site_rentals |>
+    dplyr::select(-dplyr::any_of("listing_price")) |>
+    dplyr::inner_join(rental_controls, by = "rental_id") |>
+    dplyr::inner_join(ud_rentals, by = c("rental_id", "site_id")) |>
+    dplyr::mutate(log_price = log(listing_price)) |>
+    dplyr::filter(
+      !is.na(spill_count_daily_avg),
+      !is.na(spill_hrs_daily_avg),
+      !is.na(lsoa),
+      !is.na(msoa),
+      !is.na(property_type),
+      !is.na(bedrooms),
+      !is.na(bathrooms),
+      !is.na(direction),
+      is.finite(log_price)
+    ) |>
+    dplyr::mutate(
+      lsoa = forcats::fct_drop(forcats::as_factor(lsoa)),
+      msoa = forcats::fct_drop(forcats::as_factor(msoa)),
+      property_type = forcats::fct_drop(property_type)
+    ) |>
+    dplyr::arrange(rental_id, distance_m) |>
+    dplyr::group_by(rental_id) |>
+    dplyr::slice_head(n = 1) |>
+    dplyr::ungroup()
+
+  list(sales = sales, rentals = rentals)
+}
+
+build_news_samples <- function() {
+  google_trends <- readxl::read_excel(
+    root_path("data", "raw", "google_trends", "google_trends_uk.xlsx"),
+    sheet = "united_kingdom"
+  ) |>
+    dplyr::filter(Year >= 2021, Year <= 2023)
+
+  peak_row <- google_trends |>
+    dplyr::slice_max(`'Sewage Spill' Google Searches`, n = 1, with_ties = FALSE)
+
+  peak_year <- peak_row$Year[[1]]
+  peak_month <- as.integer(substr(peak_row$Date[[1]], 6, 7))
+  peak_month_id <- (peak_year - 2021) * 12 + peak_month
+
+  sales <- build_sales_prior_sample() |>
+    dplyr::filter(!is.na(month_id), !is.na(latitude), !is.na(longitude)) |>
+    dplyr::mutate(post = as.integer(month_id >= peak_month_id)) |>
+    dplyr::filter(!is.na(post))
+
+  rentals <- build_rental_prior_sample() |>
+    dplyr::filter(!is.na(month_id), !is.na(latitude), !is.na(longitude)) |>
+    dplyr::mutate(post = as.integer(month_id >= peak_month_id)) |>
+    dplyr::filter(!is.na(post))
+
+  list(sales = sales, rentals = rentals)
+}
+```
+
+```{r estimate-models}
+sales_prior <- build_sales_prior_sample()
+rentals_prior <- build_rental_prior_sample()
+
+hedonic_sales_model <- fixest::feols(
+  log_price ~ spill_count_daily_avg + property_type + old_new + duration | lsoa,
+  data = sales_prior,
+  vcov = "hetero"
+)
+
+hedonic_rentals_model <- fixest::feols(
+  log_price ~ spill_count_daily_avg + property_type + bedrooms + bathrooms | lsoa,
+  data = rentals_prior,
+  vcov = "hetero"
+)
+
+long_sales <- arrow::read_parquet(
+  root_path("data", "processed", "long_difference", "long_diff_grid_house_sales.parquet")
+) |>
+  build_long_difference()
+
+long_rentals <- arrow::read_parquet(
+  root_path("data", "processed", "long_difference", "long_diff_grid_rentals.parquet")
+) |>
+  build_long_difference()
+
+long_sales_model <- fixest::feols(
+  delta_log_price ~ delta_spill_count,
+  data = long_sales,
+  vcov = "hetero"
+)
+
+long_rentals_model <- fixest::feols(
+  delta_log_price ~ delta_spill_count,
+  data = long_rentals,
+  vcov = "hetero"
+)
+
+repeat_sales <- build_bmn_formula(build_repeat_pairs("sales"))
+repeat_rentals <- build_bmn_formula(build_repeat_pairs("rentals"))
+
+repeat_sales_model <- fixest::feols(
+  repeat_sales$formula,
+  data = repeat_sales$data,
+  vcov = "hetero"
+)
+
+repeat_rentals_model <- fixest::feols(
+  repeat_rentals$formula,
+  data = repeat_rentals$data,
+  vcov = "hetero"
+)
+
+upstream_samples <- build_upstream_samples()
+
+upstream_sales_model <- fixest::feols(
+  log_price ~ spill_count_daily_avg * direction + dist_river_m +
+    property_type + old_new + duration | msoa,
+  data = upstream_samples$sales,
+  vcov = "hetero"
+)
+
+upstream_rentals_model <- fixest::feols(
+  log_price ~ spill_count_daily_avg * direction + dist_river_m +
+    property_type + bedrooms + bathrooms | msoa,
+  data = upstream_samples$rentals,
+  vcov = "hetero"
+)
+
+news_samples <- build_news_samples()
+
+news_sales_model <- fixest::feols(
+  log_price ~ spill_count_daily_avg + spill_count_daily_avg:post +
+    property_type + old_new + duration | lsoa + month_id,
+  data = news_samples$sales,
+  vcov = "hetero"
+)
+
+news_rentals_model <- fixest::feols(
+  log_price ~ spill_count_daily_avg + spill_count_daily_avg:post +
+    property_type + bedrooms + bathrooms | lsoa + month_id,
+  data = news_samples$rentals,
+  vcov = "hetero"
+)
+```
+
+```{r assemble-results}
+results <- list(
+  extract_result(
+    strategy = "Hedonic cross-sections",
+    market = "House Sales",
+    model = hedonic_sales_model,
+    data = sales_prior,
+    coefficient = "spill_count_daily_avg",
+    exposure = "spill_count_daily_avg",
+    exposure_label = "Daily spill count",
+    unit_type = "daily_count",
+    interpretation_id = "sales_hedonic"
+  ),
+  extract_result(
+    strategy = "Grid-cell long difference, 2023-2021",
+    market = "House Sales",
+    model = long_sales_model,
+    data = long_sales,
+    coefficient = "delta_spill_count",
+    exposure = "delta_spill_count",
+    exposure_label = "Change in annual spill count",
+    unit_type = "annual_delta",
+    interpretation_id = "sales_long"
+  ),
+  extract_result(
+    strategy = "Repeat sales (Palmquist)",
+    market = "House Sales",
+    model = repeat_sales_model,
+    data = repeat_sales$data,
+    coefficient = "delta_spill_count",
+    exposure = "delta_spill_count",
+    exposure_label = "Change in four-quarter spill count",
+    unit_type = "four_quarter_delta",
+    interpretation_id = "sales_repeat"
+  ),
+  extract_result(
+    strategy = "Upstream/downstream nearest site",
+    market = "House Sales",
+    model = upstream_sales_model,
+    data = upstream_samples$sales,
+    coefficient = "spill_count_daily_avg:direction",
+    exposure = "spill_count_daily_avg",
+    exposure_label = "Nearest-site daily spill count",
+    unit_type = "daily_count",
+    interpretation_id = "sales_upstream"
+  ),
+  extract_result(
+    strategy = "Publicity DiD intensive margin",
+    market = "House Sales",
+    model = news_sales_model,
+    data = news_samples$sales,
+    coefficient = "spill_count_daily_avg:post",
+    exposure = "spill_count_daily_avg",
+    exposure_label = "Daily spill count",
+    unit_type = "daily_count",
+    interpretation_id = "sales_publicity"
+  ),
+  extract_result(
+    strategy = "Hedonic cross-sections",
+    market = "House Rentals",
+    model = hedonic_rentals_model,
+    data = rentals_prior,
+    coefficient = "spill_count_daily_avg",
+    exposure = "spill_count_daily_avg",
+    exposure_label = "Daily spill count",
+    unit_type = "daily_count",
+    interpretation_id = "rentals_hedonic"
+  ),
+  extract_result(
+    strategy = "Grid-cell long difference, 2023-2021",
+    market = "House Rentals",
+    model = long_rentals_model,
+    data = long_rentals,
+    coefficient = "delta_spill_count",
+    exposure = "delta_spill_count",
+    exposure_label = "Change in annual spill count",
+    unit_type = "annual_delta",
+    interpretation_id = "rentals_long"
+  ),
+  extract_result(
+    strategy = "Repeat rentals (Palmquist)",
+    market = "House Rentals",
+    model = repeat_rentals_model,
+    data = repeat_rentals$data,
+    coefficient = "delta_spill_count",
+    exposure = "delta_spill_count",
+    exposure_label = "Change in four-quarter spill count",
+    unit_type = "four_quarter_delta",
+    interpretation_id = "rentals_repeat"
+  ),
+  extract_result(
+    strategy = "Upstream/downstream nearest site",
+    market = "House Rentals",
+    model = upstream_rentals_model,
+    data = upstream_samples$rentals,
+    coefficient = "spill_count_daily_avg:direction",
+    exposure = "spill_count_daily_avg",
+    exposure_label = "Nearest-site daily spill count",
+    unit_type = "daily_count",
+    interpretation_id = "rentals_upstream"
+  ),
+  extract_result(
+    strategy = "Publicity DiD intensive margin",
+    market = "House Rentals",
+    model = news_rentals_model,
+    data = news_samples$rentals,
+    coefficient = "spill_count_daily_avg:post",
+    exposure = "spill_count_daily_avg",
+    exposure_label = "Daily spill count",
+    unit_type = "daily_count",
+    interpretation_id = "rentals_publicity"
+  )
+)
+
+scaled_effects <- purrr::map_dfr(results, "scaled") |>
+  dplyr::mutate(
+    market = factor(market, levels = c("House Sales", "House Rentals")),
+    strategy = factor(
+      strategy,
+      levels = c(
+        "Hedonic cross-sections",
+        "Grid-cell long difference, 2023-2021",
+        "Repeat sales (Palmquist)",
+        "Repeat rentals (Palmquist)",
+        "Upstream/downstream nearest site",
+        "Publicity DiD intensive margin"
+      )
+    )
+  ) |>
+  dplyr::arrange(market, strategy)
+
+exposure_summary <- purrr::map_dfr(results, "exposure") |>
+  dplyr::mutate(
+    market = factor(market, levels = c("House Sales", "House Rentals")),
+    strategy = factor(
+      strategy,
+      levels = c(
+        "Hedonic cross-sections",
+        "Grid-cell long difference, 2023-2021",
+        "Repeat sales (Palmquist)",
+        "Repeat rentals (Palmquist)",
+        "Upstream/downstream nearest site",
+        "Publicity DiD intensive margin"
+      )
+    )
+  ) |>
+  dplyr::arrange(market, strategy)
+
+scaled_effects_display <- scaled_effects |>
+  dplyr::transmute(
+    Market = as.character(market),
+    Strategy = as.character(strategy),
+    `Effect of 1 SD` = format_percent(effect_1sd),
+    `1 SD interpretation` = interpretation_1sd,
+    `Effect of P25 to P75` = format_percent(effect_p25_p75),
+    `P25-P75 interpretation` = interpretation_p25_p75
+  )
+
+exposure_summary_display <- exposure_summary |>
+  dplyr::transmute(
+    Market = as.character(market),
+    Strategy = as.character(strategy),
+    `Main variable` = main_variable,
+    N = format_number(n, 0),
+    Mean = format_number(mean, 3),
+    SD = format_number(sd, 3),
+    Skew = format_number(skew, 2),
+    P25 = format_number(p25, 3),
+    P50 = format_number(p50, 3),
+    P75 = format_number(p75, 3),
+    P95 = format_number(p95, 3),
+    P99 = format_number(p99, 3)
+  )
+```
+
+```{r scaled-effects-table}
+render_table(
+  scaled_effects_display,
+  "Scaled effects for preferred identification-strategy specifications."
+)
+```
+
+For rows where the 25th and 75th percentiles coincide, the interquartile contrast is mechanically zero. This is especially relevant for the grid-cell long-difference specifications, where most cells experience no change in nearby annual spill counts between 2021 and 2023.
+
+```{r exposure-summary-table}
+render_table(
+  exposure_summary_display,
+  "Distribution of the main spill-count exposure in each preferred estimation sample."
+)
+```

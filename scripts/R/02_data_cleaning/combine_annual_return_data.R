@@ -8,7 +8,7 @@
 #
 # Author: Jacopo Olivieri
 # Date: 2024-12-02
-# Date Modified: 2026-03-10
+# Date Modified: 2026-06-15
 #
 # Inputs:
 #   - data/raw/edm_data/{year}_annual_return_edm.xlsx
@@ -35,10 +35,10 @@ REQUIRED_PACKAGES <- c(
   "dplyr",
   "fs",
   "glue",
-  "hms",
   "janitor",
   "logger",
   "purrr",
+  "readxl",
   "rio",
   "stringr"
 )
@@ -82,6 +82,7 @@ CONFIG <- list(
     "water_company_name" = "water_company",
     "site_name_ea_consents_database" = "site_name_ea",
     "site_name_wa_sc_operational_optional" = "site_name_wa_sc", # Variant 1
+    "site_name_wa_sc_operational_name_optional" = "site_name_wa_sc", # Variant 2
     "ea_permit_reference_ea_consents_database" = "permit_reference_ea",
     "wa_sc_supplementary_permit_ref_optional" = "permit_reference_wa_sc",
     "activity_reference_on_permit_if_1_discharge_on_permit" = "activity_reference", # Variant 1
@@ -148,8 +149,47 @@ load_data <- function(year) {
     stop(err_msg)
   }
 
-  # Import data
-  rio::import_list(file_path, skip = 1, setclass = "tbl")
+  # Import every company sheet, repairing HH:MM:SS duration columns on the way in
+  sheets <- readxl::excel_sheets(file_path)
+  purrr::map(purrr::set_names(sheets), ~ load_sheet(file_path, .x))
+}
+
+#' Load a single workbook sheet, converting Excel HH:MM:SS duration columns to
+#' numeric hours.
+#'
+#' Some reporting vintages (e.g. 2024) store the total-duration field as an Excel
+#' time value rather than a plain number of hours. read_excel coerces those cells
+#' to POSIXct; extracting only the time-of-day (the previous behaviour) discarded
+#' whole days and dropped durations near the Excel 1900 leap-year bug to NA.
+#' Reading the column as its raw serial (a count of days) and multiplying by 24
+#' recovers the true duration in hours and is a no-op for vintages that already
+#' store plain hours.
+#'
+#' @param file_path Path to the workbook
+#' @param sheet Sheet name to read
+#' @return Tibble for the sheet with duration columns expressed in hours
+load_sheet <- function(file_path, sheet) {
+  data <- rio::import(file_path, which = sheet, skip = 1, setclass = "tbl")
+
+  hms_duration <- str_detect(
+    janitor::make_clean_names(names(data)),
+    "total_duration_hh_mm_ss"
+  )
+  if (!any(hms_duration)) {
+    return(data)
+  }
+
+  # Re-read with the HH:MM:SS duration column forced to its raw Excel serial (a
+  # count of days) rather than a POSIXct, then convert that day count to hours.
+  col_types <- rep("guess", ncol(data))
+  col_types[hms_duration] <- "numeric"
+  data <- rio::import(
+    file_path,
+    which = sheet, skip = 1, col_types = col_types, setclass = "tbl"
+  )
+  data[hms_duration] <- lapply(data[hms_duration], function(x) x * 24)
+
+  data
 }
 
 #' Clean and standardise data
@@ -189,18 +229,11 @@ clean_data <- function(df) {
       "Welsh Water",
       water_company
     )) %>%
-    # Convert hours to numeric type
+    # spill_hrs_ea is numeric hours by this point (HH:MM:SS workbooks are
+    # converted in load_sheet); coerce defensively for any text-stored vintage.
     mutate(across(
       any_of("spill_hrs_ea"),
-      ~ {
-        if (inherits(.x, "POSIXct")) {
-          as.numeric(as_hms(.x)) / 3600
-        } else if (is.numeric(.x)) {
-          .x
-        } else {
-          NA_real_
-        }
-      }
+      ~ if (is.numeric(.x)) .x else suppressWarnings(as.numeric(.x))
     )) %>%
     # Convert data start year to integer
     mutate(across(

@@ -19,6 +19,7 @@ book:
       chapters:
       - event_study.qmd
       - hedonic_regs.qmd
+      - scaled_effects.qmd
     - part: "Data Cleaning"
       chapters: 
       - data_clean_documentation/01_pipeline.qmd

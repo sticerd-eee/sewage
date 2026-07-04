@@ -106,7 +106,7 @@ api_config_list <- list(
   # --- API 4: Southern Water ---
   southern_water = list(
     name = "southern water",
-    base_url = "https://services-eu1.arcgis.com/XxS6FebPX29TRGDJ/arcgis/rest/services/Southern_Water_Storm_Overflow_Activity/FeatureServer/0",
+    base_url = "https://services-eu1.arcgis.com/6qJmARkS2dt2IjVA/arcgis/rest/services/SouthernWater_StormOverflowActivity_PROD_view/FeatureServer/0",
     query_params = list(
       where = "1=1",
       outFields = "*",

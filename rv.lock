@@ -1035,6 +1035,20 @@ dependencies = [
 ]
 
 [[packages]]
+name = "ggmapinset"
+version = "0.5.0"
+source = { repository = "https://packagemanager.posit.co/cran/2026-05-12" }
+force_source = false
+dependencies = [
+    { name = "sf", requirement = "(>= 1.0)" },
+    { name = "cli", requirement = "(>= 3.4.0)" },
+    { name = "ggplot2", requirement = "(>= 3.4.0)" },
+    "lifecycle",
+    { name = "rlang", requirement = "(>= 1.0.0)" },
+    { name = "vctrs", requirement = "(>= 0.6.5)" },
+]
+
+[[packages]]
 name = "ggplot2"
 version = "4.0.3"
 source = { repository = "https://packagemanager.posit.co/cran/2026-05-12" }
@@ -1735,6 +1749,13 @@ force_source = false
 dependencies = []
 
 [[packages]]
+name = "nanoparquet"
+version = "0.5.1"
+source = { repository = "https://packagemanager.posit.co/cran/2026-05-12" }
+force_source = false
+dependencies = []
+
+[[packages]]
 name = "ncdf4"
 version = "1.24"
 source = { repository = "https://packagemanager.posit.co/cran/2026-05-12" }
@@ -1845,6 +1866,16 @@ dependencies = [
     "numDeriv",
     { name = "Matrix", requirement = "(>= 1.2.3)" },
     { name = "doBy", requirement = "(>= 4.6.22)" },
+]
+
+[[packages]]
+name = "pdftools"
+version = "3.8.0"
+source = { repository = "https://packagemanager.posit.co/cran/2026-05-12" }
+force_source = false
+dependencies = [
+    { name = "Rcpp", requirement = "(>= 0.12.12)" },
+    "qpdf",
 ]
 
 [[packages]]
@@ -2019,6 +2050,17 @@ dependencies = [
     { name = "magrittr", requirement = "(>= 1.5.0)" },
     { name = "rlang", requirement = "(>= 1.1.1)" },
     { name = "vctrs", requirement = "(>= 0.6.3)" },
+]
+
+[[packages]]
+name = "qpdf"
+version = "1.4.1"
+source = { repository = "https://packagemanager.posit.co/cran/2026-05-12" }
+force_source = false
+dependencies = [
+    "Rcpp",
+    "askpass",
+    "curl",
 ]
 
 [[packages]]

@@ -54,6 +54,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 
 # ==============================================================================
 # 3. Setup
@@ -326,7 +329,7 @@ attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--3) or the log weekly asking rent for rentals (columns 4--6). Spill intensity is measured as the average number of spill events per day (12/24 count) recorded across all overflows within 250m from January 2021 up to the transaction date. Post is an indicator equal to one for transactions occurring on or after August 2022 (the peak month for Google Trends searches and news coverage of sewage spills). Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--3) or the log weekly asking rent for rentals (columns 4--6). Spill intensity is measured as the average number of spill events per week (12/24 count) recorded across all overflows within 250m from January 2021 up to the transaction date. Post is an indicator equal to one for transactions occurring on or after August 2022 (the peak month for Google Trends searches and news coverage of sewage spills). Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 
@@ -353,7 +356,7 @@ table_latex <- modelsummary::modelsummary(
   estimate = "{estimate}{stars}",
   statistic = "({std.error})",
   stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-  fmt = 3,
+  fmt = fmt_table,
   coef_map = coef_labels,
   gof_map = gof_map,
   add_rows = add_rows,
@@ -361,33 +364,12 @@ table_latex <- modelsummary::modelsummary(
   title = "Effect of Sewage Spills on Property Values: Pre/Post Google Trends Peak"
 )
 
-# Force table environment to [H]
-table_latex <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", table_latex)
-
-# Add label in tabularray format
-table_latex <- sub(
-  "caption=\\{([^}]*)\\},",
-  "caption={\\1},\nlabel={tbl:did-trends-full},",
-  table_latex
+table_latex <- fit_tblr_latex(
+  table_latex,
+  label = "tbl:did-trends-full",
+  notes = custom_notes,
+  width = "0.9\\linewidth"
 )
-
-# Add colsep and font size for tighter column spacing
-table_latex <- sub(
-  "(\\{\\s*%% tabularray inner open\\n)",
-  "\\1width=0.9\\\\linewidth,\ncolsep=3pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-  table_latex
-)
-
-# Replace empty note with custom notes (tabularray format)
-table_latex <- sub(
-  "note\\{\\}=\\{\\s*\\},",
-  custom_notes,
-  table_latex
-)
-
-# Distribute available width among columns (X[] instead of Q[])
-table_latex <- gsub("Q\\[\\]", "X[c] ", table_latex)
-table_latex <- sub("colspec=\\{X\\[c\\] ", "colspec={l ", table_latex)
 
 # Write to file
 output_path <- file.path(output_dir, "did_trends_full.tex")

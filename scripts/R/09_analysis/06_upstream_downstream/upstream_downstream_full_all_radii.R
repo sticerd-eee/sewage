@@ -66,6 +66,9 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+# Shared table formatting helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+
 # ==============================================================================
 # 3. Setup
 # ==============================================================================
@@ -190,8 +193,8 @@ run_all_models <- function(RAD) {
     inner_join(upstream_downstream_sales, by = c("house_id", "site_id")) |>
     mutate(log_price = log(price)) |>
     filter(
-      !is.na(spill_count_daily_avg),
-      !is.na(spill_hrs_daily_avg),
+      !is.na(spill_count_weekly_avg),
+      !is.na(spill_hrs_weekly_avg),
       !is.na(lsoa),
       !is.na(msoa),
       !is.na(property_type),
@@ -220,14 +223,14 @@ run_all_models <- function(RAD) {
       inv_dist_weight_raw = (dist_river_m + 0.01) ^(-alpha)
     ) |>
     summarise(
-      upstream_count = sum(spill_count_daily_avg * (direction == 1), na.rm = TRUE),
-      downstream_count = sum(spill_count_daily_avg * (direction == 0), na.rm = TRUE),
-      upstream_count_exposure = sum(inv_dist_weight_raw * spill_count_daily_avg * (direction == 1), na.rm = TRUE),
-      downstream_count_exposure = sum(inv_dist_weight_raw * spill_count_daily_avg * (direction == 0), na.rm = TRUE),
-      upstream_hrs = sum(spill_hrs_daily_avg * (direction == 1), na.rm = TRUE),
-      downstream_hrs = sum(spill_hrs_daily_avg * (direction == 0), na.rm = TRUE),
-      upstream_hrs_exposure = sum(inv_dist_weight_raw * spill_hrs_daily_avg * (direction == 1), na.rm = TRUE),
-      downstream_hrs_exposure = sum(inv_dist_weight_raw * spill_hrs_daily_avg * (direction == 0), na.rm = TRUE)
+      upstream_count = sum(spill_count_weekly_avg * (direction == 1), na.rm = TRUE),
+      downstream_count = sum(spill_count_weekly_avg * (direction == 0), na.rm = TRUE),
+      upstream_count_exposure = sum(inv_dist_weight_raw * spill_count_weekly_avg * (direction == 1), na.rm = TRUE),
+      downstream_count_exposure = sum(inv_dist_weight_raw * spill_count_weekly_avg * (direction == 0), na.rm = TRUE),
+      upstream_hrs = sum(spill_hrs_weekly_avg * (direction == 1), na.rm = TRUE),
+      downstream_hrs = sum(spill_hrs_weekly_avg * (direction == 0), na.rm = TRUE),
+      upstream_hrs_exposure = sum(inv_dist_weight_raw * spill_hrs_weekly_avg * (direction == 1), na.rm = TRUE),
+      downstream_hrs_exposure = sum(inv_dist_weight_raw * spill_hrs_weekly_avg * (direction == 0), na.rm = TRUE)
     ) |>
     ungroup() |>
     inner_join(sales, by = "house_id") |>
@@ -266,8 +269,8 @@ run_all_models <- function(RAD) {
     inner_join(upstream_downstream_rentals, by = c("rental_id", "site_id")) |>
     mutate(log_price = log(listing_price)) |>
     filter(
-      !is.na(spill_count_daily_avg),
-      !is.na(spill_hrs_daily_avg),
+      !is.na(spill_count_weekly_avg),
+      !is.na(spill_hrs_weekly_avg),
       !is.na(lsoa),
       !is.na(msoa),
       !is.na(property_type),
@@ -292,14 +295,14 @@ run_all_models <- function(RAD) {
       inv_dist_weight_raw = (dist_river_m + 0.01) ^(-alpha)
     ) |>
     summarise(
-      upstream_count = sum(spill_count_daily_avg * (direction == 1), na.rm = TRUE),
-      downstream_count = sum(spill_count_daily_avg * (direction == 0), na.rm = TRUE),
-      upstream_count_exposure = sum(inv_dist_weight_raw * spill_count_daily_avg * (direction == 1), na.rm = TRUE),
-      downstream_count_exposure = sum(inv_dist_weight_raw * spill_count_daily_avg * (direction == 0), na.rm = TRUE),
-      upstream_hrs = sum(spill_hrs_daily_avg * (direction == 1), na.rm = TRUE),
-      downstream_hrs = sum(spill_hrs_daily_avg * (direction == 0), na.rm = TRUE),
-      upstream_hrs_exposure = sum(inv_dist_weight_raw * spill_hrs_daily_avg * (direction == 1), na.rm = TRUE),
-      downstream_hrs_exposure = sum(inv_dist_weight_raw * spill_hrs_daily_avg * (direction == 0), na.rm = TRUE)
+      upstream_count = sum(spill_count_weekly_avg * (direction == 1), na.rm = TRUE),
+      downstream_count = sum(spill_count_weekly_avg * (direction == 0), na.rm = TRUE),
+      upstream_count_exposure = sum(inv_dist_weight_raw * spill_count_weekly_avg * (direction == 1), na.rm = TRUE),
+      downstream_count_exposure = sum(inv_dist_weight_raw * spill_count_weekly_avg * (direction == 0), na.rm = TRUE),
+      upstream_hrs = sum(spill_hrs_weekly_avg * (direction == 1), na.rm = TRUE),
+      downstream_hrs = sum(spill_hrs_weekly_avg * (direction == 0), na.rm = TRUE),
+      upstream_hrs_exposure = sum(inv_dist_weight_raw * spill_hrs_weekly_avg * (direction == 1), na.rm = TRUE),
+      downstream_hrs_exposure = sum(inv_dist_weight_raw * spill_hrs_weekly_avg * (direction == 0), na.rm = TRUE)
     ) |>
     ungroup() |>
     inner_join(rentals, by = "rental_id") |>
@@ -636,25 +639,12 @@ run_all_models <- function(RAD) {
   
   # Post-process modelsummary LaTeX output
   postprocess_table <- function(latex_str, label, notes) {
-    # Force [H] placement
-    latex_str <- sub("\\\\begin\\{table\\}", "\\\\begin{table}[H]", latex_str)
-    # Add label
-    latex_str <- sub(
-      "caption=\\{([^}]*)\\},",
-      paste0("caption={\\1},\nlabel={", label, "},"),
-      latex_str
-    )
-    # Add colsep, rowsep, hspan and font size
-    latex_str <- sub(
-      "(\\{\\s*%% tabularray inner open\\n)",
-      "\\1hspan = even,\ncolsep=2pt,\nrowsep=0.1pt,\ncells   = {font = \\\\fontsize{11pt}{12pt}\\\\selectfont},\n",
-      latex_str
-    )
-    # Replace empty note with custom notes
-    latex_str <- sub(
-      "note\\{\\}=\\{\\s*\\},",
-      notes,
-      latex_str
+    latex_str <- fit_tblr_latex(
+      latex_str,
+      label = label,
+      notes = notes,
+      hspan = "even",
+      rowsep = "0.1pt"
     )
     # Add indentation
     latex_str <- gsub("Upstream &", "\\\\quad Upstream &", latex_str)
@@ -676,10 +666,10 @@ run_all_models <- function(RAD) {
   }
   
   notes_count <- make_notes(
-    paste0("Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date.")
+    paste0("Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date.")
   )
   notes_hrs <- make_notes(
-    paste0("Spill exposure is measured as the average total number of spill hours per day recorded across all overflows within ", RAD, "m from January 2021 to the transaction date.")
+    paste0("Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within ", RAD, "m from January 2021 to the transaction date.")
   )
   
   # ---- Shared add_rows for 8-column tables (LSOA only) ----
@@ -711,7 +701,7 @@ run_all_models <- function(RAD) {
   
   add_rows_count_8 <- tibble::tribble(
     ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" ,
-    "Daily spill count"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     ,
+    "Spills per week (avg.)"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     ,
     "Location FE"        , "No"   , "No"   , "LSOA" , "LSOA" , "No"   , "No"   , "LSOA" , "LSOA" ,
     "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"
   )
@@ -739,7 +729,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count,
     gof_map = gof_map,
     add_rows = add_rows_count_8,
@@ -771,7 +761,7 @@ run_all_models <- function(RAD) {
   
   add_rows_count_w_8 <- tibble::tribble(
     ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" ,
-    "Daily spill count"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     ,
+    "Spills per week (avg.)"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     ,
     "Location FE"        , "No"   , "No"   , "LSOA" , "LSOA" , "No"   , "No"   , "LSOA" , "LSOA" ,
     "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"
   )
@@ -799,7 +789,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count_w,
     gof_map = gof_map,
     add_rows = add_rows_count_w_8,
@@ -825,7 +815,7 @@ run_all_models <- function(RAD) {
   
   add_rows_count_12 <- tibble::tribble(
     ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" , ~"(9)" , ~"(10)" , ~"(11)" , ~"(12)" ,
-    "Daily spill count"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""      , ""      , ""      ,
+    "Spills per week (avg.)"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""      , ""      , ""      ,
     "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"  ,
     "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"   , "No"    , "Yes"
   )
@@ -857,7 +847,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count,
     gof_map = gof_map,
     add_rows = add_rows_count_12,
@@ -883,7 +873,7 @@ run_all_models <- function(RAD) {
   
   add_rows_count_w_12 <- tibble::tribble(
     ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" , ~"(9)" , ~"(10)" , ~"(11)" , ~"(12)" ,
-    "Daily spill count"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""      , ""      , ""      ,
+    "Spills per week (avg.)"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""      , ""      , ""      ,
     "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"  ,
     "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"   , "No"    , "Yes"
   )
@@ -915,7 +905,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_count_w,
     gof_map = gof_map,
     add_rows = add_rows_count_w_12,
@@ -947,7 +937,7 @@ run_all_models <- function(RAD) {
   
   add_rows_hrs_8 <- tibble::tribble(
     ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" ,
-    "Daily spill hours"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     ,
+    "Spill hours per week (avg.)"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     ,
     "Location FE"        , "No"   , "No"   , "LSOA" , "LSOA" , "No"   , "No"   , "LSOA" , "LSOA" ,
     "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"
   )
@@ -975,7 +965,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_hrs,
     gof_map = gof_map,
     add_rows = add_rows_hrs_8,
@@ -1007,7 +997,7 @@ run_all_models <- function(RAD) {
   
   add_rows_hrs_w_8 <- tibble::tribble(
     ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" ,
-    "Daily spill hours"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     ,
+    "Spill hours per week (avg.)"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     ,
     "Location FE"        , "No"   , "No"   , "LSOA" , "LSOA" , "No"   , "No"   , "LSOA" , "LSOA" ,
     "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"
   )
@@ -1035,7 +1025,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_hrs_w,
     gof_map = gof_map,
     add_rows = add_rows_hrs_w_8,
@@ -1061,7 +1051,7 @@ run_all_models <- function(RAD) {
   
   add_rows_hrs_12 <- tibble::tribble(
     ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" , ~"(9)" , ~"(10)" , ~"(11)" , ~"(12)" ,
-    "Daily spill hours"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""      , ""      , ""      ,
+    "Spill hours per week (avg.)"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""      , ""      , ""      ,
     "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"  ,
     "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"   , "No"    , "Yes"
   )
@@ -1093,7 +1083,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_hrs,
     gof_map = gof_map,
     add_rows = add_rows_hrs_12,
@@ -1119,7 +1109,7 @@ run_all_models <- function(RAD) {
   
   add_rows_hrs_w_12 <- tibble::tribble(
     ~term                , ~"(1)" , ~"(2)" , ~"(3)" , ~"(4)" , ~"(5)" , ~"(6)" , ~"(7)" , ~"(8)" , ~"(9)" , ~"(10)" , ~"(11)" , ~"(12)" ,
-    "Daily spill hours"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""      , ""      , ""      ,
+    "Spill hours per week (avg.)"  , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""     , ""      , ""      , ""      ,
     "Location FE"        , "No"   , "No"   , "MSOA" , "MSOA" , "LSOA" , "LSOA" , "No"   , "No"   , "MSOA" , "MSOA"  , "LSOA"  , "LSOA"  ,
     "Property controls"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"  , "No"   , "Yes"   , "No"    , "Yes"
   )
@@ -1151,7 +1141,7 @@ run_all_models <- function(RAD) {
     estimate = "{estimate}{stars}",
     statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
-    fmt = fmt_decimal(2),
+    fmt = fmt_table,
     coef_map = coef_labels_hrs_w,
     gof_map = gof_map,
     add_rows = add_rows_hrs_w_12,
@@ -1176,6 +1166,11 @@ run_all_models <- function(RAD) {
   cat("  Exporting combined count MSOA panel table...\n")
   
   # Extract coefficients from each model
+  format_panel_num <- function(x, digits = 3) {
+    out <- formatC(x, format = "f", digits = digits)
+    sub("^-0\\.000$", "0.000", out)
+  }
+
   extract_coefs <- function(model, coef_names, label_map) {
     s <- summary(model, vcov = "hetero")
     ct <- coeftable(s)
@@ -1192,18 +1187,15 @@ run_all_models <- function(RAD) {
           else if (pv < 0.1) stars <- "*"
         }
         rows[[label_map[cname]]] <- list(
-          est = paste0("\\num{", formatC(est, format = "f", digits = 2), "}", stars),
-          se  = paste0("(\\num{", formatC(se, format = "f", digits = 2), "})")
+          est = paste0("\\num{", format_panel_num(est), "}", stars),
+          se  = paste0("(\\num{", format_panel_num(se), "})")
         )
       } else {
         rows[[label_map[cname]]] <- list(est = "", se = "")
       }
     }
     rows[["nobs"]] <- format(nobs(model), big.mark = "")
-    rows[["adj_r2"]] <- formatC(
-      fixest::r2(model, type = "ar2"),
-      format = "f", digits = 3
-    )
+    rows[["adj_r2"]] <- format_panel_num(fixest::r2(model, type = "ar2"))
     rows
   }
   
@@ -1269,7 +1261,7 @@ run_all_models <- function(RAD) {
     RAD,
     "m of a storm overflow in England, 2021--2023. Properties and spill sites are within ",
     RAD,
-    "m of a river, and river distance between property and spill site is less than 1 km. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per day (12/24 count) recorded across all overflows within ",
+    "m of a river, and river distance between property and spill site is less than 1 km. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ",
     RAD,
     "m from January 2021 to the transaction date. Panel A uses unweighted spill counts. Panel B weights spills by inverse river distance from spill site to property. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
@@ -1285,8 +1277,8 @@ run_all_models <- function(RAD) {
     "hspan = even,\n",
     "colsep=2pt,\n",
     "rowsep=0.1pt,\n",
-    "cells   = {font = \\fontsize{11pt}{12pt}\\selectfont},\n",
-    "colspec={Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]},\n",
+    "cells   = {font = \\fontsize{8pt}{9pt}\\selectfont},\n",
+    "colspec={l *{12}{X[c]}},\n",
     "hline{1}={1-13}{solid, black, 0.1em},\n",
     "hline{2}={2-7,8-13}{solid, black, 0.05em},\n",
     "hline{3}={1-13}{solid, black, 0.05em},\n",
@@ -1313,7 +1305,7 @@ run_all_models <- function(RAD) {
     "\\textbf{Panel A: Unweighted} &  &  &  &  &  &  &  &  &  &  &  & \\\\\n",
     "Constant & ", make_row(coefs_a, "est", "Constant"), " \\\\\n",
     "& ", make_row(coefs_a, "se", "Constant"), " \\\\\n",
-    "Daily spill count &  &  &  &  &  &  &  &  &  &  &  &  \\\\\n",
+    "Spills per week (avg.) &  &  &  &  &  &  &  &  &  &  &  &  \\\\\n",
     "\\quad Upstream & ", make_row(coefs_a, "est", "Upstream"), " \\\\\n",
     "& ", make_row(coefs_a, "se", "Upstream"), " \\\\\n",
     "\\quad Downstream & ", make_row(coefs_a, "est", "Downstream"), " \\\\\n",
@@ -1326,7 +1318,7 @@ run_all_models <- function(RAD) {
     "\\textbf{Panel B: Weighted by river distance}  &  &  &  &  &  &  &  &  &  &  &  &\\\\\n",
     "Constant & ", make_row(coefs_b, "est", "Constant"), " \\\\\n",
     "& ", make_row(coefs_b, "se", "Constant"), " \\\\\n",
-    "Daily spill count &  &  &  &  &  &  &  &  &  &  &  &  \\\\\n",
+    "Spills per week (avg.) &  &  &  &  &  &  &  &  &  &  &  &  \\\\\n",
     "\\quad Upstream & ", make_row(coefs_b, "est", "Upstream"), " \\\\\n",
     "& ", make_row(coefs_b, "se", "Upstream"), " \\\\\n",
     "\\quad Downstream & ", make_row(coefs_b, "est", "Downstream"), " \\\\\n",
@@ -1389,7 +1381,7 @@ run_all_models <- function(RAD) {
     RAD,
     "m of a storm overflow in England, 2021--2023. Properties and spill sites are within ",
     RAD,
-    "m of a river, and river distance between property and spill site is less than 1 km. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per day recorded across all overflows within ",
+    "m of a river, and river distance between property and spill site is less than 1 km. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within ",
     RAD,
     "m from January 2021 to the transaction date. Panel A uses unweighted spill hours. Panel B weights spills by inverse river distance from spill site to property. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
@@ -1403,8 +1395,8 @@ run_all_models <- function(RAD) {
     "hspan = even,\n",
     "colsep=2pt,\n",
     "rowsep=0.1pt,\n",
-    "cells   = {font = \\fontsize{11pt}{12pt}\\selectfont},\n",
-    "colspec={Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]},\n",
+    "cells   = {font = \\fontsize{8pt}{9pt}\\selectfont},\n",
+    "colspec={l *{12}{X[c]}},\n",
     "hline{1}={1-13}{solid, black, 0.1em},\n",
     "hline{2}={2-7,8-13}{solid, black, 0.05em},\n",
     "hline{3}={1-13}{solid, black, 0.05em},\n",
@@ -1431,7 +1423,7 @@ run_all_models <- function(RAD) {
     "\\textbf{Panel A: Unweighted} &  &  &  &  &  &  &  &  &  &  &  & \\\\\n",
     "Constant & ", make_row(coefs_a_hrs, "est", "Constant"), " \\\\\n",
     "& ", make_row(coefs_a_hrs, "se", "Constant"), " \\\\\n",
-    "Daily spill hours &  &  &  &  &  &  &  &  &  &  &  &  \\\\\n",
+    "Spill hours per week (avg.) &  &  &  &  &  &  &  &  &  &  &  &  \\\\\n",
     "\\quad Upstream & ", make_row(coefs_a_hrs, "est", "Upstream"), " \\\\\n",
     "& ", make_row(coefs_a_hrs, "se", "Upstream"), " \\\\\n",
     "\\quad Downstream & ", make_row(coefs_a_hrs, "est", "Downstream"), " \\\\\n",
@@ -1444,7 +1436,7 @@ run_all_models <- function(RAD) {
     "\\textbf{Panel B: Weighted by river distance}  &  &  &  &  &  &  &  &  &  &  &  &\\\\\n",
     "Constant & ", make_row(coefs_b_hrs, "est", "Constant"), " \\\\\n",
     "& ", make_row(coefs_b_hrs, "se", "Constant"), " \\\\\n",
-    "Daily spill hours &  &  &  &  &  &  &  &  &  &  &  &  \\\\\n",
+    "Spill hours per week (avg.) &  &  &  &  &  &  &  &  &  &  &  &  \\\\\n",
     "\\quad Upstream & ", make_row(coefs_b_hrs, "est", "Upstream"), " \\\\\n",
     "& ", make_row(coefs_b_hrs, "se", "Upstream"), " \\\\\n",
     "\\quad Downstream & ", make_row(coefs_b_hrs, "est", "Downstream"), " \\\\\n",
