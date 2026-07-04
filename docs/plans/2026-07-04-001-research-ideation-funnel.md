@@ -28,8 +28,11 @@ in the feasibility score, not by exclusion.
 - **No implementation.** Ideas are refined, not built.
 - **Repo writes only under `docs/ideas/`.** All throwaway probe code lives in the
   session scratchpad, never in `scripts/` or anywhere else in the repo.
-- **Data is read-only.** Probes and pilot regressions use existing analysis-ready
-  datasets in `data/final/` only — no raw-data processing, no new pipelines.
+- **Data is read-only.** Probes and pilot regressions use only the datasets the current
+  analysis loads — those referenced by `scripts/R/09_analysis/` (loader:
+  `00_data_load/load_data_sewage.R`), inventoried in `docs/ideas/context/project-brief.md`
+  Section 3. `data/final/` is stale and must not be used (corrected at Checkpoint 1;
+  the plan originally pointed there). No raw-data processing, no new pipelines.
 - **Ledger discipline.** Every idea gets a row in `docs/ideas/ledger.md` the moment it
   is proposed (id, title, one-liner, lens, status). Agents check the ledger and the
   already-considered register before proposing; duplicates are flagged, not counted.
@@ -72,8 +75,10 @@ what the draft claims vs. what it shows.
 
 Register contents: every idea, extension, robustness plan, or rejected direction already
 on record, each with a one-line description and a source pointer. This is the dedupe
-baseline — generators must not re-propose entries as new (they MAY build on them if the
-extension is substantive, citing the register entry).
+baseline — generators must not re-propose entries as new. Per Checkpoint 1: many register
+entries are shallow or unimplemented, so generators MAY promote a promising register
+entry into the candidate pool (as itself or extended), citing the register entry and
+adding the case for prioritising it now.
 
 **CHECKPOINT 1:** Jacopo reviews both files, corrects wrong premises, adds anything the
 notes missed. Nothing else runs until sign-off.
@@ -113,7 +118,8 @@ kills the idea (mirrors how referees reject). No appeal round.
 - **Potential (hostile-referee evaluator):** would this materially raise top-5 odds?
   Batch evaluation (all candidates together) so scores are comparative, not absolute.
 - **Feasibility (empirical engineer):** runs read-only recon and quick pilot
-  regressions on `data/final/` where an idea's key variation can be checked cheaply.
+  regressions on the analysis datasets (per the data guardrail above) where an idea's
+  key variation can be checked cheaply.
   Scores account for data-in-hand vs. acquisition risk, and effort. Batched by dataset.
 - **Originality (novelty checker):** one agent per candidate (each needs its own
   searches): Zotero library via MCP + web search for published and working papers.
