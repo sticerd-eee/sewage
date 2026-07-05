@@ -16,6 +16,11 @@ merged_from:
 
 # Consolidated findings: merge_individ_annual_location.R
 
+> **Superseded (2026-07-04):** the script will be rebuilt from scratch rather than
+> fixed in place. All decisions and the findings→resolution map live in
+> [`docs/plans/2026-07-04-002-refactor-merge-individ-annual-location-rebuild-plan.md`](../docs/plans/2026-07-04-002-refactor-merge-individ-annual-location-rebuild-plan.md).
+> Do not implement fixes from this file directly; it is retained as the evidence record.
+
 Single source of truth for all open issues in
 [`scripts/R/05_data_integration/merge_individ_annual_location.R`](../scripts/R/05_data_integration/merge_individ_annual_location.R),
 consolidating todos 001–004, 006, 008, and the 2026-06-10 full-script sanity review (010).
