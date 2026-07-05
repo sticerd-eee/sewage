@@ -43,7 +43,10 @@ WORKS_REGISTER_RESOLVER_PROTOTYPE <- tibble::tibble(
   easting = double(),
   northing = double(),
   spill_hrs_ea = double(),
-  spill_count_ea = double()
+  spill_count_ea = double(),
+  edm_operation_percent = double(),
+  no_full_years_edm_data = double(),
+  edm_commission_date = as.Date(character())
 )
 
 WORKS_REGISTER_EDGE_PROTOTYPE <- tibble::tibble(
@@ -77,6 +80,12 @@ normalise_register_permit <- function(x) {
   x <- stringr::str_squish(stringr::str_to_upper(stringr::str_trim(x)))
   x[x %in% c("", "TBC", "N/A", "NA")] <- NA_character_
   x
+}
+
+parse_iso_date_or_na <- function(x) {
+  x <- as.character(x)
+  x[!stringr::str_detect(x, "^\\d{4}-\\d{2}-\\d{2}$")] <- NA_character_
+  as.Date(x)
 }
 
 annual_lookup_long <- function(lookup_tbl) {
@@ -163,6 +172,9 @@ prepare_works_register_annual_rows <- function(annual_rows, lookup_tbl = NULL) {
   if (!"permit_reference_ea" %in% names(rows)) rows$permit_reference_ea <- NA_character_
   if (!"spill_hrs_ea" %in% names(rows)) rows$spill_hrs_ea <- NA_real_
   if (!"spill_count_ea" %in% names(rows)) rows$spill_count_ea <- NA_real_
+  if (!"edm_operation_percent" %in% names(rows)) rows$edm_operation_percent <- NA_real_
+  if (!"no_full_years_edm_data" %in% names(rows)) rows$no_full_years_edm_data <- NA_real_
+  if (!"edm_commission_date" %in% names(rows)) rows$edm_commission_date <- as.Date(NA)
 
   coords <- parse_bng_coordinates(clean_ngr(rows$outlet_discharge_ngr))
 
@@ -190,7 +202,11 @@ prepare_works_register_annual_rows <- function(annual_rows, lookup_tbl = NULL) {
       easting = coords$easting,
       northing = coords$northing,
       spill_hrs_ea = as.numeric(.data$spill_hrs_ea),
-      spill_count_ea = as.numeric(.data$spill_count_ea)
+      spill_count_ea = as.numeric(.data$spill_count_ea),
+      edm_operation_percent = as.numeric(.data$edm_operation_percent),
+      no_full_years_edm_data =
+        suppressWarnings(as.numeric(.data$no_full_years_edm_data)),
+      edm_commission_date = parse_iso_date_or_na(.data$edm_commission_date)
     ) %>%
     dplyr::select(
       "annual_row_id",
@@ -215,7 +231,10 @@ prepare_works_register_annual_rows <- function(annual_rows, lookup_tbl = NULL) {
       "easting",
       "northing",
       "spill_hrs_ea",
-      "spill_count_ea"
+      "spill_count_ea",
+      "edm_operation_percent",
+      "no_full_years_edm_data",
+      "edm_commission_date"
     )
 }
 
