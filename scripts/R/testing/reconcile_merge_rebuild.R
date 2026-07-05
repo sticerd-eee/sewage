@@ -55,10 +55,16 @@ CONFIG <- list(
   match_rate_soft_floor = 0.95
 )
 
-COMPARISON_EVENT_KEY_COLS <- c(
+# Old-baseline rows are aligned to raw events on this group key. `unique_id`
+# is deliberately EXCLUDED: the old script rewrote unique_id in its own output
+# (141,740 rows, mostly Anglian 2024 and Yorkshire 2022), so any join through
+# it misclassifies matched events as missing. Within groups that share the
+# same timestamps (batch-recorded simultaneous CSO events), rows are paired by
+# a membership-respecting assignment, not by file order — see the pairing
+# section below.
+EVENT_GROUP_KEY_COLS <- c(
   "water_company",
   "year",
-  "unique_id",
   "start_time",
   "end_time"
 )
@@ -77,8 +83,9 @@ NEW_EVENT_KEY_COLS <- c(
   "end_time"
 )
 
-REPORT_EVENT_KEY_COLS <- COMPARISON_EVENT_KEY_COLS
-OLD_UNMATCHED_KEY_COLS <- COMPARISON_EVENT_KEY_COLS
+# `unique_id` here is the raw event's value, carried through the new-side
+# alignment; the old output's (rewritten) value is reported as old_unique_id.
+REPORT_EVENT_KEY_COLS <- c(EVENT_GROUP_KEY_COLS, "unique_id")
 
 EXACT_NEW_METHODS <- c(
   "unique_id",
@@ -262,12 +269,22 @@ fingerprints <- assert_input_fingerprints()
 
 message("Reading raw events and merge outputs...")
 events <- arrow::read_parquet(CONFIG$event_path) %>%
-  dplyr::select(dplyr::all_of(unique(c(COMPARISON_EVENT_KEY_COLS, NEW_EVENT_KEY_COLS)))) %>%
-  dplyr::mutate(event_id = dplyr::row_number())
+  dplyr::select(dplyr::any_of(c(NEW_EVENT_KEY_COLS, "new_unqiue_id")))
 
-legacy_event_index <- events %>%
-  dplyr::select(.data$event_id, dplyr::all_of(COMPARISON_EVENT_KEY_COLS)) %>%
-  add_event_instances(COMPARISON_EVENT_KEY_COLS)
+# Mirror the orchestrator's ingest normalisation: Anglian 2024 events carry
+# their unique_id only in the typo-named `new_unqiue_id` column, and the
+# pipeline coalesces it at load. Raw-event identity must match the pipeline's
+# effective input or the new-side alignment fails for exactly those rows.
+if ("new_unqiue_id" %in% names(events)) {
+  events <- events %>%
+    dplyr::mutate(
+      unique_id = dplyr::coalesce(.data$unique_id, .data$new_unqiue_id)
+    ) %>%
+    dplyr::select(-"new_unqiue_id")
+}
+
+events <- events %>%
+  dplyr::mutate(event_id = dplyr::row_number())
 
 new_event_index <- events %>%
   dplyr::select(.data$event_id, dplyr::all_of(NEW_EVENT_KEY_COLS)) %>%
@@ -287,25 +304,19 @@ old_pseudo_rows <- old_matched %>%
 old_matched_real <- old_matched %>%
   dplyr::filter(!is.na(.data$start_time), !is.na(.data$end_time))
 
-old_matched_ids <- old_matched_real %>%
+old_rows <- old_matched_real %>%
   dplyr::select(
-    dplyr::all_of(COMPARISON_EVENT_KEY_COLS),
+    dplyr::all_of(EVENT_GROUP_KEY_COLS),
+    old_unique_id = .data$unique_id,
     old_site_id = .data$site_id,
     old_match_method = .data$match_method,
     old_match_quality = .data$match_quality,
     old_match_key = .data$match_key,
     old_ngr = .data$ngr
   ) %>%
-  attach_event_ids(legacy_event_index, COMPARISON_EVENT_KEY_COLS) %>%
-  dplyr::mutate(old_tier = classify_old_tier(.data$old_match_method))
-
-old_unmatched_ids <- old_unmatched %>%
-  dplyr::select(dplyr::all_of(OLD_UNMATCHED_KEY_COLS)) %>%
-  attach_event_ids(
-    events %>%
-      dplyr::select(.data$event_id, dplyr::all_of(OLD_UNMATCHED_KEY_COLS)) %>%
-      add_event_instances(OLD_UNMATCHED_KEY_COLS),
-    OLD_UNMATCHED_KEY_COLS
+  dplyr::mutate(
+    old_tier = classify_old_tier(.data$old_match_method),
+    old_row_id = dplyr::row_number()
   )
 
 new_matched_ids <- new_matched %>%
@@ -393,35 +404,136 @@ new_site_members <- new_crosswalk %>%
     new_site_id_members = .data$site_id_members
   )
 
-old_new_compare <- old_matched_ids %>%
-  dplyr::left_join(
-    new_outcomes %>%
-      dplyr::select(
-        .data$event_id,
-        .data$new_outcome,
-        .data$new_reason,
-        .data$new_site_id,
-        .data$new_match_method,
-        .data$new_match_quality,
-        .data$new_annual_status,
-        .data$new_ngr,
-        .data$new_tier
-      ),
+# ------------------------------------------------------------------------------
+# Membership-respecting old -> new pairing.
+#
+# Both the baseline and the new outputs partition the same raw events, but
+# neither carries a shared row id, and batch-recorded CSO events duplicate the
+# (company, year, start, end) group key (up to 40 simultaneous events). Pairing
+# rows by file order inside those groups fabricates works changes between
+# unrelated simultaneous events. Instead: within each group, an old row is
+# first paired with a new row assigned to the SAME works as the old site (via
+# crosswalk membership); only the remainder pairs by within-group order.
+# ------------------------------------------------------------------------------
+
+member_to_works <- site_members %>%
+  dplyr::distinct(.data$member_site_id, works_of_member = .data$new_site_id)
+
+member_multiplicity <- member_to_works %>%
+  dplyr::count(.data$member_site_id, name = "n") %>%
+  dplyr::filter(.data$n > 1)
+if (nrow(member_multiplicity) > 0) {
+  stop(
+    "Crosswalk member site_ids map to more than one works; ",
+    "register components are not disjoint.",
+    call. = FALSE
+  )
+}
+
+new_side <- new_outcomes %>%
+  dplyr::select(
+    .data$event_id,
+    dplyr::all_of(EVENT_GROUP_KEY_COLS),
+    .data$unique_id,
+    .data$new_outcome,
+    .data$new_reason,
+    .data$new_site_id,
+    .data$new_match_method,
+    .data$new_match_quality,
+    .data$new_annual_status,
+    .data$new_ngr,
+    .data$new_tier
+  )
+
+old_side <- old_rows %>%
+  dplyr::left_join(member_to_works, by = c("old_site_id" = "member_site_id"))
+
+old_tier1 <- old_side %>%
+  dplyr::filter(!is.na(.data$works_of_member)) %>%
+  dplyr::group_by(
+    dplyr::across(dplyr::all_of(EVENT_GROUP_KEY_COLS)),
+    .data$works_of_member
+  ) %>%
+  dplyr::mutate(pair_rank = dplyr::row_number()) %>%
+  dplyr::ungroup()
+
+new_tier1 <- new_side %>%
+  dplyr::filter(.data$new_outcome == "matched", !is.na(.data$new_site_id)) %>%
+  dplyr::group_by(
+    dplyr::across(dplyr::all_of(EVENT_GROUP_KEY_COLS)),
+    .data$new_site_id
+  ) %>%
+  dplyr::mutate(pair_rank = dplyr::row_number()) %>%
+  dplyr::ungroup()
+
+paired_tier1 <- old_tier1 %>%
+  dplyr::inner_join(
+    new_tier1,
+    by = c(EVENT_GROUP_KEY_COLS, "works_of_member" = "new_site_id", "pair_rank"),
+    na_matches = "na"
+  ) %>%
+  dplyr::mutate(new_site_id = .data$works_of_member)
+
+old_tier2 <- old_side %>%
+  dplyr::anti_join(paired_tier1, by = "old_row_id") %>%
+  dplyr::group_by(dplyr::across(dplyr::all_of(EVENT_GROUP_KEY_COLS))) %>%
+  dplyr::mutate(pair_rank = dplyr::row_number()) %>%
+  dplyr::ungroup()
+
+new_tier2 <- new_side %>%
+  dplyr::anti_join(
+    paired_tier1 %>% dplyr::distinct(.data$event_id),
     by = "event_id"
   ) %>%
-  dplyr::left_join(new_site_members, by = "new_site_id") %>%
+  dplyr::group_by(dplyr::across(dplyr::all_of(EVENT_GROUP_KEY_COLS))) %>%
+  dplyr::mutate(pair_rank = dplyr::row_number()) %>%
+  dplyr::ungroup()
+
+paired_tier2 <- old_tier2 %>%
   dplyr::left_join(
-    site_members,
-    by = c("new_site_id", "old_site_id" = "member_site_id")
-  ) %>%
-  dplyr::mutate(old_site_in_new_works = tidyr::replace_na(.data$old_site_in_new_works, FALSE))
+    new_tier2,
+    by = c(EVENT_GROUP_KEY_COLS, "pair_rank"),
+    na_matches = "na"
+  )
+
+old_new_compare <- dplyr::bind_rows(paired_tier1, paired_tier2) %>%
+  dplyr::left_join(new_site_members, by = "new_site_id") %>%
+  dplyr::mutate(
+    old_site_in_new_works = !is.na(.data$works_of_member) &
+      !is.na(.data$new_site_id) &
+      .data$works_of_member == .data$new_site_id
+  )
+
+if (nrow(old_new_compare) != nrow(old_rows)) {
+  stop(
+    "Old->new pairing changed the baseline row count: ",
+    nrow(old_new_compare), " paired vs ", nrow(old_rows), " baseline rows.",
+    call. = FALSE
+  )
+}
+if (anyDuplicated(old_new_compare$old_row_id) > 0) {
+  stop("Old->new pairing duplicated baseline rows.", call. = FALSE)
+}
+paired_event_dupes <- old_new_compare %>%
+  dplyr::filter(!is.na(.data$event_id)) %>%
+  dplyr::count(.data$event_id, name = "n") %>%
+  dplyr::filter(.data$n > 1)
+if (nrow(paired_event_dupes) > 0) {
+  stop(
+    "Old->new pairing assigned ", nrow(paired_event_dupes),
+    " new rows to more than one baseline row.",
+    call. = FALSE
+  )
+}
 
 total_by_year <- events %>%
   dplyr::count(.data$year, name = "total_events")
 
-old_tier_counts <- old_matched_ids %>%
-  dplyr::filter(!is.na(.data$event_id)) %>%
-  dplyr::distinct(.data$event_id, .data$year, .data$old_tier) %>%
+# Baseline rows are 1:1 with raw events (matched + unmatched + pseudo = raw),
+# so tier counts come straight from the baseline rows. The previous version
+# counted only rows that survived an event-id join through unique_id, which
+# silently dropped 147k rewritten-unique_id rows and understated old rates.
+old_tier_counts <- old_rows %>%
   dplyr::count(.data$year, .data$old_tier, name = "n") %>%
   tidyr::pivot_wider(names_from = .data$old_tier, values_from = .data$n, values_fill = 0)
 
@@ -464,7 +576,7 @@ write_csv(match_rates_by_year, path_out("match_rates_by_year.csv"))
 
 overall_rates <- tibble::tibble(
   total_events = nrow(events),
-  old_matched_events = dplyr::n_distinct(old_matched_ids$event_id, na.rm = TRUE),
+  old_matched_events = nrow(old_rows),
   old_pseudo_rows = nrow(old_pseudo_rows),
   old_unmatched_rows = nrow(old_unmatched),
   new_matched_including_absent = dplyr::n_distinct(new_matched_ids$event_id, na.rm = TRUE),
@@ -484,10 +596,10 @@ overall_rates <- tibble::tibble(
 write_csv(overall_rates, path_out("overall_match_rates.csv"))
 
 old_max_fate <- old_new_compare %>%
-  dplyr::filter(.data$old_match_method == "max", !is.na(.data$event_id)) %>%
+  dplyr::filter(.data$old_match_method == "max") %>%
   dplyr::mutate(
     fate = dplyr::case_when(
-      is.na(.data$new_outcome) ~ "not_in_new_outputs",
+      is.na(.data$new_outcome) ~ "unpaired_alignment_failure",
       .data$new_outcome == "unmatched" ~ paste0("unmatched_", .data$new_reason),
       .data$new_annual_status == "absent" ~ "matched_to_absent",
       .data$new_match_method == "agreement" ~ "agreement_matched",
@@ -525,16 +637,35 @@ exact_lost <- old_new_compare %>%
   ) %>%
   dplyr::mutate(
     exception_explanation = dplyr::case_when(
-      is.na(.data$new_outcome) ~ "not_in_new_outputs",
+      is.na(.data$new_outcome) ~ "unpaired_alignment_failure",
       TRUE ~ paste0("new_unmatched_", .data$new_reason)
     )
   )
+
+# Reason tallies so a reconciliation-side alignment failure can never
+# masquerade as a new-pipeline regression in the gate evidence.
+exact_lost_tally <- exact_lost %>%
+  dplyr::count(.data$exception_explanation, name = "n") %>%
+  dplyr::arrange(dplyr::desc(.data$n))
+exact_changed_tally <- exact_changed_works %>%
+  dplyr::count(.data$exception_explanation, name = "n") %>%
+  dplyr::arrange(dplyr::desc(.data$n))
+write_csv(exact_lost_tally, path_out("old_exact_lost_reason_tally.csv"))
+write_csv(exact_changed_tally, path_out("old_exact_changed_works_tally.csv"))
+
+tally_to_evidence <- function(tally) {
+  if (nrow(tally) == 0) {
+    return("none")
+  }
+  paste0(tally$exception_explanation, "=", tally$n, collapse = ", ")
+}
 
 write_parquet_safe(
   exact_changed_works %>%
     dplyr::select(
       .data$event_id,
       dplyr::all_of(REPORT_EVENT_KEY_COLS),
+      .data$old_unique_id,
       .data$old_site_id,
       .data$new_site_id,
       .data$new_site_id_members,
@@ -552,8 +683,10 @@ write_parquet_safe(
     dplyr::select(
       .data$event_id,
       dplyr::all_of(REPORT_EVENT_KEY_COLS),
+      .data$old_unique_id,
       .data$old_site_id,
       .data$old_match_method,
+      .data$old_match_key,
       .data$new_outcome,
       .data$new_reason,
       .data$exception_explanation
@@ -668,13 +801,14 @@ exact_gate <- tibble::tibble(
     all(exact_changed_works$exception_explanation == "register_collapse")
   ),
   evidence = c(
-    paste0(nrow(exact_lost), " old windfall rows are unmatched or missing in new outputs"),
     paste0(
-      nrow(exact_changed_works), " old windfall rows changed works; ",
-      sum(exact_changed_works$exception_explanation == "register_collapse"),
-      " explained as register collapse; ",
-      sum(exact_changed_works$exception_explanation != "register_collapse"),
-      " unexplained"
+      nrow(exact_lost),
+      " old windfall rows are unmatched or missing in new outputs (",
+      tally_to_evidence(exact_lost_tally), ")"
+    ),
+    paste0(
+      nrow(exact_changed_works), " old windfall rows changed works (",
+      tally_to_evidence(exact_changed_tally), ")"
     )
   )
 )
@@ -780,10 +914,22 @@ report_lines <- c(
     nrow(exact_changed_works),
     " (full list: `old_exact_changed_works.parquet`)."
   ),
+  "",
+  md_table(exact_changed_tally),
+  "",
   paste0(
     "- Old windfall rows lost or unmatched in new outputs: ",
     nrow(exact_lost),
     " (full list: `old_exact_lost_matches.parquet`)."
+  ),
+  "",
+  md_table(exact_lost_tally),
+  "",
+  paste0(
+    "- Pairing note: old rows are aligned to new rows on (company, year, ",
+    "start, end) with same-works pairing preferred inside duplicated groups; ",
+    "`unpaired_alignment_failure` rows (expected 0) are reconciliation ",
+    "alignment failures, not pipeline losses."
   ),
   "",
   "## Near-Miss Evidence",
@@ -809,7 +955,9 @@ report_lines <- c(
   "- `coordinate_churn_summary.csv`",
   "- `coordinate_churn_gt1km.parquet`",
   "- `old_exact_changed_works.parquet`",
+  "- `old_exact_changed_works_tally.csv`",
   "- `old_exact_lost_matches.parquet`",
+  "- `old_exact_lost_reason_tally.csv`",
   "- `near_miss_summary.csv`",
   "- `row_accounting_checks.csv`",
   "- `exact_tier_gate_checks.csv`",
