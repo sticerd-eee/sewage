@@ -208,6 +208,21 @@ load_merge_inputs <- function(config = CONFIG) {
   events <- arrow::read_parquet(config$data_path_individual) %>%
     dplyr::filter(.data$year %in% config$years)
 
+  # Anglian 2024 rows carry their unique_id only in the typo-named
+  # `new_unqiue_id` column (empty everywhere else in the feed); without it the
+  # unique_id rung is silently skipped and 167k rows degrade to name-only
+  # matching or no_usable_key.
+  if ("new_unqiue_id" %in% names(events)) {
+    recovered <- sum(is.na(events$unique_id) & !is.na(events$new_unqiue_id))
+    events <- events %>%
+      dplyr::mutate(
+        unique_id = dplyr::coalesce(.data$unique_id, .data$new_unqiue_id)
+      )
+    logger::log_info(
+      "Recovered {recovered} unique_id values from new_unqiue_id column"
+    )
+  }
+
   logger::log_info("Reading annual-return input: {config$data_path_annual}")
   annual_returns <- arrow::read_parquet(config$data_path_annual) %>%
     dplyr::filter(.data$year %in% config$years)
