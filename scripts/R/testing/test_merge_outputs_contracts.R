@@ -98,6 +98,16 @@ events <- tibble(
   permit_reference_wa_sc = NA_character_,
   activity_reference = NA_character_,
   unique_id = c("E1", "E2", "E3"),
+  start_time_og = c(
+    "2021-01-01T00:00:00Z",
+    "2022-01-01T00:00:00Z",
+    "2023-01-01T00:00:00Z"
+  ),
+  end_time_og = c(
+    "2021-01-01T01:00:00Z",
+    "2022-01-01T01:00:00Z",
+    "2023-01-01T01:00:00Z"
+  ),
   start_time = as.POSIXct(c(
     "2021-01-01 00:00:00",
     "2022-01-01 00:00:00",
@@ -216,6 +226,11 @@ assert_identical(
   "reported_na hours should remain NA rather than being coerced to zero."
 )
 assert_identical(
+  outputs$matched_events$start_time_og,
+  c("2021-01-01T00:00:00Z", "2022-01-01T00:00:00Z"),
+  "Native *_og timestamp columns should remain character strings."
+)
+assert_identical(
   nrow(outputs$near_miss_report),
   1L,
   "Register near misses should flow into near_miss_report."
@@ -306,7 +321,7 @@ writeLines(
     paste0("canonical <- ", dQuote(crash_canonical)),
     "outputs <- empty_merge_outputs()",
     "outputs$site_works_crosswalk <- tibble(site_id=1L, year=2024L, water_company='Test Water', site_id_members='1', n_outlets=1L, n_outlets_reporting=1L, annual_status='reported_positive', spill_hrs_ea=1, spill_count_ea=1, ngr='TQ3000080000', easting=530000, northing=180000, edm_operation_percent=100, no_full_years_edm_data=1, edm_commission_date=as.Date('2024-01-01'), matched_event_count=1L, match_methods='site_name_ea')",
-    "outputs$matched_events <- tibble(water_company='Test Water', year=2024L, site_name_ea='Alpha', site_name_wa_sc=NA_character_, permit_reference_ea=NA_character_, permit_reference_wa_sc=NA_character_, activity_reference=NA_character_, unique_id='E1', start_time=as.POSIXct('2024-01-01 00:00:00', tz='UTC'), end_time=as.POSIXct('2024-01-01 01:00:00', tz='UTC'), site_id=1L, match_method='site_name_ea', match_quality=1, annual_status='reported_positive', spill_hrs_ea=1, spill_count_ea=1, ngr='TQ3000080000')",
+    "outputs$matched_events <- tibble(water_company='Test Water', year=2024L, site_name_ea='Alpha', site_name_wa_sc=NA_character_, permit_reference_ea=NA_character_, start_time_og='2024-01-01T00:00:00Z', end_time_og='2024-01-01T01:00:00Z', permit_reference_wa_sc=NA_character_, activity_reference=NA_character_, site_code=NA_character_, asset_type=NA_character_, unique_id='E1', event_duration_in_hours=1, new_unqiue_id=NA_character_, start_time=as.POSIXct('2024-01-01 00:00:00', tz='UTC'), end_time=as.POSIXct('2024-01-01 01:00:00', tz='UTC'), site_id=1L, match_method='site_name_ea', match_quality=1, annual_status='reported_positive', spill_hrs_ea=1, spill_count_ea=1, ngr='TQ3000080000')",
     "outputs$events_unmatched <- EVENTS_UNMATCHED_PROTOTYPE",
     "outputs$annual_unmatched <- ANNUAL_UNMATCHED_PROTOTYPE",
     "outputs$near_miss_report <- NEAR_MISS_REPORT_PROTOTYPE",
