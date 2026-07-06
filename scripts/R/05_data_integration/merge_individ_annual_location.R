@@ -100,7 +100,9 @@ CONFIG <- list(
   works_near_miss_m = 1000,
   agreement_rel_error = 0.25,
   agreement_runner_up_ratio = 2,
-  agreement_abs_floor_hrs = 1
+  agreement_abs_floor_hrs = 1,
+  near_miss_name_max_edit_distance = 2,
+  near_miss_name_min_chars = 6
 )
 
 INPUT_CONTRACT <- list(
@@ -114,7 +116,7 @@ INPUT_CONTRACT <- list(
     "permit_reference_ea", "permit_reference_wa_sc", "activity_reference",
     "outlet_discharge_ngr", "spill_hrs_ea", "spill_count_ea"
   ),
-  lookup = c("site_id", "site_id_2021", "site_id_2022", "site_id_2023", "site_id_2024")
+  lookup = c("site_id", paste0("site_id_", CONFIG$years))
 )
 
 # Sourced Utilities
@@ -203,14 +205,56 @@ read_manual_overrides <- function(path = CONFIG$manual_overrides_path) {
     dplyr::select(dplyr::all_of(names(empty)))
 }
 
+# Year filter guard: rows with NA year are a hard stop (silent loss of rows
+# whose year we cannot even classify), while rows with real out-of-range years
+# are logged and dropped (config-scoped runs are legitimate).
+filter_years_with_guard <- function(data, years, label) {
+  n_na_year <- sum(is.na(data$year))
+  if (n_na_year > 0) {
+    stop(
+      glue::glue(
+        "{label} input has {n_na_year} row(s) with NA year; ",
+        "refusing to drop them silently."
+      ),
+      call. = FALSE
+    )
+  }
+
+  filtered <- data %>% dplyr::filter(.data$year %in% years)
+  n_dropped <- nrow(data) - nrow(filtered)
+  if (n_dropped > 0) {
+    dropped_years <- sort(unique(data$year[!data$year %in% years]))
+    logger::log_warn(
+      "{label} input: dropped {n_dropped} row(s) with out-of-range year(s) {paste(dropped_years, collapse = ', ')} (config years: {paste(years, collapse = ', ')})"
+    )
+  }
+
+  filtered
+}
+
 load_merge_inputs <- function(config = CONFIG) {
   logger::log_info("Reading event input: {config$data_path_individual}")
   events <- arrow::read_parquet(config$data_path_individual) %>%
-    dplyr::filter(.data$year %in% config$years)
+    filter_years_with_guard(config$years, "Event")
+
+  # Anglian 2024 rows carry their unique_id only in the typo-named
+  # `new_unqiue_id` column (empty everywhere else in the feed); without it the
+  # unique_id rung is silently skipped and 167k rows degrade to name-only
+  # matching or no_usable_key.
+  if ("new_unqiue_id" %in% names(events)) {
+    recovered <- sum(is.na(events$unique_id) & !is.na(events$new_unqiue_id))
+    events <- events %>%
+      dplyr::mutate(
+        unique_id = dplyr::coalesce(.data$unique_id, .data$new_unqiue_id)
+      )
+    logger::log_info(
+      "Recovered {recovered} unique_id values from new_unqiue_id column"
+    )
+  }
 
   logger::log_info("Reading annual-return input: {config$data_path_annual}")
   annual_returns <- arrow::read_parquet(config$data_path_annual) %>%
-    dplyr::filter(.data$year %in% config$years)
+    filter_years_with_guard(config$years, "Annual-return")
 
   logger::log_info("Reading lookup input: {config$data_path_lookup}")
   lookup <- arrow::read_parquet(config$data_path_lookup)
@@ -256,7 +300,8 @@ build_merge_outputs_from_data <- function(events, annual_returns, lookup,
     config = list(
       works_merge_ngr_m = config$works_merge_ngr_m,
       works_near_miss_m = config$works_near_miss_m
-    )
+    ),
+    years = config$years
   )
   logger::log_info(
     "Works register: members={nrow(register$membership)}, edges={nrow(register$edges)}, near_misses={nrow(register$near_misses)}"
@@ -276,7 +321,16 @@ build_merge_outputs_from_data <- function(events, annual_returns, lookup,
       agreement_abs_floor_hrs = config$agreement_abs_floor_hrs
     )
   )
+  # Grab the attribute immediately: any dplyr verb applied to `decisions`
+  # downstream returns a copy without it.
+  agreement_near_misses <- attr(decisions, "agreement_near_misses")
+  if (is.null(agreement_near_misses)) {
+    agreement_near_misses <- tibble::tibble()
+  }
   log_decision_counts(decisions)
+  logger::log_info(
+    "Agreement near-miss evidence rows: {nrow(agreement_near_misses)}"
+  )
 
   logger::log_info("Assembling merge outputs")
   outputs <- assemble_merge_outputs(
@@ -285,7 +339,10 @@ build_merge_outputs_from_data <- function(events, annual_returns, lookup,
     resolver = register$resolver,
     decisions = decisions,
     register_near_misses = register$near_misses,
-    years = config$years
+    agreement_near_misses = agreement_near_misses,
+    years = config$years,
+    name_near_miss_max_edit_distance = config$near_miss_name_max_edit_distance,
+    name_near_miss_min_chars = config$near_miss_name_min_chars
   )
   validate_publishable_merge_outputs(outputs)
   log_output_counts(outputs)
