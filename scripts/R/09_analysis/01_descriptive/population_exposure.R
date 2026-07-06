@@ -51,6 +51,7 @@ DISTANCES_M <- c(50, 100, 250, 500, 1000)
 
 PATH_ALL_MO <- here::here("data", "processed", "agg_spill_stats", "agg_spill_mo.parquet")
 PATH_DRY_MO <- here::here("data", "processed", "agg_spill_stats", "agg_spill_dry_mo.parquet")
+PATH_UNIQUE_SITES <- here::here("data", "processed", "unique_spill_sites.parquet")
 PATH_POP_RASTER <- here::here(
   "data", "raw", "population_grid", "data", "uk_residential_population_2021.tif"
 )
@@ -156,11 +157,14 @@ site_status <- site_any |>
 # ==============================================================================
 cat("Geocoding sites from NGR...\n")
 
-ngr_df <- dry_mo |>
+# Coordinates come from unique_spill_sites (works grain, one row per site_id,
+# same site_id space as the regenerated aggregates); the aggregated spill
+# files no longer carry ngr/ngr_og columns.
+ngr_df <- arrow::read_parquet(PATH_UNIQUE_SITES) |>
   dplyr::transmute(
     site_id = as.integer(site_id),
     water_company,
-    ngr = dplyr::coalesce(dplyr::na_if(ngr, ""), dplyr::na_if(ngr_og, ""))
+    ngr = dplyr::na_if(ngr, "")
   ) |>
   dplyr::distinct(site_id, water_company, .keep_all = TRUE) |>
   dplyr::mutate(ngr = toupper(gsub("\\s+", "", ngr))) |>
