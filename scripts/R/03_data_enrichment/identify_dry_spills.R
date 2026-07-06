@@ -91,8 +91,29 @@ load_spill_data <- function(file_path = CONFIG$spills_file) {
   
   logger::log_info("Loading spill data from: {basename(file_path)}")
   spills_dt <- rio::import(file_path, trust = TRUE) |>
-    dplyr::select(site_id, year, water_company, start_time, end_time, ngr) |>
+    dplyr::select(site_id, year, water_company, start_time, end_time) |>
     data.table::as.data.table()
+
+  # Match on site_id only and take the inventory's works-representative ngr:
+  # events carry their original outlet NGR, which differs from the works NGR
+  # for collapsed multi-outlet works, and the grid lookup is keyed on the
+  # works NGR. A (site_id, ngr) merge here dropped 469k in-inventory events.
+  site_inventory <- arrow::read_parquet(CONFIG$unique_sites_file) |>
+    dplyr::select(site_id, ngr) |>
+    dplyr::distinct() |>
+    data.table::as.data.table()
+
+  raw_rows <- nrow(spills_dt)
+  spills_dt <- merge(
+    spills_dt,
+    site_inventory,
+    by = "site_id",
+    all = FALSE,
+    sort = FALSE
+  )
+  logger::log_info(
+    "Filtered spill data to regenerated unique_spill_sites inventory: {nrow(spills_dt)} retained, {raw_rows - nrow(spills_dt)} dropped"
+  )
   
   return(spills_dt)
 }
@@ -161,12 +182,19 @@ match_spills_to_rainfall <- function(spills_dt, site_grid_lookup, rainfall_dt, r
   # Filter rainfall data to required dates only
   rainfall_filtered <- rainfall_dt[date %in% required_dates]
   
-  # Pre-filter site grid lookup to only NGRs present in spills (memory optimization)
-  spill_ngrs <- unique(spills_dt$ngr)
-  site_grid_filtered <- site_grid_lookup[ngr %in% spill_ngrs]
+  # Pre-filter site grid lookup to only site/NGR pairs present in spills.
+  spill_site_keys <- unique(spills_dt[, .(site_id, ngr)])
+  site_grid_filtered <- site_grid_lookup[spill_site_keys, on = c("site_id", "ngr"), nomatch = 0]
   
-  # Join spills to site grid lookup (allow Cartesian since each NGR maps to 9 cells)
-  spills_with_grids <- spills_dt[site_grid_filtered, on = "ngr", nomatch = 0, allow.cartesian = TRUE]
+  # Join spills to site grid lookup (allow Cartesian since each site maps to 9 cells)
+  spills_with_grids <- merge(
+    spills_dt,
+    site_grid_filtered,
+    by = c("site_id", "ngr"),
+    all = FALSE,
+    allow.cartesian = TRUE,
+    sort = FALSE
+  )
   
   # Create long format for temporal matching
   spills_long <- data.table::melt(
@@ -261,8 +289,9 @@ prepare_chunk_data <- function(chunk_sites, year_spills, site_grid_lookup, rainf
   # Filter spills to only sites in this chunk
   chunk_spills <- year_spills[ngr %in% chunk_sites]
   
-  # Filter lookup table to only sites in this chunk
-  chunk_lookup <- site_grid_lookup[ngr %in% chunk_sites]
+  # Filter lookup table to only site/NGR pairs in this chunk
+  chunk_site_keys <- unique(chunk_spills[, .(site_id, ngr)])
+  chunk_lookup <- site_grid_lookup[chunk_site_keys, on = c("site_id", "ngr"), nomatch = 0]
   
   # Calculate required date range (with 4-day lookback)
   date_range <- get_chunk_date_range(chunk_spills)

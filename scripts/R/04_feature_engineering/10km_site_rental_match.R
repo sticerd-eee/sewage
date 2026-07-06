@@ -74,6 +74,27 @@ load_data <- function() {
 prepare_spill_sites <- function(spill_data) {
   logger::log_info("Preparing spill sites spatial data")
 
+  dropped_sites <- spill_data %>%
+    filter(is.na(easting) | is.na(northing)) %>%
+    select(any_of(c("site_id", "water_company", "ngr", "easting", "northing"))) %>%
+    mutate(
+      missing_easting = is.na(easting),
+      missing_northing = is.na(northing)
+    )
+  missing_coordinates <- nrow(dropped_sites)
+  if (missing_coordinates > 0) {
+    dropped_path <- here::here(
+      "output", "log", "10km_site_rental_match_dropped_spill_sites.csv"
+    )
+    readr::write_csv(dropped_sites, dropped_path, na = "")
+    logger::log_warn(
+      "Dropping {missing_coordinates} spill sites with missing easting/northing before spatial matching: {paste(dropped_sites$site_id, collapse = ', ')}"
+    )
+  }
+
+  spill_data <- spill_data %>%
+    filter(!is.na(easting) & !is.na(northing))
+
   spill_sites_sf <- spill_data %>%
     st_as_sf(coords = c("easting", "northing"), crs = 27700) %>%
     rename(spill_geom = geometry) %>%

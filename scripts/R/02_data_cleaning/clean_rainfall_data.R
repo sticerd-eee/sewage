@@ -76,15 +76,38 @@ CONFIG <- list(
 #' Load Sewage Spill Site Coordinates
 #'
 #' @param file_path Character. Path to parquet file containing spill site data.
-#' @return data.table with columns: ngr, easting, northing.
+#' @return data.table with columns: site_id, ngr, easting, northing.
 load_spill_sites <- function(file_path = CONFIG$spill_sites_path) {
   
   logger::log_info("Loading spill data from: {basename(file_path)}")
   spill_sites <- arrow::read_parquet(file_path) |>
-    select(ngr, easting, northing) |> 
+    select(site_id, ngr, easting, northing) |>
     as.data.table()
 
-  logger::log_info("Loaded {nrow(spill_sites)} unique NGRs")
+  missing_spatial_key <- spill_sites[
+    is.na(ngr) | is.na(easting) | is.na(northing)
+  ]
+  if (nrow(missing_spatial_key) > 0) {
+    dropped_path <- here::here(
+      "output", "log", "clean_rainfall_data_dropped_spill_sites.csv"
+    )
+    missing_spatial_key[, `:=`(
+      missing_ngr = is.na(ngr),
+      missing_easting = is.na(easting),
+      missing_northing = is.na(northing)
+    )]
+    data.table::fwrite(missing_spatial_key, dropped_path)
+    logger::log_warn(
+      "Dropping {nrow(missing_spatial_key)} spill sites with missing NGR/easting/northing before rainfall grid lookup: {paste(missing_spatial_key$site_id, collapse = ', ')}"
+    )
+    spill_sites <- spill_sites[
+      !is.na(ngr) & !is.na(easting) & !is.na(northing)
+    ]
+  }
+
+  logger::log_info(
+    "Loaded {nrow(spill_sites)} spill sites across {data.table::uniqueN(spill_sites$ngr)} NGRs"
+  )
 
   return(spill_sites)
 }
@@ -264,7 +287,7 @@ process_files_parallel <- function(rainfall_files, required_indices, n_cores) {
 #' @param spill_sites_dt data.table. Spill sites with ngr, easting, northing.
 #' @param grid_bounds List. Grid boundary data from NetCDF.
 #' @param radius Integer. Neighborhood radius (default: 1).
-#' @return data.table with columns: ngr, easting, northing, x_idx, y_idx, is_center.
+#' @return data.table with columns: site_id, ngr, easting, northing, x_idx, y_idx, is_center.
 create_spill_site_lookup <- function(spill_sites_dt, grid_bounds, radius = 1) {
   log_info("Creating lookup table for {nrow(spill_sites_dt)} spill sites")
   
@@ -285,6 +308,7 @@ create_spill_site_lookup <- function(spill_sites_dt, grid_bounds, radius = 1) {
     
     # Generate all 9 grid cell combinations for this spill site
     neighborhood <- offsets[, .(
+      site_id = site_data$site_id,
       ngr = site_data$ngr,
       easting = site_data$easting,
       northing = site_data$northing,
