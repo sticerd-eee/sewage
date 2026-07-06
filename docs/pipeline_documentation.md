@@ -57,7 +57,7 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 ### 05_data_integration
 
 - `combine_2021-2023_and_api_edm_data.R`: combines historical and API-era EDM records.
-- `merge_individ_annual_location.R`: merges annual-return location information into spill-event data.
+- `merge_individ_annual_location.R`: links spill events to annual-return works identities, locations, and EA totals through a works-register crosswalk. Outputs under `data/processed/matched_events_annual_data/`: `site_works_crosswalk.parquet` (canonical works-year artefact), `matched_events_annual_data.parquet` (pure event grain), `events_unmatched.parquet` (reason-coded), `annual_unmatched.parquet`, and `near_miss_report.parquet`. Manual match decisions live in `data/processed/matched_events_annual_data_manual_overrides.csv`.
 
 ### 06_analysis_datasets
 
@@ -92,9 +92,9 @@ The `scripts/R/09_analysis/` folder contains the main descriptive, hedonic, repe
 
 ### Layer 03: Data Enrichment
 
-11. `merge_individ_annual_location.R` — merge location data into individual spill records.
-12. `combine_2021-2023_and_api_edm_data.R` — combine historical and API EDM data.
-13. `create_annual_return_lookup.R` — build cross-year site lookup tables.
+11. `combine_2021-2023_and_api_edm_data.R` — combine historical and API EDM data.
+12. `create_annual_return_lookup.R` — build cross-year site lookup tables.
+13. `merge_individ_annual_location.R` — merge location data into individual spill records (reads the combined EDM data and the lookup; produces the works crosswalk consumed by the next two steps).
 14. `create_unique_spill_sites.R` — create the canonical spill-sites dataset.
 15. `aggregate_spill_stats.R` — produce the main spill aggregations.
 16. `clean_rainfall_data.R` — clean rainfall inputs and site-grid lookups.

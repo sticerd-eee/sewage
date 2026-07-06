@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 priority: p0
 issue_id: "011"
 tags: [code-review, data-integrity, matching, r, pipeline, consolidated]
@@ -18,11 +18,22 @@ merged_from:
 
 > **Superseded (2026-07-04):** the script will be rebuilt from scratch rather than
 > fixed in place. All decisions and the findings→resolution map live in
-> [`docs/plans/2026-07-04-002-refactor-merge-individ-annual-location-rebuild-plan.md`](../docs/plans/2026-07-04-002-refactor-merge-individ-annual-location-rebuild-plan.md).
+> [`docs/plans/2026-07-04-002-refactor-merge-individ-annual-location-rebuild-plan.md`](../../docs/plans/2026-07-04-002-refactor-merge-individ-annual-location-rebuild-plan.md).
 > Do not implement fixes from this file directly; it is retained as the evidence record.
+>
+> **Resolved (2026-07-06):** the rebuild shipped. All 25 findings are resolved or
+> obsoleted per the findings map at the end of the plan above. Implementation landed
+> across the chunk branches (merge pipeline `jo/merge-ch6-orchestrator` @ a52ca73,
+> reconciliation gate `jo/merge-ch7-reconciliation`, downstream migrations
+> `jo/merge-ch8-unique-sites`, `jo/merge-ch9-agg-stats`, `jo/merge-ch10-verification`);
+> reconciliation and migration evidence under
+> `output/merge_rebuild_reconciliation_2026-07-05/` and
+> `output/merge_rebuild_downstream_migration_2026-07-06/`. CH7 exact-tier exceptions
+> were reviewed and accepted case-by-case (manual overrides with per-row evidence in
+> `data/processed/matched_events_annual_data_manual_overrides.csv`).
 
 Single source of truth for all open issues in
-[`scripts/R/05_data_integration/merge_individ_annual_location.R`](../scripts/R/05_data_integration/merge_individ_annual_location.R),
+[`scripts/R/05_data_integration/merge_individ_annual_location.R`](../../scripts/R/05_data_integration/merge_individ_annual_location.R),
 consolidating todos 001–004, 006, 008, and the 2026-06-10 full-script sanity review (010).
 The superseded per-issue files are deleted (recoverable from git history). Line numbers
 refer to the current script (1108 lines, identical on `jo/merge_indivi_annual` and
@@ -72,7 +83,7 @@ numbered finding.
 
 ### 1. `finalise_merged_data` crashes: `rio::import()` needs `nanoparquet` (P0)
 
-[`merge_individ_annual_location.R:955-956`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L955)
+[`merge_individ_annual_location.R:955-956`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L955)
 
 ```r
 lookup <- import(CONFIG$data_path_lookup)
@@ -99,7 +110,7 @@ project and re-sync.
 
 ### 2. Event-only companies dropped before matching (P1)
 
-[`merge_individ_annual_location.R:446-450`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L446)
+[`merge_individ_annual_location.R:446-450`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L446)
 
 `company_year_combinations` is built from `unique(annual_return_df$water_company)` × `CONFIG$years`
 only. Events for a company absent from the annual returns never enter the loop and never reach
@@ -114,9 +125,9 @@ pairs and pass one-sided empty subsets through as unmatched.
 
 ### 3. Weak-key fallthrough and unbounded key space (P1)
 
-[`merge_individ_annual_location.R:185-195`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L185),
-[`:350-351`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L350),
-[`:221-223`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L221)
+[`merge_individ_annual_location.R:185-195`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L185),
+[`:350-351`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L350),
+[`:221-223`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L221)
 
 `generate_key_combinations()` enumerates **all** non-empty subsets of the shared columns
 (2^n − 1; 9 shared columns today → 511 combinations per company-year, doubling per added
@@ -134,7 +145,7 @@ a strong identifier and cap the count — more indirect, key space can still gro
 
 ### 15. Coalesce overwrites the event `unique_id` with the annual one (P2)
 
-[`merge_individ_annual_location.R:279-283`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L279)
+[`merge_individ_annual_location.R:279-283`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L279)
 
 Both inputs carry `unique_id` (events: `ea_id`/`yw_discharge_urn`/`srn` mapped to `unique_id`;
 annual returns: native `unique_id`). When a windfall match is made on a key that does not include
@@ -146,7 +157,7 @@ as separate columns), or document that `unique_id` in the matched output is annu
 
 ### 16. Zero-spill annual rows mislabelled as windfall matches (P2)
 
-[`merge_individ_annual_location.R:415-424`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L415)
+[`merge_individ_annual_location.R:415-424`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L415)
 
 Rows appended by `add_zero_spill_stats()` matched *nothing*, yet are tagged
 `match_method = "windfall"`, `match_quality = 1`, `match_type = "unique"`. Only
@@ -157,8 +168,8 @@ Rows appended by `add_zero_spill_stats()` matched *nothing*, yet are tagged
 
 ### 17. `find_matchable_keys` defined twice (P2)
 
-[`merge_individ_annual_location.R:205-234`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L205) and
-[`:304-333`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L304)
+[`merge_individ_annual_location.R:205-234`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L205) and
+[`:304-333`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L304)
 
 Byte-identical copies (same commit, `0e5f6a51`), including the roxygen block. Harmless at
 runtime (the second silently shadows the first), but any future edit to the first copy is dead
@@ -172,8 +183,8 @@ code.
 
 ### 4. Annual rows with NA spill metrics dropped from both outputs (P1)
 
-[`merge_individ_annual_location.R:416`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L416) and
-[`:428`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L428)
+[`merge_individ_annual_location.R:416`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L416) and
+[`:428`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L428)
 
 `add_zero_spill_stats()` partitions unmatched annual rows with
 `spill_hrs_ea == 0 & spill_count_ea == 0` (zero bucket) and
@@ -197,8 +208,8 @@ more output contracts.
 
 ### 5. Annual-only company-years never enter the loop (P1)
 
-[`merge_individ_annual_location.R:629-632`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L629),
-[`:669-673`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L669)
+[`merge_individ_annual_location.R:629-632`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L629),
+[`:669-673`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L669)
 
 `company_years` is built from `unique(events_unmatched$water_company)` ×
 `unique(events_unmatched$year)` only, and the final `rbindlist()` binds only loop outputs.
@@ -212,7 +223,7 @@ pairs; pass empty-side subsets through as unmatched (the empty-side early-return
 
 ### 6. Joined-but-not-selected annual candidates dropped (P1)
 
-[`merge_individ_annual_location.R:596-604`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L596)
+[`merge_individ_annual_location.R:596-604`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L596)
 
 With the default `keep_joined_losses = FALSE`, annual rows that joined but lost the
 one-best-row selection are removed from **all** outputs — neither matched nor unmatched.
@@ -227,10 +238,10 @@ annual input rows = selected + unmatched.
 
 ### 7. All-NA column re-prune can crash the tie computation (P1)
 
-[`merge_individ_annual_location.R:544-545`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L544)
+[`merge_individ_annual_location.R:544-545`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L544)
 
 The caller deliberately re-includes the spill metrics after pruning all-NA columns
-([`:645`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L645):
+([`:645`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L645):
 `select(where(~ any(!is.na(.))), any_of(c("spill_hrs_ea", "spill_count_ea")))`), but
 `run_max_match` prunes **again** without the `any_of()` re-add. A company-year subset where every
 row has `spill_hrs_ea = NA` (with non-zero counts — such rows pass the non-zero filter because
@@ -243,7 +254,7 @@ rows are latent in the real data.
 
 ### 8. Tie flag disagrees with the selection and is wrong under NA metrics (P1)
 
-[`merge_individ_annual_location.R:567-588`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L567)
+[`merge_individ_annual_location.R:567-588`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L567)
 
 Three defects:
 
@@ -261,7 +272,7 @@ Three defects:
 
 ### 9. `match_quality` never set for max matches (P1)
 
-[`merge_individ_annual_location.R:560-565`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L560)
+[`merge_individ_annual_location.R:560-565`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L560)
 
 The mutate sets `match_method`, `match_type`, `match_key`, `key_length` — but not
 `match_quality`, which windfall sets to `1` and fuzzy to `mpost`. Every max-method row exports
@@ -275,11 +286,11 @@ defined constant for exact-on-all-shared-columns matches). While there, consider
 
 ### 24. Stage-boundary naming asymmetry (P3)
 
-[`merge_individ_annual_location.R:672`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L672)
+[`merge_individ_annual_location.R:672`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L672)
 
 `run_many_to_many_max_match` returns `annual_unmatched` where the windfall stage and the
 `run_fuzzy_matching` contract use `annual_unmatched_nonzero`; the caller compensates at
-[`:1088`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L1088). Rename the
+[`:1088`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L1088). Rename the
 return key to remove the translation step. (Note: once finding 4 is fixed, the `_nonzero` name
 itself needs revisiting — the bucket will also carry unknown-metric rows.)
 
@@ -289,13 +300,13 @@ itself needs revisiting — the bucket will also carry unknown-metric rows.)
 
 ### 10. Zero-column `fuzzy_merges` crashes the reconstruction joins (P1)
 
-[`merge_individ_annual_location.R:878-928`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L878)
+[`merge_individ_annual_location.R:878-928`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L878)
 
 If `events_unmatched` is empty, **or** no block yields usable comparator columns / candidate
 pairs (every block returns `NULL`), `bind_rows()` produces a zero-column tibble and the
 reconstruction joins fail with *Join columns in x must be present in the data. Problem with
 `group_id_annual`* (lines 912–928). `main()` calls `run_fuzzy_matching()` unconditionally
-([`:1081`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L1081)), and
+([`:1081`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L1081)), and
 "all events matched before fuzzy" is a valid — desirable — end state. Both trigger paths
 reproduced synthetically 2026-03-10. A related entry path: 0-row inputs reaching
 `prepare_fuzzy_data` lose all columns to the `where()` prune and hit the misleading
@@ -307,7 +318,7 @@ is empty; when blocks produce no selected pairs, construct a typed empty `fuzzy_
 
 ### 12. Unbounded candidate generation per block (P2)
 
-[`merge_individ_annual_location.R:728-733`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L728)
+[`merge_individ_annual_location.R:728-733`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L728)
 
 `pair_blocking()` blocks only on `water_company`/`year`, materialising the full Cartesian
 product within each block. Existing logs show batches up to **155,236 candidate pairs**
@@ -323,7 +334,7 @@ with validation that plausible matches aren't silently discarded.
 
 ### 13. `_dup`-drop discards event values instead of coalescing (P2)
 
-[`merge_individ_annual_location.R:912-918`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L912)
+[`merge_individ_annual_location.R:912-918`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L912)
 
 The reconstruction joins `events_full` with `suffix = c("", "_dup")` and then
 `select(-ends_with("_dup"))`. For every column present on both sides, the event value is
@@ -336,7 +347,7 @@ identifier completeness depending on which stage matched it.
 
 ### 14. Installed reclin2 0.6.0 silently ignores `n`, `m`, `include_ties` (P2)
 
-[`merge_individ_annual_location.R:801-815`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L801)
+[`merge_individ_annual_location.R:801-815`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L801)
 
 `select_n_to_m()` in the installed version accepts these only via `...` and hard-codes 1:1
 matching (verified in the installed package source by two reviewers independently). Today's
@@ -353,8 +364,8 @@ that honours them; add a `formals()` assertion so a future package change is cau
 
 ### 11. Missing `site_id` contract on unmatched outputs; hidden late input reads (P1)
 
-[`merge_individ_annual_location.R:955-956`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L955),
-[`:998-1004`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L998)
+[`merge_individ_annual_location.R:955-956`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L955),
+[`:998-1004`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L998)
 
 - `load_data()` validates only the event and annual inputs (lines 146–154);
   `annual_return_lookup.parquet` is read for the first time inside finalisation, after the
@@ -373,7 +384,7 @@ before the keep-cols trim suffices.
 
 ### 18. Per-year enrichment invariant unasserted (P2)
 
-[`merge_individ_annual_location.R:975-995`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L975)
+[`merge_individ_annual_location.R:975-995`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L975)
 
 The loop keeps a matched row only in year-slices where `site_id_<year>` is non-NA: a row with
 all four NA would be **silently dropped**; a row with several non-NA year-ids would be
@@ -387,9 +398,9 @@ before the loop.
 
 ### 19. `2021:2024` hard-coded in three places (P2)
 
-[`merge_individ_annual_location.R:959`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L959),
-[`:989-994`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L989),
-[`:104-105`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L104)
+[`merge_individ_annual_location.R:959`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L959),
+[`:989-994`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L989),
+[`:104-105`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L104)
 
 `years_lookup <- 2021:2024`, the `coalesce(outlet_discharge_ngr_2024, ..., _2021)`, and
 `CONFIG$id_cols`' literal `site_id_2021..2024` all duplicate `CONFIG$years`. Extending the study
@@ -400,7 +411,7 @@ window to 2025 silently produces stale/missing `ngr` values rather than erroring
 
 ### 21. `site_metadata` is event-granular (P3)
 
-[`merge_individ_annual_location.R:1008-1010`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L1008)
+[`merge_individ_annual_location.R:1008-1010`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L1008)
 
 `keep_cols` retains `group_id_event`, `match_key`, spill stats, etc., so `distinct()` after
 dropping only `start_time`/`end_time` leaves near-event granularity. Verified consumers
@@ -413,13 +424,13 @@ so impact is low — but either deduplicate to genuinely site-level columns or r
 
 ### 20. Non-atomic four-file publish (P2)
 
-[`merge_individ_annual_location.R:1023-1051`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L1023)
+[`merge_individ_annual_location.R:1023-1051`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L1023)
 
 `export_results()` writes the four parquet outputs sequentially (lines 1039, 1042, 1045, 1048)
 straight into the live directory, with no staging, manifest, or rollback. A failure between
 writes leaves a **mixed snapshot** — some files from the new run, some from the previous one —
 that downstream analysis consumes without noticing. The repo's EDM hardening notes
-([`docs/solutions/best-practices/edm-api-combine-hardening-20260310.md`](../docs/solutions/best-practices/edm-api-combine-hardening-20260310.md))
+([`docs/solutions/best-practices/edm-api-combine-hardening-20260310.md`](../../docs/solutions/best-practices/edm-api-combine-hardening-20260310.md))
 already treat fail-closed publish as the preferred pattern.
 
 **Fix (recommended):** write all four files to a temp/staging directory, validate
@@ -432,20 +443,20 @@ existence/schema, then swap into place only after the full set succeeds. (Altern
 
 ### 22. Comment typo in `keep_cols` (P3)
 
-[`merge_individ_annual_location.R:114`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L114):
+[`merge_individ_annual_location.R:114`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L114):
 `# "site_id_2021", "site_id_2022", "site_id_2024", "site_id_2024"` — `2024` twice, `2023`
 missing. If ever uncommented as-is, `site_id_2023` silently disappears from the output.
 
 ### 23. Doc-drift bundle (P3)
 
-- [`:524-538`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L524): `run_max_match` has two pasted `@param`/`@return` blocks; the first is stale.
-- [`:682-683`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L682): `prepare_fuzzy_data` documents `@param vars` (not a parameter) and claims `id_cols` "defaults to `vars`" (no default exists).
-- [`:787`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L787): `select_matches` example threshold "e.g., 0.2" vs `CONFIG$threshold = 0.5`.
-- [`:851`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L851): `block_var` example `"company_year"` vs actual `"blocking_var"`.
+- [`:524-538`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L524): `run_max_match` has two pasted `@param`/`@return` blocks; the first is stale.
+- [`:682-683`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L682): `prepare_fuzzy_data` documents `@param vars` (not a parameter) and claims `id_cols` "defaults to `vars`" (no default exists).
+- [`:787`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L787): `select_matches` example threshold "e.g., 0.2" vs `CONFIG$threshold = 0.5`.
+- [`:851`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L851): `block_var` example `"company_year"` vs actual `"blocking_var"`.
 
 ### 25. Wrong comment on the execution guard (P3)
 
-[`merge_individ_annual_location.R:1104`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L1104):
+[`merge_individ_annual_location.R:1104`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L1104):
 "Execute the main function when the script is sourced" — `sys.nframe() == 0` does the opposite:
 `main()` runs under `Rscript`, *not* under `source()`.
 
@@ -511,7 +522,7 @@ to the findings above:
   indistinguishable from "no plausible matches" (logged only).
 - `extract_join_tag` detects join overlap purely by `_event`/`_annual` name suffixes; an
   upstream column whose natural name ends in those suffixes would be mangled (none exist today).
-- The lookup join ([`:983`](../scripts/R/05_data_integration/merge_individ_annual_location.R#L983))
+- The lookup join ([`:983`](../../scripts/R/05_data_integration/merge_individ_annual_location.R#L983))
   has no `suffix=` guard or uniqueness assertion on `site_id_<year>`; it relies on upstream
   guarantees. A `distinct()` on coords plus `relationship = "one-to-one"` would be self-defending.
 - `count(..., .drop = FALSE)` in `find_matchable_keys` would create phantom zero-count key
