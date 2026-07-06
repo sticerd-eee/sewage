@@ -112,31 +112,44 @@ annual_lookup_long <- function(lookup_tbl) {
     dplyr::select("canonical_site_id", "year", "annual_site_id")
 }
 
-attach_annual_site_id <- function(annual_rows) {
+attach_annual_site_id <- function(annual_rows, years = 2021:2024) {
   if ("annual_site_id" %in% names(annual_rows)) {
     return(dplyr::mutate(annual_rows, annual_site_id = as.integer(.data$annual_site_id)))
   }
 
-  annual_rows %>%
-    dplyr::mutate(
-      annual_site_id = dplyr::case_when(
-        .data$year == 2021L ~ as.integer(.data$site_id_2021),
-        .data$year == 2022L ~ as.integer(.data$site_id_2022),
-        .data$year == 2023L ~ as.integer(.data$site_id_2023),
-        .data$year == 2024L ~ as.integer(.data$site_id_2024),
-        TRUE ~ NA_integer_
-      )
+  years <- as.integer(years)
+  year_cols <- paste0("site_id_", years)
+  missing_cols <- setdiff(year_cols, names(annual_rows))
+  if (length(missing_cols) > 0) {
+    stop(
+      "Annual rows lack year-specific site-id column(s): ",
+      paste(missing_cols, collapse = ", "),
+      call. = FALSE
     )
+  }
+
+  # Rows whose year is outside `years` keep NA (they cannot be linked through
+  # the year-specific lookup columns and are surfaced downstream as missing
+  # lookup links).
+  annual_site_id <- rep(NA_integer_, nrow(annual_rows))
+  for (i in seq_along(years)) {
+    in_year <- !is.na(annual_rows$year) &
+      as.integer(annual_rows$year) == years[[i]]
+    annual_site_id[in_year] <- as.integer(annual_rows[[year_cols[[i]]]][in_year])
+  }
+
+  dplyr::mutate(annual_rows, annual_site_id = !!annual_site_id)
 }
 
-prepare_works_register_annual_rows <- function(annual_rows, lookup_tbl = NULL) {
+prepare_works_register_annual_rows <- function(annual_rows, lookup_tbl = NULL,
+                                               years = 2021:2024) {
   if (nrow(annual_rows) == 0) {
     return(WORKS_REGISTER_RESOLVER_PROTOTYPE %>%
       dplyr::select(-"site_id", -"member_site_id"))
   }
 
   rows <- annual_rows %>%
-    attach_annual_site_id() %>%
+    attach_annual_site_id(years = years) %>%
     dplyr::mutate(
       annual_row_id = dplyr::row_number(),
       year = as.integer(.data$year)
@@ -449,8 +462,9 @@ build_works_membership <- function(nodes, edges) {
 build_works_register <- function(
     annual_rows,
     lookup_tbl = NULL,
-    config = list(works_merge_ngr_m = 250, works_near_miss_m = 1000)) {
-  prepared <- prepare_works_register_annual_rows(annual_rows, lookup_tbl)
+    config = list(works_merge_ngr_m = 250, works_near_miss_m = 1000),
+    years = 2021:2024) {
+  prepared <- prepare_works_register_annual_rows(annual_rows, lookup_tbl, years)
 
   if (nrow(prepared) == 0) {
     return(list(

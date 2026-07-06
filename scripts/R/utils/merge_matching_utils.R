@@ -28,6 +28,21 @@ MERGE_MATCHING_DECISION_PROTOTYPE <- tibble::tibble(
   annual_status_hint = character()
 )
 
+MERGE_AGREEMENT_NEAR_MISS_PROTOTYPE <- tibble::tibble(
+  report_type = character(),
+  water_company = character(),
+  year = integer(),
+  site_id = integer(),
+  candidate_site_id = integer(),
+  site_name_ea = character(),
+  reason = character(),
+  distance_m = double(),
+  match_quality = double(),
+  candidate_hours = double(),
+  event_hours = double(),
+  relative_error = double()
+)
+
 normalise_match_value <- function(x) {
   x <- as.character(x)
   x <- stringr::str_squish(stringr::str_to_upper(stringr::str_trim(x)))
@@ -130,6 +145,19 @@ prepare_resolver_for_matching <- function(resolver) {
       year = as.integer(.data$year)
     ) %>%
     add_normalised_tuple_cols()
+}
+
+summarise_works_year_hours <- function(resolver) {
+  resolver %>%
+    dplyr::group_by(.data$site_id, .data$year) %>%
+    dplyr::summarise(
+      candidate_hours = if (all(is.na(.data$spill_hrs_ea))) {
+        NA_real_
+      } else {
+        sum(.data$spill_hrs_ea, na.rm = TRUE)
+      },
+      .groups = "drop"
+    )
 }
 
 unique_work_resolution <- function(candidates) {
@@ -280,6 +308,24 @@ resolve_ladder_for_tuple <- function(tuple, resolver) {
     }
   }
 
+  key_rungs <- c("unique_id", "permit_activity", "permit_only")
+  key_spans <- any(vapply(
+    resolutions[key_rungs],
+    function(x) identical(x$status, "spans"),
+    logical(1)
+  ))
+  if (key_spans) {
+    return(list(
+      status = "unmatched",
+      site_id = NA_integer_,
+      match_method = NA_character_,
+      match_quality = NA_real_,
+      reason = "key_spans_works",
+      rows_by_rung = rows_by_rung,
+      resolutions = resolutions
+    ))
+  }
+
   list(
     status = "unmatched",
     site_id = NA_integer_,
@@ -296,31 +342,21 @@ calculate_relative_error <- function(event_hours, candidate_hours, abs_floor) {
   abs(candidate_hours - event_hours) / denominator
 }
 
-resolve_agreement_for_tuple <- function(tuple, candidates, config) {
-  same_year <- candidates %>%
-    dplyr::filter(.data$year == tuple$year) %>%
-    dplyr::group_by(.data$site_id) %>%
-    dplyr::summarise(
-      candidate_hours = if (all(is.na(.data$spill_hrs_ea))) {
-        NA_real_
-      } else {
-        sum(.data$spill_hrs_ea, na.rm = TRUE)
-      },
-      .groups = "drop"
+resolve_agreement_for_tuple <- function(tuple, candidates, works_year_hours,
+                                        config) {
+  candidate_works <- tibble::tibble(
+    site_id = sort(unique(stats::na.omit(as.integer(candidates$site_id))))
+  )
+
+  scored <- candidate_works %>%
+    dplyr::left_join(
+      works_year_hours %>%
+        dplyr::filter(.data$year == tuple$year) %>%
+        dplyr::select(dplyr::all_of(c("site_id", "candidate_hours"))),
+      by = "site_id"
     ) %>%
-    dplyr::filter(!is.na(.data$candidate_hours))
-
-  if (nrow(same_year) == 0) {
-    return(list(status = "unmatched", reason = "name_spans_works"))
-  }
-
-  if (abs(tuple$event_hours) <= config$agreement_abs_floor_hrs &&
-      all(abs(same_year$candidate_hours) <= config$agreement_abs_floor_hrs)) {
-    return(list(status = "unmatched", reason = "agreement_uninformative"))
-  }
-
-  scored <- same_year %>%
     dplyr::mutate(
+      event_hours = as.numeric(tuple$event_hours),
       relative_error = calculate_relative_error(
         tuple$event_hours,
         .data$candidate_hours,
@@ -329,13 +365,41 @@ resolve_agreement_for_tuple <- function(tuple, candidates, config) {
     ) %>%
     dplyr::arrange(.data$relative_error, .data$site_id)
 
-  if (nrow(scored) == 0 || is.na(scored$relative_error[[1L]])) {
-    return(list(status = "unmatched", reason = "agreement_failed"))
+  evidence_for <- function(reason) {
+    scored %>% dplyr::mutate(reason = reason)
   }
 
-  best <- scored[1L, ]
-  runner_up_error <- if (nrow(scored) >= 2L) {
-    scored$relative_error[[2L]]
+  usable <- scored %>%
+    dplyr::filter(!is.na(.data$candidate_hours))
+
+  if (nrow(usable) == 0) {
+    return(list(
+      status = "unmatched",
+      reason = "name_spans_works",
+      agreement_evidence = evidence_for("name_spans_works")
+    ))
+  }
+
+  if (abs(tuple$event_hours) <= config$agreement_abs_floor_hrs &&
+      all(abs(usable$candidate_hours) <= config$agreement_abs_floor_hrs)) {
+    return(list(
+      status = "unmatched",
+      reason = "agreement_uninformative",
+      agreement_evidence = evidence_for("agreement_uninformative")
+    ))
+  }
+
+  if (is.na(usable$relative_error[[1L]])) {
+    return(list(
+      status = "unmatched",
+      reason = "agreement_failed",
+      agreement_evidence = evidence_for("agreement_failed")
+    ))
+  }
+
+  best <- usable[1L, ]
+  runner_up_error <- if (nrow(usable) >= 2L) {
+    usable$relative_error[[2L]]
   } else {
     Inf
   }
@@ -347,11 +411,16 @@ resolve_agreement_for_tuple <- function(tuple, candidates, config) {
       site_id = as.integer(best$site_id),
       match_method = "agreement",
       match_quality = as.numeric(best$relative_error),
-      reason = NA_character_
+      reason = NA_character_,
+      agreement_evidence = evidence_for("accepted")
     ))
   }
 
-  list(status = "unmatched", reason = "agreement_failed")
+  list(
+    status = "unmatched",
+    reason = "agreement_failed",
+    agreement_evidence = evidence_for("agreement_failed")
+  )
 }
 
 same_year_return_present <- function(site_id, year, resolver) {
@@ -444,6 +513,19 @@ apply_manual_overrides <- function(decisions, tuples, manual_overrides, resolver
     )
 }
 
+# Returns one decision row per distinct event tuple (columns as in
+# MERGE_MATCHING_DECISION_PROTOTYPE). Agreement-tier rejections additionally
+# expose their scored-candidate evidence for the near-miss report under the
+# name `agreement_near_misses`, attached as an attribute of the returned
+# decisions tibble (retrieve with `attr(decisions, "agreement_near_misses")`).
+# It is an attribute rather than a list element so existing callers that treat
+# the return value as the decisions tibble keep working. Its columns follow
+# MERGE_AGREEMENT_NEAR_MISS_PROTOTYPE: report_type ("agreement_rejected"),
+# water_company, year, site_id (NA; nothing accepted), candidate_site_id,
+# site_name_ea (the normalised name-key value used for the agreement rung),
+# reason, distance_m (NA), match_quality (= relative_error), candidate_hours,
+# event_hours, relative_error — a superset of the columns
+# assemble_near_miss_report() needs for its `agreement_near_misses` argument.
 resolve_merge_matches <- function(
     events,
     resolver,
@@ -455,6 +537,9 @@ resolve_merge_matches <- function(
     )) {
   tuples <- prepare_event_tuples(events)
   resolver <- prepare_resolver_for_matching(resolver)
+  works_year_hours <- summarise_works_year_hours(resolver)
+
+  near_miss_rows <- vector("list", nrow(tuples))
 
   decisions <- purrr::map_dfr(seq_len(nrow(tuples)), function(i) {
     tuple <- tuples[i, ]
@@ -465,13 +550,47 @@ resolve_merge_matches <- function(
       agreement <- resolve_agreement_for_tuple(
         tuple,
         ladder$agreement_candidates,
+        works_year_hours,
         config
       )
       resolution <- utils::modifyList(ladder, agreement)
+
+      if (identical(agreement$status, "unmatched")) {
+        agreement_name_key <- if (
+          identical(ladder$agreement_rung, "site_name_ea")
+        ) {
+          tuple$site_name_ea_norm
+        } else {
+          tuple$site_name_wa_sc_norm
+        }
+        near_miss_rows[[i]] <<- agreement$agreement_evidence %>%
+          dplyr::transmute(
+            report_type = "agreement_rejected",
+            water_company = tuple$water_company,
+            year = as.integer(tuple$year),
+            candidate_site_id = as.integer(.data$site_id),
+            site_id = NA_integer_,
+            site_name_ea = agreement_name_key,
+            reason = .data$reason,
+            distance_m = NA_real_,
+            match_quality = as.numeric(.data$relative_error),
+            candidate_hours = as.numeric(.data$candidate_hours),
+            event_hours = as.numeric(.data$event_hours),
+            relative_error = as.numeric(.data$relative_error)
+          ) %>%
+          dplyr::select(
+            dplyr::all_of(names(MERGE_AGREEMENT_NEAR_MISS_PROTOTYPE))
+          )
+      }
     }
 
     decision_from_resolution(tuple, resolution, resolver)
   })
+
+  agreement_near_misses <- dplyr::bind_rows(
+    MERGE_AGREEMENT_NEAR_MISS_PROTOTYPE,
+    near_miss_rows[!vapply(near_miss_rows, is.null, logical(1))]
+  )
 
   decisions <- apply_manual_overrides(decisions, tuples, manual_overrides, resolver)
 
@@ -479,7 +598,10 @@ resolve_merge_matches <- function(
     stop("Row-accounting failure: decisions do not match tuple count.", call. = FALSE)
   }
 
-  decisions %>%
+  decisions <- decisions %>%
     dplyr::arrange(.data$year, .data$water_company, .data$site_name_ea, .data$unique_id) %>%
     dplyr::select(dplyr::all_of(names(MERGE_MATCHING_DECISION_PROTOTYPE)))
+
+  attr(decisions, "agreement_near_misses") <- agreement_near_misses
+  decisions
 }

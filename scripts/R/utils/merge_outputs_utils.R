@@ -141,16 +141,33 @@ annual_status_from_metrics <- function(has_return, spill_hrs, spill_count) {
 }
 
 most_recent_representative_location <- function(resolver, site_id, year) {
+  # KTD-10 carry-forward. Preference order:
+  # 1. Rows whose NGR actually parsed to easting/northing (the resolver derives
+  #    both in prepare_works_register_annual_rows via parse_bng_coordinates on
+  #    the cleaned NGR, so NA coordinates here mean the NGR text is
+  #    unparseable); an unparseable NGR must not shadow a parseable one.
+  # 2. Rows at or before the target year over rows after it.
+  # 3. Within the past group, the most recent year; within the future group
+  #    (years before the works' first return), the NEAREST future year.
   candidates <- resolver %>%
     dplyr::filter(
       .data$site_id == !!site_id,
       .data$member_site_id == !!site_id,
       !is.na(.data$ngr)
     ) %>%
-    dplyr::mutate(before_or_same_year = .data$year <= !!year) %>%
+    dplyr::mutate(
+      before_or_same_year = .data$year <= !!year,
+      has_parsed_coordinates = !is.na(.data$easting) & !is.na(.data$northing),
+      year_proximity = dplyr::if_else(
+        .data$before_or_same_year,
+        -.data$year,
+        .data$year
+      )
+    ) %>%
     dplyr::arrange(
+      dplyr::desc(.data$has_parsed_coordinates),
       dplyr::desc(.data$before_or_same_year),
-      dplyr::desc(.data$year)
+      .data$year_proximity
     )
 
   if (nrow(candidates) == 0) {
@@ -208,7 +225,13 @@ build_site_works_crosswalk <- function(membership, resolver, decisions, years) {
       } else {
         max(.data$no_full_years_edm_data, na.rm = TRUE)
       },
-      edm_commission_date = suppressWarnings(min(.data$edm_commission_date, na.rm = TRUE)),
+      # min(..., na.rm = TRUE) on an all-NA group yields Inf (as a Date);
+      # keep all-NA groups NA instead, typed as Date.
+      edm_commission_date = if (all(is.na(.data$edm_commission_date))) {
+        as.Date(NA)
+      } else {
+        min(.data$edm_commission_date, na.rm = TRUE)
+      },
       .groups = "drop"
     )
 
@@ -294,8 +317,163 @@ assemble_annual_unmatched <- function(crosswalk, matched_events) {
     conform_merge_output(ANNUAL_UNMATCHED_PROTOTYPE)
 }
 
+# Mirrors normalise_match_value()/normalise_works_text(); duplicated locally so
+# merge_outputs_utils.R stays sourceable standalone (its contract-test module
+# does not source the matching or register utils).
+normalise_near_miss_name <- function(x) {
+  x <- as.character(x)
+  x <- stringr::str_squish(stringr::str_to_upper(stringr::str_trim(x)))
+  x[x %in% c("", "TBC", "N/A", "NA")] <- NA_character_
+  x
+}
+
+near_miss_names_long <- function(data, value_prefix) {
+  name_cols <- c("site_name_ea", "site_name_wa_sc")
+  for (col in name_cols) {
+    norm_col <- paste0(col, "_norm")
+    if (!norm_col %in% names(data)) {
+      data[[norm_col]] <- if (col %in% names(data)) {
+        normalise_near_miss_name(data[[col]])
+      } else {
+        NA_character_
+      }
+    }
+  }
+
+  data %>%
+    dplyr::select(-dplyr::any_of(name_cols)) %>%
+    dplyr::rename(site_name_ea = "site_name_ea_norm", site_name_wa_sc = "site_name_wa_sc_norm") %>%
+    tidyr::pivot_longer(
+      cols = dplyr::all_of(name_cols),
+      names_to = paste0(value_prefix, "_field"),
+      values_to = paste0(value_prefix, "_name")
+    )
+}
+
+# String-near name pass among unmatched tuples (plan D7 output 5, third
+# component): each distinct unmatched event-side normalised name is compared
+# against the distinct normalised annual-side names of the SAME water company
+# (both name fields on both sides) with base utils::adist, and pairs within
+# `max_edit_distance` are reported. Names shorter than `min_name_chars` are
+# skipped to avoid junk pairs. Exact-equal pairs (distance 0) are reported only
+# when the annual name lives in the OTHER field than the event name: a
+# same-field exact equal was already visible to that field's ladder rung, so
+# the tuple is unmatched for candidate-domain reasons (name_spans_works,
+# agreement_failed, key_conflict) already covered by the agreement evidence,
+# whereas a cross-field exact equal is new information the ladder never
+# compares.
+assemble_string_near_name_report <- function(decisions, resolver,
+                                             max_edit_distance = 2,
+                                             min_name_chars = 6) {
+  if (is.null(decisions) || nrow(decisions) == 0 ||
+      is.null(resolver) || nrow(resolver) == 0) {
+    return(NEAR_MISS_REPORT_PROTOTYPE)
+  }
+
+  event_names <- decisions %>%
+    dplyr::filter(is.na(.data$site_id)) %>%
+    dplyr::select(dplyr::any_of(c(
+      "water_company", "year", "site_name_ea", "site_name_wa_sc",
+      "site_name_ea_norm", "site_name_wa_sc_norm"
+    ))) %>%
+    near_miss_names_long("event") %>%
+    dplyr::filter(
+      !is.na(.data$event_name),
+      nchar(.data$event_name) >= min_name_chars
+    ) %>%
+    dplyr::distinct(
+      .data$water_company, .data$year, .data$event_field, .data$event_name
+    ) %>%
+    dplyr::mutate(year = as.integer(.data$year))
+
+  annual_names <- resolver %>%
+    dplyr::select(dplyr::any_of(c(
+      "water_company", "site_id", "site_name_ea", "site_name_wa_sc",
+      "site_name_ea_norm", "site_name_wa_sc_norm"
+    ))) %>%
+    near_miss_names_long("annual") %>%
+    dplyr::filter(
+      !is.na(.data$annual_name),
+      nchar(.data$annual_name) >= min_name_chars
+    ) %>%
+    dplyr::distinct(
+      .data$water_company, .data$site_id, .data$annual_field, .data$annual_name
+    )
+
+  if (nrow(event_names) == 0 || nrow(annual_names) == 0) {
+    return(NEAR_MISS_REPORT_PROTOTYPE)
+  }
+
+  companies <- intersect(
+    unique(event_names$water_company),
+    unique(annual_names$water_company)
+  )
+
+  company_reports <- purrr::map(companies, function(company) {
+    company_events <- event_names %>%
+      dplyr::filter(.data$water_company == !!company)
+    company_annual <- annual_names %>%
+      dplyr::filter(.data$water_company == !!company)
+    if (nrow(company_events) == 0 || nrow(company_annual) == 0) {
+      return(NULL)
+    }
+
+    event_strings <- unique(company_events$event_name)
+    annual_strings <- unique(company_annual$annual_name)
+    distances <- utils::adist(event_strings, annual_strings)
+    hits <- which(distances <= max_edit_distance, arr.ind = TRUE)
+    if (nrow(hits) == 0) {
+      return(NULL)
+    }
+
+    tibble::tibble(
+      event_name = event_strings[hits[, "row"]],
+      annual_name = annual_strings[hits[, "col"]],
+      edit_distance = as.integer(distances[hits])
+    ) %>%
+      dplyr::inner_join(
+        company_events,
+        by = "event_name",
+        relationship = "many-to-many"
+      ) %>%
+      dplyr::inner_join(
+        company_annual,
+        by = c("water_company", "annual_name"),
+        relationship = "many-to-many"
+      ) %>%
+      dplyr::filter(
+        .data$edit_distance > 0L |
+          .data$event_field != .data$annual_field
+      )
+  })
+
+  pairs <- dplyr::bind_rows(company_reports)
+  if (nrow(pairs) == 0) {
+    return(NEAR_MISS_REPORT_PROTOTYPE)
+  }
+
+  pairs %>%
+    dplyr::transmute(
+      report_type = "string_near_name",
+      water_company = .data$water_company,
+      year = as.integer(.data$year),
+      site_id = as.integer(.data$site_id),
+      candidate_site_id = as.integer(.data$site_id),
+      site_name_ea = .data$event_name,
+      reason = paste0("edit_distance_", .data$edit_distance),
+      distance_m = NA_real_,
+      match_quality = NA_real_
+    ) %>%
+    dplyr::distinct() %>%
+    dplyr::arrange(
+      .data$water_company, .data$year, .data$site_name_ea, .data$site_id
+    ) %>%
+    conform_merge_output(NEAR_MISS_REPORT_PROTOTYPE)
+}
+
 assemble_near_miss_report <- function(register_near_misses = tibble::tibble(),
-                                      agreement_near_misses = tibble::tibble()) {
+                                      agreement_near_misses = tibble::tibble(),
+                                      string_near_name_misses = tibble::tibble()) {
   register_report <- register_near_misses
   if (nrow(register_report) > 0) {
     register_report <- register_report %>%
@@ -321,14 +499,16 @@ assemble_near_miss_report <- function(register_near_misses = tibble::tibble(),
     }
   }
 
-  dplyr::bind_rows(register_report, agreement_report) %>%
+  dplyr::bind_rows(register_report, agreement_report, string_near_name_misses) %>%
     conform_merge_output(NEAR_MISS_REPORT_PROTOTYPE)
 }
 
 assemble_merge_outputs <- function(events, membership, resolver, decisions,
                                    register_near_misses = tibble::tibble(),
                                    agreement_near_misses = tibble::tibble(),
-                                   years = sort(unique(events$year))) {
+                                   years = sort(unique(events$year)),
+                                   name_near_miss_max_edit_distance = 2,
+                                   name_near_miss_min_chars = 6) {
   crosswalk <- build_site_works_crosswalk(membership, resolver, decisions, years)
   matched_events <- assemble_matched_events(events, decisions, crosswalk)
   events_unmatched <- assemble_events_unmatched(events, decisions)
@@ -349,7 +529,13 @@ assemble_merge_outputs <- function(events, membership, resolver, decisions,
     annual_unmatched = assemble_annual_unmatched(crosswalk, matched_events),
     near_miss_report = assemble_near_miss_report(
       register_near_misses,
-      agreement_near_misses
+      agreement_near_misses,
+      assemble_string_near_name_report(
+        decisions,
+        resolver,
+        max_edit_distance = name_near_miss_max_edit_distance,
+        min_name_chars = name_near_miss_min_chars
+      )
     )
   )
 }
@@ -401,6 +587,45 @@ complete_merge_output_set <- function(path) {
     all(file.exists(file.path(path, unname(MERGE_OUTPUT_FILES))))
 }
 
+# Fail-closed gate on the STAGING directory before any promote rename (KTD-9):
+# every staged file must exist, be readable parquet, and carry exactly the row
+# count of its in-memory output. On failure the caller stops before touching
+# the canonical path.
+validate_staged_merge_outputs <- function(staging_dir, outputs) {
+  if (!complete_merge_output_set(staging_dir)) {
+    staged_files <- file.path(staging_dir, unname(MERGE_OUTPUT_FILES))
+    missing_files <- basename(staged_files[!file.exists(staged_files)])
+    stop(
+      "Staged merge output set at ", staging_dir, " is incomplete; missing: ",
+      paste(missing_files, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  for (name in names(MERGE_OUTPUT_FILES)) {
+    staged_path <- file.path(staging_dir, MERGE_OUTPUT_FILES[[name]])
+    staged_table <- tryCatch(
+      arrow::read_parquet(staged_path, as_data_frame = FALSE),
+      error = function(e) {
+        stop(
+          "Staged merge output ", name, " is unreadable: ",
+          conditionMessage(e),
+          call. = FALSE
+        )
+      }
+    )
+    if (staged_table$num_rows != nrow(outputs[[name]])) {
+      stop(
+        "Staged merge output ", name, " has ", staged_table$num_rows,
+        " row(s) on disk but ", nrow(outputs[[name]]), " in memory.",
+        call. = FALSE
+      )
+    }
+  }
+
+  invisible(TRUE)
+}
+
 promote_staged_merge_outputs <- function(staging_dir, canonical_dir,
                                          crash_at = Sys.getenv("MERGE_OUTPUTS_CRASH_AT", "")) {
   previous_dir <- paste0(canonical_dir, ".prev")
@@ -426,12 +651,22 @@ promote_staged_merge_outputs <- function(staging_dir, canonical_dir,
 }
 
 publish_merge_outputs <- function(outputs, canonical_dir,
-                                  staging_dir = paste0(canonical_dir, ".staging")) {
+                                  staging_dir = paste0(canonical_dir, ".staging"),
+                                  drop_staged_file = Sys.getenv("MERGE_OUTPUTS_DROP_STAGED_FILE", "")) {
   validate_publishable_merge_outputs(outputs)
   if (dir.exists(staging_dir)) {
     unlink(staging_dir, recursive = TRUE, force = TRUE)
   }
   write_merge_outputs(outputs, staging_dir)
+
+  if (nzchar(drop_staged_file)) {
+    # Test-only kill point (mirrors MERGE_OUTPUTS_CRASH_AT in the promote):
+    # simulates a staged file lost between write and promote so the staged
+    # validation gate can be exercised end-to-end.
+    unlink(file.path(staging_dir, drop_staged_file))
+  }
+
+  validate_staged_merge_outputs(staging_dir, outputs)
   promote_staged_merge_outputs(staging_dir, canonical_dir)
   invisible(canonical_dir)
 }
