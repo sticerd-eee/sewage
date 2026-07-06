@@ -242,7 +242,7 @@ aggregate_spills_to_msoa <- function(data, spill_sites, years) {
 
   # Join spill data with site coordinates
   dat_clean <- left_join(
-    select(data, -ngr),
+    select(data, -any_of("ngr")),
     spill_sites,
     by = join_by(water_company, site_id)
   )
@@ -304,7 +304,7 @@ aggregate_dry_spills_to_msoa <- function(data, spill_sites, years) {
 
   # Join spill data with site coordinates
   dat_clean <- left_join(
-    select(data, -ngr),
+    select(data, -any_of("ngr")),
     spill_sites,
     by = join_by(water_company, site_id)
   )

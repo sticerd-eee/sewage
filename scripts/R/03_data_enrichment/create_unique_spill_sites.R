@@ -1,43 +1,77 @@
-############################################################
+# ==============================================================================
 # Create Unique Spill Sites
-# Project: Sewage
-# Date: 03/02/2025
+# ==============================================================================
+#
+# Purpose: Build the unique spill-site metadata table from the works crosswalk,
+#          annual-return lookup, and annual EDM datasets.
+#
 # Author: Jacopo Olivieri
-############################################################
+# Date: 2025-02-03
+# Date Modified: 2026-06-09
+#
+# Inputs:
+#   - data/processed/matched_events_annual_data/site_works_crosswalk.parquet
+#   - data/processed/annual_return_edm.parquet
+#   - data/processed/annual_return_lookup.parquet
+#
+# Outputs:
+#   - data/processed/unique_spill_sites.parquet
+#   - data/processed/unique_spill_sites.xlsx
+#   - output/log/13_create_unique_spill_sites.log
+#
+# ==============================================================================
 
-#' This script creates unique spill sites from the merged EDM data
-#' by cleaning location data and extracting distinct sites.
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first with `rv sync`.",
+    call. = FALSE
+  )
+}
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+source(here::here("scripts", "R", "utils", "ngr_utils.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "conflicted",
+  "dplyr",
+  "fs",
+  "glue",
+  "here",
+  "logger",
+  "purrr",
+  "readr",
+  "rio",
+  "rnrfa",
+  "stringr",
+  "tibble",
+  "tidyr"
+)
+
+LOG_FILE <- here::here("output", "log", "13_create_unique_spill_sites.log")
+
+check_required_packages(REQUIRED_PACKAGES)
 
 # Set Up Functions
 ############################################################
 
-#' Initialize the R environment with required packages and settings
+#' Attach the packages used unqualified in this script
 #' @return NULL
 initialise_environment <- function() {
-  
-  required_packages <- c(
-    "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue", 
-    "fs", "rnrfa", "arrow"
-  )
-  
-  # Install and load packages
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
-    }
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
     library(pkg, character.only = TRUE)
   }))
+
+  conflicted::conflict_prefer("filter", "dplyr")
+  conflicted::conflict_prefer("select", "dplyr")
 }
 
-#' Set up logging configuration
+#' Initialise logging for this script
 #' @return NULL
-setup_logging <- function() {
-  log_path <- here::here("output", "log", "13_create_unique_spill_sites.log")
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-  
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
+  logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
 }
 
@@ -46,9 +80,9 @@ setup_logging <- function() {
 ############################################################
 
 CONFIG <- list(
-  spill_data_path = here::here(
-    "data", "processed", "matched_events_annual_data", 
-    "matched_events_annual_data.parquet"),
+  site_works_crosswalk_path = here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_works_crosswalk.parquet"),
   annual_data_path = here::here(
     "data", "processed", "annual_return_edm.parquet"),
   lookup_data_path = here::here(
@@ -79,7 +113,11 @@ load_data <- function(file_path, label = "dataset") {
   
   tryCatch(
     {
-      df <- rio::import(file_path, trust = TRUE)
+      df <- if (tolower(fs::path_ext(file_path)) == "parquet") {
+        arrow::read_parquet(file_path)
+      } else {
+        rio::import(file_path, trust = TRUE)
+      }
       logger::log_info("Loaded {label} ({nrow(df)} rows)")
       return(df)
     },
@@ -91,29 +129,6 @@ load_data <- function(file_path, label = "dataset") {
   )
 }
 
-
-#' Standardize grid references (NGR)
-#' @param x Character vector of raw NGR strings
-#' @return Cleaned NGR strings or NA
-clean_ngr <- function(x) {
-  x <- as.character(x)
-  x <- dplyr::case_when(
-    toupper(x) %in% c("UNABLE TO MATCH TO CONSENTS DATABASE",
-                      "NOT IN CONSENTS DATABASE") ~ NA_character_,
-    TRUE ~ x
-  )
-  
-  # Extract content after 'and', drop trailing notes
-  x <- ifelse(stringr::str_detect(x, "(?i)and"),
-              stringr::str_extract(x, "(?i)(?<=and).*"), x)
-  x <- stringr::str_replace(x, "(?i)Not.*", "")
-  
-  # Keep only leading alphanumeric block
-  x <- stringr::str_extract(x, "^[^,&/\\(]+")
-  x <- stringr::str_remove_all(x, "\\s+")
-  
-  trimws(x)
-}
 
 #' Convert blank/whitespace strings to NA_character_
 #' @param x Character-like vector
@@ -310,39 +325,36 @@ resolve_commission_date <- function(texts, years) {
 }
 
 
-#' Parse British National Grid coordinates from NGR strings
-#' @param ngr Character vector of NGR values
-#' @return Tibble with easting and northing columns
-parse_bng_coordinates <- function(ngr) {
-  coords <- purrr::map(
-    ngr,
-    ~ tryCatch(
-      suppressWarnings(rnrfa::osg_parse(.x, coord_system = "BNG")),
-      error = function(e) list(easting = NA_real_, northing = NA_real_)
-    )
-  )
-
-  tibble(
-    easting = purrr::map_dbl(coords, "easting"),
-    northing = purrr::map_dbl(coords, "northing")
-  )
-}
-
-#' Build matched-event site availability while preserving current semantics
-#' @param data Matched event-annual dataframe
+#' Build works-year site availability from the site works crosswalk
+#' @param crosswalk_data Site works crosswalk dataframe
 #' @param availability_years Integer vector of availability years
-#' @return One row per matched site_id with availability flags and fallback fields
-build_matched_site_data <- function(data, availability_years = 2021:2024) {
-  matched_data <- data %>%
+#' @return One row per works site_id with availability flags and fallback fields
+build_matched_site_data <- function(crosswalk_data, availability_years = 2021:2024) {
+  required_cols <- c(
+    "site_id", "year", "annual_status", "water_company", "ngr",
+    "easting", "northing"
+  )
+  missing_cols <- setdiff(required_cols, names(crosswalk_data))
+  if (length(missing_cols) > 0) {
+    stop(
+      glue::glue(
+        "Crosswalk missing required columns: {paste(missing_cols, collapse = ', ')}"
+      )
+    )
+  }
+
+  crosswalk_site_years <- crosswalk_data %>%
     filter(!is.na(site_id), year %in% availability_years) %>%
     mutate(
       water_company = normalise_missing_character(water_company),
-      ngr = clean_ngr(ngr)
+      ngr = clean_ngr(ngr),
+      annual_status = normalise_missing_character(annual_status),
+      is_reporting_year = annual_status != "absent"
     )
 
-  availability <- matched_data %>%
-    distinct(site_id, year) %>%
-    mutate(available = TRUE) %>%
+  availability <- crosswalk_site_years %>%
+    group_by(site_id, year) %>%
+    summarise(available = any(is_reporting_year, na.rm = TRUE), .groups = "drop") %>%
     pivot_wider(
       id_cols = site_id,
       names_from = year,
@@ -361,12 +373,14 @@ build_matched_site_data <- function(data, availability_years = 2021:2024) {
   availability <- availability %>%
     select(site_id, all_of(availability_cols))
 
-  matched_site_fields <- matched_data %>%
-    arrange(site_id, desc(year)) %>%
+  matched_site_fields <- crosswalk_site_years %>%
+    arrange(site_id, desc(is_reporting_year), desc(year)) %>%
     group_by(site_id) %>%
     summarise(
       water_company_matched = first_non_na(water_company),
       ngr_matched = first_non_na(ngr),
+      easting_crosswalk = first_non_na(easting),
+      northing_crosswalk = first_non_na(northing),
       .groups = "drop"
     )
 
@@ -378,10 +392,49 @@ build_matched_site_data <- function(data, availability_years = 2021:2024) {
         easting_matched = easting,
         northing_matched = northing
       )
+  ) %>%
+    mutate(
+      easting_matched = coalesce(easting_matched, easting_crosswalk),
+      northing_matched = coalesce(northing_matched, northing_crosswalk)
+    ) %>%
+    select(
+      site_id,
+      water_company_matched,
+      ngr_matched,
+      easting_matched,
+      northing_matched
   )
 
   availability %>%
     full_join(matched_site_fields, by = "site_id")
+}
+
+#' Parse works membership from the site works crosswalk
+#' @param crosswalk_data Site works crosswalk dataframe
+#' @return Mapping from annual lookup member site IDs to works representative site IDs
+build_works_member_map <- function(crosswalk_data) {
+  required_cols <- c("site_id", "site_id_members")
+  missing_cols <- setdiff(required_cols, names(crosswalk_data))
+  if (length(missing_cols) > 0) {
+    stop(
+      glue::glue(
+        "Crosswalk missing required columns: {paste(missing_cols, collapse = ', ')}"
+      )
+    )
+  }
+
+  crosswalk_data %>%
+    select(site_id, site_id_members) %>%
+    distinct() %>%
+    mutate(site_id_members = normalise_missing_character(site_id_members)) %>%
+    tidyr::separate_rows(site_id_members, sep = ";") %>%
+    mutate(
+      site_id = as.integer(site_id),
+      member_site_id = as.integer(site_id_members)
+    ) %>%
+    filter(!is.na(site_id), !is.na(member_site_id)) %>%
+    select(site_id, member_site_id) %>%
+    distinct()
 }
 
 #' Map annual-return rows to canonical site IDs from lookup
@@ -575,13 +628,13 @@ summarise_site_metadata <- function(data, metadata_years = 2021:2024) {
 
 #' Apply "No longer operational" carryforward to availability flags
 #' @param unique_sites Candidate unique spill sites table
-#' @param matched_data Matched event-annual dataframe
+#' @param crosswalk_data Site works crosswalk dataframe
 #' @param availability_years Integer vector of availability years
 #' @param metadata_years Integer vector of metadata years
 #' @return unique_sites with updated availability flags and nlo_carryforward_year
 apply_nlo_carryforward <- function(
     unique_sites,
-    matched_data,
+    crosswalk_data,
     availability_years = 2021:2024,
     metadata_years = 2021:2024
 ) {
@@ -606,33 +659,34 @@ apply_nlo_carryforward <- function(
     group_by(site_id) %>%
     summarise(first_nlo_year = min(year, na.rm = TRUE), .groups = "drop")
 
-  positive_years <- tibble(site_id = integer(), first_post_nlo_positive_year = integer())
-  has_event_metrics <- all(c("spill_count_ea", "spill_hrs_ea") %in% names(matched_data))
-
-  if (!has_event_metrics) {
-    logger::log_warn(
-      "Matched data does not include spill_count_ea/spill_hrs_ea; applying uncapped NLO carryforward"
+  required_cols <- c("site_id", "year", "annual_status", "spill_count_ea", "spill_hrs_ea")
+  missing_cols <- setdiff(required_cols, names(crosswalk_data))
+  if (length(missing_cols) > 0) {
+    stop(
+      glue::glue(
+        "Crosswalk missing required columns: {paste(missing_cols, collapse = ', ')}"
+      )
     )
-  } else {
-    positive_site_year <- matched_data %>%
-      filter(!is.na(site_id), year %in% availability_years) %>%
-      mutate(
-        has_positive_event = (
-          (!is.na(spill_count_ea) & spill_count_ea > 0) |
-            (!is.na(spill_hrs_ea) & spill_hrs_ea > 0)
-        )
-      ) %>%
-      group_by(site_id, year) %>%
-      summarise(has_positive_event = any(has_positive_event), .groups = "drop") %>%
-      filter(has_positive_event)
-
-    positive_years <- reasons_long %>%
-      select(site_id, first_nlo_year) %>%
-      inner_join(positive_site_year, by = "site_id") %>%
-      filter(year > first_nlo_year) %>%
-      group_by(site_id) %>%
-      summarise(first_post_nlo_positive_year = min(year, na.rm = TRUE), .groups = "drop")
   }
+
+  positive_site_year <- crosswalk_data %>%
+    filter(!is.na(site_id), year %in% availability_years) %>%
+    mutate(
+      annual_status = normalise_missing_character(annual_status),
+      has_positive_works_year = annual_status == "reported_positive" |
+        (!is.na(spill_count_ea) & spill_count_ea > 0) |
+        (!is.na(spill_hrs_ea) & spill_hrs_ea > 0)
+    ) %>%
+    group_by(site_id, year) %>%
+    summarise(has_positive_works_year = any(has_positive_works_year), .groups = "drop") %>%
+    filter(has_positive_works_year)
+
+  positive_years <- reasons_long %>%
+    select(site_id, first_nlo_year) %>%
+    inner_join(positive_site_year, by = "site_id") %>%
+    filter(year > first_nlo_year) %>%
+    group_by(site_id) %>%
+    summarise(first_post_nlo_positive_year = min(year, na.rm = TRUE), .groups = "drop")
 
   nlo_windows <- reasons_long %>%
     left_join(positive_years, by = "site_id") %>%
@@ -693,7 +747,7 @@ apply_nlo_carryforward <- function(
 #' @param site_universe Distinct canonical site IDs
 #' @param annual_metadata Annual-return metadata summarised at site level
 #' @param matched_sites Matched-event availability and fallback site fields
-#' @param matched_data Matched event-annual dataframe
+#' @param crosswalk_data Site works crosswalk dataframe
 #' @param availability_years Integer vector of availability years
 #' @param metadata_years Integer vector of metadata years
 #' @return Final unique site table with stable schema
@@ -701,7 +755,7 @@ assemble_unique_sites <- function(
     site_universe,
     annual_metadata,
     matched_sites,
-    matched_data,
+    crosswalk_data,
     availability_years = 2021:2024,
     metadata_years = 2021:2024
 ) {
@@ -728,7 +782,7 @@ assemble_unique_sites <- function(
 
   unique_sites <- apply_nlo_carryforward(
     unique_sites = unique_sites,
-    matched_data = matched_data,
+    crosswalk_data = crosswalk_data,
     availability_years = availability_years,
     metadata_years = metadata_years
   )
@@ -857,26 +911,26 @@ main <- function() {
     {
       # Setup
       initialise_environment()
-      setup_logging()
+      initialise_logging()
       
       # Load source data
-      matched_data <- load_data(CONFIG$spill_data_path, "matched event-annual data")
+      crosswalk_data <- load_data(CONFIG$site_works_crosswalk_path, "site works crosswalk")
       annual_data <- load_data(CONFIG$annual_data_path, "annual return EDM data")
       lookup_data <- load_data(CONFIG$lookup_data_path, "annual return lookup")
 
-      # Build site universe from lookup
-      site_universe <- lookup_data %>%
+      # Build site universe from the works crosswalk
+      site_universe <- crosswalk_data %>%
         select(site_id) %>%
         distinct() %>%
         filter(!is.na(site_id)) %>%
         mutate(site_id = as.integer(site_id))
 
-      logger::log_info("Canonical site universe size: {nrow(site_universe)}")
+      logger::log_info("Works site universe size: {nrow(site_universe)}")
 
-      # Build matched-event availability and fallback fields
-      logger::log_info("Building matched-event availability flags")
+      # Build crosswalk availability and fallback fields
+      logger::log_info("Building crosswalk availability flags")
       matched_sites <- build_matched_site_data(
-        matched_data,
+        crosswalk_data,
         availability_years = CONFIG$availability_years
       )
 
@@ -886,7 +940,10 @@ main <- function() {
         annual_data,
         lookup_data,
         metadata_years = CONFIG$metadata_years
-      )
+      ) %>%
+        left_join(build_works_member_map(crosswalk_data), by = c("site_id" = "member_site_id")) %>%
+        mutate(site_id = coalesce(site_id.y, site_id)) %>%
+        select(-site_id.y)
 
       logger::log_info("Summarising annual metadata at site level")
       annual_metadata <- summarise_site_metadata(
@@ -900,7 +957,7 @@ main <- function() {
         site_universe = site_universe,
         annual_metadata = annual_metadata,
         matched_sites = matched_sites,
-        matched_data = matched_data,
+        crosswalk_data = crosswalk_data,
         availability_years = CONFIG$availability_years,
         metadata_years = CONFIG$metadata_years
       )

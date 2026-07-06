@@ -66,6 +66,11 @@ CONFIG <- list(
     monthly = "rainfall_agg_mo.parquet",    # Monthly rainfall sums by site
     quarterly = "rainfall_agg_qtr.parquet"  # Quarterly rainfall sums by site
   ),
+  compatibility_output_files = list(
+    yearly = "spill_blocks_rainfall_yr.parquet",
+    monthly = "spill_blocks_rainfall_mo.parquet",
+    quarterly = "spill_blocks_rainfall_qt.parquet"
+  ),
   
   # Temporal range for aggregation - covers main study period for spill analysis
   start_date = as.Date("2021-01-01"),  # Start of comprehensive data availability
@@ -107,11 +112,11 @@ load_rainfall_data <- function() {
 }
 
 #' Load spill site to grid cell lookup table
-#' @return data.table with ngr, x_idx, y_idx, is_center columns  
+#' @return data.table with site_id, ngr, x_idx, y_idx, is_center columns
 load_site_grid_lookup <- function() {
   logger::log_info("Loading site-grid lookup from: {basename(CONFIG$lookup_path)}")
   lookup_dt <- arrow::read_parquet(CONFIG$lookup_path) |>
-    select(ngr, x_idx, y_idx, is_center) |>
+    select(site_id, ngr, x_idx, y_idx, is_center) |>
     as.data.table()
   
   logger::log_info("Loaded lookup table: {nrow(lookup_dt)} site-grid mappings")
@@ -188,10 +193,10 @@ filter_data_for_chunk <- function(chunk_sites, rainfall_dt, lookup_dt) {
   logger::log_debug("Filtering data for chunk with {nrow(chunk_sites)} sites")
   
   # Extract NGRs for this chunk to filter spatial data
-  chunk_ngrs <- chunk_sites$ngr
-  
+  chunk_site_keys <- chunk_sites[, .(site_id, ngr)]
+
   # Filter lookup table to only sites in this chunk (reduces Cartesian product size)
-  chunk_lookup <- lookup_dt[ngr %in% chunk_ngrs]
+  chunk_lookup <- lookup_dt[chunk_site_keys, on = c("site_id", "ngr"), nomatch = 0]
   
   # Get unique grid cells required for this chunk (each site maps to 9 cells)
   chunk_grid_cells <- unique(chunk_lookup[, .(x_idx, y_idx)])
@@ -224,7 +229,11 @@ calculate_chunk_rainfall_indicators <- function(chunk_sites, rainfall_dt, lookup
   
   # Join site-day grid with spatial lookup using Cartesian product
   # Each site-day gets matched to all 9 grid cells in its neighbourhood
-  expanded_grid <- chunk_grid[chunk_data$lookup, on = "ngr", allow.cartesian = TRUE]
+  expanded_grid <- chunk_grid[
+    chunk_data$lookup,
+    on = c("site_id", "ngr"),
+    allow.cartesian = TRUE
+  ]
   
   # Join with rainfall observations using spatial and temporal keys
   rainfall_joined <- expanded_grid[chunk_data$rainfall, on = c("x_idx", "y_idx", "date"), nomatch = 0]
@@ -313,9 +322,9 @@ add_temporal_periods <- function(rainfall_indicators) {
   # Extract temporal grouping variables for aggregation
   # Using data.table's efficient column assignment by reference
   rainfall_indicators[, `:=`(
-    year = lubridate::year(date),      # Annual aggregation grouping
-    month = lubridate::month(date),    # Monthly aggregation grouping 
-    quarter = lubridate::quarter(date) # Quarterly aggregation grouping
+    year = as.integer(lubridate::year(date)),       # Annual aggregation grouping
+    month = as.integer(lubridate::month(date)),     # Monthly aggregation grouping
+    quarter = as.numeric(lubridate::quarter(date))  # Quarterly aggregation grouping
   )]
   base_year <- CONFIG$base_year
   rainfall_indicators[, `:=`(
@@ -409,7 +418,10 @@ export_rainfall_aggregations <- function(aggregated_results) {
   periods <- c("yearly", "monthly", "quarterly")
   
   for (period in periods) {
-    file_path <- file.path(CONFIG$output_dir, CONFIG$output_files[[period]])
+    file_paths <- c(
+      file.path(CONFIG$output_dir, CONFIG$output_files[[period]]),
+      file.path(CONFIG$output_dir, CONFIG$compatibility_output_files[[period]])
+    )
     
     # Sort data for consistent output
     data_to_export <- aggregated_results[[period]]
@@ -421,9 +433,10 @@ export_rainfall_aggregations <- function(aggregated_results) {
       data.table::setorder(data_to_export, site_id, year, quarter)
     }
     
-    arrow::write_parquet(data_to_export, file_path)
-    
-    logger::log_info("Exported {period} aggregation: {nrow(data_to_export)} records to {basename(file_path)}")
+    for (file_path in unique(file_paths)) {
+      arrow::write_parquet(data_to_export, file_path)
+      logger::log_info("Exported {period} aggregation: {nrow(data_to_export)} records to {basename(file_path)}")
+    }
   }
   
   logger::log_info("All rainfall aggregation exports completed successfully")

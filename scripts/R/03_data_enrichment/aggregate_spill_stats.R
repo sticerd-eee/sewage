@@ -19,7 +19,7 @@ initialise_environment <- function() {
   
   # Define required packages
   required_packages <- c(
-    "rmarkdown", "rio", "tidyverse", "purrr", "here", "logger", "glue", "fs",
+    "rmarkdown", "arrow", "tidyverse", "purrr", "here", "logger", "glue", "fs",
     "data.table"
   )
   
@@ -57,6 +57,9 @@ CONFIG <- list(
   merged_data_path = here::here(
     "data", "processed", "matched_events_annual_data", 
     "matched_events_annual_data.parquet"),
+  crosswalk_path = here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_works_crosswalk.parquet"),
   data_path_annual = here::here(
     "data", "processed", "annual_return_edm.parquet"
   ),
@@ -72,25 +75,39 @@ CONFIG <- list(
 #' @return A list with two elements:
 #' \describe{
 #'   \item{spill_data}{A data frame with site_id, start_time, and end_time}
-#'   \item{metadata}{A data frame with all other variables excluding start_time and end_time}
+#'   \item{metadata}{Works-year crosswalk metadata with EA fallback totals}
 #' }
 load_data <- function() {
   file_path <- CONFIG$merged_data_path
+  crosswalk_path <- CONFIG$crosswalk_path
   logger::log_info("Loading data: {file_path}")
+  logger::log_info("Loading works-year crosswalk: {crosswalk_path}")
   
   if (!file.exists(file_path)) {
     stop(glue::glue("File not found: {file_path}"))
   }
+  if (!file.exists(crosswalk_path)) {
+    stop(glue::glue("File not found: {crosswalk_path}"))
+  }
   
   tryCatch(
     {
-      data <- rio::import(file_path, trust = TRUE)
+      data <- arrow::read_parquet(file_path) %>%
+        select(site_id, year, water_company, start_time, end_time)
+      crosswalk <- arrow::read_parquet(crosswalk_path) %>%
+        select(
+          site_id, year, water_company, annual_status,
+          spill_hrs_ea, spill_count_ea
+        ) %>%
+        rename(
+          spill_hrs_ea_crosswalk = spill_hrs_ea,
+          spill_count_ea_crosswalk = spill_count_ea
+        ) %>%
+        distinct()
+
       list(
-        spill_data = data %>% 
-          select(site_id, year, water_company, start_time, end_time),
-        metadata = data %>% 
-          select(-start_time, -end_time, -unique_id) %>% 
-          distinct()
+        spill_data = data,
+        metadata = crosswalk
       ) %>% 
         return()
     },
@@ -109,132 +126,43 @@ aggregate_spills <- function(data) {
   prepared_data <- prepare_spill_data(data)
   dt_yearly    <- prepared_data$yearly
   dt_monthly   <- prepared_data$monthly
-  dt_quarterly <- prepared_data$quarterly
   dt_monthly[, month_id := (year - CONFIG$base_year) * 12 + month]
   dt_monthly[, qtr_id := (year - CONFIG$base_year) * 4 + quarter]
-  dt_quarterly[, qtr_id := (year - CONFIG$base_year) * 4 + quarter]
-
-  # Combinations to ensure zero-row outputs are created where needed
-  yearly_combinations <- expand_grid(
-    water_company = unique(dt_yearly$water_company),
-    year          = CONFIG$years
-  )
-
-  monthly_combinations <- expand_grid(
-    water_company = unique(dt_monthly$water_company),
-    year          = CONFIG$years,
-    month         = 1:12
-  ) %>%
-    mutate(month_id = (year - CONFIG$base_year) * 12 + month)
   
   # ---- Yearly ----------------------------------------------------
-  yearly_result <- map2(
-    yearly_combinations$water_company,
-    yearly_combinations$year,
-    ~ {
-      current_data <- dt_yearly[
-        water_company == .x & year == .y
-      ]
-      
-      if (nrow(current_data) == 0) {
-        return(data.table(
-          water_company      = .x,
-          year               = .y,
-          site_id            = NA_character_,
-          spill_count_yr     = 0L,
-          spill_hrs_yr       = 0L,
-          spill_count_yr_ea  = 0L,
-          spill_hrs_yr_ea    = 0L
-        ))
-      }
-      
-      current_data[,
-                   .(
-                     spill_count_yr    = count_spills(start_time, end_time),
-                     spill_hrs_yr      = calculate_spill_hours(start_time, end_time)
-                   ),
-                   by = .(water_company, site_id, year)
-      ]
-    }
-  )
+  yearly_result <- dt_yearly[
+    ,
+    .(
+      spill_count_yr = count_spills(start_time, end_time),
+      spill_hrs_yr = calculate_spill_hours(start_time, end_time)
+    ),
+    by = .(water_company, site_id, year)
+  ]
   
   # ---- Monthly ---------------------------------------------------
-  monthly_result <- pmap(
-    list(
-      monthly_combinations$water_company,
-      monthly_combinations$year,
-      monthly_combinations$month,
-      monthly_combinations$month_id
+  monthly_result <- dt_monthly[
+    ,
+    .(
+      spill_count_mo = count_spills(start_time, end_time),
+      spill_hrs_mo = calculate_spill_hours(start_time, end_time)
     ),
-    function(wc, yr, mo, mid) {
-      current_data <- dt_monthly[
-        water_company == wc & year == yr & month == mo
-      ]
-      
-      if (nrow(current_data) == 0) {
-        return(data.table(
-          water_company   = wc,
-          year            = yr,
-          month           = mo,
-          month_id        = mid,
-          site_id         = NA_character_,
-          spill_count_mo  = 0L,
-          spill_hrs_mo    = 0L
-        ))
-      }
-      
-      current_data[,
-                   .(
-                     spill_count_mo = count_spills(start_time, end_time),
-                     spill_hrs_mo   = calculate_spill_hours(start_time, end_time)
-                   ),
-                   by = .(water_company, site_id, year, month, month_id)
-      ]
-    }
-  )
+    by = .(water_company, site_id, year, month, month_id)
+  ]
 
   # ---- Quarterly (D13: uses quarter-split data) ----------------
-  quarterly_combinations <- expand_grid(
-    water_company = unique(dt_quarterly$water_company),
-    year          = CONFIG$years,
-    quarter       = 1:4
-  ) %>%
-    mutate(qtr_id = (year - CONFIG$base_year) * 4 + quarter)
-
-  quarterly_result <- pmap(
-    list(
-      quarterly_combinations$water_company,
-      quarterly_combinations$year,
-      quarterly_combinations$quarter,
-      quarterly_combinations$qtr_id
+  quarterly_result <- dt_monthly[
+    ,
+    .(
+      spill_count_qt = count_spills(start_time, end_time),
+      spill_hrs_qt = calculate_spill_hours(start_time, end_time)
     ),
-    function(wc, yr, qt, qid) {
-      cur <- dt_quarterly[water_company == wc & year == yr & quarter == qt]
-      if (nrow(cur) == 0) {
-        return(data.table(
-          water_company   = wc,
-          year            = yr,
-          quarter         = qt,
-          qtr_id          = qid,
-          site_id         = NA_character_,
-          spill_count_qt  = 0L,
-          spill_hrs_qt    = 0
-        ))
-      }
-      cur[,
-          .(
-            spill_count_qt = count_spills(start_time, end_time),
-            spill_hrs_qt   = calculate_spill_hours(start_time, end_time)
-          ),
-          by = .(water_company, site_id, year, quarter, qtr_id)
-      ]
-    }
-  )
+    by = .(water_company, site_id, year, quarter, qtr_id)
+  ]
   
   list(
-    yearly   = bind_rows(yearly_result),
-    monthly  = bind_rows(monthly_result),
-    quarterly = bind_rows(quarterly_result) 
+    yearly = as_tibble(yearly_result),
+    monthly = as_tibble(monthly_result),
+    quarterly = as_tibble(quarterly_result)
   )
 }
 
@@ -252,26 +180,30 @@ aggregate_spills <- function(data) {
 #'   }
 complete_data_observations <- function(
     data, metadata = data$metadata) {
-  site_metadata_cols <- c(
-    "site_name_ea", "site_name_wa_sc", 
-    "permit_reference_ea", "permit_reference_wa_sc",
-    "activity_reference", "asset_type",
-    "ngr",
-    "unique_id",
-    "wfd_waterbody_id_cycle_2", "receiving_water_name",
-    "shellfish_water", "bathing_water", 
-    "edm_commission_date"
+  metadata <- metadata %>%
+    select(
+      site_id, year, water_company, annual_status,
+      spill_count_ea_crosswalk, spill_hrs_ea_crosswalk
+    ) %>%
+    distinct()
+
+  reporting_sites <- metadata %>%
+    filter(.data$annual_status != "absent") %>%
+    distinct(site_id, water_company)
+
+  event_sites <- bind_rows(
+    distinct(data$yearly, site_id, water_company),
+    distinct(data$monthly, site_id, water_company),
+    distinct(data$quarterly, site_id, water_company)
   )
+
+  all_sites <- bind_rows(reporting_sites, event_sites) %>%
+    filter(!is.na(.data$site_id), !is.na(.data$water_company)) %>%
+    distinct()
   
   # Yearly 
   logger::log_info("Completing yearly data observations")
-  yearly_sites <- bind_rows(
-    distinct(data$yearly, site_id, water_company),
-    distinct(metadata, site_id, water_company)
-  ) %>% 
-    distinct()
-  
-  yearly_grid <- tidyr::crossing(yearly_sites, year = CONFIG$years)
+  yearly_grid <- tidyr::crossing(all_sites, year = CONFIG$years)
   
   completed_yearly <- yearly_grid %>%
     left_join(
@@ -282,77 +214,84 @@ complete_data_observations <- function(
       metadata,
       by = c("site_id", "year", "water_company")
     ) %>%
-    group_by(site_id) %>%      
-    fill(all_of(intersect(site_metadata_cols, names(.))),
-         .direction = "downup") %>%
-    ungroup() %>%    
     mutate(
-      spill_count_yr = if_else(is.na(spill_count_yr), spill_count_ea, spill_count_yr),
-      spill_hrs_yr   = if_else(is.na(spill_hrs_yr),   spill_hrs_ea,   spill_hrs_yr)
+      spill_count_yr = dplyr::coalesce(
+        as.numeric(.data$spill_count_yr),
+        .data$spill_count_ea_crosswalk
+      ),
+      spill_hrs_yr = dplyr::coalesce(
+        as.numeric(.data$spill_hrs_yr),
+        .data$spill_hrs_ea_crosswalk
+      )
+    ) %>%
+    select(
+      site_id, water_company, year, annual_status,
+      spill_count_yr, spill_hrs_yr,
+      spill_count_ea_crosswalk, spill_hrs_ea_crosswalk
     )
   
   # Monthly 
   logger::log_info("Completing monthly data observations")
-  monthly_sites <- bind_rows(
-    distinct(data$monthly, site_id, water_company),
-    distinct(metadata, site_id, water_company)
-  ) %>% 
-    distinct()
-
   monthly_grid <- tidyr::crossing(
-    monthly_sites, year = CONFIG$years, month = 1:12)
+    all_sites, year = CONFIG$years, month = 1:12) %>%
+    mutate(month_id = (year - CONFIG$base_year) * 12 + month)
   
   completed_monthly <- monthly_grid %>%
     left_join(
       data$monthly,
-      by = c("site_id", "year", "month", "water_company")
+      by = c("site_id", "year", "month", "month_id", "water_company")
     ) %>%
     left_join(
       metadata,
       by = c("site_id", "year", "water_company")
     ) %>%
-    group_by(site_id) %>%      
-    fill(all_of(intersect(site_metadata_cols, names(.))),
-         .direction = "downup") %>%
-    ungroup() %>%    
     mutate(
-      spill_count_mo = if_else(is.na(spill_count_mo), spill_count_ea, spill_count_mo),
-      spill_hrs_mo   = if_else(is.na(spill_hrs_mo),   spill_hrs_ea,   spill_hrs_mo),
-      month_id       = dplyr::coalesce(month_id, (year - CONFIG$base_year) * 12 + month)
+      spill_count_mo = dplyr::coalesce(
+        as.numeric(.data$spill_count_mo),
+        .data$spill_count_ea_crosswalk
+      ),
+      spill_hrs_mo = dplyr::coalesce(
+        as.numeric(.data$spill_hrs_mo),
+        .data$spill_hrs_ea_crosswalk
+      )
     ) %>%
-    select(-any_of(c("year", "month")))
+    select(
+      site_id, water_company, month_id, annual_status,
+      spill_count_mo, spill_hrs_mo,
+      spill_count_ea_crosswalk, spill_hrs_ea_crosswalk
+    )
   
   
   # Quarterly 
   logger::log_info("Completing quarterly data observations")
-  quarterly_sites <- bind_rows(
-    distinct(data$quarterly, site_id, water_company),
-    distinct(metadata, site_id, water_company)
-  ) %>% 
-    distinct()
-  
   quarterly_grid <- tidyr::crossing(
-    quarterly_sites, year = CONFIG$years, quarter = 1:4)
+    all_sites, year = CONFIG$years, quarter = 1:4) %>%
+    mutate(qtr_id = (year - CONFIG$base_year) * 4 + quarter)
   
   completed_quarterly <- quarterly_grid %>%
     left_join(
       data$quarterly,
-      by = c("site_id", "year", "quarter", "water_company")
+      by = c("site_id", "year", "quarter", "qtr_id", "water_company")
     ) %>%
     left_join(
       metadata,
       by = c("site_id", "year", "water_company")
     ) %>%
-    group_by(site_id) %>%      
-    fill(all_of(intersect(site_metadata_cols, names(.))),
-         .direction = "downup") %>%
-    ungroup() %>%    
     mutate(
-      spill_count_qt = if_else(is.na(spill_count_qt), spill_count_ea, spill_count_qt),
-      spill_hrs_qt   = if_else(is.na(spill_hrs_qt),   spill_hrs_ea,   spill_hrs_qt),
-      qtr_id         = dplyr::coalesce(qtr_id, (year - CONFIG$base_year) * 4 + quarter)
+      spill_count_qt = dplyr::coalesce(
+        as.numeric(.data$spill_count_qt),
+        .data$spill_count_ea_crosswalk
+      ),
+      spill_hrs_qt = dplyr::coalesce(
+        as.numeric(.data$spill_hrs_qt),
+        .data$spill_hrs_ea_crosswalk
+      )
     ) %>%
-    select(-any_of(c("year", "quarter")))
+    select(
+      site_id, water_company, qtr_id, annual_status,
+      spill_count_qt, spill_hrs_qt,
+      spill_count_ea_crosswalk, spill_hrs_ea_crosswalk
+    )
   
   list(
     yearly    = completed_yearly,

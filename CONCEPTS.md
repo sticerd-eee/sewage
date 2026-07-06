@@ -21,6 +21,15 @@ A stable project-level site identity used to connect records that refer to the s
 ### Annual-Return Lookup
 The cross-year mapping that assigns year-specific Annual-Return Sites to Canonical Spill Sites.
 
+### Works
+A wastewater works as observed by event data: the year-invariant collapse of all Monitored Discharge Points (outlets) that file annual returns under the same company and normalised site name with corroborating evidence (shared permit or near-identical location). Events name works; annual returns name outlets. Identified by the smallest member Canonical Spill Site id.
+
+### Works Register
+The graph built on top of the Annual-Return Lookup whose connected components define each Works: nodes are Canonical Spill Sites, edges require same company + same normalised name + a corroborator (identical EA permit, or grid-reference distance within the configured threshold). Membership is year-invariant by construction.
+
+### Annual Status
+The per-works-year classification that disambiguates the absence of events in the positives-only event feed: `reported_zero` (return filed, both metrics zero), `reported_positive`, `reported_na` (return filed, metrics missing), or `absent` (no return that year).
+
 ### Record-Linkage Component
 A connected group of Annual-Return Sites implied by pairwise matching evidence. A component is only valid as one canonical track when it satisfies the project's site-identity invariants.
 
