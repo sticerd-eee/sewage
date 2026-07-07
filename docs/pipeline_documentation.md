@@ -33,6 +33,7 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 - `combine_individ_edm_data.R`: combines cleaned historical EDM parquet files.
 - `combine_api_edm_data_2024_onwards.R`: combines cleaned API parquet files.
 - `clean_rainfall_data.R`: prepares rainfall inputs and site-grid lookup files.
+- `clean_lexis_nexis_search1.R`: converts LexisNexis search_1 PDFs to article-level data and aggregates to monthly counts (`search1_monthly.parquet`), consumed by the `05_news` analysis. Sources the helper `nexis_pdf_conversion.R`, which is not run standalone.
 
 ### 03_data_enrichment
 
@@ -63,10 +64,12 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 
 - `cross_section_sales.R` and `cross_section_prior_to_sale.R`: build sales cross-sections.
 - `cross_section_rental.R` and `cross_section_prior_to_rental.R`: build rental cross-sections.
+- `house_spill_prior_to_sale.R` and `rental_spill_prior_to_rental.R`: build sale- and rental-spill prior-exposure datasets from raw matched events.
 - `site_panel_sales.R` and `site_panel_rental.R`: build site-level panels.
 - `house_panel_within_radius.R` and `rental_panel_within_radius.R`: build within-radius property panels.
 - `sale_panel_exp.R` and `rental_panel_exp.R`: export the general panel datasets.
 - `grid_long_difference_sales.R` and `grid_long_difference_rentals.R`: build grid-level long-difference datasets.
+- `repeat_sales.R` and `repeat_rentals.R`: build repeated-sales and repeated-rentals identifiers and summaries.
 
 ## Analysis Scripts
 
@@ -89,48 +92,55 @@ The `scripts/R/09_analysis/` folder contains the main descriptive, hedonic, repe
 8. `process_edm_api_json_to_parquet_2024_onwards.R` — process raw API JSON snapshots into parquet.
 9. `combine_individ_edm_data.R` — combine the 2021–2024 individual EDM parquet files.
 10. `combine_api_edm_data_2024_onwards.R` — combine the 2024+ API parquet files.
+11. `clean_lexis_nexis_search1.R` — convert LexisNexis search_1 PDFs to article-level data and monthly counts (sources the `nexis_pdf_conversion.R` helper); feeds the `05_news` analysis.
 
 ### Layer 03: Data Enrichment
 
-11. `combine_2021-2023_and_api_edm_data.R` — combine historical and API EDM data.
-12. `create_annual_return_lookup.R` — build cross-year site lookup tables.
-13. `merge_individ_annual_location.R` — merge location data into individual spill records (reads the combined EDM data and the lookup; produces the works crosswalk consumed by the next two steps).
-14. `create_unique_spill_sites.R` — create the canonical spill-sites dataset.
-15. `aggregate_spill_stats.R` — produce the main spill aggregations.
-16. `clean_rainfall_data.R` — clean rainfall inputs and site-grid lookups.
-17. `aggregate_rainfall_stats.R` — aggregate rainfall by year, month, and quarter.
-18. `identify_dry_spills.R` — identify and classify dry spills.
-19. `aggregate_dry_spill_stats.R` — integrate dry-spill metrics into the main spill aggregations.
+12. `combine_2021-2023_and_api_edm_data.R` — combine historical and API EDM data.
+13. `create_annual_return_lookup.R` — build cross-year site lookup tables.
+14. `merge_individ_annual_location.R` — merge location data into individual spill records (reads the combined EDM data and the lookup; produces the works crosswalk consumed by the next two steps).
+15. `create_unique_spill_sites.R` — create the canonical spill-sites dataset.
+16. `aggregate_spill_stats.R` — produce the main spill aggregations.
+17. `clean_rainfall_data.R` — clean rainfall inputs and site-grid lookups.
+18. `aggregate_rainfall_stats.R` — aggregate rainfall by year, month, and quarter.
+19. `identify_dry_spills.R` — identify and classify dry spills.
+20. `aggregate_dry_spill_stats.R` — integrate dry-spill metrics into the main spill aggregations.
+21. `aggregate_daily_spill_rainfall.R` — construct the balanced site-day spill-and-rainfall panel; feeds the `07_dry_spills` and `01_descriptive` analysis.
 
 ### Layer 04: Feature Engineering
 
-20. `10km_site_house_sale_match.R` — create house-to-site spatial matches.
-21. `10km_site_rental_match.R` — create rental-to-site spatial matches.
-22. `compute_spill_stats.R` — build enhanced spill statistics and treatment indicators.
+22. `10km_site_house_sale_match.R` — create house-to-site spatial matches.
+23. `10km_site_rental_match.R` — create rental-to-site spatial matches.
+24. `compute_spill_stats.R` — build enhanced spill statistics and treatment indicators.
 
 ### Layer 05: Data Integration
 
-Integration scripts are executed earlier for dependency reasons; see steps 11 and 12 above.
+Integration scripts are executed earlier for dependency reasons; see steps 12 and 13 above.
 
 ### Layer 06: Analysis Datasets
 
-23. `cross_section_sales.R` — build sales cross-sections.
-24. `cross_section_prior_to_sale.R` — build prior-to-sale sales cross-sections.
-25. `cross_section_rental.R` — build rental cross-sections.
-26. `cross_section_prior_to_rental.R` — build prior-to-rental rental cross-sections.
-27. `site_panel_sales.R` — build site-level sales panels.
-28. `site_panel_rental.R` — build site-level rental panels.
-29. `house_panel_within_radius.R` — build within-radius house panels.
-30. `rental_panel_within_radius.R` — build within-radius rental panels.
-31. `sale_panel_exp.R` — export the general sales panel.
-32. `rental_panel_exp.R` — export the general rental panel.
-33. `grid_long_difference_sales.R` — build the sales long-difference grid dataset.
-34. `grid_long_difference_rentals.R` — build the rental long-difference grid dataset.
+25. `cross_section_sales.R` — build sales cross-sections.
+26. `cross_section_rental.R` — build rental cross-sections.
+27. `cross_section_prior_to_sale.R` — build prior-to-sale sales cross-sections.
+28. `cross_section_prior_to_rental.R` — build prior-to-rental rental cross-sections.
+29. `house_spill_prior_to_sale.R` — build the sale-spill prior-exposure dataset.
+30. `rental_spill_prior_to_rental.R` — build the rental-spill prior-exposure dataset.
+31. `site_panel_sales.R` — build site-level sales panels.
+32. `site_panel_rental.R` — build site-level rental panels.
+33. `house_panel_within_radius.R` — build within-radius house panels.
+34. `rental_panel_within_radius.R` — build within-radius rental panels.
+35. `sale_panel_exp.R` — export the general sales panel.
+36. `rental_panel_exp.R` — export the general rental panel.
+37. `grid_long_difference_sales.R` — build the sales long-difference grid dataset.
+38. `grid_long_difference_rentals.R` — build the rental long-difference grid dataset.
+39. `repeat_sales.R` — build repeated-sales identifiers and summaries.
+40. `repeat_rentals.R` — build repeated-rentals identifiers and summaries.
 
 ## Dependency Notes
 
 - Steps 1 and 2 can run in parallel.
 - Steps 3 to 6 are independent; step 5 is only needed for rental workflows.
 - Steps 7 to 10 depend on the ingestion outputs.
-- Steps 16 to 19 form the rainfall and dry-spill sub-pipeline.
+- Step 11 is independent and only required for the `05_news` analysis.
+- Steps 17 to 21 form the rainfall and dry-spill sub-pipeline.
 - The layer-06 scripts build on spill aggregations and spatial matching outputs.
