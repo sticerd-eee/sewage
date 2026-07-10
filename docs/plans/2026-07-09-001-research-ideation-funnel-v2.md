@@ -2,6 +2,10 @@
 
 **Date:** 2026-07-09
 **Status:** Locked — signed off as launch-ready by Jacopo on 2026-07-09
+**Amended:** 2026-07-10, by Jacopo, mid-run before Phase 2 — probe execution
+delegated to Opus probe executors (Section 10 item 9, with matching changes in
+Sections 1, 3, 9.1, 13.3, 15, and prompts A.8 and A.9). All judgment roles
+remain on Fable.
 **Owner:** Jacopo
 **Predecessor:** `docs/plans/2026-07-04-001-research-ideation-funnel.md` (run 1 — quarantined during this run; see Section 4)
 
@@ -25,10 +29,13 @@ Three standing rules for the executing session:
    skip a searcher, shrink a round, or improvise any other cut. This is an explicit
    instruction from Jacopo, who accepted a possible multi-day stall in exchange for
    zero quality loss.
-2. **All agents run on Fable (`claude-fable-5`).** Workflow scripts must not set
-   per-agent model overrides; agents inherit the session model. Thinking effort is
-   the only per-role tuning knob, and the effort for every role is fixed in
-   Section 13.
+2. **All agents run on Fable (`claude-fable-5`), with one exception.** Workflow
+   scripts must not set per-agent model overrides, with a single carve-out decided
+   by Jacopo on 2026-07-10: **probe executors** — the agents that mechanically
+   execute pre-registered data probes — run on Opus (`claude-opus-4-8`), per
+   Section 10 item 9. Every judgment role stays on Fable. Thinking effort is
+   otherwise the only per-role tuning knob, and the effort for every role is
+   fixed in Section 13.
 3. **Every artifact a human will read is written in complete plain sentences.**
    No shorthand, no arrow chains (`A → B`), no invented abbreviations. Identifiers
    are introduced with their own plain-language clause. Summaries open with the
@@ -99,7 +106,8 @@ after dedupe, 10–15 panel survivors reaching the proposal stage.
 - **Ledger discipline.** Every raw idea gets a row in `docs/ideas/ledger.md` the
   moment it is proposed (format in Appendix C.1). The ledger is append-only: rows are
   never edited or deleted, and corrections are new rows or flag lines.
-- **All-Fable.** No per-agent model overrides anywhere (Section 1, rule 2).
+- **All-Fable, except probe execution.** No per-agent model overrides anywhere,
+  except the Opus probe executors of Section 10 item 9 (Section 1, rule 2).
 - **Quarantine integrity.** No agent may read the quarantine holding folder except
   the single comparison agent in Phase 4, and that agent may not write run-2 files.
 
@@ -363,11 +371,12 @@ deterministically by the workflow script; no agent judgment sits in the rule its
   (effort: medium; prompt A.8), batched by dataset (roughly 4–6 batch agents),
   actively tries to break each candidate's data claims: does the variation exist,
   are the cells big enough, is the named dataset in hand at the right grain. It may
-  run read-only probes (at most 3 per candidate) under the probe protocol
-  (Section 10) and writes a refutation memo per candidate. Then the **feasibility
-  engineer** (effort: medium; prompt A.9) scores each candidate with the refutation
-  memo as evidence, running its own checks (at most 1 probe per candidate) only
-  where the memo is silent. Scores account for data-in-hand versus acquisition risk,
+  commission read-only probes (at most 3 per candidate), pre-registered by it and
+  executed by Opus probe executors under the probe protocol (Section 10), and
+  writes a refutation memo per candidate. Then the **feasibility engineer**
+  (effort: medium; prompt A.9) scores each candidate with the refutation memo as
+  evidence, commissioning its own checks (at most 1 probe per candidate, executed
+  the same way) only where the memo is silent. Scores account for data-in-hand versus acquisition risk,
   and effort.
 
 Every review is appended to the candidate's file with a one-line justification and
@@ -432,10 +441,12 @@ slate, so everything downstream carries full three-criterion evidence.
 
 ## 10. Probe protocol
 
-The only agents that ever touch data are the **feasibility engineer** and the
-**feasibility refuter**. Generators, the dedupe judge, potential referees,
-originality searchers, devil's advocates, curators, refiners, the synthesis agent,
-and the comparison agent never do. Rescue work at Checkpoint 3 does not probe.
+The only roles that may commission probes are the **feasibility refuter** and the
+**feasibility engineer**; the only agents that ever touch data are the **Opus
+probe executors** that carry out their pre-registered requests (item 9 below).
+Generators, the dedupe judge, potential referees, originality searchers, devil's
+advocates, curators, refiners, the synthesis agent, and the comparison agent
+never do. Rescue work at Checkpoint 3 does not probe.
 
 1. **Trigger — the decisive-claim test.** Before running anything, the prober writes
    down: (a) the specific factual claim about the data being checked (existence of a
@@ -466,6 +477,20 @@ and the comparison agent never do. Rescue work at Checkpoint 3 does not probe.
    refuted / inconclusive); and the effect on the score or attack.
 8. **Tooling default.** Probes run in R via `Rscript` with `arrow`, matching the
    repository's tooling.
+9. **Execution delegation (amended by Jacopo, 2026-07-10).** The probing roles do
+   not touch data directly. Each probe runs as a three-step pipeline inside the
+   Phase 2A workflow: (i) the Fable probing role (refuter or engineer) emits the
+   fully pre-registered probe request — all three trigger elements of item 1 plus
+   the exact descriptive question; (ii) an **Opus probe executor**
+   (`claude-opus-4-8`, the sole exception to the all-Fable rule) writes and runs
+   the R script in the session scratchpad under the caps of items 2 through 6 and
+   reports back the verbatim script, the raw output, and a one-line factual
+   result, with no interpretation; (iii) the Fable role receives the result,
+   draws the judgment (memo or score), and the evidence block is appended per
+   item 7, naming both the commissioning role and the executor. Executors never
+   choose or reformulate questions; judgment never moves to Opus. This makes the
+   pre-registration of item 1 structurally enforced: the decisive claim is
+   written by one agent before a different agent ever touches data.
 
 ---
 
@@ -574,7 +599,8 @@ Section 14, never a cut.
 
 Run 1 used about 40 agents.
 
-### 13.3 Thinking-effort table (all agents on Fable; effort is the only knob)
+### 13.3 Thinking-effort table (all agents on Fable except the Opus probe
+executors of Section 10 item 9; effort is otherwise the only knob)
 
 | Role | Effort |
 | --- | --- |
@@ -590,6 +616,7 @@ Run 1 used about 40 agents.
 | Feasibility engineer | medium |
 | Originality searchers (incl. catch-up) | medium |
 | Context-pack agents (all three) | medium |
+| Probe executors (execution only; the sole non-Fable role — Opus) | medium |
 
 ---
 
@@ -618,8 +645,11 @@ Run 1 used about 40 agents.
 
 Skeletons only — the executing session fills in the prompt constants from Appendix A
 and the file-reading/writing glue. Structure, phases, effort levels, gates, and caps
-are fixed and must not be altered. No `model:` overrides anywhere. All scripts follow
-the Workflow tool's rules (no `Date.now()`; pass timestamps via `args`).
+are fixed and must not be altered. No `model:` overrides anywhere, with one
+exception: the Opus probe executors of Section 10 item 9 carry `model: 'opus'`,
+and the Phase 2A feasibility stages run as the three-step pipeline of that item
+(Fable planner, Opus executors, Fable finalizer). All scripts follow the Workflow
+tool's rules (no `Date.now()`; pass timestamps via `args`).
 
 ### 15.1 Phase 0
 
@@ -909,9 +939,13 @@ brief. `{{EXCLUSION_BLOCK}}` is empty in round 1.
 > batch (all of which claim to use {{DATASET_GROUP}}), actively try to break its
 > data claims: does the claimed variation exist, are the cells big enough, is the
 > named dataset actually in hand at the grain the idea needs, do the claimed joins
-> work? You may run read-only probes on `data/processed/` under the probe protocol
-> given below, with a hard quota of at most 3 probes per candidate. {{PROBE_PROTOCOL
-> — Sections 10.1–10.4, 10.6–10.8 verbatim}}. For each candidate write a refutation
+> work? You may commission read-only probes on `data/processed/` under the probe
+> protocol given below, with a hard quota of at most 3 probes per candidate; you do
+> not touch data yourself — each probe is a fully pre-registered request (decisive
+> claim, why the context pack is silent, effect on the attack, exact descriptive
+> question) executed by a separate probe-executor agent that reports back the
+> script and raw output. {{PROBE_PROTOCOL — Sections 10.1–10.4, 10.6–10.9
+> verbatim}}. For each candidate write a refutation
 > memo: the strongest attacks you found, each marked as confirmed by a probe,
 > asserted from the context pack, or untested; append each probe's evidence block
 > to the candidate's file. You do not score — a separate judge will weigh your memo.
@@ -924,8 +958,10 @@ brief. `{{EXCLUSION_BLOCK}}` is empty in round 1.
 > (5 exceptional, 4 good, 3 moderate, 2 weak, 1 poor), weighing: whether the data
 > is in hand versus an acquisition with risk; the refutation memo's confirmed
 > attacks; and realistic effort. Where the memo is silent on a decisive question,
-> you may run at most 1 read-only probe per candidate under the probe protocol
-> given below. {{PROBE_PROTOCOL — same insert as A.8}}. Append your review to each
+> you may commission at most 1 read-only probe per candidate under the probe
+> protocol given below, as a fully pre-registered request executed by a separate
+> probe-executor agent that reports back the script and raw output.
+> {{PROBE_PROTOCOL — same insert as A.8}}. Append your review to each
 > candidate file with a one-line justification and your evidence; probes get
 > evidence blocks. Your score is final for this criterion — do not defer to the
 > refuter; weigh it.

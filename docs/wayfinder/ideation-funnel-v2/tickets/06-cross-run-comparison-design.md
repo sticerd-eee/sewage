@@ -49,7 +49,7 @@ including what happens to inbound links pointing at the old run-1 paths.
    `proposals/`, `context/`, `ledger.md` and their relative links) as
    `docs/ideas/run1/`; run-2 outputs land as `docs/ideas/run2/` with the same
    internal structure; the memo lives at `docs/ideas/comparison-run1-run2.md`.
-   The only inbound links to old `docs/ideas/` paths are in the wayfinder
+   The only inbound links to old `docs/ideas/run1/` paths are in the wayfinder
    map/tickets and `docs/plans/2026-07-04-001`; they are rewritten to `run1/`
    paths in the same single commit as the restore, run-2 placement, and memo.
 

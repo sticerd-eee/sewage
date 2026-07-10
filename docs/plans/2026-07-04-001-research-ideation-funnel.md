@@ -21,26 +21,26 @@ if the acquisition path is spelled out. No hard vetoes — effort and delay are 
 in the feasibility score, not by exclusion.
 
 **End deliverable:** 5–8 mini-proposals (1–2 pages each) plus a ranked index, in
-`docs/ideas/proposals/`.
+`docs/ideas/run1/proposals/`.
 
 ## Guardrails (apply to every agent in every phase)
 
 - **No implementation.** Ideas are refined, not built.
-- **Repo writes only under `docs/ideas/`.** All throwaway probe code lives in the
+- **Repo writes only under `docs/ideas/run1/`.** All throwaway probe code lives in the
   session scratchpad, never in `scripts/` or anywhere else in the repo.
 - **Data is read-only.** Probes and pilot regressions use only the datasets the current
   analysis loads — those referenced by `scripts/R/09_analysis/` (loader:
-  `00_data_load/load_data_sewage.R`), inventoried in `docs/ideas/context/project-brief.md`
+  `00_data_load/load_data_sewage.R`), inventoried in `docs/ideas/run1/context/project-brief.md`
   Section 3. `data/final/` is stale and must not be used (corrected at Checkpoint 1;
   the plan originally pointed there). No raw-data processing, no new pipelines.
-- **Ledger discipline.** Every idea gets a row in `docs/ideas/ledger.md` the moment it
+- **Ledger discipline.** Every idea gets a row in `docs/ideas/run1/ledger.md` the moment it
   is proposed (id, title, one-liner, lens, status). Agents check the ledger and the
   already-considered register before proposing; duplicates are flagged, not counted.
 
 ## Note-taking scheme
 
 ```
-docs/ideas/
+docs/ideas/run1/
 ├── ledger.md                  # single source of truth: id, title, one-liner, lens,
 │                              # P/F/O scores, verdict, status
 ├── context/

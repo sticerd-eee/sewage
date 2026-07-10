@@ -25,7 +25,7 @@ explicitly and confirmed.
    Pilot or dry-run validation of the spec was explicitly declined.
 
 2. **Independence.** Generation and evaluation are fully blind to the first run's
-   outputs (the 18 candidates and 12 proposals in `docs/ideas/`). A final synthesis
+   outputs (the 18 candidates and 12 proposals in `docs/ideas/run1/`). A final synthesis
    stage compares the new ranked list against the old one, treating overlap as
    corroboration signal rather than duplication to suppress.
 
@@ -44,8 +44,8 @@ explicitly and confirmed.
    by the dedupe stage to annotate candidates with "matches existing note X".
 
 6. **Quarantine for blindness.** At run start the orchestrating session moves
-   `docs/ideas/` and `docs/plans/2026-07-04-001-research-ideation-funnel.md` to a
-   holding folder outside the repo. Run 2 writes to a fresh `docs/ideas/` tree. At
+   `docs/ideas/run1/` and `docs/plans/2026-07-04-001-research-ideation-funnel.md` to a
+   holding folder outside the repo. Run 2 writes to a fresh `docs/ideas/run1/` tree. At
    the final comparison stage the run-1 files return and the two runs are
    reorganized as siblings (`docs/ideas/run1/`, `docs/ideas/run2/`) in one commit.
    Known residual: run-1 files remain in git history; accepted, since blind agents

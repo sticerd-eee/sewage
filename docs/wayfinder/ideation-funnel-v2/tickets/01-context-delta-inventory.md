@@ -12,7 +12,7 @@ blocked-by: []
 The first run's context pack was compiled around 2026-07-04, and the repo has moved
 since (location-merge rebuild on the works crosswalk, repeat-transactions rebuild,
 new news and daily spill-rainfall pipeline scripts). Inventory, without opening any
-`docs/ideas/` content: (a) the current state of the paper draft — sections, headline
+`docs/ideas/run1/` content: (a) the current state of the paper draft — sections, headline
 estimates, what the model section now contains; (b) the analysis datasets the
 current `scripts/R/09_analysis/` loader actually reads, their grain, coverage, and
 key variables; (c) pipeline changes since 2026-07-04 that alter what an ideation
@@ -23,7 +23,7 @@ brief is compiled from current facts rather than the first run's assumptions.
 ## Resolution (2026-07-09)
 
 Resolved by three parallel research agents (paper draft, analysis data surface,
-repo history since 2026-07-04), none of which opened `docs/ideas/`. The full
+repo history since 2026-07-04), none of which opened `docs/ideas/run1/`. The full
 inventory is the linked asset
 [Context delta memo](../assets/01-context-delta-memo.md); the run-2 context-pack
 agents' instructions should be written against that memo, not against the first

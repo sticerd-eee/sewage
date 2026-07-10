@@ -30,7 +30,7 @@ map is done when Jacopo signs the spec off as launch-ready.
   set; the frontier is any open ticket with empty `assignee` whose `blocked-by`
   ids are all closed.
 - Independence rule for every downstream session: nothing from the first run's
-  `docs/ideas/` may leak into generation or evaluation design artifacts that the
+  `docs/ideas/run1/` may leak into generation or evaluation design artifacts that the
   executing agents will read (the quarantine at run time enforces this for the
   run itself).
 

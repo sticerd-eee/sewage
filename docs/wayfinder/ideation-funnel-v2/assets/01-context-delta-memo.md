@@ -3,7 +3,7 @@
 This memo records the current facts that the run-2 context-pack agents' instructions
 must be written against. It was compiled on 2026-07-09 by three parallel research
 agents (paper draft, analysis data surface, repo history), without opening anything
-under `docs/ideas/`. Where the first run's context pack or this planning effort's
+under `docs/ideas/run1/`. Where the first run's context pack or this planning effort's
 own assumptions turn out to be wrong, the correction is stated explicitly.
 
 ## Headline corrections to assumptions this planning effort was carrying
