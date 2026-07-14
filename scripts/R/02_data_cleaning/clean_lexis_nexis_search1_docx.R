@@ -99,7 +99,7 @@ load_docx_data <- function() {
 # Data Processing Functions
 ############################################################
  
-#' Remove duplicated text within each article body (task 3 requirement).
+#' Remove duplicated text within each article body.
 #' Splits each body into sentences, drops exact repeats, rejoins. Website
 #' furniture is NOT touched here.
 #' @param df Article-level data frame with a `body` column
