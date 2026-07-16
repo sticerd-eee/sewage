@@ -8,13 +8,6 @@
 #this script provides a function to convert Nexis .docx output to tabular data
 #(counterpart to nexis_pdf_conversion.R, for use when LexisNexis is exported as
 #one article per .docx file rather than as combined PDFs)
-
-
-#required packages
-library(dplyr)
-library(stringr)
-library(officer)
-library(lubridate)
  
  
 #reading .docx nexis output, and converting it to clean dataframe
@@ -49,7 +42,7 @@ nexis_docx_to_table <- function(docx_folder_path){
     tryCatch({
  
       #load the file as a paragraph-level table (one row per paragraph)
-      summary_i <- docx_summary(read_docx(i))
+      summary_i <- officer::docx_summary(officer::read_docx(i))
       style_i <- summary_i$style_name
       #trim so marker comparisons (== "Body" etc.) are exact
       text_i <- trimws(summary_i$text)
@@ -62,7 +55,7 @@ nexis_docx_to_table <- function(docx_folder_path){
       #date. Found by content, not fixed position, because some files omit the
       #source line - which would otherwise shift the date onto the wrong row.
       after_head_i <- which(nzchar(text_i) & seq_along(text_i) > head_idx_i)
-      is_date_i <- str_detect(text_i[after_head_i], regex(date_regex, ignore_case = TRUE))
+      is_date_i <- stringr::str_detect(text_i[after_head_i], stringr::regex(date_regex, ignore_case = TRUE))
       date_pos_i <- after_head_i[which(is_date_i)[1]]   #row of the date paragraph
  
       if (is.na(date_pos_i)) {
@@ -71,9 +64,9 @@ nexis_docx_to_table <- function(docx_folder_path){
         source_i <- NA_character_
       } else {
         #parse the date: month + optional day + year (assign day 1 if no day)
-        m_i <- str_match(text_i[date_pos_i], regex(date_regex, ignore_case = TRUE))
+        m_i <- stringr::str_match(text_i[date_pos_i], stringr::regex(date_regex, ignore_case = TRUE))
         day_i <- ifelse(is.na(m_i[3]), "1", m_i[3])
-        date_i <- parse_date_time(paste(m_i[2], day_i, m_i[4]), orders = "b d Y")
+        date_i <- lubridate::parse_date_time(paste(m_i[2], day_i, m_i[4]), orders = "b d Y")
  
         #source: the non-blank paragraph directly above the date. If that is the
         #headline itself, the file has no source line -> NA
@@ -85,13 +78,13 @@ nexis_docx_to_table <- function(docx_folder_path){
       #(kept in full - no content removal here)
       body_start_i <- which(text_i == "Body")[1]
       body_end_i <- min(c(
-        which(str_detect(text_i, "^Load-Date:")),
+        which(stringr::str_detect(text_i, "^Load-Date:")),
         which(text_i == "End of Document")
       ))
       body_i <- text_i[(body_start_i + 1):(body_end_i - 1)]
       #join paragraphs into one string; str_squish just normalises whitespace
       #(collapses the blank-line gaps into single spaces - not content cleaning)
-      body_i <- str_squish(paste(body_i, collapse = " "))
+      body_i <- stringr::str_squish(paste(body_i, collapse = " "))
  
       #merge into a one-row dataframe (date already parsed above)
       news_i <- data.frame(

@@ -1,15 +1,54 @@
-############################################################
-# Clean LexisNexis Search_1 DOCX Data
-# Project: Sewage
-# Date: 14/07/2026
+# ==============================================================================
+# LexisNexis Search_1 DOCX Article Cleaner
+# ==============================================================================
+#
+# Purpose: Convert LexisNexis search_1 DOCX exports (one article per file) into
+#          an article-level dataset, apply within-body de-duplication, and write
+#          the interim `articles_clean.parquet`.
+#
 # Author: Ana Werneck
-############################################################
+# Date: 2026-07-16
+#
+# Inputs:
+#   - data/raw/lexis_nexis/search_1_docx/*.docx
+#   - scripts/R/utils/nexis_docx_conversion.R
+#
+# Outputs:
+#   - data/processed/lexis_nexis/articles_clean.parquet   # never overwrites search1_articles.parquet
+#   - output/log/clean_lexis_nexis_search1_docx.log
+#   - data/processed/lexis_nexis/articles_clean_monthly.parquet
+#   - output/figures/search1_docx_monthly.png
+#
+# Source:
+#   - LexisNexis Academic database
+#   - search_1: hlead(sewage) AND incident AND hlead(leak OR overflow); UK sources
+#
+# ==============================================================================
 
-#' This script converts LexisNexis search_1_docx DOCX files (one article per file)
-#' to article-level data, applies within-body de-duplication, and writes the
-#' interim cleaned dataset. The search_1_docx DOCX files are pre-filtered to UK
-#' sources only. Website furniture (Read More lists, promos) is not removed yet.
-#' @source LexisNexis Academic database
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first with `rv sync`.",
+    call. = FALSE
+  )
+}
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow", 
+  "dplyr", 
+  "ggplot2", 
+  "glue",
+  "logger", 
+  "lubridate", 
+  "officer", 
+  "stringr"
+)
+
+LOG_FILE <- here::here("output", "log", "clean_lexis_nexis_search1_docx.log")
+
+check_required_packages(REQUIRED_PACKAGES)
 
 # Configuration
 ############################################################
@@ -19,7 +58,7 @@ CONFIG <- list(
   input_dir = here::here("data", "raw", "lexis_nexis", "search_1_docx"),
   output_dir = here::here("data", "processed", "lexis_nexis"),
   figure_dir = here::here("output", "figures"),
-  docx_converter_path = here::here("scripts", "R", "02_data_cleaning", "nexis_docx_conversion.R")
+  docx_converter_path = here::here("scripts", "R", "utils", "nexis_docx_conversion.R")
 )
  
 # Setup Functions
@@ -28,39 +67,19 @@ CONFIG <- list(
 #' Initialize the R environment with required packages and settings
 #' @return NULL
 initialise_environment <- function() {
-  required_packages <- c(
-    "dplyr",      # Data manipulation
-    "stringr",    # String operations
-    "lubridate",  # Date handling
-    "here",       # Project-rooted paths
-    "logger",     # Structured logging
-    "glue",       # String interpolation
-    "arrow",      # Parquet I/O
-    "ggplot2",    # Plotting
-    "officer"     # DOCX text extraction (required by nexis_docx_conversion.R)
-  )
- 
-  # Install and load packages
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
-    }
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
     library(pkg, character.only = TRUE)
   }))
 }
  
-#' Set up logging configuration
+#' Initialise logging for this script
 #' @return NULL
-setup_logging <- function() {
-  log_path <- here::here("output", "log", "clean_lexis_nexis_search1_docx.log")
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
- 
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
+  logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
-}
- 
+} 
+
 # Data Loading Functions
 ############################################################
  
@@ -235,7 +254,7 @@ export_data <- function(articles_df, monthly_df) {
 main <- function() {
   # Setup
   initialise_environment()
-  setup_logging()
+  initialise_logging()
  
   # Load DOCX converter function
   load_docx_converter()
@@ -254,15 +273,8 @@ main <- function() {
   logger::log_info("Article date range: {date_range[1]} to {date_range[2]}")
  
   # Aggregate to monthly
-  monthly <- aggregate_monthly(add_time_identifiers(articles))
+  monthly <- aggregate_monthly(articles)
 
-  # is there a row with a missing value anywhere?
-  monthly[!complete.cases(monthly), ]
-
-  # and check the date column the plot builds
-  monthly$date_check <- as.Date(paste(monthly$year, monthly$month, "01", sep = "-"))
-  monthly[is.na(monthly$date_check), ]
- 
   # Export results
   export_data(articles, monthly)
  
