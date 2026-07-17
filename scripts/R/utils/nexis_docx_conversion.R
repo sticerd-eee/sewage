@@ -8,7 +8,28 @@
 #this script provides a function to convert Nexis .docx output to tabular data
 #(counterpart to nexis_pdf_conversion.R, for use when LexisNexis is exported as
 #one article per .docx file rather than as combined PDFs)
- 
+
+#  extract_nexis_zips()  - unzip the downloaded .docx exports under collision-safe
+#                          names (needed because macOS is case-insensitive)
+#  nexis_docx_to_table() - read the extracted .docx files into an article-level table
+
+#extract Nexis .docx exports from their .zip downloads under sequential names,
+#so headlines differing only by case cannot overwrite each other on macOS
+extract_nexis_zips <- function(zip_paths, dest_dir) {
+  dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
+  k <- 0
+  for (zip_path in zip_paths) {
+    entries <- utils::unzip(zip_path, list = TRUE)$Name
+    entries <- entries[grepl("\\.docx$", entries, ignore.case = TRUE)]
+    for (entry in entries) {
+      k <- k + 1
+      tmp <- file.path(tempdir(), "nexis", sprintf("%04d", k))
+      utils::unzip(zip_path, files = entry, exdir = tmp)
+      file.copy(file.path(tmp, entry),
+                file.path(dest_dir, sprintf("%04d.docx", k)), overwrite = TRUE)
+    }
+  }
+}
  
 #reading .docx nexis output, and converting it to clean dataframe
 #(note: unlike the PDF version this takes a FOLDER, since each article is its

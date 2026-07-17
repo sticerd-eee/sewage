@@ -10,7 +10,7 @@
 # Date: 2026-07-16
 #
 # Inputs:
-#   - data/raw/lexis_nexis/search_1_docx/*.docx
+#   - data/raw/lexis_nexis/search_1_zip/*.zip 
 #   - scripts/R/utils/nexis_docx_conversion.R
 #
 # Outputs:
@@ -55,6 +55,7 @@ check_required_packages(REQUIRED_PACKAGES)
 
 CONFIG <- list(
   base_year = 2021,
+  zip_dir = here::here("data", "raw", "lexis_nexis", "search_1_zip"),
   input_dir = here::here("data", "raw", "lexis_nexis", "search_1_docx"),
   output_dir = here::here("data", "processed", "lexis_nexis"),
   figure_dir = here::here("output", "figures"),
@@ -83,7 +84,8 @@ initialise_logging <- function() {
 # Data Loading Functions
 ############################################################
  
-#' Source the DOCX conversion function from the co-located conversion helper
+#' Source the DOCX helper functions (extractor + converter) from the 
+#' co-located conversion helper
 #' @return NULL
 load_docx_converter <- function() {
   if (!file.exists(CONFIG$docx_converter_path)) {
@@ -258,6 +260,12 @@ main <- function() {
  
   # Load DOCX converter function
   load_docx_converter()
+
+  # Extract the downloaded .zip exports into input_dir under collision-safe names
+  zip_paths <- list.files(CONFIG$zip_dir, pattern = "\\.zip$",
+                          full.names = TRUE, ignore.case = TRUE)
+  extract_nexis_zips(zip_paths, CONFIG$input_dir)
+  logger::log_info("Extracted {length(zip_paths)} zip(s) into {CONFIG$input_dir}")
  
   # Load and convert DOCX files
   articles_raw <- load_docx_data()
