@@ -149,3 +149,61 @@ restrict_to_common_sample <- function(sample, start_month_id, max_lag) {
       .data$month_id >= as.integer(start_month_id) + as.integer(max_lag)
     )
 }
+
+#' Run lightweight sanity checks for the shared lag mechanics
+#'
+#' @return Invisibly returns `TRUE`; aborts if a lag contract is violated.
+run_news_lag_sanity_checks <- function() {
+  stopifnot(
+    shifted_post_indicator(20, 20, 0) == 1L,
+    shifted_post_indicator(31, 20, 12) == 0L,
+    shifted_post_indicator(32, 20, 12) == 1L
+  )
+
+  sample <- data.frame(
+    row_id = seq_len(15L),
+    month_id = seq_len(15L)
+  )
+  articles <- data.frame(
+    month_id = seq_len(15L),
+    cumulative_articles = cumsum(seq_len(15L)),
+    log_cumulative_articles = log1p(cumsum(seq_len(15L)))
+  )
+
+  contemporaneous <- join_lagged_cumulative_articles(
+    sample, articles, lag = 0L, start_month_id = 1L
+  )
+  direct <- dplyr::inner_join(sample, articles, by = "month_id")
+  stopifnot(
+    identical(contemporaneous$row_id, direct$row_id),
+    identical(contemporaneous$month_id, direct$month_id),
+    identical(
+      contemporaneous$cumulative_articles,
+      direct$cumulative_articles
+    ),
+    identical(
+      contemporaneous$log_cumulative_articles,
+      direct$log_cumulative_articles
+    )
+  )
+
+  lagged <- join_lagged_cumulative_articles(
+    sample, articles, lag = 3L, start_month_id = 1L
+  )
+  stopifnot(
+    nrow(lagged) == nrow(sample) - 3L,
+    min(lagged$month_id) == 4L,
+    all(lagged$lagged_month_id == lagged$month_id - 3L)
+  )
+
+  common <- restrict_to_common_sample(
+    sample, start_month_id = 1L, max_lag = 12L
+  )
+  stopifnot(
+    min(common$month_id) == 13L,
+    all(common$row_id %in% sample$row_id),
+    nrow(common) < nrow(sample)
+  )
+
+  invisible(TRUE)
+}

@@ -263,7 +263,12 @@ estimate_preferred_model <- function(data, market) {
     " | lsoa + month_id"
   ))
 
-  fixest::feols(model_formula, data = data, vcov = ~lsoa)
+  fixest::feols(
+    model_formula,
+    data = data,
+    vcov = ~lsoa,
+    lean = TRUE
+  )
 }
 
 estimate_common_lag_path <- function(base_sample, articles, market) {
@@ -537,6 +542,7 @@ export_effect_sizes <- function(
 # ==============================================================================
 
 main <- function() {
+  run_news_lag_sanity_checks()
   stopifnot(
     identical(CONFIG$lags, c(0L, 3L, 6L, 12L)),
     CONFIG$max_lag == max(CONFIG$lags),

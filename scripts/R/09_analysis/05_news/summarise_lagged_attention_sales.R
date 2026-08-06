@@ -218,6 +218,79 @@ consolidate_components <- function(component_paths) {
   out
 }
 
+make_synthetic_component <- function(component) {
+  out <- expected_component_keys(component)
+  row_id <- seq_len(nrow(out))
+  out$estimate <- row_id / 100
+  out$std_error <- rep(0.1, nrow(out))
+  critical_value <- stats::qnorm(0.975)
+  out$conf_low <- out$estimate - critical_value * out$std_error
+  out$conf_high <- out$estimate + critical_value * out$std_error
+  out$p_value <- rep(0.5, nrow(out))
+  out$n <- as.integer(1000L + row_id)
+  out[required_columns]
+}
+
+expect_validation_error <- function(expr) {
+  error <- tryCatch(
+    {
+      force(expr)
+      NULL
+    },
+    error = function(condition) condition
+  )
+  inherits(error, "error")
+}
+
+run_consolidation_sanity_checks <- function() {
+  component_names <- c(
+    "extensive_post", "extensive_articles", "intensive_post",
+    "intensive_articles"
+  )
+  components <- setNames(
+    lapply(component_names, make_synthetic_component),
+    component_names
+  )
+
+  duplicate <- rbind(components$extensive_post, components$extensive_post[1L, ])
+  missing <- components$extensive_articles[-1L, , drop = FALSE]
+  stopifnot(
+    expect_validation_error(validate_component(duplicate, "extensive_post")),
+    expect_validation_error(validate_component(missing, "extensive_articles"))
+  )
+
+  temporary_directory <- tempfile("lagged-attention-sanity-")
+  dir.create(temporary_directory)
+  on.exit(unlink(temporary_directory, recursive = TRUE), add = TRUE)
+  component_paths <- setNames(
+    file.path(temporary_directory, paste0(component_names, ".csv")),
+    component_names
+  )
+  Map(
+    function(data, path) utils::write.csv(data, path, row.names = FALSE, na = ""),
+    components,
+    component_paths
+  )
+
+  first <- consolidate_components(component_paths)
+  consolidated_path <- file.path(temporary_directory, "consolidated.csv")
+  atomic_write_csv(first, consolidated_path)
+  first_written <- readLines(consolidated_path, warn = FALSE)
+
+  second <- consolidate_components(component_paths)
+  atomic_write_csv(second, consolidated_path)
+  second_written <- readLines(consolidated_path, warn = FALSE)
+
+  stopifnot(
+    nrow(first) == 51L,
+    !anyDuplicated(first[result_key_columns]),
+    identical(first, second),
+    identical(first_written, second_written)
+  )
+
+  invisible(TRUE)
+}
+
 atomic_write_csv <- function(data, path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   temporary <- tempfile(
@@ -354,10 +427,17 @@ main <- function(
            call. = FALSE)
     }
   }
+  run_consolidation_sanity_checks()
   results <- consolidate_components(component_paths)
   atomic_write_csv(results, consolidated_path)
   create_coefficient_path_figure(
     results, pdf_path = figure_pdf_path, png_path = figure_png_path
+  )
+  stopifnot(
+    file.exists(figure_pdf_path),
+    file.info(figure_pdf_path)$size > 0L,
+    file.exists(figure_png_path),
+    file.info(figure_png_path)$size > 0L
   )
   cat("Validated and consolidated ", nrow(results), " result rows.\n", sep = "")
   cat("Consolidated CSV: ", consolidated_path, "\n", sep = "")

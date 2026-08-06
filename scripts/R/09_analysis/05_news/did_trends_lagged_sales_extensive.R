@@ -253,7 +253,8 @@ estimate_lag_path <- function(base_sample, peak_month_id, market) {
     models[[paste0("lag_", lag)]] <- fixest::feols(
       model_formula,
       data = dat,
-      vcov = ~lsoa
+      vcov = ~lsoa,
+      lean = TRUE
     )
   }
 
@@ -430,6 +431,7 @@ export_effect_sizes <- function(sales_models, rental_models) {
 # ==============================================================================
 
 main <- function() {
+  run_news_lag_sanity_checks()
   stopifnot(
     identical(CONFIG$lags, c(0L, 3L, 6L, 12L)),
     identical(

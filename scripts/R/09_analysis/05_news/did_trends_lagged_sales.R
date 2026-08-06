@@ -35,7 +35,6 @@ REQUIRED_PACKAGES <- c(
   "forcats",
   "here",
   "readxl",
-  "rio",
   "tibble",
   "tidyr"
 )
@@ -121,14 +120,34 @@ load_google_trends_peak <- function() {
 load_global_transactions <- function() {
   cat("Loading global sales and rental transactions...\n")
 
-  sales <- rio::import(CONFIG$sales_path, trust = TRUE) |>
+  sales <- arrow::open_dataset(CONFIG$sales_path) |>
+    dplyr::filter(
+      !is.na(.data$month_id),
+      .data$month_id >= CONFIG$analysis_start_month_id,
+      .data$month_id <= CONFIG$analysis_end_month_id
+    ) |>
+    dplyr::select(
+      "house_id", "price", "month_id", "lsoa", "msoa", "latitude",
+      "longitude", "property_type", "old_new", "duration"
+    ) |>
+    dplyr::collect() |>
     dplyr::mutate(
       property_type = forcats::as_factor(.data$property_type),
       old_new = forcats::as_factor(.data$old_new),
       duration = forcats::as_factor(.data$duration)
     )
 
-  rentals <- rio::import(CONFIG$rental_path, trust = TRUE) |>
+  rentals <- arrow::open_dataset(CONFIG$rental_path) |>
+    dplyr::filter(
+      !is.na(.data$month_id),
+      .data$month_id >= CONFIG$analysis_start_month_id,
+      .data$month_id <= CONFIG$analysis_end_month_id
+    ) |>
+    dplyr::select(
+      "rental_id", "listing_price", "month_id", "lsoa", "msoa",
+      "latitude", "longitude", "property_type", "bedrooms", "bathrooms"
+    ) |>
+    dplyr::collect() |>
     dplyr::mutate(property_type = forcats::as_factor(.data$property_type))
 
   list(sales = sales, rentals = rentals)
@@ -139,6 +158,7 @@ prepare_sales_sample <- function(radius, sales) {
 
   dat_cs <- arrow::open_dataset(CONFIG$sales_cross_section_path) |>
     dplyr::filter(.data$radius == .env$radius, .data$n_spill_sites > 0) |>
+    dplyr::select("house_id", "price", "spill_count_weekly_avg") |>
     dplyr::collect()
 
   dat <- dat_cs |>
@@ -179,6 +199,7 @@ prepare_rental_sample <- function(radius, rentals) {
 
   dat_cs <- arrow::open_dataset(CONFIG$rental_cross_section_path) |>
     dplyr::filter(.data$radius == .env$radius, .data$n_spill_sites > 0) |>
+    dplyr::select("rental_id", "listing_price", "spill_count_weekly_avg") |>
     dplyr::collect()
 
   dat <- dat_cs |>
@@ -249,7 +270,8 @@ estimate_sales_lag_path <- function(base_sample, peak_month_id, radius) {
       log_price ~ spill_count_weekly_avg + spill_count_weekly_avg:post +
         property_type + old_new + duration | lsoa + month_id,
       data = dat,
-      vcov = ~lsoa
+      vcov = ~lsoa,
+      lean = TRUE
     )
 
     cat(sprintf(
@@ -280,7 +302,8 @@ estimate_rental_benchmark <- function(base_sample, peak_month_id, radius) {
     log_price ~ spill_count_weekly_avg + spill_count_weekly_avg:post +
       property_type + bedrooms + bathrooms | lsoa + month_id,
     data = dat,
-    vcov = ~lsoa
+    vcov = ~lsoa,
+    lean = TRUE
   )
 
   cat(sprintf(
@@ -494,6 +517,7 @@ export_component_results <- function(component_results) {
 # ==============================================================================
 
 main <- function() {
+  run_news_lag_sanity_checks()
   stopifnot(
     identical(CONFIG$radii, c(250L, 500L, 1000L)),
     identical(CONFIG$lags, c(0L, 3L, 6L, 12L))
