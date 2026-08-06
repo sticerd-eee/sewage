@@ -111,6 +111,14 @@ sign_agreement <- vapply(
 
 ## Conclusion
 
+Taken together, the realized extensive-margin paths do not support mistimed
+attention as a general explanation for the sales null. The post-indicator sales
+path moves toward the contemporaneous rental sign at some shorter lags, but the
+movement is not sustained; the article sales path never shares the rental sign;
+and the rental associations remain strong when attention is deliberately
+backdated. This is a qualitative KTD7 assessment across both measures and the
+rental placebo, not a mechanical threshold rule.
+
 The report applies KTD7 descriptively and does not assign a mechanical pass/fail
 verdict. Mistiming is more plausible when sales estimates move coherently toward
 the contemporaneous rental sign and an economically relevant magnitude over
