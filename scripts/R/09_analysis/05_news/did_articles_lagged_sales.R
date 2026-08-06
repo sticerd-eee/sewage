@@ -271,18 +271,18 @@ estimate_rental_model <- function(dat) {
 estimate_sales_lag_path <- function(base_sample, articles, radius) {
   models <- vector("list", length(CONFIG$lags))
   names(models) <- paste0("lag_", CONFIG$lags)
+  common_base <- restrict_to_common_sample(
+    base_sample,
+    start_month_id = CONFIG$analysis_start_month_id,
+    max_lag = CONFIG$max_lag
+  )
 
   for (lag in CONFIG$lags) {
-    joined <- join_lagged_cumulative_articles(
-      base_sample,
+    dat <- join_lagged_cumulative_articles(
+      common_base,
       articles,
       lag = lag,
       start_month_id = CONFIG$analysis_start_month_id
-    )
-    dat <- restrict_to_common_sample(
-      joined,
-      start_month_id = CONFIG$analysis_start_month_id,
-      max_lag = CONFIG$max_lag
     )
 
     stopifnot(
@@ -297,7 +297,7 @@ estimate_sales_lag_path <- function(base_sample, articles, radius) {
     cat(sprintf(
       "  Sales %dm lag %2d common sample: min month = %d, N = %s; dropped %s base rows\n",
       radius, lag, min(dat$month_id), format(nrow(dat), big.mark = ","),
-      format(nrow(base_sample) - nrow(dat), big.mark = ",")
+      format(nrow(base_sample) - nrow(common_base), big.mark = ",")
     ))
   }
 

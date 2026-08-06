@@ -110,17 +110,6 @@ CONFIG <- list(
 
 
 # ==============================================================================
-# 2. Package Management
-# ==============================================================================
-
-initialise_environment <- function() {
-  invisible(lapply("dplyr", function(pkg) {
-    suppressPackageStartupMessages(library(pkg, character.only = TRUE))
-  }))
-}
-
-
-# ==============================================================================
 # 3. Data Preparation
 # ==============================================================================
 
@@ -441,8 +430,6 @@ export_effect_sizes <- function(sales_models, rental_models) {
 # ==============================================================================
 
 main <- function() {
-  initialise_environment()
-
   stopifnot(
     identical(CONFIG$lags, c(0L, 3L, 6L, 12L)),
     identical(

@@ -13,23 +13,7 @@ execute:
 ---
 
 ```{r}
-find_repo_root <- function(start = getwd()) {
-  candidate <- normalizePath(start, mustWork = TRUE)
-  repeat {
-    marker <- file.path(
-      candidate, "scripts", "R", "09_analysis", "05_news",
-      "summarise_lagged_attention_sales.R"
-    )
-    if (file.exists(marker)) return(candidate)
-    parent <- dirname(candidate)
-    if (identical(parent, candidate)) {
-      stop("Could not locate the sewage project root.", call. = FALSE)
-    }
-    candidate <- parent
-  }
-}
-
-repo_root <- find_repo_root()
+repo_root <- here::here()
 results_path <- Sys.getenv(
   "LAGGED_ATTENTION_RESULTS_PATH",
   file.path(repo_root, "output", "tables", "did_news_lagged_sales_effect_sizes.csv")

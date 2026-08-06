@@ -108,17 +108,6 @@ CONFIG <- list(
 
 
 # ==============================================================================
-# 2. Package Management
-# ==============================================================================
-
-initialise_environment <- function() {
-  invisible(lapply("dplyr", function(pkg) {
-    suppressPackageStartupMessages(library(pkg, character.only = TRUE))
-  }))
-}
-
-
-# ==============================================================================
 # 3. Data Preparation
 # ==============================================================================
 
@@ -232,21 +221,21 @@ validate_lagged_articles <- function(data, lag) {
 
 #' Join articles for one lag, with an optional common-sample restriction
 prepare_lagged_sample <- function(base_sample, articles, lag, common_sample) {
+  if (common_sample) {
+    base_sample <- restrict_to_common_sample(
+      sample = base_sample,
+      start_month_id = CONFIG$analysis_start_month_id,
+      max_lag = CONFIG$max_lag
+    )
+    stopifnot(min(base_sample$month_id) == 13L)
+  }
+
   dat <- join_lagged_cumulative_articles(
     sample = base_sample,
     articles = articles,
     lag = lag,
     start_month_id = CONFIG$analysis_start_month_id
   )
-
-  if (common_sample) {
-    dat <- restrict_to_common_sample(
-      sample = dat,
-      start_month_id = CONFIG$analysis_start_month_id,
-      max_lag = CONFIG$max_lag
-    )
-    stopifnot(min(dat$month_id) == 13L)
-  }
 
   validate_lagged_articles(dat, lag)
   stopifnot(all(is.finite(dat$log_cumulative_articles)))
@@ -279,8 +268,9 @@ estimate_preferred_model <- function(data, market) {
 
 estimate_common_lag_path <- function(base_sample, articles, market) {
   models <- vector("list", length(CONFIG$lags))
-  data_by_lag <- vector("list", length(CONFIG$lags))
-  names(models) <- names(data_by_lag) <- paste0("lag_", CONFIG$lags)
+  data_n <- integer(length(CONFIG$lags))
+  min_month <- integer(length(CONFIG$lags))
+  names(models) <- names(data_n) <- names(min_month) <- paste0("lag_", CONFIG$lags)
 
   for (lag in CONFIG$lags) {
     dat <- prepare_lagged_sample(
@@ -302,13 +292,12 @@ estimate_common_lag_path <- function(base_sample, articles, market) {
     ))
 
     lag_name <- paste0("lag_", lag)
-    data_by_lag[[lag_name]] <- dat
+    data_n[[lag_name]] <- nrow(dat)
+    min_month[[lag_name]] <- min(dat$month_id)
     models[[lag_name]] <- estimate_preferred_model(dat, market)
   }
 
-  data_n <- vapply(data_by_lag, nrow, integer(1))
   model_n <- vapply(models, stats::nobs, numeric(1))
-  min_month <- vapply(data_by_lag, function(x) min(x$month_id), numeric(1))
 
   stopifnot(
     length(unique(data_n)) == 1L,
@@ -316,7 +305,7 @@ estimate_common_lag_path <- function(base_sample, articles, market) {
     all(min_month == 13L)
   )
 
-  list(models = models, data = data_by_lag)
+  models
 }
 
 estimate_full_reference <- function(base_sample, articles, market) {
@@ -336,10 +325,7 @@ estimate_full_reference <- function(base_sample, articles, market) {
     format(nrow(dat), big.mark = ",")
   ))
 
-  list(
-    model = estimate_preferred_model(dat, market),
-    data = dat
-  )
+  estimate_preferred_model(dat, market)
 }
 
 
@@ -551,8 +537,6 @@ export_effect_sizes <- function(
 # ==============================================================================
 
 main <- function() {
-  initialise_environment()
-
   stopifnot(
     identical(CONFIG$lags, c(0L, 3L, 6L, 12L)),
     CONFIG$max_lag == max(CONFIG$lags),
@@ -595,16 +579,16 @@ main <- function() {
   rental_full <- estimate_full_reference(rental_base, articles, "rentals")
 
   export_table(
-    sales_full_reference = sales_full$model,
-    sales_common_models = sales_common$models,
-    rental_full_reference = rental_full$model,
+    sales_full_reference = sales_full,
+    sales_common_models = sales_common,
+    rental_full_reference = rental_full,
     comparison = comparison
   )
   effect_sizes <- export_effect_sizes(
-    sales_full_reference = sales_full$model,
-    sales_common_models = sales_common$models,
-    rental_full_reference = rental_full$model,
-    rental_common_models = rental_common$models
+    sales_full_reference = sales_full,
+    sales_common_models = sales_common,
+    rental_full_reference = rental_full,
+    rental_common_models = rental_common
   )
 
   table_text <- paste(readLines(CONFIG$output_path, warn = FALSE), collapse = "\n")

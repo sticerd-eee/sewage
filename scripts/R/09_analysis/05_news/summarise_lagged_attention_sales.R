@@ -232,19 +232,13 @@ atomic_write_csv <- function(data, path) {
 }
 
 figure_data <- function(data) {
-  keep <- (
-    data$margin == "extensive" & data$market == "sales" &
-      ((data$measure == "post" & data$sample == "full") |
-         (data$measure == "articles" & data$sample == "common"))
-  ) | (
-    data$margin == "extensive" & data$market == "rentals" &
-      ((data$measure == "post" & data$sample == "full") |
-         (data$measure == "articles" & data$sample == "common"))
-  ) | (
-    data$margin == "intensive" & data$market == "sales" &
-      ((data$measure == "post" & data$sample == "full") |
-         (data$measure == "articles" & data$sample == "common"))
-  )
+  is_path_sample <-
+    (data$measure == "post" & data$sample == "full") |
+    (data$measure == "articles" & data$sample == "common")
+  is_included_panel <-
+    data$margin == "extensive" |
+    (data$margin == "intensive" & data$market == "sales")
+  keep <- is_path_sample & is_included_panel
   out <- data[keep, , drop = FALSE]
   out$panel <- ifelse(
     out$margin == "intensive", "Intensive sales (extension)",
