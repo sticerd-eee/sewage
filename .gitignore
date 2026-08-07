@@ -68,7 +68,7 @@ temp/
 *.zip
 
 # Dropbox symlinks at the repository root (data and outputs live in
-# the shared Dropbox folder; see docs/git_and_claude_workflow.md)
+# the shared Dropbox folder; see README.md)
 /data
 /output
 
