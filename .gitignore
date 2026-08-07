@@ -24,6 +24,7 @@ __pycache__/
 # Agent and assistant configuration (personal/machine-specific only;
 # AGENTS.md, CLAUDE.md, and .claude/skills/ are shared and tracked)
 CLAUDE.local.md
+AGENTS.override.md
 .claude/settings.local.json
 .claude/worktrees/
 .agents/
