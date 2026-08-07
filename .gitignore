@@ -71,6 +71,13 @@ temp/
 /data
 /output
 
+# Confidential and administrative documents: Dropbox only, never in
+# git (the repository is public). Data-access applications contain
+# personal details; emails contain addresses and correspondence.
+docs/data_requests/
+*.eml
+*.msg
+
 # Generated book and testing outputs
 /book/.quarto/
 /book/_freeze/

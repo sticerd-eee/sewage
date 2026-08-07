@@ -27,6 +27,7 @@ The repository connects to Dropbox through two symbolic links at its root: `data
 - Data files anywhere else in the tree (`.csv`, `.dta`, `.xlsx`, `.RData`, `.zip`, ...). If a script produces one, write it to `output/`.
 - Rendered artefacts that a script or LaTeX can regenerate (`.pdf`, `.log`, `.aux`, caches). We commit the recipe, not the meal.
 - Machine-specific or personal files: `.Rhistory`, `.Renviron`, `.env`, `.DS_Store`, editor settings, your personal Claude settings.
+- Confidential or administrative documents: data-access applications, email correspondence (`.eml`), ethics forms, user agreements. These contain personal details and the repository is public — they live in the shared Dropbox (`docs/data_requests/` there) and nowhere else. Remember that .gitignore is accident prevention, not a security boundary: anything committed stays in the public git history even after deletion, so check twice before committing documents.
 
 The rule of thumb: **commit anything a collaborator needs to reproduce your work that they cannot regenerate themselves; ignore anything that is data, generated, or personal.**
 
