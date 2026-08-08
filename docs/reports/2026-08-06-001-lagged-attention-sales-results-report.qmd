@@ -1,0 +1,235 @@
+---
+title: "Lagged public attention and house sales"
+subtitle: "Extensive-margin core and intensive-margin extension"
+date: 2026-08-06
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+repo_root <- here::here()
+results_path <- Sys.getenv(
+  "LAGGED_ATTENTION_RESULTS_PATH",
+  file.path(repo_root, "output", "tables", "did_news_lagged_sales_effect_sizes.csv")
+)
+core_figure_path <- Sys.getenv(
+  "LAGGED_ATTENTION_FIGURE_PATH",
+  file.path(repo_root, "output", "figures", "did_news_lagged_sales_coefficient_paths.png")
+)
+extension_figure_path <- Sys.getenv(
+  "LAGGED_ATTENTION_EXTENSION_FIGURE_PATH",
+  file.path(repo_root, "output", "figures", "did_news_lagged_sales_intensive_extension.png")
+)
+required_paths <- c(results_path, core_figure_path, extension_figure_path)
+if (!all(file.exists(required_paths))) {
+  stop(
+    "Run summarise_lagged_attention_sales.R before rendering this report. ",
+    "Missing: ", paste(required_paths[!file.exists(required_paths)], collapse = ", "),
+    call. = FALSE
+  )
+}
+results <- utils::read.csv(results_path, stringsAsFactors = FALSE)
+
+path_sample <- function(measure) if (measure == "post") "full" else "common"
+
+movement_assessment <- function(measure) {
+  sample_name <- path_sample(measure)
+  core <- results[
+    results$margin == "extensive" & results$market == "sales" &
+      results$measure == measure & results$sample == sample_name,
+  ]
+  rental <- results[
+    results$margin == "extensive" & results$market == "rentals" &
+      results$measure == measure & results$sample == sample_name,
+  ]
+  core <- core[order(core$lag), ]
+  rental <- rental[order(rental$lag), ]
+  sales_zero <- core$estimate[core$lag == 0L]
+  rental_zero <- rental$estimate[rental$lag == 0L]
+  lagged <- core[core$lag > 0L, ]
+  same_sign <- sign(lagged$estimate) == sign(rental_zero)
+  closer <- abs(lagged$estimate - rental_zero) <
+    abs(sales_zero - rental_zero)
+  relative_magnitude <- if (abs(rental_zero) < .Machine$double.eps) {
+    rep(NA_real_, nrow(lagged))
+  } else {
+    abs(lagged$estimate) / abs(rental_zero)
+  }
+  rental_zero_abs <- abs(rental_zero)
+  rental_lag_strength <- if (rental_zero_abs < .Machine$double.eps) {
+    NA_real_
+  } else {
+    stats::median(abs(rental$estimate[rental$lag > 0L])) / rental_zero_abs
+  }
+  data.frame(
+    measure = measure,
+    rental_sign_lags = paste(lagged$lag[same_sign], collapse = ", "),
+    closer_lags = paste(lagged$lag[closer], collapse = ", "),
+    relative_magnitudes = paste(
+      paste0("lag ", lagged$lag, " = ", sprintf("%.2f", relative_magnitude)),
+      collapse = "; "
+    ),
+    rental_lag_strength = rental_lag_strength,
+    stringsAsFactors = FALSE
+  )
+}
+
+assessment <- do.call(rbind, lapply(c("post", "articles"), movement_assessment))
+
+display_lags <- function(x) ifelse(nzchar(x), x, "none")
+
+fmt <- function(x) formatC(x, digits = 4L, format = "f")
+display_results <- results
+display_results$estimate_ci <- paste0(
+  fmt(display_results$estimate), " [", fmt(display_results$conf_low), ", ",
+  fmt(display_results$conf_high), "]"
+)
+
+margin_sign_agreement <- function(measure) {
+  sample_name <- path_sample(measure)
+  extensive_lagged <- results[
+    results$margin == "extensive" & results$market == "sales" &
+      results$measure == measure & results$sample == sample_name &
+      results$lag > 0L,
+  ]
+  intensive_lagged <- results[
+    results$margin == "intensive" & results$market == "sales" &
+      results$measure == measure & results$sample == sample_name &
+      results$lag > 0L,
+  ]
+  extensive_sign <- sign(stats::median(extensive_lagged$estimate))
+  radius_signs <- tapply(
+    intensive_lagged$estimate, intensive_lagged$radius,
+    function(x) sign(stats::median(x))
+  )
+  sum(radius_signs == extensive_sign)
+}
+sign_agreement <- vapply(
+  c("post", "articles"), margin_sign_agreement, integer(1)
+)
+```
+
+## Conclusion
+
+Taken together, the realized extensive-margin paths do not support mistimed
+attention as a general explanation for the sales null. The post-indicator sales
+path moves toward the contemporaneous rental sign at some shorter lags, but the
+movement is not sustained; the article sales path never shares the rental sign;
+and the rental associations remain strong when attention is deliberately
+backdated. This is a qualitative KTD7 assessment across both measures and the
+rental placebo, not a mechanical threshold rule.
+
+The report applies KTD7 descriptively and does not assign a mechanical pass/fail
+verdict. Mistiming is more plausible when sales estimates move coherently toward
+the contemporaneous rental sign and an economically relevant magnitude over
+plausible lags, preferably for both measures; an isolated p-value is not treated
+as confirmation.
+
+For the post measure, the lagged sales estimates have the contemporaneous rental
+sign at lags `r display_lags(assessment$rental_sign_lags[assessment$measure == "post"])`
+and are closer to the rental estimate than the contemporaneous sales estimate at
+lags `r display_lags(assessment$closer_lags[assessment$measure == "post"])`.
+Their absolute magnitudes relative to the contemporaneous rental estimate are
+`r assessment$relative_magnitudes[assessment$measure == "post"]`. For articles,
+the corresponding rental-sign lags are
+`r display_lags(assessment$rental_sign_lags[assessment$measure == "articles"])`,
+the lags closer to the rental estimate are
+`r display_lags(assessment$closer_lags[assessment$measure == "articles"])`, and
+the relative magnitudes are
+`r assessment$relative_magnitudes[assessment$measure == "articles"]`. These
+patterns should be read jointly to assess whether timing plausibly explains the
+sales null; the code deliberately does not convert them into an unapproved
+numeric decision rule.
+
+The lag-12 post estimate deserves less weight than the other points: shifting the
+August 2022 threshold forward by 12 months leaves only five post-threshold months
+(August--December 2023), even though the full 36-month estimation sample remains.
+All intervals shown here are ordinary pointwise 95% confidence intervals; no
+simultaneous-band or multiple-testing adjustment is applied.
+
+## Extensive-margin core and rental placebo
+
+```{r}
+#| fig-cap: "Extensive-margin lagged-attention coefficient paths. The outcome, exposure comparison, and estimated interaction are stated in the panel labels. Sales are the issue-closing core; rentals are a secondary placebo."
+#| out-width: "100%"
+knitr::include_graphics(core_figure_path)
+```
+
+```{r}
+extensive <- display_results[display_results$margin == "extensive", ]
+extensive$role <- ifelse(
+  extensive$market == "sales", "Sales core", "Rental placebo"
+)
+extensive <- extensive[order(
+  match(extensive$measure, c("post", "articles")),
+  match(extensive$role, c("Sales core", "Rental placebo")),
+  match(extensive$sample, c("full", "common", "full_reference")),
+  extensive$lag
+), ]
+knitr::kable(
+  extensive[c("role", "measure", "sample", "lag", "estimate_ci", "n")],
+  col.names = c("Role", "Measure", "Sample", "Lag", "Estimate [95% CI]", "N"),
+  caption = "Extensive-margin estimates and contemporaneous references."
+)
+```
+
+The rental placebo is informative about temporal specificity. Relative to each
+measure's contemporaneous rental estimate, the median absolute lagged rental
+coefficient is `r ifelse(is.na(assessment$rental_lag_strength[assessment$measure == "post"]), "undefined", sprintf("%.2f", assessment$rental_lag_strength[assessment$measure == "post"]))`
+times as large for the post measure and
+`r ifelse(is.na(assessment$rental_lag_strength[assessment$measure == "articles"]), "undefined", sprintf("%.2f", assessment$rental_lag_strength[assessment$measure == "articles"]))`
+times as large for articles. Ratios near or above one weaken a sharp mistiming
+story because the rental relationship remains at least as strong when attention
+is deliberately backdated; materially smaller ratios support temporal
+specificity. This placebo evidence is interpreted jointly with the sales paths,
+not as a separate significance test.
+
+## Intensive-margin extension
+
+```{r}
+#| fig-cap: "Intensive-margin lagged-attention coefficient paths. The outcome is log transaction price; exposure is the weekly average spill count within the indicated radius."
+#| out-width: "100%"
+knitr::include_graphics(extension_figure_path)
+```
+
+```{r}
+intensive <- display_results[display_results$margin == "intensive", ]
+intensive <- intensive[order(
+  match(intensive$measure, c("post", "articles")),
+  match(intensive$market, c("sales", "rentals")),
+  intensive$radius,
+  match(intensive$sample, c("full", "common", "full_reference")),
+  intensive$lag
+), ]
+knitr::kable(
+  intensive[c(
+    "market", "measure", "radius", "sample", "lag", "estimate_ci", "n"
+  )],
+  col.names = c(
+    "Market", "Measure", "Radius (m)", "Sample", "Lag",
+    "Estimate [95% CI]", "N"
+  ),
+  caption = "Intensive-margin extension and contemporaneous rental benchmarks."
+)
+```
+
+The intensive estimates are an extension, not the issue-closing test. Radius
+comparisons should be read within radius because the 250m, 500m, and 1000m
+specifications select different property samples. Post models use January
+2021--December 2023 at every lag. Article paths use the common January
+2022--December 2023 sample, while `full_reference` rows preserve the
+contemporaneous January 2021--December 2023 benchmark.
+
+As a descriptive cross-margin check, the median lagged intensive sales estimate
+has the same sign as the median lagged extensive sales estimate at
+`r sign_agreement[["post"]]` of three radii for the post measure and
+`r sign_agreement[["articles"]]` of three radii for articles. Agreement across
+all radii reinforces the extensive pattern; partial or zero agreement records
+divergence. This comparison does not override the extensive-margin assessment
+because the intensive radius samples and coefficient scales differ.
