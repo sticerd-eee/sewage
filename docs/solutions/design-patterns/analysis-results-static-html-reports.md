@@ -48,6 +48,11 @@ reports feel like part of the same research product instead of one-off pages.
 
 Keep the report generation contract narrow:
 
+Generated report HTML is a build artifact. Commit the QMD or builder source and
+its reproducibility contract; generate HTML locally or in CI, and publish
+reader-facing copies through CI artifacts, GitHub Pages, releases, or replication
+deposits. Do not commit routine rendered HTML under `docs/reports/`.
+
 1. **Generated outputs are the source of truth.** Read coefficients, standard
    errors, stars, captions, and notes from existing artifacts under
    `output/tables/` or equivalent generated-output directories.
@@ -78,8 +83,9 @@ Keep the report generation contract narrow:
 7. **Promote to a builder script when hand-written HTML gets complex.** A static
    HTML file is fine for a small one-off report. Once the report needs repeated
    regeneration, large embedded tables, or systematic conversion from LaTeX,
-   add a Python builder under `scripts/python/` and commit the generated report
-   separately from the analysis scripts.
+   add and commit a Python builder under `scripts/python/`. Keep its rendered
+   HTML ignored during routine development; publish frozen copies through CI,
+   releases, or replication deposits when they are deliverables.
 8. **Treat LaTeX parsing and escaping as part of the reporting contract.** If a
    builder patches `modelsummary` or `tabularray` output, prefer literal string
    splicing for inserted notes over regex replacement strings that can swallow
@@ -129,8 +135,9 @@ Keep the report generation contract narrow:
 
 Separating analysis from reporting prevents a presentation edit from quietly
 changing model outputs. It also makes review easier: analysis commits can be
-tested with R/model smoke runs, while report commits can be checked with static
-HTML, parser, and content checks.
+tested with R/model smoke runs, while report-source commits can be checked by
+generating temporary HTML and running parser and content checks without adding
+the rendered artifact to source history.
 
 A coefficient-only summary protects the reader from hunting through wide
 regression tables for the interaction that answers the question. The full tables
@@ -233,9 +240,9 @@ is intended to stay ASCII-compatible: `&minus;`, `&times;`, `&ndash;`, and
   Reusable: re-run after the tables are regenerated.
 - `CONCEPTS.md` -- defines the Radius Buffer `B`, Directional/Nearest-Site
   Exposure, and Cross-Radius Robustness Summary vocabulary these reports use.
-- `docs/reports/2026-06-22-001-intensive-margin-results-tables-report.html` --
-  reference structure for coefficient summaries plus full tables.
-- `docs/reports/2026-06-23-001-windowed-article-salience-results-report.html` --
-  report created from generated cumulative/windowed article-salience outputs.
+- `scripts/python/build_windowed_article_salience_html_report.py` -- builder for
+  the locally generated cumulative/windowed article-salience report.
+- Locally generated `docs/reports/*.html` files -- preview and validation
+  artifacts; ignored by Git and published separately only when needed.
 - GitHub issue #6 -- related regression-table reporting context for adding MSOA
   specifications to publicity tables.
