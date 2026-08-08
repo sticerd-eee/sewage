@@ -90,6 +90,9 @@ docs/data_requests/
 /scripts/R/testing/*.html
 /scripts/R/testing/output/
 
+# Rendered analysis reports (commit source/builders; publish HTML via CI/releases)
+/docs/reports/*.html
+
 # Local project working directories
 DD_work/
 docs/lit_review/sewage_literature_review/

@@ -108,7 +108,7 @@ Follow the pattern set by `did_articles_windowed_prior_extensive.R` (per-paramet
 - **Idempotent component CSVs** — each of the four analysis scripts writes (replaces) its own uniquely named result CSV rather than appending to a shared file. Required columns are `margin`, `market`, `measure`, `radius`, `lag`, `sample`, `estimate`, `std_error`, `conf_low`, `conf_high`, `p_value`, and `n`.
 - **Deterministic consolidation** — a dedicated summary script reads the four component CSVs, validates unique result keys and expected coverage, binds them in a fixed order, and atomically replaces `output/tables/did_news_lagged_sales_effect_sizes.csv`. Re-running any script or the full workflow must not duplicate rows.
 - **Required coefficient-path figure** — show estimates and ordinary pointwise 95% confidence intervals by lag. Extensive sales paths are the core panels; the headline extensive rental placebo is a clearly marked secondary panel; intensive radius paths are labelled as extensions.
-- **Required results report** — create a source document and rendered HTML under `docs/reports/` (`YYYY-MM-DD-NNN-lagged-attention-sales-results-report.{qmd,html}`). It must state whether timing plausibly explains the sales null using the pre-specified pattern criterion in KTD7, not an isolated p-value.
+- **Required results report** — commit the source document under `docs/reports/` (`YYYY-MM-DD-NNN-lagged-attention-sales-results-report.qmd`) and render its ignored HTML locally or in CI. Archival HTML belongs in a release or replication deposit, not source history. The report must state whether timing plausibly explains the sales null using the pre-specified pattern criterion in KTD7, not an isolated p-value.
 
 ### KTD5 — Radius scope and core/extension status differ by margin
 
@@ -163,7 +163,7 @@ The report may conclude that mistiming is plausible only if sales estimates move
     Each analysis script owns and replaces exactly one of these component files.
   - `output/tables/did_news_lagged_sales_effect_sizes.csv` (deterministically consolidated by U6).
 - `output/figures/did_news_lagged_sales_coefficient_paths.{pdf,png}` (required, U6).
-- `docs/reports/YYYY-MM-DD-NNN-lagged-attention-sales-results-report.{qmd,html}` (required, U6).
+- `docs/reports/YYYY-MM-DD-NNN-lagged-attention-sales-results-report.qmd` (tracked source; rendered HTML is ignored, U6).
 
 > **Testing note**: this repo has **no R test harness** (only Python deps carry `tests/`). "Test scenarios" below are concrete **sanity assertions** the implementer should encode as inline `stopifnot()` / `cat()` diagnostics inside each script (matching the existing `print_extensive_margin_summary` diagnostic style), plus manual checks on the produced tables. They are not a separate test framework.
 
@@ -291,7 +291,7 @@ The report may conclude that mistiming is plausible only if sales estimates move
 
 **Requirements**: R4, R5, R6. **Dependencies**: U2, U3, U4, U5.
 
-**Files**: creates `scripts/R/09_analysis/05_news/summarise_lagged_attention_sales.R`; consumes the four component CSVs; writes `output/tables/did_news_lagged_sales_effect_sizes.csv`, `output/figures/did_news_lagged_sales_coefficient_paths.{pdf,png}`, and `docs/reports/YYYY-MM-DD-NNN-lagged-attention-sales-results-report.{qmd,html}`.
+**Files**: creates `scripts/R/09_analysis/05_news/summarise_lagged_attention_sales.R`; consumes the four component CSVs; writes `output/tables/did_news_lagged_sales_effect_sizes.csv`, `output/figures/did_news_lagged_sales_coefficient_paths.{pdf,png}`, and the tracked source `docs/reports/YYYY-MM-DD-NNN-lagged-attention-sales-results-report.qmd`. Its rendered HTML is a local/CI artifact and is not tracked.
 
 **Approach**:
 - Read the four component CSVs in a fixed order; validate required columns, unique keys, allowed lags, expected market/margin/radius coverage, finite estimates, and the KTD2 sample labels. Abort on duplicates or missing cells. Atomically replace the consolidated CSV; never append.
@@ -302,7 +302,7 @@ The report may conclude that mistiming is plausible only if sales estimates move
 
 **Test scenarios**: consolidation is idempotent; rerunning it leaves row count and keys unchanged; deliberate duplicate/missing fixtures fail validation; every expected cell is present; figure files exist and are non-empty; report renders without broken references or placeholders.
 
-**Verification**: report exists and cites freshly produced numbers; no placeholders.
+**Verification**: the QMD source is tracked; its ignored HTML renders successfully from freshly produced numbers with no placeholders.
 
 ---
 
