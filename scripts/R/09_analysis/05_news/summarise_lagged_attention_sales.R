@@ -1,11 +1,12 @@
 # ==============================================================================
 # Deterministic Summary of Lagged Public-Attention Results
 # Purpose: Validate and consolidate the four lag-sweep component CSVs, then
-#          create coefficient-path figures for the extensive-margin core,
-#          extensive rental placebo, and intensive-margin extension.
+#          create separate coefficient-path figures for the extensive-margin
+#          core/placebo and the intensive-margin extension.
 # Inputs:  Four script-owned component effect-size CSVs in output/tables.
 # Outputs: output/tables/did_news_lagged_sales_effect_sizes.csv
 #          output/figures/did_news_lagged_sales_coefficient_paths.{pdf,png}
+#          output/figures/did_news_lagged_sales_intensive_extension.{pdf,png}
 # ==============================================================================
 
 required_columns <- c(
@@ -304,7 +305,7 @@ atomic_write_csv <- function(data, path) {
   invisible(path)
 }
 
-figure_data <- function(data) {
+path_figure_data <- function(data) {
   is_path_sample <-
     (data$measure == "post" & data$sample == "full") |
     (data$measure == "articles" & data$sample == "common")
@@ -313,30 +314,81 @@ figure_data <- function(data) {
     (data$margin == "intensive" & data$market == "sales")
   keep <- is_path_sample & is_included_panel
   out <- data[keep, , drop = FALSE]
-  out$panel <- ifelse(
-    out$margin == "intensive", "Intensive sales (extension)",
-    ifelse(
-      out$market == "rentals", "Extensive rentals (secondary placebo)",
-      "Extensive sales (core)"
-    )
-  )
   out$series <- ifelse(
     out$margin == "intensive", paste0(out$radius, "m radius"),
     ifelse(out$market == "rentals", "Rentals", "Sales")
   )
-  out$measure_label <- ifelse(
-    out$measure == "post", "Post-peak indicator", "Cumulative articles"
-  )
-  out$panel <- factor(
-    out$panel,
-    levels = c(
-      "Extensive sales (core)", "Extensive rentals (secondary placebo)",
-      "Intensive sales (extension)"
+  out
+}
+
+core_figure_data <- function(data) {
+  out <- path_figure_data(data)
+  out <- out[out$margin == "extensive", , drop = FALSE]
+  out$outcome_label <- ifelse(
+    out$market == "sales",
+    "Sales: log transaction price\nNear: 0-500m vs far: 1-2km",
+    paste0(
+      "Rentals: log weekly asking rent\n",
+      "Near: 0-500m vs far: 1-2km (placebo)"
     )
   )
-  out$measure_label <- factor(
-    out$measure_label,
-    levels = c("Post-peak indicator", "Cumulative articles")
+  out$interaction_label <- ifelse(
+    out$measure == "post",
+    "Binary attention\nNear × post indicator at t - L",
+    "Article attention\nNear × log cumulative articles at t - L"
+  )
+  out$outcome_label <- factor(
+    out$outcome_label,
+    levels = c(
+      "Sales: log transaction price\nNear: 0-500m vs far: 1-2km",
+      paste0(
+        "Rentals: log weekly asking rent\n",
+        "Near: 0-500m vs far: 1-2km (placebo)"
+      )
+    )
+  )
+  out$interaction_label <- factor(
+    out$interaction_label,
+    levels = c(
+      "Binary attention\nNear × post indicator at t - L",
+      "Article attention\nNear × log cumulative articles at t - L"
+    )
+  )
+  out
+}
+
+intensive_figure_data <- function(data) {
+  out <- path_figure_data(data)
+  out <- out[
+    out$margin == "intensive" & out$market == "sales", , drop = FALSE
+  ]
+  out$series <- factor(
+    out$series,
+    levels = c("250m radius", "500m radius", "1000m radius")
+  )
+  out$interaction_label <- ifelse(
+    out$measure == "post",
+    paste0(
+      "Binary attention\n",
+      "Weekly spill exposure × post indicator at t - L"
+    ),
+    paste0(
+      "Article attention\n",
+      "Weekly spill exposure × log cumulative articles at t - L"
+    )
+  )
+  out$interaction_label <- factor(
+    out$interaction_label,
+    levels = c(
+      paste0(
+        "Binary attention\n",
+        "Weekly spill exposure × post indicator at t - L"
+      ),
+      paste0(
+        "Article attention\n",
+        "Weekly spill exposure × log cumulative articles at t - L"
+      )
+    )
   )
   out
 }
@@ -359,10 +411,68 @@ atomic_save_plot <- function(plot, path, width, height, dpi = 300) {
   invisible(path)
 }
 
-create_coefficient_path_figure <- function(data, pdf_path, png_path) {
-  plot_data <- figure_data(data)
-  expected_path_rows <- 4L + 4L + 4L + 4L + 12L + 12L
-  stopifnot(nrow(plot_data) == expected_path_rows)
+create_core_coefficient_figure <- function(data, pdf_path, png_path) {
+  plot_data <- core_figure_data(data)
+  stopifnot(nrow(plot_data) == 16L)
+
+  plot <- ggplot2::ggplot(
+    plot_data,
+    ggplot2::aes(
+      x = .data$lag, y = .data$estimate, colour = .data$market,
+      group = .data$market
+    )
+  ) +
+    ggplot2::geom_hline(yintercept = 0, colour = "grey65", linewidth = 0.35) +
+    ggplot2::geom_line(linewidth = 0.55) +
+    ggplot2::geom_errorbar(
+      ggplot2::aes(ymin = .data$conf_low, ymax = .data$conf_high),
+      width = 0.55, linewidth = 0.45
+    ) +
+    ggplot2::geom_point(size = 1.8) +
+    ggplot2::facet_grid(
+      rows = ggplot2::vars(.data$outcome_label),
+      cols = ggplot2::vars(.data$interaction_label),
+      scales = "free_y", switch = "y"
+    ) +
+    ggplot2::scale_x_continuous(breaks = allowed_lags) +
+    ggplot2::scale_colour_manual(values = c(
+      "sales" = "#1b6ca8", "rentals" = "#a4512a"
+    ), guide = "none") +
+    ggplot2::labs(
+      title = paste(
+        "Does earlier public attention change the near-far price or rent gap?"
+      ),
+      subtitle = paste(
+        "Each point is the interaction coefficient from a separate LSOA and",
+        "month fixed-effects regression."
+      ),
+      x = "Attention lag, L (months)",
+      y = "Estimated near × attention coefficient (95% CI)",
+      caption = paste(
+        "Models include property controls and LSOA-clustered standard errors.",
+        "\nPost models use Jan 2021-Dec 2023; article models use the common",
+        "Jan 2022-Dec 2023 sample."
+      )
+    ) +
+    ggplot2::theme_minimal(base_size = 10) +
+    ggplot2::theme(
+      panel.grid.minor = ggplot2::element_blank(),
+      strip.placement = "outside",
+      strip.text = ggplot2::element_text(face = "bold", lineheight = 1.1),
+      strip.text.y.left = ggplot2::element_text(angle = 0, hjust = 1),
+      plot.caption = ggplot2::element_text(hjust = 0, lineheight = 1.05),
+      plot.caption.position = "plot",
+      plot.title.position = "plot"
+    )
+
+  atomic_save_plot(plot, pdf_path, width = 10.5, height = 6.6)
+  atomic_save_plot(plot, png_path, width = 10.5, height = 6.6, dpi = 320)
+  invisible(plot)
+}
+
+create_intensive_coefficient_figure <- function(data, pdf_path, png_path) {
+  plot_data <- intensive_figure_data(data)
+  stopifnot(nrow(plot_data) == 24L)
 
   plot <- ggplot2::ggplot(
     plot_data,
@@ -378,34 +488,43 @@ create_coefficient_path_figure <- function(data, pdf_path, png_path) {
       width = 0.55, linewidth = 0.45
     ) +
     ggplot2::geom_point(size = 1.8) +
-    ggplot2::facet_grid(
-      rows = ggplot2::vars(.data$panel),
-      cols = ggplot2::vars(.data$measure_label), scales = "free_y"
+    ggplot2::facet_wrap(
+      ggplot2::vars(.data$interaction_label), nrow = 1L, scales = "free_y"
     ) +
     ggplot2::scale_x_continuous(breaks = allowed_lags) +
     ggplot2::scale_colour_manual(values = c(
-      "Sales" = "#1b6ca8", "Rentals" = "#a4512a",
       "250m radius" = "#4477aa", "500m radius" = "#228833",
       "1000m radius" = "#aa3377"
     )) +
     ggplot2::labs(
-      x = "Attention lag (months)", y = "Interaction coefficient",
-      colour = NULL,
+      title = paste(
+        "Does earlier public attention change the spill-intensity price gradient?"
+      ),
+      subtitle = paste(
+        "Outcome: log transaction price. Exposure: weekly average spill count",
+        "within the indicated radius. Each point is a separate regression."
+      ),
+      x = "Attention lag, L (months)",
+      y = "Estimated spill exposure × attention coefficient (95% CI)",
+      colour = "Exposure radius",
       caption = paste(
-        "Points are estimates; bars are ordinary pointwise 95% confidence",
-        "intervals. Article paths use the common Jan 2022-Dec 2023 sample."
+        "Models include property controls, LSOA and month fixed effects, and",
+        "LSOA-clustered standard errors.\nPost models use Jan 2021-Dec 2023;",
+        "article models use the common Jan 2022-Dec 2023 sample."
       )
     ) +
     ggplot2::theme_minimal(base_size = 10) +
     ggplot2::theme(
       legend.position = "bottom",
       panel.grid.minor = ggplot2::element_blank(),
-      strip.text.y = ggplot2::element_text(angle = 0),
-      plot.caption = ggplot2::element_text(hjust = 0)
+      strip.text = ggplot2::element_text(face = "bold", lineheight = 1.1),
+      plot.caption = ggplot2::element_text(hjust = 0, lineheight = 1.05),
+      plot.caption.position = "plot",
+      plot.title.position = "plot"
     )
 
-  atomic_save_plot(plot, pdf_path, width = 9.2, height = 8.2)
-  atomic_save_plot(plot, png_path, width = 9.2, height = 8.2, dpi = 320)
+  atomic_save_plot(plot, pdf_path, width = 10.5, height = 5.5)
+  atomic_save_plot(plot, png_path, width = 10.5, height = 5.5, dpi = 320)
   invisible(plot)
 }
 
@@ -419,6 +538,12 @@ main <- function(
   ),
   figure_png_path = here::here(
     "output", "figures", "did_news_lagged_sales_coefficient_paths.png"
+  ),
+  extension_figure_pdf_path = here::here(
+    "output", "figures", "did_news_lagged_sales_intensive_extension.pdf"
+  ),
+  extension_figure_png_path = here::here(
+    "output", "figures", "did_news_lagged_sales_intensive_extension.png"
   )
 ) {
   for (package in c("here", "ggplot2")) {
@@ -430,19 +555,31 @@ main <- function(
   run_consolidation_sanity_checks()
   results <- consolidate_components(component_paths)
   atomic_write_csv(results, consolidated_path)
-  create_coefficient_path_figure(
+  create_core_coefficient_figure(
     results, pdf_path = figure_pdf_path, png_path = figure_png_path
+  )
+  create_intensive_coefficient_figure(
+    results, pdf_path = extension_figure_pdf_path,
+    png_path = extension_figure_png_path
   )
   stopifnot(
     file.exists(figure_pdf_path),
     file.info(figure_pdf_path)$size > 0L,
     file.exists(figure_png_path),
-    file.info(figure_png_path)$size > 0L
+    file.info(figure_png_path)$size > 0L,
+    file.exists(extension_figure_pdf_path),
+    file.info(extension_figure_pdf_path)$size > 0L,
+    file.exists(extension_figure_png_path),
+    file.info(extension_figure_png_path)$size > 0L
   )
   cat("Validated and consolidated ", nrow(results), " result rows.\n", sep = "")
   cat("Consolidated CSV: ", consolidated_path, "\n", sep = "")
-  cat("Coefficient paths: ", figure_pdf_path, " and ", figure_png_path, "\n",
-      sep = "")
+  cat("Core coefficient paths: ", figure_pdf_path, " and ", figure_png_path,
+      "\n", sep = "")
+  cat(
+    "Intensive extension paths: ", extension_figure_pdf_path, " and ",
+    extension_figure_png_path, "\n", sep = ""
+  )
   invisible(results)
 }
 

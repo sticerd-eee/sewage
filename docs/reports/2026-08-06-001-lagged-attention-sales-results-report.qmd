@@ -18,13 +18,19 @@ results_path <- Sys.getenv(
   "LAGGED_ATTENTION_RESULTS_PATH",
   file.path(repo_root, "output", "tables", "did_news_lagged_sales_effect_sizes.csv")
 )
-figure_path <- Sys.getenv(
+core_figure_path <- Sys.getenv(
   "LAGGED_ATTENTION_FIGURE_PATH",
   file.path(repo_root, "output", "figures", "did_news_lagged_sales_coefficient_paths.png")
 )
-if (!file.exists(results_path) || !file.exists(figure_path)) {
+extension_figure_path <- Sys.getenv(
+  "LAGGED_ATTENTION_EXTENSION_FIGURE_PATH",
+  file.path(repo_root, "output", "figures", "did_news_lagged_sales_intensive_extension.png")
+)
+required_paths <- c(results_path, core_figure_path, extension_figure_path)
+if (!all(file.exists(required_paths))) {
   stop(
-    "Run summarise_lagged_attention_sales.R before rendering this report.",
+    "Run summarise_lagged_attention_sales.R before rendering this report. ",
+    "Missing: ", paste(required_paths[!file.exists(required_paths)], collapse = ", "),
     call. = FALSE
   )
 }
@@ -147,15 +153,13 @@ August 2022 threshold forward by 12 months leaves only five post-threshold month
 All intervals shown here are ordinary pointwise 95% confidence intervals; no
 simultaneous-band or multiple-testing adjustment is applied.
 
-## Coefficient paths
+## Extensive-margin core and rental placebo
 
 ```{r}
-#| fig-cap: "Lagged-attention coefficient paths. The extensive sales panels are the issue-closing core; rentals are a secondary placebo; radius paths are an intensive-margin extension."
+#| fig-cap: "Extensive-margin lagged-attention coefficient paths. The outcome, exposure comparison, and estimated interaction are stated in the panel labels. Sales are the issue-closing core; rentals are a secondary placebo."
 #| out-width: "100%"
-knitr::include_graphics(figure_path)
+knitr::include_graphics(core_figure_path)
 ```
-
-## Extensive-margin core and rental placebo
 
 ```{r}
 extensive <- display_results[display_results$margin == "extensive", ]
@@ -187,6 +191,12 @@ specificity. This placebo evidence is interpreted jointly with the sales paths,
 not as a separate significance test.
 
 ## Intensive-margin extension
+
+```{r}
+#| fig-cap: "Intensive-margin lagged-attention coefficient paths. The outcome is log transaction price; exposure is the weekly average spill count within the indicated radius."
+#| out-width: "100%"
+knitr::include_graphics(extension_figure_path)
+```
 
 ```{r}
 intensive <- display_results[display_results$margin == "intensive", ]
