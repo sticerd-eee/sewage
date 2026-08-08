@@ -5,27 +5,31 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Local environment and session files
-.env
-.history
-.Rapp.history
-.RData
-.Renviron
+# R environment and session files
 .Rhistory
+.Rapp.history
+.history
 .Rproj.user/
 .Ruserdata
+.Renviron
 rv/library/
 rv/local/
-scripts/python/.venv/
+
+# Python environment
+.venv/
 __pycache__/
 *.pyc
+.env
 
-# Local agent and assistant configuration
+# Agent and assistant configuration (personal/machine-specific only;
+# AGENTS.md, CLAUDE.md, and .claude/skills/ are shared and tracked)
+CLAUDE.local.md
+AGENTS.override.md
+.claude/settings.local.json
+.claude/worktrees/
 .agents/
-.claude/
 .codex/
 .tmp_skill_refresh/
-AGENTS.md
 compound-engineering.local.md
 .compound-engineering/
 
@@ -35,7 +39,6 @@ compound-engineering.local.md
 ~$*
 *.temp
 temp/
-*/temp/*
 
 # Rendered documents and compilation artefacts
 *.aux
@@ -50,8 +53,9 @@ temp/
 *.run.xml
 *.synctex.gz
 
-# Raw data and bulky binary artefacts
+# Data files: these belong in Dropbox, never in git
 *.accdb
+*.laccdb
 *.csv
 *.dta
 *.nc
@@ -63,6 +67,18 @@ temp/
 *.xlsx
 *.zip
 
+# Dropbox symlinks at the repository root (data and outputs live in
+# the shared Dropbox folder; see README.md)
+/data
+/output
+
+# Confidential and administrative documents: Dropbox only, never in
+# git (the repository is public). Data-access applications contain
+# personal details; emails contain addresses and correspondence.
+docs/data_requests/
+*.eml
+*.msg
+
 # Generated book and testing outputs
 /book/.quarto/
 /book/_freeze/
@@ -73,10 +89,8 @@ temp/
 /book/tinytable_assets/
 /scripts/R/testing/*.html
 /scripts/R/testing/output/
-/output
 
 # Local project working directories
-/data
 DD_work/
 docs/lit_review/sewage_literature_review/
 docs/overleaf/
