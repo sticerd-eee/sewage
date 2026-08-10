@@ -147,20 +147,7 @@ aggregate_daily_spills <- function(events_dt) {
                       spill_count = integer(), spill_hrs = numeric()))
   }
 
-  dt <- copy(events_dt)
-
-  # Clamp events to year boundaries (same as prepare_spill_data() in utils)
-  dt[, c("lower", "upper") := {
-    lr <- as.POSIXct(ISOdatetime(year, 1, 1, 0, 0, 0), tz = "UTC")
-    ur <- as.POSIXct(ISOdatetime(year + 1, 1, 1, 0, 0, 0), tz = "UTC")
-    list(lr, ur)
-  }, by = year]
-
-  dt[, `:=`(
-    start_time = pmax(start_time, lower),
-    end_time   = pmin(end_time,   upper)
-  )]
-  dt[, c("lower", "upper") := NULL]
+  dt <- clamp_spill_records_to_year(copy(events_dt))
 
   # Split into daily records
   daily_dt <- split_daily_records(dt)

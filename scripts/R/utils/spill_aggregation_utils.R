@@ -30,6 +30,33 @@ for(pkg in required_packages) {
 # Functions
 ############################################################
 
+#' Clamp spill records to their labelled calendar year
+#'
+#' Uses explicit UTC year boundaries so results do not depend on the machine
+#' timezone.
+#'
+#' @param df Data frame containing year, start_time, and end_time
+#' @return data.table with start_time and end_time clamped to the labelled year
+#' @export
+clamp_spill_records_to_year <- function(df) {
+  dt <- as.data.table(df)
+
+  dt[, c("year_start", "year_end") := {
+    list(
+      ISOdatetime(year, 1, 1, 0, 0, 0, tz = "UTC"),
+      ISOdatetime(year + 1, 1, 1, 0, 0, 0, tz = "UTC")
+    )
+  }, by = year]
+
+  dt[, `:=`(
+    start_time = pmax(start_time, year_start),
+    end_time = pmin(end_time, year_end)
+  )]
+  dt[, c("year_start", "year_end") := NULL]
+
+  dt[]
+}
+
 #' Split records that cross month boundaries into separate monthly records
 #'
 #' This function handles spills that span multiple months by creating separate
@@ -48,8 +75,8 @@ split_monthly_records <- function(df) {
     by = "month"
   )
   cal <- data.table(
-    month_start = as.POSIXct(all_months,               tz = "UTC"),
-    month_end   = as.POSIXct(all_months + months(1), tz = "UTC") - 1
+    month_start = as.POSIXct(all_months, tz = "UTC"),
+    month_end = as.POSIXct(all_months + months(1), tz = "UTC")
   )
   
   # 2. Key both tables for an interval‐overlap join
@@ -65,8 +92,10 @@ split_monthly_records <- function(df) {
       .SD[, setdiff(names(dt), c("start_time","end_time")), with = FALSE]
     )
   ]
-  
-  # 4. Return as a data.frame (or data.table)
+
+  # Closed interval joins also match records that only touch a boundary.
+  out <- out[end_time > start_time]
+
   return(out[])
 }
 
@@ -135,18 +164,7 @@ prepare_spill_data <- function(data) {
   dt <- as.data.table(data) 
   ## Remove key NAs
   dt <- dt[!is.na(site_id) & !is.na(start_time)]
-  ## Truncate start/end times that cross year boundaries
-  dt[, c("lower", "upper") := {
-    lr <- as.POSIXct(ISOdatetime(year, 1, 1, 0, 0, 0), tz = "UTC")
-    ur <- as.POSIXct(ISOdatetime(year + 1, 1, 1, 0, 0, 0), tz = "UTC")
-    list(lr, ur)
-  }, by = year]
-  
-  dt[, `:=`(
-    start_time = pmax(start_time, lower),
-    end_time   = pmin(end_time,   upper)
-  )]
-  dt[, c("lower", "upper") := NULL]
+  dt <- clamp_spill_records_to_year(dt)
   data.table::setkey(dt, site_id, start_time)
   
   # Prepare yearly dataset

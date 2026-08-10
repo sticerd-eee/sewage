@@ -11,7 +11,7 @@
 
 ## Critical
 
-### 1. `[ ]` Event-free months and quarters are filled with the site's ANNUAL Environment Agency total
+### 1. `[x]` Event-free months and quarters are filled with the site's ANNUAL Environment Agency total
 
 - **Where:** `scripts/R/03_data_enrichment/aggregate_spill_stats.R:248-257` (monthly) and `:280-289` (quarterly), inside `complete_data_observations()`.
 - **Problem:** after the completion grid is built, any month (or quarter) with no matched events has `NA` for `spill_count_mo` / `spill_hrs_mo`, and the `dplyr::coalesce()` then fills that cell with `spill_count_ea_crosswalk` / `spill_hrs_ea_crosswalk` — which are **annual** totals. Every event-free month of a site-year therefore carries the whole year's spill figure. This is correct at the yearly grain (lines 217–226, where the fallback covers site-years with no matched events at all) but is a grain mismatch at monthly and quarterly frequency.
@@ -21,18 +21,20 @@
   - Aggregate monthly sums are roughly 3.4 × the yearly sums in every year 2021–2024.
 - **Downstream impact:** no consumer undoes this. `cross_section_sales.R:194-210` joins `agg_spill_mo` to houses by the month of sale and sums with `na.rm = TRUE`; `cross_section_rental.R`, `population_exposure.R`, `repeat_sales.R` (quarterly), and `aggregate_dry_spill_stats.R` all read these files without touching `annual_status` or the `_ea_crosswalk` columns.
 - **Suggested fix:** keep the EA fallback at yearly grain only. At monthly/quarterly grain: fill event-free periods with **0** for site-years that report (`annual_status` of `reported_positive` or `reported_zero` with event coverage), keep `NA` for `reported_na`/`absent`, and if an EA-only fallback is wanted at sub-annual grain, apportion (total ÷ 12 or ÷ 4) and add an explicit imputation flag column. Then regenerate every downstream artifact built from `agg_spill_mo` / `agg_spill_qtr`.
+- **Resolution (2026-08-10):** annual EA totals remain a yearly fallback only. Missing subperiods are zero-filled for `reported_zero` years and event-covered `reported_positive` years; EA-only positive, `reported_na`, and `absent` years remain `NA`. Contract tests and regenerated-output checks confirm unchanged schemas and keys, with aggregate monthly/yearly hours falling from 3.254 to 0.987 and quarterly/yearly hours from 1.223 to 0.987.
 - **Flagged by:** correctness, adversarial, pipeline-contract (independently); confirmed empirically by the orchestrator.
 
 ---
 
 ## High
 
-### 2. `[ ]` Year-boundary clamp creates a phantom spill counted in January of the wrong year
+### 2. `[x]` Year-boundary clamp creates a phantom spill counted in January of the wrong year
 
 - **Where:** `scripts/R/utils/spill_aggregation_utils.R:60-67` (`split_monthly_records()` has no output-side `end_time > start_time` filter, unlike `split_daily_records()` at line 116), interacting with the year clamp in `prepare_spill_data()` (lines 139–148).
 - **Problem:** a spill that runs across New Year is clamped to end exactly at 1 January 00:00:00 of the following year. The interval-overlap join then matches the following-January window and produces a zero-duration piece. That piece is not dropped, its `month` becomes 1, but its `year` column is still the original label year — so `month_id` places it in January of the **previous** year. `count_spills()` counts a zero-duration record as one spill (verified by executing the function).
 - **Evidence:** 2,767 spills in the current data are clamped at a year end and each produces one phantom January record.
 - **Suggested fix:** add `out <- out[end_time > start_time]` after the clamp in `split_monthly_records()`, mirroring `split_daily_records()`. Then re-run and diff January/Q1 counts.
+- **Resolution (2026-08-10):** year boundaries are now constructed explicitly in UTC through the shared `clamp_spill_records_to_year()` helper. Monthly windows end at the exact next-month boundary, and the overlap output drops every non-positive slice before counting. Focused UTC/Europe-Rome contract tests pass. On the rebuilt input, all 535 cross-year events reconcile to their 573 monthly slices with zero non-positive slices, zero wrong-label-year slices, and a maximum duration difference of `9.1e-13` hours.
 - **Flagged by:** adversarial (verified by execution); magnitude verified by the orchestrator.
 
 ### 3. `[ ]` Exact-duplicate event rows double spill hours but not spill counts
@@ -81,11 +83,12 @@
 - **Problem:** a spill starting exactly at `block_end` (gap of exactly zero) takes the within-block branch and measures from `block_start`, counting an empty elapsed block: spills `[0h,1h]` and `[36h,37h]` return 3 where the Environment Agency 12/24 method gives 2 (verified by execution). Measure-zero in continuous timestamps, so practical impact is negligible. The comments at lines 172–175 and 213 also misstate the reset rule (">24h gap" vs the actual `gap > 0` after pre-advanced blocks — the code's rule is otherwise equivalent to the EA convention).
 - **Suggested fix:** change the condition to `gap >= 0` and fix the comments; add unit tests pinning EA worked examples.
 
-### 9. `[ ]` One-second undercount of hours per month-crossing spill
+### 9. `[x]` One-second undercount of hours per month-crossing spill
 
 - **Where:** `spill_aggregation_utils.R:52` (`month_end` is next month start minus 1 second).
 - **Problem:** the boundary second is lost for every month-crossing spill, so summed monthly hours are systematically (trivially) below yearly hours even after fixing finding 1.
 - **Suggested fix:** clamp piece ends to the true boundary and drop zero-duration rows (same edit as finding 2).
+- **Resolution (2026-08-10):** monthly windows now use the exact start of the following month. Focused tests confirm that ordinary month crossings and exact-boundary endings retain their full duration, while the production-data reconciliation described in finding 2 confirms the invariant across all current cross-year events.
 
 ### 10. `[ ]` Monthly/quarterly outputs drop calendar columns
 

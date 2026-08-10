@@ -69,6 +69,54 @@ event_year <- completed$yearly %>%
 assert_equal(event_year$spill_count_yr, 1, "Event-computed yearly count should beat crosswalk fallback.")
 assert_equal(event_year$spill_hrs_yr, 2, "Event-computed yearly hours should beat crosswalk fallback.")
 
+event_months <- completed$monthly %>%
+  filter(.data$site_id == 1L, .data$month_id %in% 1:12) %>%
+  arrange(.data$month_id)
+assert_equal(
+  event_months$spill_count_mo,
+  c(1, rep(0, 11)),
+  "Event-covered positive site-year should use zero for event-free months."
+)
+assert_equal(
+  event_months$spill_hrs_mo,
+  c(2, rep(0, 11)),
+  "Event-covered positive site-year should preserve computed monthly hours and zero-fill the rest."
+)
+
+event_quarters <- completed$quarterly %>%
+  filter(.data$site_id == 1L, .data$qtr_id %in% 1:4) %>%
+  arrange(.data$qtr_id)
+assert_equal(
+  event_quarters$spill_count_qt,
+  c(1, rep(0, 3)),
+  "Event-covered positive site-year should use zero for event-free quarters."
+)
+assert_equal(
+  event_quarters$spill_hrs_qt,
+  c(2, rep(0, 3)),
+  "Event-covered positive site-year should preserve computed quarterly hours and zero-fill the rest."
+)
+assert_equal(
+  sum(event_months$spill_count_mo),
+  event_year$spill_count_yr,
+  "Fixture monthly counts should reconcile with the event-computed yearly count."
+)
+assert_equal(
+  sum(event_months$spill_hrs_mo),
+  event_year$spill_hrs_yr,
+  "Fixture monthly hours should reconcile with the event-computed yearly hours."
+)
+assert_equal(
+  sum(event_quarters$spill_count_qt),
+  event_year$spill_count_yr,
+  "Fixture quarterly counts should reconcile with the event-computed yearly count."
+)
+assert_equal(
+  sum(event_quarters$spill_hrs_qt),
+  event_year$spill_hrs_yr,
+  "Fixture quarterly hours should reconcile with the event-computed yearly hours."
+)
+
 reported_zero_year <- completed$yearly %>%
   filter(.data$site_id == 2L, .data$year == 2021L)
 assert_equal(reported_zero_year$spill_count_yr, 0, "reported_zero site-year should enter yearly grid with zero count.")
@@ -99,6 +147,51 @@ assert_true(
   "reported_na site-year should propagate NA totals rather than zero."
 )
 
+reported_na_months <- completed$monthly %>%
+  filter(.data$site_id == 3L, .data$month_id %in% 1:12)
+assert_true(
+  all(is.na(reported_na_months$spill_count_mo)) &&
+    all(is.na(reported_na_months$spill_hrs_mo)),
+  "reported_na site-year should keep monthly totals unknown."
+)
+
+reported_na_quarters <- completed$quarterly %>%
+  filter(.data$site_id == 3L, .data$qtr_id %in% 1:4)
+assert_true(
+  all(is.na(reported_na_quarters$spill_count_qt)) &&
+    all(is.na(reported_na_quarters$spill_hrs_qt)),
+  "reported_na site-year should keep quarterly totals unknown."
+)
+
+ea_only_positive_year <- completed$yearly %>%
+  filter(.data$site_id == 4L, .data$year == 2021L)
+assert_equal(
+  ea_only_positive_year$spill_count_yr,
+  5,
+  "EA-only positive site-year should retain the annual count fallback."
+)
+assert_equal(
+  ea_only_positive_year$spill_hrs_yr,
+  5,
+  "EA-only positive site-year should retain the annual hours fallback."
+)
+
+ea_only_positive_months <- completed$monthly %>%
+  filter(.data$site_id == 4L, .data$month_id %in% 1:12)
+assert_true(
+  all(is.na(ea_only_positive_months$spill_count_mo)) &&
+    all(is.na(ea_only_positive_months$spill_hrs_mo)),
+  "EA-only positive site-year should not assign annual totals to months."
+)
+
+ea_only_positive_quarters <- completed$quarterly %>%
+  filter(.data$site_id == 4L, .data$qtr_id %in% 1:4)
+assert_true(
+  all(is.na(ea_only_positive_quarters$spill_count_qt)) &&
+    all(is.na(ea_only_positive_quarters$spill_hrs_qt)),
+  "EA-only positive site-year should not assign annual totals to quarters."
+)
+
 absent_year <- completed$yearly %>%
   filter(.data$site_id == 4L, .data$year == 2022L)
 assert_true(
@@ -108,6 +201,22 @@ assert_true(
     is.na(absent_year$spill_count_ea_crosswalk) &&
     is.na(absent_year$spill_hrs_ea_crosswalk),
   "Absent works-years should be present only through site-level crossing, with no EA fallback."
+)
+
+absent_months <- completed$monthly %>%
+  filter(.data$site_id == 4L, .data$month_id %in% 13:24)
+assert_true(
+  all(is.na(absent_months$spill_count_mo)) &&
+    all(is.na(absent_months$spill_hrs_mo)),
+  "Absent works-years should keep monthly totals unknown."
+)
+
+absent_quarters <- completed$quarterly %>%
+  filter(.data$site_id == 4L, .data$qtr_id %in% 5:8)
+assert_true(
+  all(is.na(absent_quarters$spill_count_qt)) &&
+    all(is.na(absent_quarters$spill_hrs_qt)),
+  "Absent works-years should keep quarterly totals unknown."
 )
 
 descriptive_cols <- c(

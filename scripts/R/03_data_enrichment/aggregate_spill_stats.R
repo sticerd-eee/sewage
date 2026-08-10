@@ -197,6 +197,10 @@ complete_data_observations <- function(
     distinct(data$quarterly, site_id, water_company)
   )
 
+  event_site_years <- data$yearly %>%
+    distinct(site_id, year, water_company) %>%
+    mutate(has_event_data = TRUE)
+
   all_sites <- bind_rows(reporting_sites, event_sites) %>%
     filter(!is.na(.data$site_id), !is.na(.data$water_company)) %>%
     distinct()
@@ -245,14 +249,25 @@ complete_data_observations <- function(
       metadata,
       by = c("site_id", "year", "water_company")
     ) %>%
+    left_join(
+      event_site_years,
+      by = c("site_id", "year", "water_company")
+    ) %>%
     mutate(
-      spill_count_mo = dplyr::coalesce(
-        as.numeric(.data$spill_count_mo),
-        .data$spill_count_ea_crosswalk
+      can_zero_fill = dplyr::coalesce(
+        .data$annual_status == "reported_zero" |
+          (.data$annual_status == "reported_positive" & .data$has_event_data),
+        FALSE
       ),
-      spill_hrs_mo = dplyr::coalesce(
-        as.numeric(.data$spill_hrs_mo),
-        .data$spill_hrs_ea_crosswalk
+      spill_count_mo = dplyr::if_else(
+        is.na(.data$spill_count_mo) & .data$can_zero_fill,
+        0,
+        as.numeric(.data$spill_count_mo)
+      ),
+      spill_hrs_mo = dplyr::if_else(
+        is.na(.data$spill_hrs_mo) & .data$can_zero_fill,
+        0,
+        as.numeric(.data$spill_hrs_mo)
       )
     ) %>%
     select(
@@ -277,14 +292,25 @@ complete_data_observations <- function(
       metadata,
       by = c("site_id", "year", "water_company")
     ) %>%
+    left_join(
+      event_site_years,
+      by = c("site_id", "year", "water_company")
+    ) %>%
     mutate(
-      spill_count_qt = dplyr::coalesce(
-        as.numeric(.data$spill_count_qt),
-        .data$spill_count_ea_crosswalk
+      can_zero_fill = dplyr::coalesce(
+        .data$annual_status == "reported_zero" |
+          (.data$annual_status == "reported_positive" & .data$has_event_data),
+        FALSE
       ),
-      spill_hrs_qt = dplyr::coalesce(
-        as.numeric(.data$spill_hrs_qt),
-        .data$spill_hrs_ea_crosswalk
+      spill_count_qt = dplyr::if_else(
+        is.na(.data$spill_count_qt) & .data$can_zero_fill,
+        0,
+        as.numeric(.data$spill_count_qt)
+      ),
+      spill_hrs_qt = dplyr::if_else(
+        is.na(.data$spill_hrs_qt) & .data$can_zero_fill,
+        0,
+        as.numeric(.data$spill_hrs_qt)
       )
     ) %>%
     select(
