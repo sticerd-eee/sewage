@@ -57,29 +57,33 @@
 
 ## Moderate
 
-### 4. `[ ]` `month_id` / `qtr_id` computed twice from two independently hardcoded base years
+### 4. `[x]` `month_id` / `qtr_id` computed twice from two independently hardcoded base years
 
 - **Where:** `spill_aggregation_utils.R:159-161` (`base_year <- 2021` hardcoded inside `prepare_spill_data()`) vs `aggregate_spill_stats.R:129-130` (recomputed from `CONFIG$base_year`).
 - **Problem:** the recomputation silently overwrites identical values today; if either constant is ever changed alone, the two grains diverge with no error. `aggregate_dry_spill_stats.R` uses the utils values with its own separate config entry.
 - **Suggested fix:** add a `base_year` parameter to `prepare_spill_data()`, pass `CONFIG$base_year`, delete the recomputation in this script.
+- **Resolution (2026-08-10):** `prepare_spill_data()` now requires an explicit `base_year` and is the single owner of `month_id` / `qtr_id` construction. Both the main and dry-spill aggregation callers pass their configured base year, and the duplicate recomputation in the main script has been removed. A non-2021 fixture verifies that both IDs follow the supplied value.
 
-### 5. `[ ]` Misleading default argument `metadata = data$metadata`
+### 5. `[x]` Misleading default argument `metadata = data$metadata`
 
 - **Where:** `aggregate_spill_stats.R:181-182`.
 - **Problem:** the `data` argument at the call site is `aggregate_spills()`'s output, which has no `$metadata` element, so the default silently evaluates to `NULL` and would fail later with a confusing `select()` error. Every current call passes `metadata` explicitly, so this is a latent footgun only.
 - **Suggested fix:** make `metadata` a required argument (drop the default).
+- **Resolution (2026-08-10):** `complete_data_observations()` now requires `metadata`. All callers already supplied it, so the interface is now honest without changing behavior.
 
-### 6. `[ ]` Dead configuration entry `CONFIG$data_path_annual`
+### 6. `[x]` Dead configuration entry `CONFIG$data_path_annual`
 
 - **Where:** `aggregate_spill_stats.R:63-65`.
 - **Problem:** `annual_return_edm.parquet` is never read anywhere in the script (single grep hit is the assignment itself). It misstates the script's input surface; the EA totals now come from the crosswalk.
 - **Suggested fix:** delete the entry.
+- **Resolution (2026-08-10):** the unused configuration entry has been removed. The works-year crosswalk remains the script's sole declared source of EA annual totals.
 
-### 7. `[ ]` No guards for inverted or open-ended events at the yearly grain (latent)
+### 7. `[-]` No guards for inverted or open-ended events at the yearly grain (latent)
 
 - **Where:** `spill_aggregation_utils.R:137-153` (`prepare_spill_data()` filters `NA` `site_id`/`start_time` but not `NA` `end_time` or `end_time <= start_time`); `count_spills()` line 221 adds +1 for any record and returns `NA` for the whole site-year if any `end_time` is `NA`, after which the coalesce in the main script silently substitutes the EA total.
 - **Problem:** the yearly path counts inverted records and sums negative hours; a single `NA` end poisons the count and is then invisibly replaced by a different measurement instrument. **Current data is clean** (zero `NA` timestamps, zero inverted rows), so this is robustness hardening, not a live bug.
 - **Suggested fix:** after the year clamp, drop or clamp bad rows with a logged count, and log whenever the EA fallback replaces a computed value.
+- **Resolution (2026-08-10):** not an issue in the canonical pipeline. `combine_individ_edm_data.R` rejects missing or unparseable timestamps, corrects its known midnight-rollover case, removes non-positive intervals, and excludes events that do not overlap their labelled year. The matching stage only joins metadata and does not alter timestamps. Direct checks found zero missing timestamps, zero raw non-positive intervals, and zero intervals made non-positive by the year clamp in both `combined_edm_data.parquet` (7,383,972 rows) and `matched_events_annual_data.parquet` (7,271,711 rows). No duplicate cleaning or guard is added at the aggregation layer.
 
 ---
 

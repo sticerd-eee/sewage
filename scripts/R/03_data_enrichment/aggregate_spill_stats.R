@@ -60,9 +60,6 @@ CONFIG <- list(
   crosswalk_path = here::here(
     "data", "processed", "matched_events_annual_data",
     "site_works_crosswalk.parquet"),
-  data_path_annual = here::here(
-    "data", "processed", "annual_return_edm.parquet"
-  ),
   output_dir = here::here("data", "processed", "agg_spill_stats"),
   years = 2021:2024,
   base_year = 2021
@@ -129,11 +126,9 @@ load_data <- function() {
 #' @param data Input dataframe containing individual spill data
 #' @return List with aggregated yearly and monthly spill statistics
 aggregate_spills <- function(data) {
-  prepared_data <- prepare_spill_data(data)
+  prepared_data <- prepare_spill_data(data, CONFIG$base_year)
   dt_yearly    <- prepared_data$yearly
   dt_monthly   <- prepared_data$monthly
-  dt_monthly[, month_id := (year - CONFIG$base_year) * 12 + month]
-  dt_monthly[, qtr_id := (year - CONFIG$base_year) * 4 + quarter]
   
   # ---- Yearly ----------------------------------------------------
   yearly_result <- dt_yearly[
@@ -184,8 +179,7 @@ aggregate_spills <- function(data) {
 #'     \item yearly: completed yearly data.
 #'     \item monthly: completed monthly data.
 #'   }
-complete_data_observations <- function(
-    data, metadata = data$metadata) {
+complete_data_observations <- function(data, metadata) {
   metadata <- metadata %>%
     select(
       site_id, year, water_company, annual_status,

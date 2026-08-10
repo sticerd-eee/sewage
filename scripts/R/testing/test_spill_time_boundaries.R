@@ -18,6 +18,8 @@ source(here::here(
   "scripts", "R", "03_data_enrichment", "aggregate_daily_spill_rainfall.R"
 ))
 
+test_base_year <- 2021L
+
 assert_true <- function(condition, message) {
   if (!isTRUE(condition)) {
     stop(message, call. = FALSE)
@@ -66,7 +68,7 @@ run_new_year_fixture <- function(timezone) {
     "2021-12-31 23:00:00",
     "2022-01-01 01:00:00"
   )
-  prepared <- prepare_spill_data(event)
+  prepared <- prepare_spill_data(event, test_base_year)
   daily <- aggregate_daily_spills(event)
 
   list(yearly = prepared$yearly, monthly = prepared$monthly, daily = daily)
@@ -128,7 +130,10 @@ month_crossing <- make_event(
   "2021-02-28 23:30:00",
   "2021-03-01 00:30:00"
 )
-month_slices <- prepare_spill_data(month_crossing)$monthly[order(month)]
+month_slices <- prepare_spill_data(
+  month_crossing,
+  test_base_year
+)$monthly[order(month)]
 
 assert_equal(
   month_slices$month,
@@ -145,11 +150,30 @@ assert_equal(
   "Monthly slices should reconcile exactly to the original spill duration."
 )
 
+alternative_base_slices <- prepare_spill_data(
+  month_crossing,
+  base_year = 2020L
+)$monthly[order(month)]
+
+assert_equal(
+  alternative_base_slices$month_id,
+  c(14, 15),
+  "Month IDs should be derived from the supplied base year."
+)
+assert_equal(
+  alternative_base_slices$qtr_id,
+  c(5, 5),
+  "Quarter IDs should be derived from the supplied base year."
+)
+
 month_boundary <- make_event(
   "2021-01-31 23:00:00",
   "2021-02-01 00:00:00"
 )
-month_boundary_slices <- prepare_spill_data(month_boundary)$monthly
+month_boundary_slices <- prepare_spill_data(
+  month_boundary,
+  test_base_year
+)$monthly
 
 assert_true(
   nrow(month_boundary_slices) == 1L && month_boundary_slices$month == 1L,
@@ -168,7 +192,10 @@ year_boundary <- make_event(
   "2021-12-31 23:00:00",
   "2022-01-01 00:00:00"
 )
-year_boundary_slices <- prepare_spill_data(year_boundary)$monthly
+year_boundary_slices <- prepare_spill_data(
+  year_boundary,
+  test_base_year
+)$monthly
 
 assert_true(
   nrow(year_boundary_slices) == 1L &&

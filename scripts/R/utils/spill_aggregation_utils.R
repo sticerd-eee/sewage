@@ -153,13 +153,14 @@ split_daily_records <- function(df) {
 #' year boundaries and creating separate datasets for yearly and monthly analysis.
 #'
 #' @param data Input dataframe containing spill data with start_time, end_time, year
+#' @param base_year Integer base year used to construct sequential month and quarter IDs
 #' @return List of data tables prepared for yearly and monthly aggregation
 #'   \itemize{
 #'     \item yearly: Data table with year boundary handling
 #'     \item monthly: Data table with month splits and added month/quarter columns
 #'   }
 #' @export
-prepare_spill_data <- function(data) {
+prepare_spill_data <- function(data, base_year) {
   # Initial data prep and year boundary handling
   dt <- as.data.table(data) 
   ## Remove key NAs
@@ -174,7 +175,6 @@ prepare_spill_data <- function(data) {
   dt_monthly <- split_monthly_records(dt)
   dt_monthly[, month := data.table::month(start_time)]
   dt_monthly[, quarter := ceiling(month/3)] 
-  base_year <- 2021
   dt_monthly[, month_id := (year - base_year) * 12 + month]
   dt_monthly[, qtr_id := (year - base_year) * 4 + quarter]
   
