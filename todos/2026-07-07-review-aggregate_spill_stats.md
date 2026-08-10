@@ -52,6 +52,7 @@
 - **Problem:** event-derived `spill_count_yr` applies the 12/24 method once to the combined works-level event stream, while `spill_count_ea_crosswalk` sums annual counts across the works' monitored outlets. Coalescing the latter into the former changes the count estimand according to data source: two outlets spilling simultaneously count as one event-derived works spill but two outlet-summed EA spills.
 - **Evidence:** 832 `reported_positive` works-years currently have no matched event data and therefore receive the cross-grain fallback; 831 carry a positive EA outlet count and one carries zero. The corresponding EA count remains separately available as `spill_count_ea_crosswalk`.
 - **Resolution (2026-08-10):** `spill_count_yr` is now consistently a works-level count. Event-derived values take precedence, `reported_zero` works-years remain zero, and EA-only positive, `reported_na`, and `absent` works-years remain `NA`. `spill_hrs_yr` still uses the EA fallback because both event-derived and crosswalk hours are additive outlet-hours. Output names and schemas are unchanged. Downstream yearly consumers differ in their existing missing-value policy: `grid_long_difference_{sales,rentals}.R` and the main hedonic scripts propagate `NA`, while mapping/support summaries and `did_trends_full.R` use `na.rm = TRUE`; that broader policy remains tracked under related finding R1 rather than changed here.
+- **Regeneration note (2026-08-10):** the canonical yearly Parquet had not been regenerated after this resolution and still contained the old EA outlet-count fallback for 832 EA-only Works-years. The low-findings rebuild corrected those stale values to `NA`; this additional artifact change was reviewed and explicitly accepted alongside the new exact-boundary corrections.
 
 ---
 
@@ -89,11 +90,12 @@
 
 ## Low
 
-### 8. `[ ]` `count_spills()` overcounts when a spill starts exactly at a block boundary
+### 8. `[x]` `count_spills()` overcounts when a spill starts exactly at a block boundary
 
 - **Where:** `spill_aggregation_utils.R:214` (`gap > 0`).
 - **Problem:** a spill starting exactly at `block_end` (gap of exactly zero) takes the within-block branch and measures from `block_start`, counting an empty elapsed block: spills `[0h,1h]` and `[36h,37h]` return 3 where the Environment Agency 12/24 method gives 2 (verified by execution). Measure-zero in continuous timestamps, so practical impact is negligible. The comments at lines 172–175 and 213 also misstate the reset rule (">24h gap" vs the actual `gap > 0` after pre-advanced blocks — the code's rule is otherwise equivalent to the EA convention).
 - **Suggested fix:** change the condition to `gap >= 0` and fix the comments; add unit tests pinning EA worked examples.
+- **Resolution (2026-08-10):** `count_spills()` now treats the active block endpoint as excluded, so a spill starting at or after `block_end` begins a new 12-hour block. Proof-first fixtures cover starts one second before, exactly at, and one second after the endpoint plus the existing long-spill behavior. The exact-boundary assertion failed with 3 instead of 2 before the production edit and passes afterward. On regenerated outputs, all 370 yearly, 357 monthly, and 371 quarterly event-count changes reproduce under the old and new algorithms and occur only in groups containing an exact endpoint; no row keys, hours, statuses, EA fields, or period IDs changed.
 
 ### 9. `[x]` One-second undercount of hours per month-crossing spill
 
@@ -102,25 +104,28 @@
 - **Suggested fix:** clamp piece ends to the true boundary and drop zero-duration rows (same edit as finding 2).
 - **Resolution (2026-08-10):** monthly windows now use the exact start of the following month. Focused tests confirm that ordinary month crossings and exact-boundary endings retain their full duration, while the production-data reconciliation described in finding 2 confirms the invariant across all current cross-year events.
 
-### 10. `[ ]` Monthly/quarterly outputs drop calendar columns
+### 10. `[x]` Monthly/quarterly outputs drop calendar columns
 
 - **Where:** `aggregate_spill_stats.R:258-262` and `:290-294`.
 - **Problem:** only `month_id` / `qtr_id` survive; consumers must re-derive calendar time with their own hardcoded base year (e.g. `compute_spill_stats.R:155` derives a 1–4 index). Consistent today, fragile tomorrow.
 - **Suggested fix:** also write `year` and `month` / `quarter`.
+- **Resolution (2026-08-10):** the monthly output now retains `year`, `month`, and `month_id`; the quarterly output retains `year`, `quarter`, and `qtr_id`. The stable ID formulas are unchanged. The written files contain 671,520 monthly rows and 223,840 quarterly rows, their original keys and row membership are unchanged, and every calendar column agrees with its configured-base-year ID.
 
-### 11. `[ ]` No input-contract or grain assertions
+### 11. `[x]` No input-contract or grain assertions
 
 - **Where:** `aggregate_spill_stats.R:95-106` and the three metadata joins (lines 213–216, 244–247, 276–279).
 - **Problem:** grain safety currently rests entirely on the upstream `stop()` check in `merge_outputs_utils.R:520-523`. (Verified: the crosswalk is unique at site/year/company — 55,960 rows, zero duplicate keys — so there is **no live join fanout**.) A local assertion would fail fast if the upstream invariant is ever weakened.
 - **Suggested fix:** assert crosswalk uniqueness on `(site_id, year, water_company)` and required columns before the joins, mirroring the preflight checks in `merge_individ_annual_location.R`.
+- **Resolution (2026-08-10):** the aggregator now declares and preflights the required columns for both Parquet inputs using schema metadata, reads only those columns, rejects duplicate Works-year-company metadata before completion joins, and asserts the yearly, monthly, and quarterly output keys both after completion and before export. Focused tests cover missing columns, exact and conflicting duplicate metadata keys, output uniqueness, and the existing status/hour/count contracts.
 
-### 12. `[ ]` Logging: stale numeric prefix and colour codes written to file
+### 12. `[x]` Logging: stale numeric prefix and colour codes written to file
 
 - **Where:** `aggregate_spill_stats.R:41-48`.
 - **Problem:** the log name `12_aggregate_spill_stats.log` uses a stale pipeline-position prefix (siblings use the plain script basename), and `layout_glue_colors` writes ANSI escape codes into a file log.
 - **Suggested fix:** rename to `aggregate_spill_stats.log`, use a plain layout, remove the orphaned old log file.
+- **Resolution (2026-08-10):** the entry script now delegates to the shared logger and writes `output/log/aggregate_spill_stats.log`. The shared helper uses `layout_glue`, and focused file-only and tee tests verify that persistent logs contain their messages with no ANSI escape byte. The full aggregation produced a non-empty plain-text log, and the superseded numeric-prefix log was removed after a temporary backup was preserved with the reconciliation snapshot.
 
-### 13. `[ ]` Documentation drift (cluster)
+### 13. `[x]` Documentation drift (cluster)
 
 - `aggregate_spill_stats.R:8-9` — header sentence is missing its verb ("This script individual sewage overflow spills into…") and says aggregation is by "catchment area" when the code groups by water company and site.
 - `aggregate_spill_stats.R:74-79` — `load_data()` return doc omits `year` and `water_company`, which are selected.
@@ -128,6 +133,7 @@
 - `aggregate_spill_stats.R:153` — the comment "(D13: uses quarter-split data)" is wrong: the quarterly result uses month-split data grouped by quarter.
 - `aggregate_spill_stats.R:304` — `export_results()` doc mentions only `$yearly` and `$monthly`; it also writes quarterly.
 - `aggregate_spill_stats.R:338-340` — the "imported from shared utilities" notes sit before `main()` although `split_monthly_records()` is never called directly in this file; move next to the `source()` call or delete.
+- **Resolution (2026-08-10):** the script now uses the approved purpose/author/date/input/output/log header and the shared fail-fast `rv sync` bootstrap. Its roxygen and nearby comments describe event inputs, Works grain, additive outlet-hours, all three output periods, calendar columns, and utility ownership accurately. The direct pipeline documentation names both canonical inputs and all three outputs, and the tracked test notebook points to the renamed plain log.
 
 ---
 
