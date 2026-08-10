@@ -30,7 +30,7 @@ setup_logging <- function(log_file, console = interactive(), threshold = "DEBUG"
   }
 
   logger::log_appender(appender)
-  logger::log_layout(logger::layout_glue_colors)
+  logger::log_layout(logger::layout_glue)
   logger::log_threshold(threshold)
 
   invisible(log_file)

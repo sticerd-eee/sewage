@@ -1,52 +1,75 @@
-############################################################
+# ==============================================================================
 # Aggregate Spill Statistics
-# Project: Sewage
-# Date: 28/12/2024
+# ==============================================================================
+#
+# Purpose: Aggregate matched event-level discharges to completed yearly, monthly,
+#          and quarterly Works panels using the Environment Agency 12/24 method.
+#
 # Author: Jacopo Olivieri
-############################################################
+# Date: 2024-12-28
+# Date Modified: 2026-08-10
+#
+# Inputs:
+#   - data/processed/matched_events_annual_data/matched_events_annual_data.parquet
+#   - data/processed/matched_events_annual_data/site_works_crosswalk.parquet
+#
+# Outputs:
+#   - data/processed/agg_spill_stats/agg_spill_yr.parquet
+#   - data/processed/agg_spill_stats/agg_spill_mo.parquet
+#   - data/processed/agg_spill_stats/agg_spill_qtr.parquet
+#   - output/log/aggregate_spill_stats.log
+#
+# ==============================================================================
 
-#' This script individual sewage overflow spills into total spill counts and
-#' durations based on data affecting the same catchment area.
-
-# Set Up Functions
-############################################################
-
-# Initialise packages from the rv-managed project library
-#' Initialize the R environment with required packages and settings
-#' @return NULL
-initialise_environment <- function() {
-  # Package management is handled by rv
-  
-  # Define required packages
-  required_packages <- c(
-    "rmarkdown", "arrow", "tidyverse", "purrr", "here", "logger", "glue", "fs",
-    "data.table"
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first with `rv sync`.",
+    call. = FALSE
   )
-  
-  # Install and load packages
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
-    }
-    library(pkg, character.only = TRUE)
-  }))
-  
-  # Source shared utilities
-  source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
 }
 
-#' Set up logging configuration
-#' @return NULL
-setup_logging <- function() {
-  log_path <- here::here(
-    "output", "log", "12_aggregate_spill_stats.log"
-  )
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-  
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "data.table",
+  "dplyr",
+  "fs",
+  "glue",
+  "here",
+  "logger",
+  "lubridate",
+  "tibble",
+  "tidyr"
+)
+
+LOG_FILE <- here::here("output", "log", "aggregate_spill_stats.log")
+
+check_required_packages(REQUIRED_PACKAGES)
+source(
+  here::here("scripts", "R", "utils", "spill_aggregation_utils.R"),
+  local = TRUE
+)
+
+# Setup Functions
+############################################################
+
+#' Attach packages used unqualified by the aggregation functions
+#' @return NULL invisibly
+initialise_environment <- function() {
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
+    library(pkg, character.only = TRUE)
+  }))
+}
+
+#' Initialise persistent logging for this script
+#' @return NULL invisibly
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
+  logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
+  invisible(NULL)
 }
 
 
@@ -153,11 +176,16 @@ assert_unique_keys <- function(data, keys, label) {
   invisible(TRUE)
 }
 
-#' Load merged individual sewage spill data
+#' Load event-level discharges and Works-year metadata
+#'
+#' Reads only the declared input-contract columns. Event rows retain
+#' `site_id`, `year`, `water_company`, `start_time`, and `end_time`; metadata
+#' retains the Works-year Annual Status and EA outlet totals.
+#'
 #' @return A list with two elements:
 #' \describe{
-#'   \item{spill_data}{A data frame with site_id, start_time, and end_time}
-#'   \item{metadata}{Works-year crosswalk metadata with EA fallback totals}
+#'   \item{spill_data}{Event-level discharge rows assigned to Works.}
+#'   \item{metadata}{Unique Works-year-company metadata with Annual Status and EA totals.}
 #' }
 load_data <- function() {
   file_path <- CONFIG$merged_data_path
@@ -202,9 +230,13 @@ load_data <- function() {
   )
 }
 
-#' Aggregate spill data by water company and year/month
-#' @param data Input dataframe containing individual spill data
-#' @return List with aggregated yearly and monthly spill statistics
+#' Aggregate event-level discharges to Works-period statistics
+#'
+#' Spill counts apply the 12/24 method once to each combined Works event stream.
+#' Spill hours remain additive outlet-hours, including simultaneous outlets.
+#'
+#' @param data Event-level discharge data assigned to Works
+#' @return List with yearly, monthly, and quarterly Works-period statistics
 aggregate_spills <- function(data) {
   prepared_data <- prepare_spill_data(data, CONFIG$base_year)
   dt_yearly    <- prepared_data$yearly
@@ -230,7 +262,7 @@ aggregate_spills <- function(data) {
     by = .(water_company, site_id, year, month, month_id)
   ]
 
-  # ---- Quarterly (D13: uses quarter-split data) ----------------
+  # ---- Quarterly (month slices grouped into calendar quarters) --
   quarterly_result <- dt_monthly[
     ,
     .(
@@ -247,17 +279,19 @@ aggregate_spills <- function(data) {
   )
 }
 
-#' Complete and align spill data across time
+#' Complete Works observations across yearly, monthly, and quarterly grids
 #' @param data List with components:
 #'   \itemize{
-#'     \item yearly: annual spill data (columns: water_company, site_id, year, spill_count_yr, spill_hrs_yr).
-#'     \item monthly: monthly spill data (columns: water_company, site_id, year, month, spill_count_mo, spill_hrs_mo).
+#'     \item yearly: Works-year spill counts and outlet-hours.
+#'     \item monthly: Works-month spill counts and outlet-hours.
+#'     \item quarterly: Works-quarter spill counts and outlet-hours.
 #'   }
-#' @param metadata site metadata with annual spill totals
+#' @param metadata Unique Works-year metadata with Annual Status and EA totals
 #' @return List with:
 #'   \itemize{
-#'     \item yearly: completed yearly data.
-#'     \item monthly: completed monthly data.
+#'     \item yearly: completed Works-year observations.
+#'     \item monthly: completed Works-month observations with calendar columns and month_id.
+#'     \item quarterly: completed Works-quarter observations with calendar columns and qtr_id.
 #'   }
 complete_data_observations <- function(data, metadata) {
   metadata <- metadata %>%
@@ -428,8 +462,8 @@ complete_data_observations <- function(data, metadata) {
   )
 }
 
-#' Export function to save aggregated results
-#' @param final_results List containing components $yearly and $monthly
+#' Export the completed Works-period aggregates
+#' @param final_results List containing yearly, monthly, and quarterly components
 #' @return NULL (invisibly)
 export_results <- function(final_results) {
   output_dir <- CONFIG$output_dir
@@ -479,14 +513,10 @@ export_results <- function(final_results) {
 # Main execution
 ############################################################
 
-# Note: split_monthly_records() function is imported from shared utilities
-# Note: prepare_spill_data() function is imported from shared utilities
-# Note: count_spills() function is imported from shared utilities
-
 main <- function() {
   # Setup
   initialise_environment()
-  setup_logging()
+  initialise_logging()
   
   # Load and process data
   logger::log_info("Starting data processing pipeline")
