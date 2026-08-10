@@ -14,6 +14,15 @@ if (!requireNamespace("here", quietly = TRUE) ||
 
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 
+aggregation_script <- here::here(
+  "scripts", "R", "03_data_enrichment", "aggregate_spill_stats.R"
+)
+attached_before_source <- search()
+aggregation_environment <- new.env(parent = globalenv())
+source(aggregation_script, local = aggregation_environment)
+stopifnot(identical(search(), attached_before_source))
+stopifnot(is.function(aggregation_environment$initialise_environment))
+
 assert_plain_log <- function(console) {
   log_file <- tempfile("script-setup-", fileext = ".log")
   on.exit(unlink(log_file), add = TRUE)

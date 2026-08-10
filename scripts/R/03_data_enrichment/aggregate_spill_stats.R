@@ -47,10 +47,6 @@ REQUIRED_PACKAGES <- c(
 LOG_FILE <- here::here("output", "log", "aggregate_spill_stats.log")
 
 check_required_packages(REQUIRED_PACKAGES)
-source(
-  here::here("scripts", "R", "utils", "spill_aggregation_utils.R"),
-  local = TRUE
-)
 
 # Setup Functions
 ############################################################
@@ -61,6 +57,11 @@ initialise_environment <- function() {
   invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
     library(pkg, character.only = TRUE)
   }))
+  source(
+    here::here("scripts", "R", "utils", "spill_aggregation_utils.R"),
+    local = environment(initialise_environment)
+  )
+  invisible(NULL)
 }
 
 #' Initialise persistent logging for this script
