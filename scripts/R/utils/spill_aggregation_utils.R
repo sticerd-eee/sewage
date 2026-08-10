@@ -188,7 +188,7 @@ prepare_spill_data <- function(data, base_year) {
 #'
 #' This function implements the Environment Agency's 12/24 hour counting methodology
 #' for aggregating overlapping or consecutive spill events:
-#' - First spill or spills with >0 hour gap: Creates 12-hour block (counts as 1)
+#' - First spill or a spill at/after the active block end: Creates a 12-hour block
 #' - Subsequent spills within blocks: Creates 24-hour blocks
 #' - Long spills: Generate additional 24-hour blocks if duration exceeds block size
 #'
@@ -223,13 +223,9 @@ count_spills <- function(start_times, end_times) {
     current_start <- start_times[i]
     current_end <- end_times[i]
     
-    # Calculate difference between spill start and current block end
-    if (!is.na(block_end)) {
-      gap <- (current_start - block_end) / 3600
-    }
-    
-    # 12-hour block (first spill or >24h gap)
-    if (is.na(block_end) || gap > 0) {
+    # Block endpoints are excluded: a spill beginning at or after the current
+    # endpoint starts a new 12-hour counting block.
+    if (is.na(block_end) || current_start >= block_end) {
       block_start <- current_start
       block_end <- current_start + dur12
       
@@ -242,7 +238,7 @@ count_spills <- function(start_times, end_times) {
       block_start <- block_end + (dur24 * spill_over_12h)
       block_end <- block_start + dur24
     } else {
-      # 24 hour block
+      # A spill inside the active sequence advances through 24-hour blocks.
       # Update spill count
       diff_current <- (current_end - block_start) / 3600
       spill_over_24h <- ceiling(pmax(0, diff_current) / 24)

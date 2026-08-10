@@ -52,6 +52,52 @@ make_event <- function(start_time, end_time, year = 2021L) {
   )
 }
 
+count_fixture_spills <- function(second_start, second_end) {
+  count_spills(
+    as.POSIXct(
+      c("2021-01-01 00:00:00", second_start),
+      tz = "UTC"
+    ),
+    as.POSIXct(
+      c("2021-01-01 01:00:00", second_end),
+      tz = "UTC"
+    )
+  )
+}
+
+assert_equal(
+  count_fixture_spills(
+    "2021-01-02 11:59:59",
+    "2021-01-02 12:00:00"
+  ),
+  2,
+  "A spill beginning one second before the active block end should remain in the active sequence."
+)
+assert_equal(
+  count_fixture_spills(
+    "2021-01-02 12:00:00",
+    "2021-01-02 13:00:00"
+  ),
+  2,
+  "A spill beginning exactly at the excluded block end should start a new 12-hour block."
+)
+assert_equal(
+  count_fixture_spills(
+    "2021-01-02 12:00:01",
+    "2021-01-02 13:00:01"
+  ),
+  2,
+  "A spill beginning after the active block end should start a new 12-hour block."
+)
+assert_equal(
+  count_spills(
+    as.POSIXct("2021-01-01 00:00:00", tz = "UTC"),
+    as.POSIXct("2021-01-03 12:00:00", tz = "UTC")
+  ),
+  3,
+  "A 60-hour spill should retain its existing 12-hour plus two 24-hour block count."
+)
+
 run_new_year_fixture <- function(timezone) {
   previous_timezone <- Sys.getenv("TZ", unset = NA_character_)
   on.exit({
