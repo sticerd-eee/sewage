@@ -37,13 +37,21 @@
 - **Resolution (2026-08-10):** year boundaries are now constructed explicitly in UTC through the shared `clamp_spill_records_to_year()` helper. Monthly windows end at the exact next-month boundary, and the overlap output drops every non-positive slice before counting. Focused UTC/Europe-Rome contract tests pass. On the rebuilt input, all 535 cross-year events reconcile to their 573 monthly slices with zero non-positive slices, zero wrong-label-year slices, and a maximum duration difference of `9.1e-13` hours.
 - **Flagged by:** adversarial (verified by execution); magnitude verified by the orchestrator.
 
-### 3. `[ ]` Exact-duplicate event rows double spill hours but not spill counts
+### 3. `[-]` Exact-duplicate event rows double spill hours but not spill counts
 
 - **Where:** `scripts/R/03_data_enrichment/aggregate_spill_stats.R:95-96` (`load_data()` applies no deduplication to the event data) together with `calculate_spill_hours()` (`spill_aggregation_utils.R:250-255`), which sums durations, while `count_spills()` effectively absorbs duplicates into the same block.
 - **Problem:** identical `(site_id, start_time, end_time)` rows are summed twice in hours but merge into one counted block, so hours and counts are computed from inconsistent record sets.
 - **Evidence:** 2,979 duplicated keys / 3,284 surplus rows in `matched_events_annual_data.parquet` (small relative to 7.27 million rows, but concentrated on specific sites).
 - **Suggested fix:** deduplicate exact `(site_id, start_time, end_time)` rows in `load_data()` with a logged drop count. Separately decide whether overlapping (non-identical) intervals at the same site should be union-merged for the hours measure; the duplicate source is worth tracing upstream in the merge script.
+- **Resolution (2026-08-10):** won't fix because the proposed duplicate key is at the wrong grain. Upstream, multiple monitored outlets can be assigned the same works-level `site_id`; coincident events at distinct outlets are therefore legitimate rows, and their durations intentionally sum to outlet-hours. The 2,979 coincident works/timestamp groups contain zero duplicates after adding the complete source identity tuple (`site_name_ea`, `site_name_wa_sc`, both permit references, `activity_reference`, and `unique_id`). Deduplicating by works and timestamps would silently discard real outlet activity. The script now documents this contract and a fixture pins the expected result: two simultaneous two-hour outlet events produce four outlet-hours.
 - **Flagged by:** adversarial; confirmed empirically by the orchestrator.
+
+### 3a. `[x]` Yearly count fallback mixes works-level and outlet-level counts
+
+- **Where:** `scripts/R/03_data_enrichment/aggregate_spill_stats.R`, inside the yearly branch of `complete_data_observations()`.
+- **Problem:** event-derived `spill_count_yr` applies the 12/24 method once to the combined works-level event stream, while `spill_count_ea_crosswalk` sums annual counts across the works' monitored outlets. Coalescing the latter into the former changes the count estimand according to data source: two outlets spilling simultaneously count as one event-derived works spill but two outlet-summed EA spills.
+- **Evidence:** 832 `reported_positive` works-years currently have no matched event data and therefore receive the cross-grain fallback; 831 carry a positive EA outlet count and one carries zero. The corresponding EA count remains separately available as `spill_count_ea_crosswalk`.
+- **Resolution (2026-08-10):** `spill_count_yr` is now consistently a works-level count. Event-derived values take precedence, `reported_zero` works-years remain zero, and EA-only positive, `reported_na`, and `absent` works-years remain `NA`. `spill_hrs_yr` still uses the EA fallback because both event-derived and crosswalk hours are additive outlet-hours. Output names and schemas are unchanged. Downstream yearly consumers differ in their existing missing-value policy: `grid_long_difference_{sales,rentals}.R` and the main hedonic scripts propagate `NA`, while mapping/support summaries and `did_trends_full.R` use `na.rm = TRUE`; that broader policy remains tracked under related finding R1 rather than changed here.
 
 ---
 

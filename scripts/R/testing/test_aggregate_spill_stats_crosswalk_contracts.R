@@ -42,11 +42,26 @@ assert_equal <- function(actual, expected, message, tolerance = 1e-9) {
 }
 
 events <- tibble::tibble(
-  site_id = 1L,
+  site_id = c(1L, 5L, 5L),
+  source_outlet = c("site_1_outlet", "site_5_outlet_a", "site_5_outlet_b"),
   year = 2021L,
   water_company = "Fixture Water",
-  start_time = as.POSIXct("2021-01-01 00:00:00", tz = "UTC"),
-  end_time = as.POSIXct("2021-01-01 02:00:00", tz = "UTC")
+  start_time = as.POSIXct(
+    c(
+      "2021-01-01 00:00:00",
+      "2021-01-01 13:00:00",
+      "2021-01-01 13:00:00"
+    ),
+    tz = "UTC"
+  ),
+  end_time = as.POSIXct(
+    c(
+      "2021-01-01 02:00:00",
+      "2021-01-01 15:00:00",
+      "2021-01-01 15:00:00"
+    ),
+    tz = "UTC"
+  )
 )
 
 crosswalk <- tibble::tribble(
@@ -58,7 +73,9 @@ crosswalk <- tibble::tribble(
   3L, 2021L, "Fixture Water", "reported_na", NA_real_, NA_real_,
   3L, 2022L, "Fixture Water", "absent", NA_real_, NA_real_,
   4L, 2021L, "Fixture Water", "reported_positive", 5, 5,
-  4L, 2022L, "Fixture Water", "absent", NA_real_, NA_real_
+  4L, 2022L, "Fixture Water", "absent", NA_real_, NA_real_,
+  5L, 2021L, "Fixture Water", "reported_positive", 2, 4,
+  5L, 2022L, "Fixture Water", "absent", NA_real_, NA_real_
 )
 
 aggregated <- aggregate_spills(events)
@@ -68,6 +85,8 @@ event_year <- completed$yearly %>%
   filter(.data$site_id == 1L, .data$year == 2021L)
 assert_equal(event_year$spill_count_yr, 1, "Event-computed yearly count should beat crosswalk fallback.")
 assert_equal(event_year$spill_hrs_yr, 2, "Event-computed yearly hours should beat crosswalk fallback.")
+assert_equal(event_year$spill_count_ea_crosswalk, 99, "Outlet-summed EA count should remain available separately.")
+assert_equal(event_year$spill_hrs_ea_crosswalk, 99, "EA outlet-hours should remain available separately.")
 
 event_months <- completed$monthly %>%
   filter(.data$site_id == 1L, .data$month_id %in% 1:12) %>%
@@ -115,6 +134,47 @@ assert_equal(
   sum(event_quarters$spill_hrs_qt),
   event_year$spill_hrs_yr,
   "Fixture quarterly hours should reconcile with the event-computed yearly hours."
+)
+
+simultaneous_outlet_year <- completed$yearly %>%
+  filter(.data$site_id == 5L, .data$year == 2021L)
+assert_equal(
+  simultaneous_outlet_year$spill_count_yr,
+  1,
+  "Simultaneous outlet events should form one works-level 12/24 spill block."
+)
+assert_equal(
+  simultaneous_outlet_year$spill_hrs_yr,
+  4,
+  "Simultaneous outlet events should contribute all four outlet-hours."
+)
+
+simultaneous_outlet_months <- completed$monthly %>%
+  filter(.data$site_id == 5L, .data$month_id %in% 1:12) %>%
+  arrange(.data$month_id)
+assert_equal(
+  simultaneous_outlet_months$spill_count_mo,
+  c(1, rep(0, 11)),
+  "Monthly counts should apply the 12/24 method to the combined works event stream."
+)
+assert_equal(
+  simultaneous_outlet_months$spill_hrs_mo,
+  c(4, rep(0, 11)),
+  "Monthly hours should preserve simultaneous outlet-hours."
+)
+
+simultaneous_outlet_quarters <- completed$quarterly %>%
+  filter(.data$site_id == 5L, .data$qtr_id %in% 1:4) %>%
+  arrange(.data$qtr_id)
+assert_equal(
+  simultaneous_outlet_quarters$spill_count_qt,
+  c(1, rep(0, 3)),
+  "Quarterly counts should apply the 12/24 method to the combined works event stream."
+)
+assert_equal(
+  simultaneous_outlet_quarters$spill_hrs_qt,
+  c(4, rep(0, 3)),
+  "Quarterly hours should preserve simultaneous outlet-hours."
 )
 
 reported_zero_year <- completed$yearly %>%
@@ -165,15 +225,19 @@ assert_true(
 
 ea_only_positive_year <- completed$yearly %>%
   filter(.data$site_id == 4L, .data$year == 2021L)
-assert_equal(
-  ea_only_positive_year$spill_count_yr,
-  5,
-  "EA-only positive site-year should retain the annual count fallback."
+assert_true(
+  is.na(ea_only_positive_year$spill_count_yr),
+  "EA-only positive site-year should not substitute an outlet-summed count for a works-level count."
 )
 assert_equal(
   ea_only_positive_year$spill_hrs_yr,
   5,
   "EA-only positive site-year should retain the annual hours fallback."
+)
+assert_equal(
+  ea_only_positive_year$spill_count_ea_crosswalk,
+  5,
+  "EA-only outlet-summed count should remain available in its explicit crosswalk column."
 )
 
 ea_only_positive_months <- completed$monthly %>%

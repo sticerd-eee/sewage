@@ -92,6 +92,12 @@ load_data <- function() {
   
   tryCatch(
     {
+      # Upstream, every monitored outlet is mapped to a sewage works. Outlets with the
+      # same company and normalised EA site name are grouped when corroborated by either
+      # a shared permit or locations within 250 m. A works-level site_id may therefore
+      # cover several outlets. spill_hrs sums outlet durations (outlet-hours), even when
+      # timestamps match; spill_count applies the 12/24 method once to the combined
+      # works-level event stream.
       data <- arrow::read_parquet(file_path) %>%
         select(site_id, year, water_company, start_time, end_time)
       crosswalk <- arrow::read_parquet(crosswalk_path) %>%
@@ -219,9 +225,10 @@ complete_data_observations <- function(
       by = c("site_id", "year", "water_company")
     ) %>%
     mutate(
-      spill_count_yr = dplyr::coalesce(
-        as.numeric(.data$spill_count_yr),
-        .data$spill_count_ea_crosswalk
+      spill_count_yr = dplyr::case_when(
+        !is.na(.data$spill_count_yr) ~ as.numeric(.data$spill_count_yr),
+        .data$annual_status == "reported_zero" ~ 0,
+        TRUE ~ NA_real_
       ),
       spill_hrs_yr = dplyr::coalesce(
         as.numeric(.data$spill_hrs_yr),
