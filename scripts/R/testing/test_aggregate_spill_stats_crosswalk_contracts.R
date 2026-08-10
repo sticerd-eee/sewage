@@ -41,6 +41,28 @@ assert_equal <- function(actual, expected, message, tolerance = 1e-9) {
   }
 }
 
+assert_error_contains <- function(expression, expected, message) {
+  error_message <- tryCatch(
+    {
+      force(expression)
+      NA_character_
+    },
+    error = function(e) conditionMessage(e)
+  )
+
+  if (is.na(error_message) || !grepl(expected, error_message, fixed = TRUE)) {
+    stop(
+      sprintf(
+        "%s\nActual error: %s\nExpected substring: %s",
+        message,
+        ifelse(is.na(error_message), "<no error>", error_message),
+        expected
+      ),
+      call. = FALSE
+    )
+  }
+}
+
 events <- tibble::tibble(
   site_id = c(1L, 5L, 5L),
   source_outlet = c("site_1_outlet", "site_5_outlet_a", "site_5_outlet_b"),
@@ -80,6 +102,99 @@ crosswalk <- tibble::tribble(
 
 aggregated <- aggregate_spills(events)
 completed <- complete_data_observations(aggregated, crosswalk)
+
+assert_true(
+  all(c("year", "month", "month_id") %in% names(completed$monthly)),
+  "Completed monthly output should retain year, month, and month_id."
+)
+assert_equal(
+  completed$monthly$month_id,
+  (completed$monthly$year - CONFIG$base_year) * 12 + completed$monthly$month,
+  "Monthly calendar columns should agree with month_id."
+)
+assert_true(
+  all(c("year", "quarter", "qtr_id") %in% names(completed$quarterly)),
+  "Completed quarterly output should retain year, quarter, and qtr_id."
+)
+assert_equal(
+  completed$quarterly$qtr_id,
+  (completed$quarterly$year - CONFIG$base_year) * 4 + completed$quarterly$quarter,
+  "Quarterly calendar columns should agree with qtr_id."
+)
+
+assert_unique_keys(
+  completed$yearly,
+  c("site_id", "water_company", "year"),
+  "Completed yearly output"
+)
+assert_unique_keys(
+  completed$monthly,
+  c("site_id", "water_company", "month_id"),
+  "Completed monthly output"
+)
+assert_unique_keys(
+  completed$quarterly,
+  c("site_id", "water_company", "qtr_id"),
+  "Completed quarterly output"
+)
+
+duplicate_metadata <- dplyr::bind_rows(crosswalk, crosswalk[1, ])
+assert_error_contains(
+  complete_data_observations(aggregated, duplicate_metadata),
+  "Works-year metadata must be unique on: site_id, year, water_company",
+  "An exact duplicate Works-year metadata key should fail before completion joins."
+)
+
+conflicting_metadata <- crosswalk
+conflicting_metadata$annual_status[1] <- "reported_zero"
+conflicting_metadata <- dplyr::bind_rows(crosswalk, conflicting_metadata[1, ])
+assert_error_contains(
+  complete_data_observations(aggregated, conflicting_metadata),
+  "Works-year metadata must be unique on: site_id, year, water_company",
+  "A conflicting duplicate Works-year metadata key should fail before completion joins."
+)
+
+input_dir <- tempfile("aggregate-spill-input-contracts-")
+dir.create(input_dir)
+events_path <- file.path(input_dir, "events.parquet")
+crosswalk_path <- file.path(input_dir, "crosswalk.parquet")
+on.exit(unlink(input_dir, recursive = TRUE), add = TRUE)
+
+event_input <- dplyr::select(
+  events,
+  site_id, year, water_company, start_time, end_time
+)
+crosswalk_input <- dplyr::transmute(
+  crosswalk,
+  site_id,
+  year,
+  water_company,
+  annual_status,
+  spill_hrs_ea = spill_hrs_ea_crosswalk,
+  spill_count_ea = spill_count_ea_crosswalk
+)
+
+arrow::write_parquet(dplyr::select(event_input, -start_time), events_path)
+arrow::write_parquet(crosswalk_input, crosswalk_path)
+assert_error_contains(
+  preflight_inputs(list(
+    merged_data_path = events_path,
+    crosswalk_path = crosswalk_path
+  )),
+  "Event input is missing required columns: start_time",
+  "Event preflight should identify a missing required column."
+)
+
+arrow::write_parquet(event_input, events_path)
+arrow::write_parquet(dplyr::select(crosswalk_input, -annual_status), crosswalk_path)
+assert_error_contains(
+  preflight_inputs(list(
+    merged_data_path = events_path,
+    crosswalk_path = crosswalk_path
+  )),
+  "Works-year crosswalk input is missing required columns: annual_status",
+  "Crosswalk preflight should identify a missing required column."
+)
 
 event_year <- completed$yearly %>%
   filter(.data$site_id == 1L, .data$year == 2021L)

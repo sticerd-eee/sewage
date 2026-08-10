@@ -65,8 +65,93 @@ CONFIG <- list(
   base_year = 2021
 )
 
+INPUT_CONTRACT <- list(
+  events = c(
+    "site_id", "year", "water_company", "start_time", "end_time"
+  ),
+  crosswalk = c(
+    "site_id", "year", "water_company", "annual_status",
+    "spill_hrs_ea", "spill_count_ea"
+  )
+)
+
 # Functions
 ############################################################
+
+#' Return the column names stored in a Parquet file
+#' @param path Path to a Parquet file
+#' @return Character vector of column names
+parquet_names <- function(path) {
+  names(arrow::read_parquet(path, as_data_frame = FALSE))
+}
+
+#' Validate a Parquet input against its required columns
+#' @param path Path to a Parquet file
+#' @param required_columns Character vector of required columns
+#' @param label Human-readable input label used in errors
+#' @return TRUE invisibly
+assert_parquet_contract <- function(path, required_columns, label) {
+  if (!file.exists(path)) {
+    stop(glue::glue("{label} input not found: {path}"), call. = FALSE)
+  }
+
+  missing_columns <- setdiff(required_columns, parquet_names(path))
+  if (length(missing_columns) > 0) {
+    stop(
+      glue::glue(
+        "{label} input is missing required columns: ",
+        "{paste(missing_columns, collapse = ', ')}"
+      ),
+      call. = FALSE
+    )
+  }
+
+  invisible(TRUE)
+}
+
+#' Validate both aggregation inputs before loading full data
+#' @param config Aggregation configuration containing both input paths
+#' @return TRUE invisibly
+preflight_inputs <- function(config = CONFIG) {
+  assert_parquet_contract(
+    config$merged_data_path,
+    INPUT_CONTRACT$events,
+    "Event"
+  )
+  assert_parquet_contract(
+    config$crosswalk_path,
+    INPUT_CONTRACT$crosswalk,
+    "Works-year crosswalk"
+  )
+  invisible(TRUE)
+}
+
+#' Assert that a data frame contains one row per declared key
+#' @param data Data frame to validate
+#' @param keys Character vector naming the key columns
+#' @param label Human-readable dataset label used in errors
+#' @return TRUE invisibly
+assert_unique_keys <- function(data, keys, label) {
+  missing_keys <- setdiff(keys, names(data))
+  if (length(missing_keys) > 0) {
+    stop(
+      glue::glue(
+        "{label} is missing key columns: ",
+        "{paste(missing_keys, collapse = ', ')}"
+      ),
+      call. = FALSE
+    )
+  }
+
+  if (anyDuplicated(data[keys]) > 0L) {
+    stop(
+      glue::glue("{label} must be unique on: {paste(keys, collapse = ', ')}"),
+      call. = FALSE
+    )
+  }
+
+  invisible(TRUE)
+}
 
 #' Load merged individual sewage spill data
 #' @return A list with two elements:
@@ -80,33 +165,28 @@ load_data <- function() {
   logger::log_info("Loading data: {file_path}")
   logger::log_info("Loading works-year crosswalk: {crosswalk_path}")
   
-  if (!file.exists(file_path)) {
-    stop(glue::glue("File not found: {file_path}"))
-  }
-  if (!file.exists(crosswalk_path)) {
-    stop(glue::glue("File not found: {crosswalk_path}"))
-  }
-  
   tryCatch(
     {
+      preflight_inputs()
+
       # Upstream, every monitored outlet is mapped to a sewage works. Outlets with the
       # same company and normalised EA site name are grouped when corroborated by either
       # a shared permit or locations within 250 m. A works-level site_id may therefore
       # cover several outlets. spill_hrs sums outlet durations (outlet-hours), even when
       # timestamps match; spill_count applies the 12/24 method once to the combined
       # works-level event stream.
-      data <- arrow::read_parquet(file_path) %>%
-        select(site_id, year, water_company, start_time, end_time)
-      crosswalk <- arrow::read_parquet(crosswalk_path) %>%
-        select(
-          site_id, year, water_company, annual_status,
-          spill_hrs_ea, spill_count_ea
-        ) %>%
+      data <- arrow::read_parquet(
+        file_path,
+        col_select = dplyr::all_of(INPUT_CONTRACT$events)
+      )
+      crosswalk <- arrow::read_parquet(
+        crosswalk_path,
+        col_select = dplyr::all_of(INPUT_CONTRACT$crosswalk)
+      ) %>%
         rename(
           spill_hrs_ea_crosswalk = spill_hrs_ea,
           spill_count_ea_crosswalk = spill_count_ea
-        ) %>%
-        distinct()
+        )
 
       list(
         spill_data = data,
@@ -184,8 +264,13 @@ complete_data_observations <- function(data, metadata) {
     select(
       site_id, year, water_company, annual_status,
       spill_count_ea_crosswalk, spill_hrs_ea_crosswalk
-    ) %>%
-    distinct()
+    )
+
+  assert_unique_keys(
+    metadata,
+    c("site_id", "year", "water_company"),
+    "Works-year metadata"
+  )
 
   reporting_sites <- metadata %>%
     filter(.data$annual_status != "absent") %>%
@@ -272,7 +357,7 @@ complete_data_observations <- function(data, metadata) {
       )
     ) %>%
     select(
-      site_id, water_company, month_id, annual_status,
+      site_id, water_company, year, month, month_id, annual_status,
       spill_count_mo, spill_hrs_mo,
       spill_count_ea_crosswalk, spill_hrs_ea_crosswalk
     )
@@ -315,10 +400,26 @@ complete_data_observations <- function(data, metadata) {
       )
     ) %>%
     select(
-      site_id, water_company, qtr_id, annual_status,
+      site_id, water_company, year, quarter, qtr_id, annual_status,
       spill_count_qt, spill_hrs_qt,
       spill_count_ea_crosswalk, spill_hrs_ea_crosswalk
     )
+
+  assert_unique_keys(
+    completed_yearly,
+    c("site_id", "water_company", "year"),
+    "Completed yearly output"
+  )
+  assert_unique_keys(
+    completed_monthly,
+    c("site_id", "water_company", "month_id"),
+    "Completed monthly output"
+  )
+  assert_unique_keys(
+    completed_quarterly,
+    c("site_id", "water_company", "qtr_id"),
+    "Completed quarterly output"
+  )
   
   list(
     yearly    = completed_yearly,
@@ -332,6 +433,22 @@ complete_data_observations <- function(data, metadata) {
 #' @return NULL (invisibly)
 export_results <- function(final_results) {
   output_dir <- CONFIG$output_dir
+
+  assert_unique_keys(
+    final_results$yearly,
+    c("site_id", "water_company", "year"),
+    "Yearly export"
+  )
+  assert_unique_keys(
+    final_results$monthly,
+    c("site_id", "water_company", "month_id"),
+    "Monthly export"
+  )
+  assert_unique_keys(
+    final_results$quarterly,
+    c("site_id", "water_company", "qtr_id"),
+    "Quarterly export"
+  )
   
   if (!dir.exists(output_dir)) {
     fs::dir_create(output_dir, recurse = TRUE)
