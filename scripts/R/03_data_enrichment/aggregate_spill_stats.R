@@ -105,7 +105,7 @@ INPUT_CONTRACT <- list(
 #' @param path Path to a Parquet file
 #' @return Character vector of column names
 parquet_names <- function(path) {
-  names(arrow::read_parquet(path, as_data_frame = FALSE))
+  arrow::open_dataset(path, format = "parquet")$schema$names
 }
 
 #' Validate a Parquet input against its required columns
