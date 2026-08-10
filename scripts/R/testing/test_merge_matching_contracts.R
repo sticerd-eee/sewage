@@ -68,8 +68,7 @@ resolver_row <- function(site_id, year = 2024L, company = "Test Water",
                          spill_count_ea = NA_real_) {
   tibble(
     site_id = as.integer(site_id),
-    member_site_id = as.integer(site_id),
-    canonical_site_id = as.integer(site_id),
+    site_id_canonical = as.integer(site_id),
     water_company = company,
     year = as.integer(year),
     annual_site_id = as.integer(site_id),
@@ -166,7 +165,7 @@ permit_only_decision <- first_decision(
 assert_identical(
   permit_only_decision$site_id,
   4L,
-  "If permit+activity finds zero annual rows, permit-only should retry and resolve one works."
+  "If permit+activity finds zero annual rows, permit-only should retry and resolve one Site Group."
 )
 assert_identical(
   permit_only_decision$match_method,
@@ -183,7 +182,7 @@ permit_spans <- first_decision(
 )
 assert_true(
   is.na(permit_spans$site_id),
-  "Permit-only candidates spanning multiple works should not match."
+  "Permit-only candidates spanning multiple Site Groups should not match."
 )
 
 # ------------------------------------------------------------------------------
@@ -235,7 +234,7 @@ absent_decision <- first_decision(
 assert_identical(
   absent_decision$site_id,
   11L,
-  "A key resolving one works with no same-year annual row should still match."
+  "A key resolving one Site Group with no same-year annual row should still match."
 )
 assert_identical(
   absent_decision$annual_status_hint,
@@ -311,7 +310,7 @@ assert_true(
   "NA candidate metrics should not match."
 )
 assert_true(
-  agreement_na$reason %in% c("agreement_failed", "name_spans_works"),
+  agreement_na$reason %in% c("agreement_failed", "name_spans_site_groups"),
   "NA candidate metrics should be reason-coded without crashing."
 )
 
@@ -345,7 +344,7 @@ assert_error_matching(
     override_resolver,
     manual_overrides = override_events %>% mutate(site_id = 999L)
   ),
-  "unknown works site_id",
+  "unknown Site Group site_id",
   "Manual overrides naming a site_id absent from the register should fail preflight."
 )
 

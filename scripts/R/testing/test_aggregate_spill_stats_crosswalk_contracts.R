@@ -141,8 +141,8 @@ assert_unique_keys(
 duplicate_metadata <- dplyr::bind_rows(crosswalk, crosswalk[1, ])
 assert_error_contains(
   complete_data_observations(aggregated, duplicate_metadata),
-  "Works-year metadata must be unique on: site_id, year, water_company",
-  "An exact duplicate Works-year metadata key should fail before completion joins."
+  "Site Group-year metadata must be unique on: site_id, year, water_company",
+  "An exact duplicate Site Group-year metadata key should fail before completion joins."
 )
 
 conflicting_metadata <- crosswalk
@@ -150,8 +150,8 @@ conflicting_metadata$annual_status[1] <- "reported_zero"
 conflicting_metadata <- dplyr::bind_rows(crosswalk, conflicting_metadata[1, ])
 assert_error_contains(
   complete_data_observations(aggregated, conflicting_metadata),
-  "Works-year metadata must be unique on: site_id, year, water_company",
-  "A conflicting duplicate Works-year metadata key should fail before completion joins."
+  "Site Group-year metadata must be unique on: site_id, year, water_company",
+  "A conflicting duplicate Site Group-year metadata key should fail before completion joins."
 )
 
 input_dir <- tempfile("aggregate-spill-input-contracts-")
@@ -192,7 +192,7 @@ assert_error_contains(
     merged_data_path = events_path,
     crosswalk_path = crosswalk_path
   )),
-  "Works-year crosswalk input is missing required columns: annual_status",
+  "Site Group-year crosswalk input is missing required columns: annual_status",
   "Crosswalk preflight should identify a missing required column."
 )
 
@@ -256,7 +256,7 @@ simultaneous_outlet_year <- completed$yearly %>%
 assert_equal(
   simultaneous_outlet_year$spill_count_yr,
   1,
-  "Simultaneous outlet events should form one works-level 12/24 spill block."
+  "Simultaneous outlet events should form one Site Group-level 12/24 spill block."
 )
 assert_equal(
   simultaneous_outlet_year$spill_hrs_yr,
@@ -270,7 +270,7 @@ simultaneous_outlet_months <- completed$monthly %>%
 assert_equal(
   simultaneous_outlet_months$spill_count_mo,
   c(1, rep(0, 11)),
-  "Monthly counts should apply the 12/24 method to the combined works event stream."
+  "Monthly counts should apply the 12/24 method to the combined Site Group event stream."
 )
 assert_equal(
   simultaneous_outlet_months$spill_hrs_mo,
@@ -284,7 +284,7 @@ simultaneous_outlet_quarters <- completed$quarterly %>%
 assert_equal(
   simultaneous_outlet_quarters$spill_count_qt,
   c(1, rep(0, 3)),
-  "Quarterly counts should apply the 12/24 method to the combined works event stream."
+  "Quarterly counts should apply the 12/24 method to the combined Site Group event stream."
 )
 assert_equal(
   simultaneous_outlet_quarters$spill_hrs_qt,
@@ -342,7 +342,7 @@ ea_only_positive_year <- completed$yearly %>%
   filter(.data$site_id == 4L, .data$year == 2021L)
 assert_true(
   is.na(ea_only_positive_year$spill_count_yr),
-  "EA-only positive site-year should not substitute an outlet-summed count for a works-level count."
+  "EA-only positive site-year should not substitute an outlet-summed count for a Site Group-level count."
 )
 assert_equal(
   ea_only_positive_year$spill_hrs_yr,
@@ -379,7 +379,7 @@ assert_true(
     is.na(absent_year$spill_hrs_yr) &&
     is.na(absent_year$spill_count_ea_crosswalk) &&
     is.na(absent_year$spill_hrs_ea_crosswalk),
-  "Absent works-years should be present only through site-level crossing, with no EA fallback."
+  "Absent Site Group-years should be present only through site-level crossing, with no EA fallback."
 )
 
 absent_months <- completed$monthly %>%
@@ -387,7 +387,7 @@ absent_months <- completed$monthly %>%
 assert_true(
   all(is.na(absent_months$spill_count_mo)) &&
     all(is.na(absent_months$spill_hrs_mo)),
-  "Absent works-years should keep monthly totals unknown."
+  "Absent Site Group-years should keep monthly totals unknown."
 )
 
 absent_quarters <- completed$quarterly %>%
@@ -395,7 +395,7 @@ absent_quarters <- completed$quarterly %>%
 assert_true(
   all(is.na(absent_quarters$spill_count_qt)) &&
     all(is.na(absent_quarters$spill_hrs_qt)),
-  "Absent works-years should keep quarterly totals unknown."
+  "Absent Site Group-years should keep quarterly totals unknown."
 )
 
 descriptive_cols <- c(

@@ -3,7 +3,7 @@
 # ==============================================================================
 #
 # Purpose: Aggregate matched event-level discharges to completed yearly, monthly,
-#          and quarterly Works panels using the Environment Agency 12/24 method.
+#          and quarterly Site Group panels using the Environment Agency 12/24 method.
 #
 # Author: Jacopo Olivieri
 # Date: 2024-12-28
@@ -11,7 +11,7 @@
 #
 # Inputs:
 #   - data/processed/matched_events_annual_data/matched_events_annual_data.parquet
-#   - data/processed/matched_events_annual_data/site_works_crosswalk.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #
 # Outputs:
 #   - data/processed/agg_spill_stats/agg_spill_yr.parquet
@@ -83,7 +83,7 @@ CONFIG <- list(
     "matched_events_annual_data.parquet"),
   crosswalk_path = here::here(
     "data", "processed", "matched_events_annual_data",
-    "site_works_crosswalk.parquet"),
+    "site_group_crosswalk.parquet"),
   output_dir = here::here("data", "processed", "agg_spill_stats"),
   years = 2021:2024,
   base_year = 2021
@@ -145,7 +145,7 @@ preflight_inputs <- function(config = CONFIG) {
   assert_parquet_contract(
     config$crosswalk_path,
     INPUT_CONTRACT$crosswalk,
-    "Works-year crosswalk"
+    "Site Group-year crosswalk"
   )
   invisible(TRUE)
 }
@@ -177,33 +177,33 @@ assert_unique_keys <- function(data, keys, label) {
   invisible(TRUE)
 }
 
-#' Load event-level discharges and Works-year metadata
+#' Load event-level discharges and Site Group-year metadata
 #'
 #' Reads only the declared input-contract columns. Event rows retain
 #' `site_id`, `year`, `water_company`, `start_time`, and `end_time`; metadata
-#' retains the Works-year Annual Status and EA outlet totals.
+#' retains the Site Group-year Annual Status and EA outlet totals.
 #'
 #' @return A list with two elements:
 #' \describe{
-#'   \item{spill_data}{Event-level discharge rows assigned to Works.}
-#'   \item{metadata}{Unique Works-year-company metadata with Annual Status and EA totals.}
+#'   \item{spill_data}{Event-level discharge rows assigned to Site Group.}
+#'   \item{metadata}{Unique Site Group-year-company metadata with Annual Status and EA totals.}
 #' }
 load_data <- function() {
   file_path <- CONFIG$merged_data_path
   crosswalk_path <- CONFIG$crosswalk_path
   logger::log_info("Loading data: {file_path}")
-  logger::log_info("Loading works-year crosswalk: {crosswalk_path}")
+  logger::log_info("Loading Site Group-year crosswalk: {crosswalk_path}")
   
   tryCatch(
     {
       preflight_inputs()
 
-      # Upstream, every monitored outlet is mapped to a sewage works. Outlets with the
+      # Upstream, every monitored outlet is mapped to a Site Group. Outlets with the
       # same company and normalised EA site name are grouped when corroborated by either
-      # a shared permit or locations within 250 m. A works-level site_id may therefore
+      # a shared permit or locations within 250 m. A Site Group-level site_id may therefore
       # cover several outlets. spill_hrs sums outlet durations (outlet-hours), even when
       # timestamps match; spill_count applies the 12/24 method once to the combined
-      # works-level event stream.
+      # Site Group-level event stream.
       data <- arrow::read_parquet(
         file_path,
         col_select = dplyr::all_of(INPUT_CONTRACT$events)
@@ -231,13 +231,13 @@ load_data <- function() {
   )
 }
 
-#' Aggregate event-level discharges to Works-period statistics
+#' Aggregate event-level discharges to Site Group-period statistics
 #'
-#' Spill counts apply the 12/24 method once to each combined Works event stream.
+#' Spill counts apply the 12/24 method once to each combined Site Group event stream.
 #' Spill hours remain additive outlet-hours, including simultaneous outlets.
 #'
-#' @param data Event-level discharge data assigned to Works
-#' @return List with yearly, monthly, and quarterly Works-period statistics
+#' @param data Event-level discharge data assigned to Site Group
+#' @return List with yearly, monthly, and quarterly Site Group-period statistics
 aggregate_spills <- function(data) {
   prepared_data <- prepare_spill_data(data, CONFIG$base_year)
   dt_yearly    <- prepared_data$yearly
@@ -280,19 +280,19 @@ aggregate_spills <- function(data) {
   )
 }
 
-#' Complete Works observations across yearly, monthly, and quarterly grids
+#' Complete Site Group observations across yearly, monthly, and quarterly grids
 #' @param data List with components:
 #'   \itemize{
-#'     \item yearly: Works-year spill counts and outlet-hours.
-#'     \item monthly: Works-month spill counts and outlet-hours.
-#'     \item quarterly: Works-quarter spill counts and outlet-hours.
+#'     \item yearly: Site Group-year spill counts and outlet-hours.
+#'     \item monthly: Site Group-month spill counts and outlet-hours.
+#'     \item quarterly: Site Group-quarter spill counts and outlet-hours.
 #'   }
-#' @param metadata Unique Works-year metadata with Annual Status and EA totals
+#' @param metadata Unique Site Group-year metadata with Annual Status and EA totals
 #' @return List with:
 #'   \itemize{
-#'     \item yearly: completed Works-year observations.
-#'     \item monthly: completed Works-month observations with calendar columns and month_id.
-#'     \item quarterly: completed Works-quarter observations with calendar columns and qtr_id.
+#'     \item yearly: completed Site Group-year observations.
+#'     \item monthly: completed Site Group-month observations with calendar columns and month_id.
+#'     \item quarterly: completed Site Group-quarter observations with calendar columns and qtr_id.
 #'   }
 complete_data_observations <- function(data, metadata) {
   metadata <- metadata %>%
@@ -304,7 +304,7 @@ complete_data_observations <- function(data, metadata) {
   assert_unique_keys(
     metadata,
     c("site_id", "year", "water_company"),
-    "Works-year metadata"
+    "Site Group-year metadata"
   )
 
   reporting_sites <- metadata %>%
@@ -463,7 +463,7 @@ complete_data_observations <- function(data, metadata) {
   )
 }
 
-#' Export the completed Works-period aggregates
+#' Export the completed Site Group-period aggregates
 #' @param final_results List containing yearly, monthly, and quarterly components
 #' @return NULL (invisibly)
 export_results <- function(final_results) {

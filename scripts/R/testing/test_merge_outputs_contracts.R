@@ -55,38 +55,37 @@ suppressPackageStartupMessages({
 source(here::here("scripts", "R", "utils", "merge_outputs_utils.R"))
 
 membership <- tibble(
-  site_id = c(1L, 2L),
-  member_site_id = c(1L, 2L),
+  site_id = c(1L, 1L, 2L),
+  site_id_canonical = c(1L, 3L, 2L),
   water_company = "Test Water",
-  component_id = c(1L, 2L),
-  n_members = c(1L, 1L),
-  site_id_members = c("1", "2")
+  component_id = c(1L, 1L, 2L),
+  n_members = c(2L, 2L, 1L),
+  site_id_canonical_members = c("1;3", "1;3", "2")
 )
 
 resolver <- tibble(
-  annual_row_id = 1:4,
-  site_id = c(1L, 1L, 1L, 2L),
-  member_site_id = c(1L, 1L, 1L, 2L),
-  canonical_site_id = c(1L, 1L, 1L, 2L),
+  annual_row_id = 1:5,
+  site_id = c(1L, 1L, 1L, 1L, 2L),
+  site_id_canonical = c(1L, 3L, 1L, 1L, 2L),
   water_company = "Test Water",
-  year = c(2021L, 2022L, 2023L, 2021L),
-  annual_site_id = 1:4,
-  site_name_ea = c("Alpha", "Alpha", "Alpha", "Beta"),
-  site_name_ea_norm = c("ALPHA", "ALPHA", "ALPHA", "BETA"),
+  year = c(2021L, 2021L, 2022L, 2023L, 2021L),
+  annual_site_id = 1:5,
+  site_name_ea = c("Alpha", "Alpha Tank", "Alpha", "Alpha", "Beta"),
+  site_name_ea_norm = c("ALPHA", "ALPHA TANK", "ALPHA", "ALPHA", "BETA"),
   site_name_wa_sc = NA_character_,
   permit_reference_ea = NA_character_,
   permit_reference_ea_norm = NA_character_,
   permit_reference_wa_sc = NA_character_,
   activity_reference = NA_character_,
-  outlet_discharge_ngr = c("TQ3000080000", "TQ3000080000", "TQ3000080000", "TQ3100080000"),
-  ngr = c("TQ3000080000", "TQ3000080000", "TQ3000080000", "TQ3100080000"),
-  easting = c(530000, 530000, 530000, 531000),
-  northing = c(180000, 180000, 180000, 180000),
-  spill_hrs_ea = c(0, 12, NA, 24),
-  spill_count_ea = c(0, 3, NA, 4),
-  edm_operation_percent = c(100, 95, NA, 90),
-  no_full_years_edm_data = c(1, 2, NA, 1),
-  edm_commission_date = as.Date(c("2020-01-01", "2020-01-01", "2020-01-01", "2021-01-01"))
+  outlet_discharge_ngr = c("TQ3000080000", "TQ3010080000", "TQ3000080000", "TQ3000080000", "TQ3100080000"),
+  ngr = c("TQ3000080000", "TQ3010080000", "TQ3000080000", "TQ3000080000", "TQ3100080000"),
+  easting = c(530000, 530100, 530000, 530000, 531000),
+  northing = c(180000, 180000, 180000, 180000, 180000),
+  spill_hrs_ea = c(0, 0, 12, NA, 24),
+  spill_count_ea = c(0, 0, 3, NA, 4),
+  edm_operation_percent = c(100, 80, 95, NA, 90),
+  no_full_years_edm_data = c(1, 1, 2, NA, 1),
+  edm_commission_date = as.Date(c("2020-01-01", "2022-01-01", "2020-01-01", "2020-01-01", "2021-01-01"))
 )
 
 events <- tibble(
@@ -155,14 +154,31 @@ outputs <- assemble_merge_outputs(
 )
 
 # ------------------------------------------------------------------------------
-# Crosswalk status taxonomy and full works x years grid
+# Crosswalk membership, schema, status taxonomy, and full Site Group x years grid
 # ------------------------------------------------------------------------------
 
-crosswalk <- outputs$site_works_crosswalk
+crosswalk <- outputs$site_group_crosswalk
 assert_identical(
   nrow(crosswalk),
   8L,
-  "Crosswalk should contain one row per works x year."
+  "Crosswalk should contain one row per Site Group x year."
+)
+assert_identical(
+  unique(crosswalk$site_id_canonical_members[crosswalk$site_id == 1L]),
+  "1;3",
+  "A multi-member Site Group should retain every canonical member in sorted order."
+)
+assert_true(
+  !anyDuplicated(crosswalk[c("site_id", "year", "water_company")]),
+  "The Site Group crosswalk should be unique on site_id, year, and water_company."
+)
+member_level_edm_fields <- c(
+  "edm_commission_date", "edm_operation_percent", "no_full_years_edm_data"
+)
+assert_identical(
+  intersect(member_level_edm_fields, names(crosswalk)),
+  character(),
+  "The Site Group crosswalk must omit member-level EDM metadata."
 )
 assert_identical(
   crosswalk %>% filter(site_id == 1L, year == 2021L) %>% pull(annual_status),
@@ -216,10 +232,10 @@ assert_true(
 
 assert_true(
   nrow(outputs$annual_unmatched) >= 1L,
-  "Reported-positive works-years with no matched events should appear in annual_unmatched."
+  "Reported-positive Site Group-years with no matched events should appear in annual_unmatched."
 )
 assert_identical(
-  outputs$site_works_crosswalk %>%
+  outputs$site_group_crosswalk %>%
     filter(site_id == 1L, year == 2023L) %>%
     pull(spill_hrs_ea),
   NA_real_,
@@ -301,6 +317,11 @@ assert_true(
   !file.exists(file.path(canonical_dir, "site_metadata.parquet")),
   "A normal publish should not retain the retired site_metadata.parquet output."
 )
+assert_true(
+  file.exists(file.path(canonical_dir, "site_group_crosswalk.parquet")) &&
+    !file.exists(file.path(canonical_dir, "site_works_crosswalk.parquet")),
+  "A normal publish should emit only the Site Group crosswalk name."
+)
 
 crash_root <- tempfile("merge-output-crash-")
 crash_canonical <- file.path(crash_root, "matched_events_annual_data")
@@ -320,7 +341,7 @@ writeLines(
     paste0("staging <- ", dQuote(file.path(crash_root, "staging"))),
     paste0("canonical <- ", dQuote(crash_canonical)),
     "outputs <- empty_merge_outputs()",
-    "outputs$site_works_crosswalk <- tibble(site_id=1L, year=2024L, water_company='Test Water', site_id_members='1', n_outlets=1L, n_outlets_reporting=1L, annual_status='reported_positive', spill_hrs_ea=1, spill_count_ea=1, ngr='TQ3000080000', easting=530000, northing=180000, edm_operation_percent=100, no_full_years_edm_data=1, edm_commission_date=as.Date('2024-01-01'), matched_event_count=1L, match_methods='site_name_ea')",
+    "outputs$site_group_crosswalk <- tibble(site_id=1L, year=2024L, water_company='Test Water', site_id_canonical_members='1', n_outlets=1L, n_outlets_reporting=1L, annual_status='reported_positive', spill_hrs_ea=1, spill_count_ea=1, ngr='TQ3000080000', easting=530000, northing=180000, matched_event_count=1L, match_methods='site_name_ea')",
     "outputs$matched_events <- tibble(water_company='Test Water', year=2024L, site_name_ea='Alpha', site_name_wa_sc=NA_character_, permit_reference_ea=NA_character_, start_time_og='2024-01-01T00:00:00Z', end_time_og='2024-01-01T01:00:00Z', permit_reference_wa_sc=NA_character_, activity_reference=NA_character_, site_code=NA_character_, asset_type=NA_character_, unique_id='E1', event_duration_in_hours=1, new_unqiue_id=NA_character_, start_time=as.POSIXct('2024-01-01 00:00:00', tz='UTC'), end_time=as.POSIXct('2024-01-01 01:00:00', tz='UTC'), site_id=1L, match_method='site_name_ea', match_quality=1, annual_status='reported_positive', spill_hrs_ea=1, spill_count_ea=1, ngr='TQ3000080000')",
     "outputs$events_unmatched <- EVENTS_UNMATCHED_PROTOTYPE",
     "outputs$annual_unmatched <- ANNUAL_UNMATCHED_PROTOTYPE",

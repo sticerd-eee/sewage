@@ -147,7 +147,7 @@ prepare_resolver_for_matching <- function(resolver) {
     add_normalised_tuple_cols()
 }
 
-summarise_works_year_hours <- function(resolver) {
+summarise_site_group_year_hours <- function(resolver) {
   resolver %>%
     dplyr::group_by(.data$site_id, .data$year) %>%
     dplyr::summarise(
@@ -160,15 +160,19 @@ summarise_works_year_hours <- function(resolver) {
     )
 }
 
-unique_work_resolution <- function(candidates) {
-  works <- sort(unique(stats::na.omit(candidates$site_id)))
-  if (length(works) == 0) {
-    return(list(status = "none", site_id = NA_integer_, n_works = 0L))
+unique_site_group_resolution <- function(candidates) {
+  site_groups <- sort(unique(stats::na.omit(candidates$site_id)))
+  if (length(site_groups) == 0) {
+    return(list(status = "none", site_id = NA_integer_, n_site_groups = 0L))
   }
-  if (length(works) == 1) {
-    return(list(status = "unique", site_id = as.integer(works[[1L]]), n_works = 1L))
+  if (length(site_groups) == 1) {
+    return(list(status = "unique", site_id = as.integer(site_groups[[1L]]), n_site_groups = 1L))
   }
-  list(status = "spans", site_id = NA_integer_, n_works = length(works))
+  list(
+    status = "spans",
+    site_id = NA_integer_,
+    n_site_groups = length(site_groups)
+  )
 }
 
 candidate_rows_for_rung <- function(tuple, resolver, rung) {
@@ -226,34 +230,34 @@ resolve_ladder_for_tuple <- function(tuple, resolver) {
   resolutions <- list()
 
   rows_by_rung$unique_id <- candidate_rows_for_rung(tuple, resolver, "unique_id")
-  resolutions$unique_id <- unique_work_resolution(rows_by_rung$unique_id)
+  resolutions$unique_id <- unique_site_group_resolution(rows_by_rung$unique_id)
 
   rows_by_rung$permit_activity <-
     candidate_rows_for_rung(tuple, resolver, "permit_activity")
   resolutions$permit_activity <-
-    unique_work_resolution(rows_by_rung$permit_activity)
+    unique_site_group_resolution(rows_by_rung$permit_activity)
 
   if (identical(resolutions$permit_activity$status, "none")) {
     rows_by_rung$permit_only <-
       candidate_rows_for_rung(tuple, resolver, "permit_only")
-    resolutions$permit_only <- unique_work_resolution(rows_by_rung$permit_only)
+    resolutions$permit_only <- unique_site_group_resolution(rows_by_rung$permit_only)
   } else {
     rows_by_rung$permit_only <- resolver[0, ]
     resolutions$permit_only <- list(
       status = "skipped",
       site_id = NA_integer_,
-      n_works = 0L
+      n_site_groups = 0L
     )
   }
 
   rows_by_rung$site_name_ea <-
     candidate_rows_for_rung(tuple, resolver, "site_name_ea")
-  resolutions$site_name_ea <- unique_work_resolution(rows_by_rung$site_name_ea)
+  resolutions$site_name_ea <- unique_site_group_resolution(rows_by_rung$site_name_ea)
 
   rows_by_rung$site_name_wa_sc <-
     candidate_rows_for_rung(tuple, resolver, "site_name_wa_sc")
   resolutions$site_name_wa_sc <-
-    unique_work_resolution(rows_by_rung$site_name_wa_sc)
+    unique_site_group_resolution(rows_by_rung$site_name_wa_sc)
 
   unique_rungs <- rungs[vapply(
     resolutions[rungs],
@@ -299,7 +303,7 @@ resolve_ladder_for_tuple <- function(tuple, resolver) {
         site_id = NA_integer_,
         match_method = NA_character_,
         match_quality = NA_real_,
-        reason = "name_spans_works",
+        reason = "name_spans_site_groups",
         agreement_rung = name_rung,
         agreement_candidates = rows_by_rung[[name_rung]],
         rows_by_rung = rows_by_rung,
@@ -320,7 +324,7 @@ resolve_ladder_for_tuple <- function(tuple, resolver) {
       site_id = NA_integer_,
       match_method = NA_character_,
       match_quality = NA_real_,
-      reason = "key_spans_works",
+      reason = "key_spans_site_groups",
       rows_by_rung = rows_by_rung,
       resolutions = resolutions
     ))
@@ -342,15 +346,15 @@ calculate_relative_error <- function(event_hours, candidate_hours, abs_floor) {
   abs(candidate_hours - event_hours) / denominator
 }
 
-resolve_agreement_for_tuple <- function(tuple, candidates, works_year_hours,
+resolve_agreement_for_tuple <- function(tuple, candidates, site_group_year_hours,
                                         config) {
-  candidate_works <- tibble::tibble(
+  candidate_site_groups <- tibble::tibble(
     site_id = sort(unique(stats::na.omit(as.integer(candidates$site_id))))
   )
 
-  scored <- candidate_works %>%
+  scored <- candidate_site_groups %>%
     dplyr::left_join(
-      works_year_hours %>%
+      site_group_year_hours %>%
         dplyr::filter(.data$year == tuple$year) %>%
         dplyr::select(dplyr::all_of(c("site_id", "candidate_hours"))),
       by = "site_id"
@@ -375,8 +379,8 @@ resolve_agreement_for_tuple <- function(tuple, candidates, works_year_hours,
   if (nrow(usable) == 0) {
     return(list(
       status = "unmatched",
-      reason = "name_spans_works",
-      agreement_evidence = evidence_for("name_spans_works")
+      reason = "name_spans_site_groups",
+      agreement_evidence = evidence_for("name_spans_site_groups")
     ))
   }
 
@@ -459,7 +463,7 @@ validate_manual_overrides <- function(manual_overrides, resolver) {
   unknown <- setdiff(as.integer(manual_overrides$site_id), unique(resolver$site_id))
   if (length(unknown) > 0) {
     stop(
-      "Manual overrides reference unknown works site_id(s): ",
+      "Manual overrides reference unknown Site Group site_id(s): ",
       paste(sort(unknown), collapse = ", "),
       call. = FALSE
     )
@@ -537,7 +541,7 @@ resolve_merge_matches <- function(
     )) {
   tuples <- prepare_event_tuples(events)
   resolver <- prepare_resolver_for_matching(resolver)
-  works_year_hours <- summarise_works_year_hours(resolver)
+  site_group_year_hours <- summarise_site_group_year_hours(resolver)
 
   near_miss_rows <- vector("list", nrow(tuples))
 
@@ -550,7 +554,7 @@ resolve_merge_matches <- function(
       agreement <- resolve_agreement_for_tuple(
         tuple,
         ladder$agreement_candidates,
-        works_year_hours,
+        site_group_year_hours,
         config
       )
       resolution <- utils::modifyList(ladder, agreement)
