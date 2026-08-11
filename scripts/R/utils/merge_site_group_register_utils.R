@@ -64,14 +64,7 @@ SITE_GROUP_REGISTER_NEAR_MISS_PROTOTYPE <- tibble::tibble(
   reason = character()
 )
 
-normalise_site_group_text <- function(x) {
-  x <- as.character(x)
-  x <- stringr::str_squish(stringr::str_to_upper(stringr::str_trim(x)))
-  x[x %in% c("", "TBC", "N/A", "NA")] <- NA_character_
-  x
-}
-
-normalise_register_permit <- function(x) {
+normalise_register_value <- function(x) {
   x <- as.character(x)
   x <- stringr::str_squish(stringr::str_to_upper(stringr::str_trim(x)))
   x[x %in% c("", "TBC", "N/A", "NA")] <- NA_character_
@@ -182,20 +175,20 @@ prepare_site_group_register_annual_rows <- function(annual_rows, lookup_tbl = NU
       site_id_canonical = as.integer(.data$site_id_canonical),
       water_company = as.character(.data$water_company),
       site_name_ea = as.character(.data$site_name_ea),
-      site_name_ea_norm = normalise_site_group_text(.data$site_name_ea),
+      site_name_ea_norm = normalise_register_value(.data$site_name_ea),
       site_name_wa_sc = as.character(.data$site_name_wa_sc),
-      site_name_wa_sc_norm = normalise_site_group_text(.data$site_name_wa_sc),
+      site_name_wa_sc_norm = normalise_register_value(.data$site_name_wa_sc),
       permit_reference_ea = as.character(.data$permit_reference_ea),
       permit_reference_ea_norm =
-        normalise_register_permit(.data$permit_reference_ea),
+        normalise_register_value(.data$permit_reference_ea),
       permit_reference_wa_sc = as.character(.data$permit_reference_wa_sc),
       permit_reference_wa_sc_norm =
-        normalise_register_permit(.data$permit_reference_wa_sc),
+        normalise_register_value(.data$permit_reference_wa_sc),
       activity_reference = as.character(.data$activity_reference),
       activity_reference_norm =
-        normalise_register_permit(.data$activity_reference),
+        normalise_register_value(.data$activity_reference),
       unique_id = as.character(.data$unique_id),
-      unique_id_norm = normalise_register_permit(.data$unique_id),
+      unique_id_norm = normalise_register_value(.data$unique_id),
       outlet_discharge_ngr = as.character(.data$outlet_discharge_ngr),
       ngr_clean = clean_ngr(.data$outlet_discharge_ngr),
       easting = coords$easting,

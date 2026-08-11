@@ -138,7 +138,7 @@ annual_status_from_metrics <- function(has_return, spill_hrs, spill_count) {
 }
 
 most_recent_representative_location <- function(resolver, site_id, year) {
-  # KTD-10 carry-forward. Preference order:
+  # Representative-location preference order:
   # 1. Rows whose NGR actually parsed to easting/northing (the resolver derives
   #    both in prepare_site_group_register_annual_rows via parse_bng_coordinates on
   #    the cleaned NGR, so NA coordinates here mean the NGR text is
@@ -323,8 +323,8 @@ near_miss_names_long <- function(data, value_prefix) {
     )
 }
 
-# String-near name pass among unmatched tuples (plan D7 output 5, third
-# component): each distinct unmatched event-side normalised name is compared
+# String-near name pass among unmatched tuples: each distinct unmatched
+# event-side normalised name is compared
 # against the distinct normalised annual-side names of the SAME water company
 # (both name fields on both sides) with base utils::adist, and pairs within
 # `max_edit_distance` are reported. Names shorter than `min_name_chars` are

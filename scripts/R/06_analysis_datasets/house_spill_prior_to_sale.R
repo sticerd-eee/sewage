@@ -62,15 +62,6 @@ CONFIG <- list(
 # Data Loading Functions
 ############################################################
 
-#' Derive site-level missing flags for the sale-year window
-#' @param site_group_crosswalk_dt Site Group crosswalk data.table
-#' @param sale_years Integer vector of sale years
-#' @return data.table with site_id and site_missing
-derive_site_missing_flags <- function(site_group_crosswalk_dt, sale_years) {
-  derive_site_group_missing_flags(site_group_crosswalk_dt, sale_years) |>
-    data.table::as.data.table()
-}
-
 #' Load datasets from parquet files
 #' @return List containing house_dt, spill_lookup_dt, raw_events_dt, site_missing_dt
 load_data <- function() {
@@ -95,7 +86,11 @@ load_data <- function() {
   
   site_group_crosswalk_dt <- arrow::read_parquet(CONFIG$site_group_crosswalk_path) |>
     as.data.table()
-  site_missing_dt <- derive_site_missing_flags(site_group_crosswalk_dt, sample_years)
+  site_missing_dt <- derive_site_group_missing_flags(
+    site_group_crosswalk_dt,
+    sample_years
+  ) |>
+    data.table::as.data.table()
   setkey(site_missing_dt, site_id)
   logger::log_info(
     "Site Group crosswalk loaded: {nrow(site_group_crosswalk_dt)} rows; missing flags for {nrow(site_missing_dt)} groups"

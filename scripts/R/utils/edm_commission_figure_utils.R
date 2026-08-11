@@ -201,3 +201,39 @@ print_edm_commission_diagnostics <- function(figure_data) {
   }
   invisible(figure_data)
 }
+
+run_edm_commission_figure <- function(input_path, output_dir, output_filename,
+                                      plot_builder) {
+  required_packages <- c("arrow", "dplyr", "ggplot2", "scales", "tibble")
+  missing_packages <- required_packages[
+    !vapply(required_packages, requireNamespace, logical(1L), quietly = TRUE)
+  ]
+  if (length(missing_packages) > 0L) {
+    stop(
+      "Missing required packages: ", paste(missing_packages, collapse = ", "),
+      ". Restore the project environment with `rv sync`.",
+      call. = FALSE
+    )
+  }
+  if (!file.exists(input_path)) {
+    stop("Canonical spill-site input not found: ", input_path, call. = FALSE)
+  }
+
+  figure_data <- arrow::read_parquet(input_path) |>
+    prepare_edm_commission_figure_data()
+  print_edm_commission_diagnostics(figure_data)
+
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  output_path <- file.path(output_dir, output_filename)
+  ggplot2::ggsave(
+    filename = output_path,
+    plot = plot_builder(figure_data),
+    width = 9 * 1.618,
+    height = 10.5,
+    dpi = 300,
+    units = "cm",
+    device = grDevices::cairo_pdf
+  )
+  cat("Saved:", output_path, "\n")
+  invisible(list(data = figure_data, output_path = output_path))
+}

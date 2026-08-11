@@ -79,38 +79,12 @@ run_edm_commission_cumulative <- function(
       "EDM_COMMISSION_FIGURE_DIR",
       unset = here::here("output", "figures")
     )) {
-  required_packages <- c("arrow", "dplyr", "ggplot2", "scales", "tibble")
-  missing_packages <- required_packages[
-    !vapply(required_packages, requireNamespace, logical(1L), quietly = TRUE)
-  ]
-  if (length(missing_packages) > 0L) {
-    stop(
-      "Missing required packages: ", paste(missing_packages, collapse = ", "),
-      ". Restore the project environment with `rv sync`.",
-      call. = FALSE
-    )
-  }
-  if (!file.exists(input_path)) {
-    stop("Canonical spill-site input not found: ", input_path, call. = FALSE)
-  }
-
-  unique_sites <- arrow::read_parquet(input_path)
-  figure_data <- prepare_edm_commission_figure_data(unique_sites)
-  print_edm_commission_diagnostics(figure_data)
-
-  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-  output_path <- file.path(output_dir, "edm_commission_cumulative.pdf")
-  ggplot2::ggsave(
-    filename = output_path,
-    plot = build_edm_commission_cumulative_plot(figure_data),
-    width = 9 * 1.618,
-    height = 10.5,
-    dpi = 300,
-    units = "cm",
-    device = grDevices::cairo_pdf
+  run_edm_commission_figure(
+    input_path = input_path,
+    output_dir = output_dir,
+    output_filename = "edm_commission_cumulative.pdf",
+    plot_builder = build_edm_commission_cumulative_plot
   )
-  cat("Saved:", output_path, "\n")
-  invisible(list(data = figure_data, output_path = output_path))
 }
 
 if (sys.nframe() == 0L) {
