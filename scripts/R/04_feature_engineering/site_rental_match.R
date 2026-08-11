@@ -304,6 +304,8 @@ validate_rental_stage <- function(stage_path, expected_schema,
     if (nrow(sample_rows) > 0L) {
       sample_parts[[length(sample_parts) + 1L]] <- sample_rows
     }
+    rm(row_group, group_counts, sample_rows)
+    gc(verbose = FALSE)
   }
   if (covered_properties != expected_input_rows) {
     stop("Staged rental lookup does not cover every eligible rental.", call. = FALSE)
@@ -367,10 +369,12 @@ write_rental_lookup <- function(rentals_sf, spill_sites_sf, spill_lookup,
       radius_km = radius_km
     ) |>
       normalise_rental_lookup()
-    table <- arrow::Table$create(chunk, schema = schema)
-    writer$WriteTable(table, chunk_size = table$num_rows)
+    gc(verbose = FALSE)
+    batch <- arrow::RecordBatch$create(chunk, schema = schema)
+    writer$WriteBatch(batch, chunk_size = batch$num_rows)
     output_rows <- output_rows + nrow(chunk)
-    rm(chunk, table)
+    rm(chunk, batch)
+    gc(verbose = FALSE)
 
     if (identical(fail_at, "after_first_row_group") && row_group_index == 1L) {
       stop("Injected failure after the first rental row group.", call. = FALSE)
@@ -384,6 +388,8 @@ write_rental_lookup <- function(rentals_sf, spill_sites_sf, spill_lookup,
   }
   output_stream$close()
   stream_open <- FALSE
+  rm(writer, output_stream, writer_properties)
+  gc(verbose = FALSE)
 
   if (identical(fail_at, "validation")) {
     stop("Injected rental staged validation failure.", call. = FALSE)
@@ -412,6 +418,7 @@ write_rental_lookup <- function(rentals_sf, spill_sites_sf, spill_lookup,
     radius_km = radius_km,
     sample_expected = sample_expected
   )
+  gc(verbose = FALSE)
 
   if (identical(fail_at, "promotion")) {
     stop("Injected rental promotion failure.", call. = FALSE)
