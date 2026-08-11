@@ -38,6 +38,93 @@ assert_left_row_count <- function(before, after, context = "metadata join") {
   invisible(after)
 }
 
+#' Derive analysis-window missingness at Site Group grain.
+#'
+#' A Site Group is missing for an analysis window when at least one requested
+#' group-year has `annual_status == "absent"` (or is not present in the
+#' crosswalk). This deliberately uses the group-year status and never combines
+#' Canonical Spill Site availability across members.
+#'
+#' @param crosswalk Site Group crosswalk at `site_id`-`year`-company grain.
+#' @param years Analysis years that must all be reported.
+#' @return A tibble unique on `site_id` with logical `site_missing`.
+derive_site_group_missing_flags <- function(crosswalk, years) {
+  required_columns <- c("site_id", "year", "water_company", "annual_status")
+  missing_columns <- setdiff(required_columns, names(crosswalk))
+  if (length(missing_columns) > 0L) {
+    stop(
+      "Site Group crosswalk is missing required column(s): ",
+      paste(missing_columns, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  years <- as.integer(years)
+  if (length(years) == 0L || anyNA(years) || anyDuplicated(years)) {
+    stop("years must be a non-empty vector of unique integers.", call. = FALSE)
+  }
+
+  crosswalk <- tibble::as_tibble(crosswalk) |>
+    dplyr::transmute(
+      site_id = as.integer(.data$site_id),
+      year = as.integer(.data$year),
+      water_company = as.character(.data$water_company),
+      annual_status = as.character(.data$annual_status)
+    )
+
+  if (nrow(crosswalk) == 0L || anyNA(crosswalk[c("site_id", "year", "water_company")])) {
+    stop("Site Group crosswalk keys must be non-empty and non-missing.", call. = FALSE)
+  }
+  if (anyDuplicated(crosswalk[c("site_id", "year", "water_company")])) {
+    stop(
+      "Site Group crosswalk must be unique on site_id, year, water_company.",
+      call. = FALSE
+    )
+  }
+
+  company_counts <- crosswalk |>
+    dplyr::summarise(
+      n_water_company = dplyr::n_distinct(.data$water_company),
+      .by = "site_id"
+    )
+  if (any(company_counts$n_water_company != 1L)) {
+    stop("Each Site Group must have exactly one water_company.", call. = FALSE)
+  }
+
+  valid_statuses <- c("absent", "reported_zero", "reported_positive", "reported_na")
+  observed <- crosswalk |>
+    dplyr::filter(.data$year %in% years)
+  if (anyNA(observed$annual_status) || any(!observed$annual_status %in% valid_statuses)) {
+    stop("Requested Site Group years must have valid annual_status values.", call. = FALSE)
+  }
+
+  tidyr::expand_grid(
+    site_id = sort(unique(crosswalk$site_id)),
+    year = sort(years)
+  ) |>
+    dplyr::left_join(
+      dplyr::select(observed, "site_id", "year", "annual_status"),
+      by = c("site_id", "year")
+    ) |>
+    dplyr::mutate(
+      annual_status = tidyr::replace_na(.data$annual_status, "absent")
+    ) |>
+    dplyr::summarise(
+      site_missing = !all(.data$annual_status != "absent"),
+      .by = "site_id"
+    ) |>
+    dplyr::arrange(.data$site_id)
+}
+
+#' Read Site Group analysis-window missingness from the crosswalk.
+#'
+#' @param file_path Path to `site_group_crosswalk.parquet`.
+#' @inheritParams derive_site_group_missing_flags
+#' @return A tibble unique on `site_id` with logical `site_missing`.
+read_site_group_missing_flags <- function(file_path, years) {
+  derive_site_group_missing_flags(arrow::read_parquet(file_path), years)
+}
+
 #' Derive one explicit metadata row per Site Group.
 #'
 #' Location follows the crosswalk's representative-location contract: among

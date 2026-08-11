@@ -11,7 +11,7 @@
 # Inputs:
 #   - data/processed/agg_spill_stats/agg_spill_yr.parquet - Yearly spill data
 #   - data/processed/agg_spill_stats/agg_spill_dry_yr.parquet - Dry spill data
-#   - data/processed/unique_spill_sites.parquet - Site coordinates
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #   - data/raw/shapefiles/msoa_bcg_2021/ - MSOA boundary shapefiles
 #   - data/raw/shapefiles/msoa_population_2021/sapemsoasyoatablefinal.xlsx - Population
 #
@@ -66,6 +66,7 @@ install_if_missing <- function(packages) {
   invisible(sapply(packages, library, character.only = TRUE))
 }
 install_if_missing(required_packages)
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 
 
 # ==============================================================================
@@ -171,9 +172,12 @@ dat_dry_yr <- rio::import(
 )
 
 # Spill sites (coordinates)
-spill_sites <- rio::import(
-  here::here("data", "processed", "unique_spill_sites.parquet"),
-  trust = TRUE
+spill_sites <- read_site_group_projection(
+  here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  years = 2021:2024
 )
 
 # MSOA boundaries (England only) - load first to get England bounding box
@@ -210,10 +214,10 @@ aggregate_spills_to_msoa <- function(data, spill_sites, years) {
   n_years <- length(years)
 
   # Join spill data with site coordinates
-  dat_clean <- left_join(
+  dat_clean <- left_join_site_group_projection(
     select(data, -any_of("ngr")),
-    spill_sites,
-    by = join_by(water_company, site_id)
+    select(spill_sites, site_id, easting, northing),
+    context = "Regular map Site Group coordinate join"
   )
 
   # Convert to sf and filter for year range
@@ -275,10 +279,10 @@ aggregate_dry_spills_to_msoa <- function(data, spill_sites, years) {
   n_years <- length(years)
 
   # Join spill data with site coordinates
-  dat_clean <- left_join(
+  dat_clean <- left_join_site_group_projection(
     select(data, -any_of("ngr")),
-    spill_sites,
-    by = join_by(water_company, site_id)
+    select(spill_sites, site_id, easting, northing),
+    context = "Dry map Site Group coordinate join"
   )
 
   # Convert to sf and filter for year range

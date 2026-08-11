@@ -10,7 +10,7 @@
 # Date: 2026-03-09
 #
 # Inputs:
-#   - data/processed/unique_spill_sites.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #   - data/processed/rainfall/spill_site_grid_lookup.parquet
 #   - data/processed/rainfall/rainfall_data_cleaned.parquet
 #   - data/processed/rainfall/spill_blocks_rainfall_yr.parquet
@@ -77,6 +77,7 @@ install_if_missing <- function(packages) {
 }
 
 install_if_missing(required_packages)
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 
 
 # ==============================================================================
@@ -165,8 +166,12 @@ theme_pref <- theme_minimal(base_family = FONT_FAMILY) +
 # 4. Helper Functions
 # ==============================================================================
 load_target_event <- function() {
-  site_data <- arrow::read_parquet(
-    here::here("data", "processed", "unique_spill_sites.parquet")
+  site_data <- read_site_group_projection(
+    here::here(
+      "data", "processed", "matched_events_annual_data",
+      "site_group_crosswalk.parquet"
+    ),
+    years = 2021:2024
   ) |>
     dplyr::filter(
       .data$site_id == TARGET_SITE_ID,

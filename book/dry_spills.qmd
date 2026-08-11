@@ -134,10 +134,14 @@ rainfall_mo <- import(
   here::here("data", "processed", "rainfall", "rainfall_agg_mo.parquet"),
 )
 
-# Spill sites
-spill_sites <- import(
-  here("data", "processed", "unique_spill_sites.parquet"),
-  trust = TRUE
+# Site Group locations for group-keyed spill aggregates
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+spill_sites <- read_site_group_projection(
+  here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  years = 2021:2024
 )
 
 # UK Map
@@ -1697,7 +1701,7 @@ dat_mo_dry_clean <- dat_mo %>%
   dplyr::summarize(
     dry_spill_hrs_mo = sum(dry_spill_hrs_mo_r1_d01_weak, na.rm = TRUE),
     dry_spill_count_mo = sum(dry_spill_count_mo_r1_d01_weak, na.rm = TRUE),
-    unique_spill_sites = dplyr::n_distinct(site_id),
+    n_site_groups = dplyr::n_distinct(site_id),
     .groups = "drop"
   ) %>%
   dplyr::mutate(
@@ -1708,7 +1712,7 @@ dat_mo_dry_clean <- dat_mo %>%
     ),
     dplyr::across(
       c(dry_spill_hrs_mo, dry_spill_count_mo),
-      ~ . / unique_spill_sites,
+      ~ . / n_site_groups,
       .names = "{.col}_site"
     )
   )
@@ -1725,7 +1729,7 @@ dat_mo_rain_clean <- rainfall_mo |>
   dplyr::summarize(
     avg_rainfall_mo_r9 = mean(rainfall_r9_mo, na.rm = TRUE),
     med_rainfall_mo_r9 = median(rainfall_r9_mo, na.rm = TRUE),
-    unique_spill_sites = dplyr::n_distinct(site_id),
+    n_site_groups = dplyr::n_distinct(site_id),
     .groups = "drop"
   )
 ```

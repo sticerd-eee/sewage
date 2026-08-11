@@ -32,6 +32,7 @@ install_if_missing <- function(packages) {
   invisible(sapply(packages, library, character.only = TRUE))
 }
 install_if_missing(required_packages)
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 
 # set up parallel processing
 setup_parallel <- function() {
@@ -75,8 +76,12 @@ dat_mo <- dat$monthly
 house_price_data <- import(here("data", "processed", "house_price.rds"),
   trust = TRUE
 )
-spill_sites <- import(here("data", "processed", "unique_spill_sites.rds"),
-  trust = TRUE
+spill_sites <- read_site_group_projection(
+  here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  years = 2021:2024
 )
 # spill_lookup <- import(here("data", "processed", "spill_lookup.rds"),
 #   trust = TRUE
@@ -298,8 +303,12 @@ test_results <- test_chunk %>%
 house_price_data <- import(here("data", "processed", "house_price.rds"),
   trust = TRUE
 )
-spill_sites <- import(here("data", "processed", "unique_spill_sites.rds"),
-  trust = TRUE
+spill_sites <- read_site_group_projection(
+  here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  years = 2021:2024
 )
 
 spill_sites_sf <- spill_sites %>%
@@ -475,8 +484,12 @@ load_data <- function() {
   house_data <- rio::import(here::here("data", "processed", "house_price.rds"),
     trust = TRUE
   )
-  spill_data <- rio::import(here::here("data", "processed", "unique_spill_sites.rds"),
-    trust = TRUE
+  spill_data <- read_site_group_projection(
+    here::here(
+      "data", "processed", "matched_events_annual_data",
+      "site_group_crosswalk.parquet"
+    ),
+    years = 2021:2024
   )
 
   return(list(house = house_data, spill = spill_data))
@@ -487,6 +500,7 @@ load_data <- function() {
 #' @return List containing the spatial spill sites and a lookup table
 prepare_spill_sites <- function(spill_data) {
   logger::log_info("Preparing spill sites spatial data")
+  assert_unique_site_groups(spill_data, "Embedded house-match Site Group projection")
 
   spill_sites_sf <- spill_data %>%
     st_as_sf(coords = c("easting", "northing"), crs = 27700) %>%
@@ -496,6 +510,7 @@ prepare_spill_sites <- function(spill_data) {
     st_set_geometry(NULL) %>%
     mutate(spill_geom = spill_sites_sf$spill_geom) %>%
     select(site_id, spill_geom)
+  assert_unique_site_groups(spill_lookup, "Embedded house-match geometry lookup")
 
   return(list(spill_sf = spill_sites_sf, lookup = spill_lookup))
 }
@@ -510,7 +525,7 @@ prepare_house_data <- function(house_data) {
     filter(!is.na(easting) & !is.na(northing)) %>%
     mutate(house_id = row_number()) %>%
     st_as_sf(coords = c("easting", "northing"), crs = 27700) %>%
-    select(house_id, geometry)
+    select(house_id, any_of(c("transaction_id", "year")), geometry)
 
   return(houses_sf)
 }
@@ -534,13 +549,21 @@ perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup, radius
   
   merged_chunks <- purrr::map(house_chunks, function(chunk) {
     logger::log_info(glue::glue("Processing chunk with {nrow(chunk)} houses"))
-    
-    st_join(chunk, spill_sites_sf,
-            join = st_is_within_distance,
-            dist = radius_m,
-            left = TRUE
-    ) %>%
-      left_join(spill_lookup, by = "site_id") %>%
+
+    spatial_matches <- st_join(
+      chunk,
+      spill_sites_sf,
+      join = st_is_within_distance,
+      dist = radius_m,
+      left = TRUE
+    )
+    joined <- left_join_site_group_projection(
+      spatial_matches,
+      spill_lookup,
+      context = "Embedded house-match Site Group geometry join"
+    )
+
+    joined %>%
       mutate(
         # Calculate the straight-line distance to the spill site
         distance_m = if_else(is.na(spill_geom), NA_real_,
@@ -549,13 +572,23 @@ perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup, radius
         distance_km = distance_m / 1000
       ) %>%
       group_by(house_id) %>%
-      mutate(n_discharge_outlet = sum(!is.na(site_id))) %>%
+      mutate(n_site_groups = n_distinct(site_id, na.rm = TRUE)) %>%
       ungroup() %>%
       st_drop_geometry() %>%
-      select(house_id, site_id, transaction_id, year, distance_m, distance_km, n_discharge_outlet)
+      select(
+        house_id, site_id, transaction_id, year,
+        distance_m, distance_km, n_site_groups
+      )
   })
   
   merged_data <- dplyr::bind_rows(merged_chunks)
+  duplicate_property_groups <- merged_data %>%
+    filter(!is.na(site_id)) %>%
+    count(house_id, site_id, name = "n") %>%
+    filter(n != 1L)
+  if (nrow(duplicate_property_groups) > 0L) {
+    stop("Embedded house-match output must be unique on house_id + site_id.")
+  }
   return(merged_data)
 }
 
@@ -632,4 +665,3 @@ if (sys.nframe() == 0) {
 }
 
 ```
-

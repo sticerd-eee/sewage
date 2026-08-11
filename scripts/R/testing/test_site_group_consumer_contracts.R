@@ -93,6 +93,22 @@ assert_true(
   "The Site Group projection key must be unique."
 )
 
+# Analysis-dataset missingness is a Site Group annual-status estimand. A group
+# with a reporting member and an absent canonical member is still reported;
+# canonical member availability must never be collapsed with member-level any().
+missingness_fixture <- derive_site_group_missing_flags(
+  crosswalk_fixture,
+  years = 2021:2023
+)
+assert_identical(
+  missingness_fixture$site_missing,
+  c(FALSE, TRUE),
+  paste0(
+    "Analysis datasets must derive missingness from Site Group annual_status ",
+    "over the requested window."
+  )
+)
+
 duplicate_fixture <- bind_rows(crosswalk_fixture, slice(crosswalk_fixture, 1L))
 assert_error_contains(
   derive_site_group_projection(duplicate_fixture, 2021:2024),

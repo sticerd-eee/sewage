@@ -42,7 +42,10 @@ RAD <- 250L
 WRITE_CSV <- TRUE
 
 path_house <- here::here("data", "processed", "house_price.parquet")
-path_unique_sites <- here::here("data", "processed", "unique_spill_sites.parquet")
+path_site_group_crosswalk <- here::here(
+  "data", "processed", "matched_events_annual_data",
+  "site_group_crosswalk.parquet"
+)
 path_agg_yr <- here::here("data", "processed", "agg_spill_stats", "agg_spill_yr.parquet")
 path_cross_sales_prior <- here::here(
   "data", "processed", "cross_section", "sales", "prior_to_sale"
@@ -141,11 +144,13 @@ house_sales_geo <- classify_points_to_london(
   lad_sf = lad_sf
 )
 
-# Spill sites base: unique site list
-spill_sites <- arrow::open_dataset(path_unique_sites) |>
-  dplyr::select(site_id, water_company, easting, northing) |>
-  dplyr::collect() |>
-  dplyr::distinct(water_company, site_id, .keep_all = TRUE)
+# Spill sites base: one explicit row per Site Group.
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+spill_sites <- read_site_group_projection(
+  path_site_group_crosswalk,
+  years = 2021:2024
+) |>
+  dplyr::select(site_id, water_company, easting, northing)
 
 spill_sites_geo <- classify_points_to_london(
   spill_sites,

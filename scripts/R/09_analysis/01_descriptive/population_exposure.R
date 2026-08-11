@@ -13,6 +13,7 @@
 # Inputs:
 #   - data/processed/agg_spill_stats/agg_spill_mo.parquet
 #   - data/processed/agg_spill_stats/agg_spill_dry_mo.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #   - data/raw/population_grid/data/uk_residential_population_2021.tif
 #
 # Outputs:
@@ -51,7 +52,10 @@ DISTANCES_M <- c(50, 100, 250, 500, 1000)
 
 PATH_ALL_MO <- here::here("data", "processed", "agg_spill_stats", "agg_spill_mo.parquet")
 PATH_DRY_MO <- here::here("data", "processed", "agg_spill_stats", "agg_spill_dry_mo.parquet")
-PATH_UNIQUE_SITES <- here::here("data", "processed", "unique_spill_sites.parquet")
+PATH_SITE_GROUP_CROSSWALK <- here::here(
+  "data", "processed", "matched_events_annual_data",
+  "site_group_crosswalk.parquet"
+)
 PATH_POP_RASTER <- here::here(
   "data", "raw", "population_grid", "data", "uk_residential_population_2021.tif"
 )
@@ -75,6 +79,7 @@ initialise_environment <- function() {
 }
 
 initialise_environment()
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 
 
 # ==============================================================================
@@ -157,16 +162,17 @@ site_status <- site_any |>
 # ==============================================================================
 cat("Geocoding sites from NGR...\n")
 
-# Coordinates come from unique_spill_sites (works grain, one row per site_id,
-# same site_id space as the regenerated aggregates); the aggregated spill
-# files no longer carry ngr/ngr_og columns.
-ngr_df <- arrow::read_parquet(PATH_UNIQUE_SITES) |>
+# Coordinates come from the unique Site Group projection; the aggregated spill
+# files use the same group key and no longer carry NGR columns.
+ngr_df <- read_site_group_projection(
+  PATH_SITE_GROUP_CROSSWALK,
+  years = 2021:2024
+) |>
   dplyr::transmute(
     site_id = as.integer(site_id),
     water_company,
     ngr = dplyr::na_if(ngr, "")
   ) |>
-  dplyr::distinct(site_id, water_company, .keep_all = TRUE) |>
   dplyr::mutate(ngr = toupper(gsub("\\s+", "", ngr))) |>
   dplyr::filter(
     !is.na(ngr),
@@ -188,8 +194,12 @@ ll <- tryCatch(
 loc_df <- dplyr::bind_cols(ngr_df, as.data.frame(ll)) |>
   dplyr::filter(!is.na(lat), !is.na(lon))
 
-sites_sf <- sf::st_as_sf(loc_df, coords = c("lon", "lat"), crs = 4326) |>
-  dplyr::left_join(site_status, by = c("site_id", "water_company")) |>
+sites_sf <- sf::st_as_sf(loc_df, coords = c("lon", "lat"), crs = 4326)
+sites_sf <- left_join_site_group_projection(
+  sites_sf,
+  dplyr::select(site_status, -"water_company"),
+  context = "Population exposure Site Group status join"
+) |>
   dplyr::filter(!is.na(any_spill))
 
 cat("Geocoded ", nrow(sites_sf), " sites.\n", sep = "")

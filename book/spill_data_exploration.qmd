@@ -111,10 +111,14 @@ dat_mo <- import(
   here::here("data", "processed", "agg_spill_stats", "agg_spill_mo.parquet"),
 )
 
-# Spill sites
-spill_sites <- import(
-  here("data", "processed", "unique_spill_sites.parquet"),
-  trust = TRUE
+# Site Group locations for group-keyed spill aggregates
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+spill_sites <- read_site_group_projection(
+  here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  years = 2021:2024
 )
 
 # UK Map
@@ -200,7 +204,7 @@ spill_sites_map <- plot_spill_sites_tmap(spill_sites)
 #| eval: false
 
 # Save the interactive map
-path <- here("book", "book_figs", "unique_spill_sites.html")
+path <- here("book", "book_figs", "site_group_locations.html")
 tmap_save(
   spill_sites_map,
   filename = path,
@@ -209,7 +213,7 @@ tmap_save(
 ```
 
 ```{=html}
-<iframe src="book_figs/unique_spill_sites.html" width="800" height="600" frameborder="0"></iframe>
+<iframe src="book_figs/site_group_locations.html" width="800" height="600" frameborder="0"></iframe>
 ```
 
 ## Geographic Distribution in 2023 {#sec-03-03-geo-distribution}
@@ -779,14 +783,14 @@ dat_mo_clean <- dat_mo %>%
   summarize(
     spill_hrs_mo = sum(spill_hrs_mo),
     spill_count_mo = sum(spill_count_mo),
-    unique_spill_sites = n_distinct(ngr),
+    n_site_groups = n_distinct(site_id),
     .groups = "drop"
   ) %>%
   mutate(
     across(starts_with("spill"), ~ log(1 + .), .names = "log_{.col}"),
     across(
       starts_with("spill"),
-      ~ . / unique_spill_sites,
+      ~ . / n_site_groups,
       .names = "{.col}_site"
     )
   )

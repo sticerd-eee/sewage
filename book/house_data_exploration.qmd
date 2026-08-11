@@ -97,10 +97,14 @@ dat_mo <- import(
   here::here("data", "processed", "agg_spill_stats", "agg_spill_mo.parquet"),
 )
 
-# Spill sites
-spill_sites <- import(
-  here("data", "processed", "unique_spill_sites.parquet"),
-  trust = TRUE
+# Site Group locations for group-keyed property lookups
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+spill_sites <- read_site_group_projection(
+  here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  years = 2021:2024
 )
 
 # House price
