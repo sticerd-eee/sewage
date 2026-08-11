@@ -1,152 +1,115 @@
 # ==============================================================================
-# EDM Commission Timeline - Distribution of EDM Commissioning by Year
+# Canonical EDM Commission Timeline
 # ==============================================================================
 #
-# Purpose: Plot the percentage of EDM sites commissioned each year
-#          showing the temporal rollout of EDM monitoring infrastructure.
+# Grain: Canonical Spill Site (`site_id_canonical`).
+# Percentages are conditional on histories with resolved commission dates.
+# Pre-2016 and unresolved histories are disclosed from the full universe.
 #
-# Author: Jacopo Olivieri
-# Date: 2026-01-16
-#
-# Inputs:
-#   - data/processed/unique_spill_sites.parquet
-#
-# Outputs:
-#   - output/figures/edm_commission_timeline.pdf
+# Environment overrides:
+#   EDM_COMMISSION_INPUT_PATH  canonical unique_spill_sites parquet
+#   EDM_COMMISSION_FIGURE_DIR  destination directory
 #
 # ==============================================================================
 
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop("Package `here` is required to run this script.", call. = FALSE)
+}
 
-# ==============================================================================
-# 1. Configuration
-# ==============================================================================
-PLOT_WIDTH <- 9 * 1.618   # Width in cm
-PLOT_HEIGHT <- 9          # Height in cm
-PLOT_DPI <- 300           # Resolution
-BAR_COLOR <- "#B63679FF"  # Viridis magma color
-
-
-# ==============================================================================
-# 2. Package Management
-# ==============================================================================
-
-required_packages <- c(
-  "arrow",
-  "tidyverse",
-  "here",
-  "scales",
-  "showtext",
-  "lubridate"
+source(
+  here::here("scripts", "R", "utils", "edm_commission_figure_utils.R"),
+  local = TRUE
 )
 
-install_if_missing <- function(packages) {
-  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
-  if (length(new_packages) > 0) {
-    install.packages(new_packages)
-  }
-  invisible(sapply(packages, library, character.only = TRUE))
-}
-install_if_missing(required_packages)
-
-
-# ==============================================================================
-# 3. Setup
-# ==============================================================================
-
-# 3.1 Font Setup ---------------------------------------------------------------
-showtext::showtext_auto()
-showtext::showtext_opts(dpi = 300)
-sysfonts::font_add_google("Libertinus Serif", "libertinus", db_cache = FALSE)
-
-# 3.2 Output Directory ---------------------------------------------------------
-output_dir <- here::here("output", "figures")
-if (!dir.exists(output_dir)) {
-  dir.create(output_dir, recursive = TRUE)
-}
-
-# 3.3 ggplot Theme -------------------------------------------------------------
-theme_pref <- theme_minimal() +
-  theme(
-    text = element_text(size = 10, family = "Libertinus Serif"),
-    plot.title = element_text(
-      face = "bold",
-      size = 12,
-      family = "Libertinus Serif",
-      margin = ggplot2::margin(b = 9, unit = "pt")
-    ),
-    axis.title = element_text(face = "bold", size = 12, family = "Libertinus Serif"),
-    axis.text = element_text(size = 10, family = "Libertinus Serif"),
-    panel.grid.minor = element_blank(),
-    panel.grid.major.x = element_line(color = "gray95"),
-    panel.grid.major.y = element_line(color = "gray95"),
-    panel.background = element_rect(fill = "white", color = NA),
-    plot.background = element_rect(fill = "white", color = NA),
-    legend.position = "none",
-    plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
+build_edm_commission_timeline_plot <- function(figure_data) {
+  annual_timing <- figure_data$annual_timing
+  note <- paste(
+    strwrap(format_edm_commission_figure_note(figure_data), width = 92L),
+    collapse = "\n"
   )
 
-
-# ==============================================================================
-# 4. Data Loading and Preparation
-# ==============================================================================
-cat("Loading unique spill sites data...\n")
-
-unique_sites <- arrow::read_parquet(
-  here::here("data", "processed", "unique_spill_sites.parquet")
-)
-
-# 4.1 Process Data -------------------------------------------------------------
-cat("Processing data...\n")
-
-commission_by_year <- unique_sites %>%
-  filter(!is.na(edm_commission_date)) %>%
-  mutate(commission_year = lubridate::year(edm_commission_date)) %>%
-  count(commission_year) %>%
-  mutate(percentage = n / sum(n) * 100)
-
-# Print summary statistics
-cat("Summary of EDM commissioning:\n")
-cat("  Total EDMs with commission date:", sum(commission_by_year$n), "\n")
-cat("  Year range:", min(commission_by_year$commission_year), "-",
-    max(commission_by_year$commission_year), "\n")
-cat("  Percentages sum to:", round(sum(commission_by_year$percentage), 2), "%\n")
-
-
-# ==============================================================================
-# 5. Create and Save Plot
-# ==============================================================================
-cat("Creating plot...\n")
-
-p <- ggplot(commission_by_year, aes(x = commission_year, y = percentage)) +
-  geom_col(fill = BAR_COLOR) +
-  scale_x_continuous(
-    breaks = seq(
-      min(commission_by_year$commission_year),
-      max(commission_by_year$commission_year),
-      by = 1
+  ggplot2::ggplot(
+    annual_timing,
+    ggplot2::aes(
+      x = .data$commission_year,
+      y = .data$conditional_percentage
     )
   ) +
-  scale_y_continuous(
-    labels = scales::percent_format(scale = 1),
-    expand = expansion(mult = c(0, 0.05))
-  ) +
-  labs(
-    x = "Year",
-    y = "Percentage of EDMs Commissioned (%)"
-  ) +
-  theme_pref
+    ggplot2::geom_col(fill = "#B63679FF") +
+    ggplot2::scale_x_continuous(
+      breaks = seq(
+        min(annual_timing$commission_year),
+        max(annual_timing$commission_year),
+        by = 1L
+      )
+    ) +
+    ggplot2::scale_y_continuous(
+      labels = scales::percent_format(scale = 1),
+      expand = ggplot2::expansion(mult = c(0, 0.05))
+    ) +
+    ggplot2::labs(
+      title = "Annual EDM commissioning of Canonical Spill Sites",
+      subtitle = "Canonical Spill Sites with commissioned EDM coverage",
+      x = "Commission year",
+      y = "Conditional share (%)",
+      caption = note
+    ) +
+    ggplot2::theme_minimal(base_family = "serif", base_size = 10) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", size = 12),
+      plot.subtitle = ggplot2::element_text(size = 9),
+      axis.title = ggplot2::element_text(face = "bold"),
+      panel.grid.minor = ggplot2::element_blank(),
+      panel.grid.major.x = ggplot2::element_line(color = "gray95"),
+      panel.grid.major.y = ggplot2::element_line(color = "gray95"),
+      plot.caption = ggplot2::element_text(hjust = 0, size = 6.5),
+      plot.margin = ggplot2::margin(10, 10, 10, 10, unit = "pt")
+    )
+}
 
-# 5.1 Save Plot ----------------------------------------------------------------
-cat("Saving plot...\n")
+run_edm_commission_timeline <- function(
+    input_path = Sys.getenv(
+      "EDM_COMMISSION_INPUT_PATH",
+      unset = here::here("data", "processed", "unique_spill_sites.parquet")
+    ),
+    output_dir = Sys.getenv(
+      "EDM_COMMISSION_FIGURE_DIR",
+      unset = here::here("output", "figures")
+    )) {
+  required_packages <- c("arrow", "dplyr", "ggplot2", "scales", "tibble")
+  missing_packages <- required_packages[
+    !vapply(required_packages, requireNamespace, logical(1L), quietly = TRUE)
+  ]
+  if (length(missing_packages) > 0L) {
+    stop(
+      "Missing required packages: ", paste(missing_packages, collapse = ", "),
+      ". Restore the project environment with `rv sync`.",
+      call. = FALSE
+    )
+  }
+  if (!file.exists(input_path)) {
+    stop("Canonical spill-site input not found: ", input_path, call. = FALSE)
+  }
 
-file_name <- "edm_commission_timeline.pdf"
-ggsave(
-  filename = here::here(output_dir, file_name),
-  plot = p,
-  width = PLOT_WIDTH,
-  height = PLOT_HEIGHT,
-  dpi = PLOT_DPI,
-  units = "cm"
-)
+  unique_sites <- arrow::read_parquet(input_path)
+  figure_data <- prepare_edm_commission_figure_data(unique_sites)
+  print_edm_commission_diagnostics(figure_data)
 
-cat("  Saved:", file_name, "\n")
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  output_path <- file.path(output_dir, "edm_commission_timeline.pdf")
+  ggplot2::ggsave(
+    filename = output_path,
+    plot = build_edm_commission_timeline_plot(figure_data),
+    width = 9 * 1.618,
+    height = 10.5,
+    dpi = 300,
+    units = "cm",
+    device = grDevices::cairo_pdf
+  )
+  cat("Saved:", output_path, "\n")
+  invisible(list(data = figure_data, output_path = output_path))
+}
+
+if (sys.nframe() == 0L) {
+  run_edm_commission_timeline()
+}
