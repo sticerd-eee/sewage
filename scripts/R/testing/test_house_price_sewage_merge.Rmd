@@ -77,7 +77,7 @@ house_price_data <- import(here("data", "processed", "house_price.rds"),
   trust = TRUE
 )
 spill_sites <- read_site_group_projection(
-  here(
+  here::here(
     "data", "processed", "matched_events_annual_data",
     "site_group_crosswalk.parquet"
   ),
@@ -304,7 +304,7 @@ house_price_data <- import(here("data", "processed", "house_price.rds"),
   trust = TRUE
 )
 spill_sites <- read_site_group_projection(
-  here(
+  here::here(
     "data", "processed", "matched_events_annual_data",
     "site_group_crosswalk.parquet"
   ),

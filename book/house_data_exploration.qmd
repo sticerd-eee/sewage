@@ -100,7 +100,7 @@ dat_mo <- import(
 # Site Group locations for group-keyed property lookups
 source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 spill_sites <- read_site_group_projection(
-  here(
+  here::here(
     "data", "processed", "matched_events_annual_data",
     "site_group_crosswalk.parquet"
   ),

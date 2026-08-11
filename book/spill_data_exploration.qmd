@@ -114,7 +114,7 @@ dat_mo <- import(
 # Site Group locations for group-keyed spill aggregates
 source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 spill_sites <- read_site_group_projection(
-  here(
+  here::here(
     "data", "processed", "matched_events_annual_data",
     "site_group_crosswalk.parquet"
   ),
@@ -204,7 +204,7 @@ spill_sites_map <- plot_spill_sites_tmap(spill_sites)
 #| eval: false
 
 # Save the interactive map
-path <- here("book", "book_figs", "site_group_locations.html")
+path <- here::here("book", "book_figs", "site_group_locations.html")
 tmap_save(
   spill_sites_map,
   filename = path,

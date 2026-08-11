@@ -39,6 +39,10 @@ invisible(lapply(required_packages, function(pkg) {
   library(pkg, character.only = TRUE)
 }))
 
+source(here::here(
+  "scripts", "R", "utils", "annual_return_mapping_utils.R"
+))
+
 set.seed(params$seed)
 
 options(dplyr.summarise.inform = FALSE)
@@ -175,15 +179,10 @@ map_annual_to_canonical_sites <- function(annual_data, lookup_data, years = 2021
       values_to = "year_site_id"
     ) %>%
     mutate(id_year = as.integer(readr::parse_number(id_year_col))) %>%
-    filter(year == id_year, !is.na(year_site_id)) %>%
+    filter(year == id_year) %>%
     select(-id_year_col, -id_year) %>%
     left_join(lookup_long, by = c("year", "year_site_id")) %>%
-    mutate(
-      site_id_canonical = coalesce(
-        as.integer(site_id_canonical),
-        as.integer(year_site_id)
-      )
-    )
+    finalise_annual_lookup_mapping()
 
   annual_long %>%
     select(

@@ -35,6 +35,10 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+source(here::here(
+  "scripts", "R", "utils", "annual_return_mapping_utils.R"
+))
+
 USE_SAMPLE <- FALSE
 SAMPLE_N <- 500L
 YEARS <- 2021:2023
@@ -177,18 +181,13 @@ annual_long <- annual_return |>
     values_to = "year_site_id"
   ) |>
   dplyr::mutate(id_year = as.integer(readr::parse_number(id_year_col))) |>
-  dplyr::filter(year == id_year, !is.na(year_site_id)) |>
+  dplyr::filter(year == id_year) |>
   dplyr::select(-id_year_col, -id_year)
 
 # Join to get the explicit Canonical Spill Site key.
 annual_mapped <- annual_long |>
   dplyr::left_join(lookup_long, by = c("year", "year_site_id")) |>
-  dplyr::mutate(
-    site_id_canonical = dplyr::coalesce(
-      as.integer(site_id_canonical),
-      as.integer(year_site_id)
-    )
-  ) |>
+  finalise_annual_lookup_mapping() |>
   dplyr::select(-year_site_id)
 
 cat("Annual return rows mapped to site_id_canonical:", nrow(annual_mapped), "\n")

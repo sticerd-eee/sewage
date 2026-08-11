@@ -14,6 +14,16 @@
 #   SITE_GRAIN_NEW_AGG_DIR          candidate aggregate directory
 #   SITE_GRAIN_BASELINE_EVENTS      pre-migration matched events (optional)
 #   SITE_GRAIN_NEW_EVENTS           candidate matched events
+#   SITE_GRAIN_BASELINE_PROPERTY    pre-migration property lookup validation artifact
+#   SITE_GRAIN_NEW_PROPERTY         candidate property lookup validation artifact
+#   SITE_GRAIN_BASELINE_RAINFALL    pre-migration rainfall validation artifact
+#   SITE_GRAIN_NEW_RAINFALL         candidate rainfall validation artifact
+#   SITE_GRAIN_BASELINE_DRY_SPILL   pre-migration dry-spill validation artifact
+#   SITE_GRAIN_NEW_DRY_SPILL        candidate dry-spill validation artifact
+#   SITE_GRAIN_BASELINE_EXPOSURE    pre-migration exposure validation artifact
+#   SITE_GRAIN_NEW_EXPOSURE         candidate exposure validation artifact
+#   SITE_GRAIN_BASELINE_MAP_SUPPORT pre-migration map-support validation artifact
+#   SITE_GRAIN_NEW_MAP_SUPPORT      candidate map-support validation artifact
 #   SITE_GRAIN_ALLOW_PENDING_PUBLICATION  true only for pre-publication temp proof
 #
 # ==============================================================================
@@ -305,7 +315,168 @@ reconcile_event_totals <- function(baseline_path, candidate_path) {
   )
 }
 
-reconcile_consumer_manifest <- function() {
+consumer_artifact_contracts <- function() {
+  list(
+    property = list(
+      baseline_env = "SITE_GRAIN_BASELINE_PROPERTY",
+      candidate_env = "SITE_GRAIN_NEW_PROPERTY",
+      key_options = list(c("house_id", "site_id"), c("rental_id", "site_id")),
+      values = c("distance_m", "distance_km", "n_site_groups")
+    ),
+    rainfall = list(
+      baseline_env = "SITE_GRAIN_BASELINE_RAINFALL",
+      candidate_env = "SITE_GRAIN_NEW_RAINFALL",
+      key_options = list(c("site_id", "water_company", "year")),
+      values = c("rainfall_r1_yr", "rainfall_r9_yr")
+    ),
+    dry_spill = list(
+      baseline_env = "SITE_GRAIN_BASELINE_DRY_SPILL",
+      candidate_env = "SITE_GRAIN_NEW_DRY_SPILL",
+      key_options = list(c(
+        "site_id", "year", "water_company", "start_time", "end_time"
+      )),
+      values = c(
+        "rainfall_1cell_d01_na_rm", "rainfall_1cell_d01_strict",
+        "rainfall_max_9cell_d01_na_rm", "rainfall_max_9cell_d01_strict",
+        "rainfall_max_9cell_d0123_na_rm", "rainfall_max_9cell_d0123_strict"
+      )
+    ),
+    exposure = list(
+      baseline_env = "SITE_GRAIN_BASELINE_EXPOSURE",
+      candidate_env = "SITE_GRAIN_NEW_EXPOSURE",
+      key_options = list(c("site_id", "period")),
+      values = c("population", "spill_total")
+    ),
+    map_support = list(
+      baseline_env = "SITE_GRAIN_BASELINE_MAP_SUPPORT",
+      candidate_env = "SITE_GRAIN_NEW_MAP_SUPPORT",
+      key_options = list(c("site_id", "period")),
+      values = c("easting", "northing", "spill_total")
+    )
+  )
+}
+
+consumer_artifact_paths_from_env <- function(
+    contracts = consumer_artifact_contracts()) {
+  lapply(contracts, function(contract) {
+    list(
+      baseline = path_from_env(contract$baseline_env),
+      candidate = path_from_env(contract$candidate_env)
+    )
+  })
+}
+
+read_consumer_artifact <- function(path, label) {
+  extension <- tolower(tools::file_ext(path))
+  if (extension == "parquet") {
+    return(arrow::read_parquet(path))
+  }
+  if (extension == "csv") {
+    return(readr::read_csv(path, show_col_types = FALSE))
+  }
+  stop(
+    label, " must be a .parquet or .csv validation artifact: ", path,
+    call. = FALSE
+  )
+}
+
+normalise_consumer_artifact <- function(data, artifact) {
+  data <- tibble::as_tibble(data)
+  if (
+    artifact == "property" &&
+      "n_discharge_outlet" %in% names(data) &&
+      !"n_site_groups" %in% names(data)
+  ) {
+    data <- rename(data, n_site_groups = "n_discharge_outlet")
+  }
+  data
+}
+
+resolve_consumer_key <- function(baseline, candidate, key_options, artifact) {
+  available <- vapply(key_options, function(key) {
+    all(key %in% names(baseline)) && all(key %in% names(candidate))
+  }, logical(1))
+  assert_true(
+    sum(available) == 1L,
+    paste0(
+      artifact, " validation artifacts must share exactly one supported key: ",
+      paste(vapply(key_options, paste, collapse = " + ", FUN.VALUE = character(1)), collapse = "; ")
+    )
+  )
+  key_options[[which(available)]]
+}
+
+reconcile_consumer_artifacts <- function(
+    paths = consumer_artifact_paths_from_env(),
+    contracts = consumer_artifact_contracts(),
+    consumer_env = NULL) {
+  assert_true(
+    identical(sort(names(paths)), sort(names(contracts))),
+    "Consumer artifact paths must cover every declared reconciliation contract."
+  )
+  if (is.null(consumer_env)) {
+    consumer_env <- new.env(parent = globalenv())
+    sys.source(
+      here::here("scripts", "R", "testing", "reconcile_site_group_consumers.R"),
+      envir = consumer_env
+    )
+  }
+
+  bind_rows(lapply(names(contracts), function(artifact) {
+    contract <- contracts[[artifact]]
+    artifact_paths <- paths[[artifact]]
+    baseline_path <- artifact_paths$baseline
+    candidate_path <- artifact_paths$candidate
+    unavailable <- c(
+      if (!nzchar(baseline_path)) paste0("no ", contract$baseline_env, " path supplied")
+      else if (!file.exists(baseline_path)) paste0("baseline unavailable: ", baseline_path),
+      if (!nzchar(candidate_path)) paste0("no ", contract$candidate_env, " path supplied")
+      else if (!file.exists(candidate_path)) paste0("candidate unavailable: ", candidate_path)
+    )
+    if (length(unavailable) > 0L) {
+      return(tibble(
+        check = paste0("consumer_", artifact, "_artifact"),
+        status = "pending_publication",
+        detail = paste(unavailable, collapse = "; ")
+      ))
+    }
+
+    baseline <- read_consumer_artifact(
+      baseline_path, paste0(artifact, " baseline")
+    ) |>
+      normalise_consumer_artifact(artifact)
+    candidate <- read_consumer_artifact(
+      candidate_path, paste0(artifact, " candidate")
+    ) |>
+      normalise_consumer_artifact(artifact)
+    key <- resolve_consumer_key(
+      baseline, candidate, contract$key_options, artifact
+    )
+    comparison <- consumer_env$reconcile_consumer_artifact(
+      baseline, candidate, key, contract$values, artifact
+    )
+    assert_true(
+      comparison$unexplained_changes == 0L,
+      paste0(
+        artifact, " consumer artifact drift: ",
+        comparison$removed_keys, " removed key(s), ",
+        comparison$added_keys, " added key(s), ",
+        comparison$changed_rows, " changed row(s)."
+      )
+    )
+    tibble(
+      check = paste0("consumer_", artifact, "_artifact"),
+      status = "passed",
+      detail = paste0(
+        comparison$candidate_rows, " candidate rows read from ", candidate_path,
+        "; keyed values unchanged"
+      )
+    )
+  }))
+}
+
+reconcile_consumer_manifest <- function(
+    paths = consumer_artifact_paths_from_env()) {
   consumer_env <- new.env(parent = globalenv())
   sys.source(
     here::here("scripts", "R", "testing", "reconcile_site_group_consumers.R"),
@@ -314,11 +485,33 @@ reconcile_consumer_manifest <- function() {
   summary <- consumer_env$audit_site_grain_manifest()
   fixture <- consumer_env$run_fixture_reconciliation()
   assert_true(all(fixture$unexplained_changes == 0L), "Consumer fixture reconciliation found fanout or drift.")
-  tibble(
-    check = "consumer_manifest",
-    status = "passed",
-    detail = paste0(sum(summary$files), " classified grain-token surfaces; no fixture fanout")
+  bind_rows(
+    tibble(
+      check = "consumer_manifest",
+      status = "passed",
+      detail = paste0(sum(summary$files), " classified grain-token surfaces; no fixture fanout")
+    ),
+    reconcile_consumer_artifacts(paths, consumer_env = consumer_env)
   )
+}
+
+reconciliation_gate_mode <- function(checks, allow_pending_publication = FALSE) {
+  unknown <- setdiff(unique(checks$status), c("passed", "pending_publication"))
+  assert_true(
+    length(unknown) == 0L,
+    paste0("Migration reconciliation has unknown check status(es): ", paste(unknown, collapse = ", "))
+  )
+  pending <- checks |>
+    filter(.data$status == "pending_publication")
+  if (nrow(pending) == 0L) return("complete")
+  if (!allow_pending_publication) {
+    stop(
+      "Migration reconciliation has pending publication/baseline gate(s): ",
+      paste(pending$check, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  "pending_publication"
 }
 
 reconcile_figure_denominators <- function(candidate) {
@@ -418,6 +611,7 @@ audit_stale_contracts <- function(root = here::here()) {
     "scripts/R/testing/reconcile_site_grain_migration.R", "legacy_property_count", "Retained stale-contract detector",
     "scripts/R/testing/reconcile_site_grain_migration.R", "removed_commission_seam", "Retained stale-contract detector",
     "scripts/R/testing/reconcile_site_group_consumers.R", "legacy_crosswalk_path", "Manifest discovery detects unreviewed legacy readers",
+    "scripts/R/testing/test_reconcile_site_grain_migration_contracts.R", "legacy_property_count", "Legacy-baseline fixture proves the property count rename reconciles",
     "scripts/R/testing/test_merge_outputs_contracts.R", "legacy_crosswalk_path", "Negative assertion proves the alias is absent",
     "scripts/R/testing/test_site_group_consumer_contracts.R", "legacy_property_count", "Negative assertions prove the old count is absent",
     "todos/2026-07-06-review-create-unique-spill-sites.md", "obsolete_grain_prose", "Historical defect rationale retained below resolved status"
@@ -593,6 +787,11 @@ main <- function() {
       paste0("- Canonical rows: ", nrow(candidate)),
       paste0("- Site Groups: ", n_distinct(candidate$site_id)),
       paste0("- Crosswalk rows: ", nrow(crosswalk)),
+      paste0(
+        "- Gate mode: `",
+        if (any(checks$status == "pending_publication")) "pending_publication" else "complete",
+        "`"
+      ),
       "",
       "All checks with supplied evidence passed. Checks marked",
       "`pending_publication` require the coordinated production publication or",
@@ -601,16 +800,8 @@ main <- function() {
     file.path(evidence_dir, "reconciliation.md")
   )
   print(checks, n = Inf)
-  pending <- checks |>
-    filter(.data$status != "passed")
-  if (nrow(pending) > 0L && !allow_pending_publication) {
-    stop(
-      "Migration reconciliation has pending publication/baseline gate(s): ",
-      paste(pending$check, collapse = ", "),
-      call. = FALSE
-    )
-  }
-  if (nrow(pending) > 0L) {
+  gate_mode <- reconciliation_gate_mode(checks, allow_pending_publication)
+  if (gate_mode == "pending_publication") {
     cat("Canonical Spill Site / Site Group pre-publication checks passed; publication gates remain pending.\n")
   } else {
     cat("Canonical Spill Site / Site Group migration reconciliation passed.\n")

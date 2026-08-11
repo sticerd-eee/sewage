@@ -109,6 +109,17 @@ assert_identical(
   )
 )
 
+incomplete_missingness_fixture <- derive_site_group_missing_flags(
+  crosswalk_fixture |>
+    filter(!(site_id == 10L & year == 2022L)),
+  years = 2021:2023
+)
+assert_identical(
+  incomplete_missingness_fixture$site_missing,
+  c(TRUE, TRUE),
+  "A Site Group missing a requested year must be flagged without changing unaffected groups."
+)
+
 duplicate_fixture <- bind_rows(crosswalk_fixture, slice(crosswalk_fixture, 1L))
 assert_error_contains(
   derive_site_group_projection(duplicate_fixture, 2021:2024),

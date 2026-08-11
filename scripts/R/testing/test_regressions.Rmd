@@ -70,7 +70,7 @@ dat_yr <- dat$yearly
 dat_mo <- dat$monthly
 
 spill_sites <- read_site_group_projection(
-  here(
+  here::here(
     "data", "processed", "matched_events_annual_data",
     "site_group_crosswalk.parquet"
   ),
