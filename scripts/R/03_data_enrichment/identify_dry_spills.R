@@ -22,7 +22,11 @@ CONFIG <- list(
     "data", "processed", "matched_events_annual_data", 
     "matched_events_annual_data.parquet"),
   rainfall_file = here::here("data", "processed", "rainfall", "rainfall_data_cleaned.parquet"),
-  unique_sites_file = here::here("data", "processed", "unique_spill_sites.parquet"),
+  site_group_crosswalk_file = here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  site_group_years = 2021:2024,
   lookup_table_file = here::here("data", "processed", "rainfall", "spill_site_grid_lookup.parquet"),
   dry_spills_export_path = here::here("data", "processed", "rainfall", "dry_spills.parquet"),
   
@@ -54,6 +58,7 @@ initialise_environment <- function() {
   
   invisible(lapply(required_packages, library, character.only = TRUE))
   source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
+  source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 }
 
 #' Set up logging configuration
@@ -94,25 +99,23 @@ load_spill_data <- function(file_path = CONFIG$spills_file) {
     dplyr::select(site_id, year, water_company, start_time, end_time) |>
     data.table::as.data.table()
 
-  # Match on site_id only and take the inventory's works-representative ngr:
-  # events carry their original outlet NGR, which differs from the works NGR
-  # for collapsed multi-outlet works, and the grid lookup is keyed on the
-  # works NGR. A (site_id, ngr) merge here dropped 469k in-inventory events.
-  site_inventory <- arrow::read_parquet(CONFIG$unique_sites_file) |>
-    dplyr::select(site_id, ngr) |>
-    dplyr::distinct() |>
-    data.table::as.data.table()
+  # Events are group-keyed. Attach the single Site Group representative NGR;
+  # outlet NGRs can differ and the rainfall lookup is keyed by Site Group.
+  site_projection <- read_site_group_projection(
+    CONFIG$site_group_crosswalk_file,
+    years = CONFIG$site_group_years
+  ) |>
+    dplyr::select("site_id", "ngr")
 
   raw_rows <- nrow(spills_dt)
-  spills_dt <- merge(
-    spills_dt,
-    site_inventory,
-    by = "site_id",
-    all = FALSE,
-    sort = FALSE
-  )
+  spills_dt <- left_join_site_group_projection(
+    tibble::as_tibble(spills_dt),
+    site_projection,
+    context = "Dry-spill event Site Group join"
+  ) |>
+    data.table::as.data.table()
   logger::log_info(
-    "Filtered spill data to regenerated unique_spill_sites inventory: {nrow(spills_dt)} retained, {raw_rows - nrow(spills_dt)} dropped"
+    "Attached Site Group locations to {nrow(spills_dt)} spill rows; pre-join rows: {raw_rows}"
   )
   
   return(spills_dt)

@@ -36,6 +36,7 @@ initialise_environment <- function() {
     }
     library(pkg, character.only = TRUE)
   }))
+  source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 }
 
 #' Set up logging configuration
@@ -55,7 +56,8 @@ setup_logging <- function() {
 
 CONFIG <- list(
   # Input file paths - preprocessed data from earlier pipeline stages
-  spill_sites_path = here::here("data", "processed", "unique_spill_sites.parquet"),      # Site metadata with coordinates
+  site_group_crosswalk_path = here::here("data", "processed", "matched_events_annual_data", "site_group_crosswalk.parquet"),
+  site_group_years = 2021:2024,
   rainfall_path = here::here("data", "processed", "rainfall", "rainfall_data_cleaned.parquet"),  # Grid-based daily rainfall data
   lookup_path = here::here("data", "processed", "rainfall", "spill_site_grid_lookup.parquet"),   # Site-to-grid mapping (9-cell neighbourhoods)
   
@@ -88,12 +90,16 @@ CONFIG <- list(
 #' Load unique spill sites data
 #' @return data.table with site_id, water_company, ngr columns
 load_spill_sites <- function() {
-  logger::log_info("Loading spill sites from: {basename(CONFIG$spill_sites_path)}")
-  sites_dt <- arrow::read_parquet(CONFIG$spill_sites_path) |>
-    select(site_id, water_company, ngr) |>
+  logger::log_info("Loading Site Groups from: {basename(CONFIG$site_group_crosswalk_path)}")
+  sites_dt <- read_site_group_projection(
+    CONFIG$site_group_crosswalk_path,
+    years = CONFIG$site_group_years
+  ) |>
+    dplyr::select("site_id", "water_company", "ngr") |>
     as.data.table()
-  
-  logger::log_info("Loaded {nrow(sites_dt)} unique spill sites")
+
+  assert_unique_site_groups(sites_dt, "Rainfall-aggregation Site Group projection")
+  logger::log_info("Loaded {nrow(sites_dt)} unique Site Groups")
   return(sites_dt)
 }
 
@@ -163,6 +169,7 @@ split_sites_into_chunks <- function(sites_dt) {
 #' @return data.table with site_id, water_company, ngr, date combinations for chunk
 create_chunk_site_day_grid <- function(chunk_sites) {
   logger::log_debug("Creating site-day grid for chunk: {nrow(chunk_sites)} sites")
+  assert_unique_site_groups(chunk_sites, "Rainfall-aggregation Site Group chunk")
   
   # Generate complete date sequence
   date_seq <- seq(from = CONFIG$start_date, to = CONFIG$end_date, by = "day")
@@ -175,7 +182,13 @@ create_chunk_site_day_grid <- function(chunk_sites) {
   )
   
   # Join with site metadata
+  chunk_grid_before_metadata <- data.table::copy(chunk_grid)
   chunk_grid <- chunk_sites[chunk_grid, on = "site_id"]
+  assert_left_row_count(
+    chunk_grid_before_metadata,
+    chunk_grid,
+    "Rainfall-aggregation Site Group metadata join"
+  )
   
   logger::log_debug("Generated chunk grid: {nrow(chunk_grid)} site-day combinations")
   return(chunk_grid)

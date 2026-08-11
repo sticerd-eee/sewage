@@ -26,6 +26,7 @@ initialise_environment <- function() {
     }
     library(pkg, character.only = TRUE)
   }))
+  source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 }
 
 #' Set up logging configuration
@@ -47,7 +48,11 @@ setup_logging <- function() {
 CONFIG <- list(
   processed_dir = here::here("data", "processed"),
   zoopla_path = here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
-  spill_sites_path = here::here("data", "processed", "unique_spill_sites.parquet"),
+  site_group_crosswalk_path = here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  site_group_years = 2021:2024,
   output_path = here::here("data", "processed", "zoopla", "spill_rental_lookup.parquet"),
   radius_km = 5,
   chunk_size = 2000
@@ -63,7 +68,10 @@ load_data <- function() {
   logger::log_info("Loading Zoopla rentals and spill site datasets")
 
   rentals <- rio::import(CONFIG$zoopla_path, trust = TRUE)
-  spill <- rio::import(CONFIG$spill_sites_path, trust = TRUE)
+  spill <- read_site_group_projection(
+    CONFIG$site_group_crosswalk_path,
+    years = CONFIG$site_group_years
+  )
 
   return(list(rentals = rentals, spill = spill))
 }
@@ -73,6 +81,7 @@ load_data <- function() {
 #' @return List with `spill_sf` (sf) and `lookup` (tibble)
 prepare_spill_sites <- function(spill_data) {
   logger::log_info("Preparing spill sites spatial data")
+  assert_unique_site_groups(spill_data, "Rental-match Site Group projection")
 
   dropped_sites <- spill_data %>%
     filter(is.na(easting) | is.na(northing)) %>%
@@ -145,12 +154,16 @@ perform_spatial_join <- function(rentals_sf, spill_sites_sf, spill_lookup,
     chunk <- rental_chunks[[i]]
     logger::log_info(glue::glue("Processing chunk {i}/{length(rental_chunks)} with {nrow(chunk)} rentals"))
 
-    st_join(chunk, spill_sites_sf,
+    spatial_matches <- st_join(chunk, spill_sites_sf,
       join = st_is_within_distance,
       dist = radius_m,
       left = TRUE
+    )
+    left_join_site_group_projection(
+      spatial_matches,
+      spill_lookup,
+      context = "Rental-match Site Group geometry join"
     ) %>%
-      left_join(spill_lookup, by = "site_id") %>%
       mutate(
         # Straight-line distance to the spill site
         distance_m = if_else(is.na(spill_geom), NA_real_,
@@ -159,13 +172,17 @@ perform_spatial_join <- function(rentals_sf, spill_sites_sf, spill_lookup,
         distance_km = distance_m / 1000
       ) %>%
       group_by(rental_id) %>%
-      mutate(n_discharge_outlet = sum(!is.na(site_id))) %>%
+      mutate(n_site_groups = sum(!is.na(site_id))) %>%
       ungroup() %>%
       st_drop_geometry() %>%
-      select(rental_id, site_id, distance_m, distance_km, n_discharge_outlet)
+      select(rental_id, site_id, distance_m, distance_km, n_site_groups)
   })
 
-  dplyr::bind_rows(merged_chunks)
+  result <- dplyr::bind_rows(merged_chunks)
+  if (anyDuplicated(result[c("rental_id", "site_id")])) {
+    stop("Rental Site Group lookup must be unique on rental_id, site_id.", call. = FALSE)
+  }
+  result
 }
 
 
