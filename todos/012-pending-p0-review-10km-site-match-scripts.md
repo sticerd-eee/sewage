@@ -3,7 +3,7 @@
 - **Date:** 2026-07-06
 - **Scripts reviewed:** `scripts/R/04_feature_engineering/10km_site_house_sale_match.R`, `scripts/R/04_feature_engineering/10km_site_rental_match.R`
 - **Review type:** whole-file sanity check (multi-agent review: correctness, performance, maintainability, project-standards, testing, institutional-learnings; every finding below survived an independent validation pass)
-- **Status:** partially resolved — the 2026-08-11 grain migration fixed the Site Group input and count contracts; radius, dependency, logging, memory, and performance findings remain as recorded below.
+- **Status:** resolved 2026-08-12 — both radius-neutral producers now use the same explicit 10 km contract, stream validated Parquet row groups, and have regenerated production artifacts.
 
 ---
 
@@ -91,3 +91,41 @@ One critical error: **the rental match was actually run at 5 km, not the 10 km s
 2. Fix finding 2 at the same time (one-line default change, same root cause).
 3. Add the contract test from finding 6 so radius drift can never ship silently again.
 4. Findings 3, 5, 7 are quick, independent quality improvements; finding 4 belongs in a pipeline-wide cleanup task.
+
+---
+
+## Resolution (2026-08-12)
+
+The producer filenames are now radius-neutral:
+
+- `10km_site_house_sale_match.R` → `site_house_sale_match.R`
+- `10km_site_rental_match.R` → `site_rental_match.R`
+
+Both scripts expose one `CONFIG$radius_km` value, currently 10, use the shared project bootstrap, fail with an `rv sync` instruction when dependencies are missing, report coordinate exclusions, and preserve the canonical single-file outputs. The original `st_is_within_distance` matcher remains in place; performance finding 8 was explicitly optional and outside this correctness-and-memory repair.
+
+Each producer now streams one input chunk into one Parquet row group through `ParquetFileWriter`. It writes to a sibling stage, closes the file, validates schema, row groups, keys, distances, coverage, counts, sentinels, and a direct spatial sample, and only then promotes the stage over the canonical artifact. Failure-injection contracts cover write, close, validation, sample-oracle, and promotion failures while preserving the last-known-good output.
+
+### Memory benchmark
+
+The end-to-end accumulator baseline and streaming implementation each ran three times in separate processes against the same fixed 10 km fixture: 5,000 properties, 200 Site Groups, 500-property chunks, 995,251 output rows, and logical checksum `041d86bdca0fbdd8` in every run.
+
+- Accumulator peak RSS: 409,894,912; 434,634,752; 442,990,592 bytes (median 434,634,752).
+- Streaming peak RSS: 416,907,264; 408,666,112; 412,008,448 bytes (median 412,008,448).
+- Median peak-RSS reduction: 5.21%.
+
+### Regenerated artifacts
+
+- Sales: 207,927,037 rows, 1,584 row groups, 3,166,671 eligible properties, maximum distance 10,000 m. The full logical signature remained `9556157589613953918`, exactly matching the pre-regeneration artifact.
+- Rentals: 112,159,617 rows, 726 row groups, 1,450,255 eligible properties, maximum distance 10,000 m. The widened output adds 75,080,943 matches above 5 km and at or below 10 km.
+- The 37,037,753 legacy rental matches at or below 5 km are unchanged. Recomputing their former 5 km `n_site_groups` semantics yields logical signature `18294554726373250018`, exactly matching the pre-regeneration artifact.
+- The opt-in production audit passed exact schema, nonempty row groups, row-group key uniqueness, input-ID coverage, sentinel semantics, distance bounds, property counts, and deterministic direct 10 km recomputation for both outputs.
+
+### Consumer audit
+
+- **Changed and rerun:** `repeat_rentals.R` was rerun because formerly unmatched rentals can now receive a finite nearest distance above 5 km. It retained all 1,450,255 rentals and rebuilt both repeat-rental outputs; its published 250/500/1,000 m flags remain capped and therefore invariant.
+- **Changed and rerun:** `extensive_margin_coefficient_plots.R` reads nearest distances up to 10 km. Its comparison bands stop at 2 km; 48/48 models converged and both coefficient PDFs were rebuilt.
+- **Invariant and verified:** the maintained rental analysis-dataset builders cap their lookups at 250–5,000 m (`cross_section_rental.R`, `cross_section_prior_to_rental.R`, `grid_long_difference_rentals.R`, `rental_panel_exp.R`, `rental_panel_within_radius.R`, `rental_spill_prior_to_rental.R`, and `site_panel_rental.R`). The legacy ≤5 km signature proves their lookup inputs are unchanged.
+- **Invariant and verified:** `repeat_sales.R` caps both sales and rental lookups at 250 m. The remaining direct extensive-news scripts cap their comparison lookup at 2 km; their inputs are covered by the unchanged ≤5 km signature.
+- **Out of scope:** exploratory Quarto/R Markdown readers and the historical reconciliation script consume the canonical artifacts interactively and publish no maintained pipeline artifact in this repair.
+
+Verification completed with `test_script_setup.R`, `test_property_site_match_contracts.R`, the opt-in production-artifact mode, `test_site_group_consumer_contracts.R`, independent DuckDB signatures, both production producers, and the two affected downstream runs described above.

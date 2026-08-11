@@ -64,11 +64,8 @@ read_text <- function(path) {
 
 source_producer <- function(path) {
   producer_env <- new.env(parent = globalenv())
-  sys.source(
-    here::here("scripts", "R", "utils", "site_group_utils.R"),
-    envir = producer_env
-  )
   sys.source(here::here(path), envir = producer_env)
+  producer_env$initialise_environment()
   producer_env
 }
 
@@ -420,7 +417,7 @@ audit_production_artifact <- function(producer_name, spec, expected_radius_km = 
 
   properties <- arrow::read_parquet(
     config$input_path,
-    col_select = c(id_column, "easting", "northing")
+    col_select = dplyr::all_of(c(id_column, "easting", "northing"))
   ) |>
     tibble::as_tibble()
   assert_true(
@@ -438,7 +435,7 @@ audit_production_artifact <- function(producer_name, spec, expected_radius_km = 
     paste(producer_name, "production input must contain eligible properties.")
   )
 
-  site_data <- read_site_group_projection(
+  site_data <- producer_env$read_site_group_projection(
     config$site_group_crosswalk_path,
     years = config$site_group_years
   )
@@ -466,7 +463,7 @@ audit_production_artifact <- function(producer_name, spec, expected_radius_km = 
     producer_env[[spec$schema_function]]()$ToString(),
     paste(producer_name, "production artifact must have the exact schema.")
   )
-  expected_row_groups <- ceiling(length(eligible_ids) / config$chunk_size)
+  expected_row_groups <- as.integer(ceiling(length(eligible_ids) / config$chunk_size))
   assert_identical(
     reader$num_row_groups,
     expected_row_groups,

@@ -130,7 +130,8 @@ digraph DataPipeline {
     label = '04 Feature Engineering; Spatial Processing Layer';
     style='filled,rounded'; fillcolor='#fef2f2'; color='#ef4444'; fontcolor='#7f1d1d'; penwidth=2;
     node [style='filled,rounded', rx=6, ry=6, fillcolor='#e0e7ff', color='#6366f1', penwidth=2, fontcolor='#312e81'];
-    S15 [label='10km_site_house_sale_match.R\\nPerforms spatial matching between house sales and spill sites'];
+    S15 [label='site_house_sale_match.R\\nMatches house sales to Site Groups at the configured radius (currently 10 km)'];
+    S15R [label='site_rental_match.R\\nMatches rentals to Site Groups at the configured radius (currently 10 km)'];
     S17 [label='compute_spill_stats.R\\nCalculates site-level spill statistics and treatment indicators'];
   }
 
@@ -203,6 +204,7 @@ digraph DataPipeline {
   S13 -> D13;
   S14 -> D14;
   {D10G, D14} -> S15 -> D15;
+  {D10G, D18} -> S15R -> D19;
   {D12, D14, D15} -> S16 -> F01;
   {D14, D15} -> S18 -> F02;
   {D14, D15} -> S19 -> F03;
@@ -335,12 +337,19 @@ digraph DataPipeline {
 
 **Spatial Matching**
 
-- **script_name**: `10km_site_house_sale_match.R`
-- **purpose**: Performs spatial matching between house sales and the unique Site Group projection. The output count is `n_site_groups`; canonical inventory rows are not deduplicated for this group-keyed task.
+- **script_name**: `site_house_sale_match.R`
+- **purpose**: Performs spatial matching between house sales and the unique Site Group projection using a configurable radius (currently 10 km). The output count is `n_site_groups`; canonical inventory rows are not deduplicated for this group-keyed task.
 - **inputs**: 
   - `"data/processed/house_price.parquet"`
   - `"data/processed/matched_events_annual_data/site_group_crosswalk.parquet"`
 - **outputs**: `["data/processed/spill_house_lookup.parquet"]`
+
+- **script_name**: `site_rental_match.R`
+- **purpose**: Performs spatial matching between rental listings and the unique Site Group projection using a configurable radius (currently 10 km). The output count is `n_site_groups`.
+- **inputs**:
+  - `"data/processed/zoopla/zoopla_rentals.parquet"`
+  - `"data/processed/matched_events_annual_data/site_group_crosswalk.parquet"`
+- **outputs**: `["data/processed/zoopla/spill_rental_lookup.parquet"]`
 
 **Spill Statistics Computing**
 

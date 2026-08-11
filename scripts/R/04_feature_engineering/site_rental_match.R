@@ -66,9 +66,9 @@ initialise_environment <- function() {
   invisible(lapply(REQUIRED_PACKAGES, function(package) {
     library(package, character.only = TRUE)
   }))
-  source(
+  sys.source(
     here::here("scripts", "R", "utils", "site_group_utils.R"),
-    local = TRUE
+    envir = environment(initialise_environment)
   )
 }
 

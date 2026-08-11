@@ -55,8 +55,8 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 
 ### 04_feature_engineering
 
-- `10km_site_house_sale_match.R`: spatially matches house sales to the unique Site Group projection and writes `n_site_groups` as the nearby-group count.
-- `10km_site_rental_match.R`: spatially matches rental listings to the unique Site Group projection and writes `n_site_groups` as the nearby-group count.
+- `site_house_sale_match.R`: spatially matches house sales to the unique Site Group projection using a configurable radius (currently 10 km) and writes `n_site_groups` as the nearby-group count.
+- `site_rental_match.R`: spatially matches rental listings to the unique Site Group projection using a configurable radius (currently 10 km) and writes `n_site_groups` as the nearby-group count.
 - `compute_spill_stats.R`: builds enhanced spill statistics and treatment indicators.
 
 ### 05_data_integration
@@ -113,8 +113,8 @@ The `scripts/R/09_analysis/` folder contains the main descriptive, hedonic, repe
 
 ### Layer 04: Feature Engineering
 
-22. `10km_site_house_sale_match.R` — create house-to-site spatial matches.
-23. `10km_site_rental_match.R` — create rental-to-site spatial matches.
+22. `site_house_sale_match.R` — create house-to-site spatial matches using the configured radius (currently 10 km).
+23. `site_rental_match.R` — create rental-to-site spatial matches using the configured radius (currently 10 km).
 24. `compute_spill_stats.R` — build enhanced spill statistics and treatment indicators.
 
 ### Layer 05: Data Integration
