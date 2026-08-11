@@ -18,8 +18,8 @@ scripts/R/03_data_enrichment/aggregate_rainfall_stats.R,active_site_group,U4,Rai
 scripts/R/03_data_enrichment/aggregate_spill_stats.R,active_site_group,U1,Annual aggregation reads Site Group annual status
 scripts/R/03_data_enrichment/create_unique_spill_sites.R,active_canonical,U3,Canonical inventory attaches Site Group membership from crosswalk
 scripts/R/03_data_enrichment/identify_dry_spills.R,active_site_group,U4,Dry-spill events use Site Group location
-scripts/R/04_feature_engineering/10km_site_house_sale_match.R,active_site_group,U4,House distances use Site Group points
-scripts/R/04_feature_engineering/10km_site_rental_match.R,active_site_group,U4,Rental distances use Site Group points
+scripts/R/04_feature_engineering/site_house_sale_match.R,active_site_group,U4,House distances use Site Group points
+scripts/R/04_feature_engineering/site_rental_match.R,active_site_group,U4,Rental distances use Site Group points
 scripts/R/05_data_integration/merge_individ_annual_location.R,non_reader,U1,Produces the Site Group crosswalk
 scripts/R/06_analysis_datasets/cross_section_prior_to_rental.R,active_site_group,U5,Rental missingness uses group annual status
 scripts/R/06_analysis_datasets/cross_section_prior_to_sale.R,active_site_group,U5,Sale missingness uses group annual status

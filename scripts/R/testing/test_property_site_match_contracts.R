@@ -46,6 +46,22 @@ assert_error_contains <- function(expression, expected, message) {
   }
 }
 
+capture_warning_messages <- function(expression) {
+  messages <- character()
+  value <- withCallingHandlers(
+    expression,
+    warning = function(warning) {
+      messages <<- c(messages, conditionMessage(warning))
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(value = value, messages = messages)
+}
+
+read_text <- function(path) {
+  paste(readLines(path, warn = FALSE), collapse = "\n")
+}
+
 source_producer <- function(path) {
   producer_env <- new.env(parent = globalenv())
   sys.source(
@@ -61,7 +77,7 @@ producer_specs <- list(
     env = source_producer(
       file.path(
         "scripts", "R", "04_feature_engineering",
-        "10km_site_house_sale_match.R"
+        "site_house_sale_match.R"
       )
     ),
     id_column = "house_id",
@@ -71,7 +87,7 @@ producer_specs <- list(
     env = source_producer(
       file.path(
         "scripts", "R", "04_feature_engineering",
-        "10km_site_rental_match.R"
+        "site_rental_match.R"
       )
     ),
     id_column = "rental_id",
@@ -97,7 +113,7 @@ normalise_lookup <- function(lookup, id_column) {
     as.data.frame()
 }
 
-run_match <- function(spec, properties = property_fixture, chunk_size = NULL) {
+run_match <- function(spec, properties = property_fixture, chunk_size = 100L) {
   id_column <- spec$id_column
   names(properties)[names(properties) == "property_id"] <- id_column
   property_sf <- spec$env[[spec$prepare_property]](properties)
@@ -119,6 +135,32 @@ run_match <- function(spec, properties = property_fixture, chunk_size = NULL) {
 for (producer_name in names(producer_specs)) {
   spec <- producer_specs[[producer_name]]
   id_column <- spec$id_column
+
+  assert_identical(
+    spec$env$CONFIG$radius_km,
+    10,
+    paste(producer_name, "must configure a 10 km radius.")
+  )
+  assert_identical(
+    sum(names(spec$env$CONFIG) == "radius_km"),
+    1L,
+    paste(producer_name, "must expose exactly one radius configuration value.")
+  )
+  assert_true(
+    identical(
+      formals(spec$env$perform_spatial_join)["radius_km"],
+      alist(radius_km = )
+    ),
+    paste(producer_name, "matching must require an explicit radius.")
+  )
+  assert_true(
+    identical(
+      formals(spec$env$process_spatial_data)["radius_km"],
+      alist(radius_km = )
+    ),
+    paste(producer_name, "orchestration must require an explicit radius.")
+  )
+
   result <- run_match(spec)
 
   assert_true(
@@ -184,6 +226,76 @@ for (producer_name in names(producer_specs)) {
     one_chunk,
     paste(producer_name, "must be invariant to chunk boundaries.")
   )
+
+  diagnostic_properties <- tibble(
+    property_id = 1:4,
+    easting = c(500000, NA_real_, 500000, NaN),
+    northing = c(200000, 200000, Inf, 200000)
+  )
+  names(diagnostic_properties)[names(diagnostic_properties) == "property_id"] <-
+    id_column
+  log_path <- tempfile(paste0(producer_name, "-coordinate-log-"))
+  logger::log_appender(logger::appender_file(log_path))
+  diagnostic_result <- capture_warning_messages(
+    spec$env[[spec$prepare_property]](diagnostic_properties)
+  )
+  logger::log_appender(logger::appender_console)
+
+  assert_identical(
+    length(diagnostic_result$messages),
+    1L,
+    paste(producer_name, "must warn once when coordinates are excluded.")
+  )
+  diagnostic_log <- read_text(log_path)
+  assert_true(
+    grepl("total=4", diagnostic_log, fixed = TRUE) &&
+      grepl("eligible=1", diagnostic_log, fixed = TRUE) &&
+      grepl("excluded=3", diagnostic_log, fixed = TRUE) &&
+      grepl("75.00%", diagnostic_log, fixed = TRUE),
+    paste(producer_name, "must log reconciled coordinate coverage.")
+  )
+  assert_identical(
+    nrow(diagnostic_result$value),
+    1L,
+    paste(producer_name, "must retain only finite coordinate rows.")
+  )
+
+  missing_id_properties <- diagnostic_properties[1L, ]
+  missing_id_properties[[id_column]] <- NA_integer_
+  assert_error_contains(
+    spec$env[[spec$prepare_property]](missing_id_properties),
+    paste(id_column, "must not contain missing values"),
+    paste(producer_name, "must reject missing property identifiers.")
+  )
+
+  all_ineligible <- diagnostic_properties[2:4, ]
+  assert_error_contains(
+    spec$env[[spec$prepare_property]](all_ineligible),
+    "No coordinate-eligible",
+    paste(producer_name, "must reject an all-ineligible property input.")
+  )
 }
+
+producer_paths <- c(
+  here::here(
+    "scripts", "R", "04_feature_engineering", "site_house_sale_match.R"
+  ),
+  here::here(
+    "scripts", "R", "04_feature_engineering", "site_rental_match.R"
+  )
+)
+producer_text <- paste(vapply(producer_paths, read_text, character(1)), collapse = "\n")
+assert_true(
+  !grepl("install.packages(", producer_text, fixed = TRUE),
+  "Property-match producers must not install packages at runtime."
+)
+assert_true(
+  !grepl("setup_logging <- function", producer_text, fixed = TRUE),
+  "Property-match producers must delegate generic logger setup to script_setup.R."
+)
+assert_true(
+  !grepl("10km_site_", producer_text, fixed = TRUE),
+  "Property-match producers must use radius-neutral operational filenames."
+)
 
 cat("Property-site match producer contract tests passed.\n")
