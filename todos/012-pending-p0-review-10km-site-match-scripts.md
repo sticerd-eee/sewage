@@ -3,7 +3,7 @@
 - **Date:** 2026-07-06
 - **Scripts reviewed:** `scripts/R/04_feature_engineering/10km_site_house_sale_match.R`, `scripts/R/04_feature_engineering/10km_site_rental_match.R`
 - **Review type:** whole-file sanity check (multi-agent review: correctness, performance, maintainability, project-standards, testing, institutional-learnings; every finding below survived an independent validation pass)
-- **Status:** pending — no fixes applied, no branches created (per request)
+- **Status:** partially resolved — the 2026-08-11 grain migration fixed the Site Group input and count contracts; radius, dependency, logging, memory, and performance findings remain as recorded below.
 
 ---
 
@@ -51,7 +51,8 @@ One critical error: **the rental match was actually run at 5 km, not the 10 km s
 
 - **Where:** gap in `scripts/R/testing/` (convention established by e.g. `test_create_unique_spill_sites_ch8.R`, `test_merge_matching_contracts.R`)
 - **What happens:** nothing checks the two lookup parquets. A one-line assertion that `max(distance_m) <= radius_km * 1000` with the intended radius would have caught finding 1 at build time. `test_house_price_sewage_merge.Rmd` is an exploratory notebook with zero assertions, not a test.
-- **Suggested fix:** add `scripts/R/testing/test_10km_site_match_contracts.R` asserting, for both parquets: all `distance_m` ≤ intended radius; no duplicate (`house_id`/`rental_id`, `site_id`) pairs; `n_discharge_outlet` ≥ 0 and equal to the per-property count of non-NA `site_id`; and the two scripts' effective radii match each other (or match their documented values).
+- **Suggested fix:** add `scripts/R/testing/test_10km_site_match_contracts.R` asserting, for both parquets: all `distance_m` ≤ intended radius; no duplicate (`house_id`/`rental_id`, `site_id`) pairs; `n_site_groups` ≥ 0 and equal to the per-property count of non-NA `site_id`; and the two scripts' effective radii match each other (or match their documented values).
+- **Grain-contract resolution (2026-08-11):** both producers now read the unique Site Group projection from `site_group_crosswalk.parquet`, preserve the left-side row count through metadata attachment, and write `n_site_groups`. `test_site_group_consumer_contracts.R` covers uniqueness, no fanout, and the clean count-name migration. The intended-radius contract remains open and is not claimed by that test.
 
 ### 7. [P2] Peak memory roughly doubles at the 208-million-row output scale
 
@@ -71,11 +72,11 @@ One critical error: **the rental match was actually run at 5 km, not the 10 km s
 ## Verified non-issues (checked and ruled out)
 
 - **Chunking cannot corrupt the per-property outlet count.** `house_id`/`rental_id` are `row_number()` identifiers, so a property can never span two chunks; the per-chunk `group_by` count is globally correct.
-- **The lookup join cannot duplicate rows.** `unique_spill_sites.parquet` is one row per `site_id` by construction (`distinct()` on the site universe plus a left-join chain keyed on `site_id` upstream), so the `left_join(spill_lookup)` is one-to-one.
-- **NA join keys are harmless here.** Unmatched properties get NA `site_id` from the left spatial join, and `spill_lookup` has no NA keys, so no spurious matches arise; `n_discharge_outlet` correctly counts only non-NA `site_id`.
+- **The lookup join cannot duplicate rows.** The shared Site Group projection is asserted unique on `site_id` before either spatial join, and both producers assert row conservation after metadata attachment. The repeated Site Group key in `unique_spill_sites.parquet` is deliberately not used for this task.
+- **NA join keys are harmless here.** Unmatched properties get NA `site_id` from the left spatial join, and the Site Group projection has no NA keys, so no spurious matches arise; `n_site_groups` correctly counts only non-NA `site_id`.
 - **Chunk reordering by `split()`** only permutes output row order, which downstream ID-based joins ignore.
 - **`if_else()` evaluating `st_distance()` eagerly on unmatched rows** was examined and judged low-risk (the failure mode would be a loud chunk error, not silent corruption); noted as a residual risk only.
-- **No consumer depends on `n_discharge_outlet`:** no script in `06_analysis_datasets/` or `09_analysis/` uses the column, and all examined consumers re-filter `distance_m` to their own analysis radius.
+- **The count rename was clean:** active analysis consumers use `n_site_groups`; the legacy count name is retained only in negative contract assertions.
 
 ## Residual risks / adjacent observations (outside the two scripts)
 

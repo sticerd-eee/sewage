@@ -37,22 +37,22 @@
 - **Resolution (2026-08-10):** year boundaries are now constructed explicitly in UTC through the shared `clamp_spill_records_to_year()` helper. Monthly windows end at the exact next-month boundary, and the overlap output drops every non-positive slice before counting. Focused UTC/Europe-Rome contract tests pass. On the rebuilt input, all 535 cross-year events reconcile to their 573 monthly slices with zero non-positive slices, zero wrong-label-year slices, and a maximum duration difference of `9.1e-13` hours.
 - **Flagged by:** adversarial (verified by execution); magnitude verified by the orchestrator.
 
-### 3. `[-]` Exact-duplicate event rows double spill hours but not spill counts
+### 3. `[-]` Exact-duplicate Site Group event rows double spill hours but not spill counts
 
 - **Where:** `scripts/R/03_data_enrichment/aggregate_spill_stats.R:95-96` (`load_data()` applies no deduplication to the event data) together with `calculate_spill_hours()` (`spill_aggregation_utils.R:250-255`), which sums durations, while `count_spills()` effectively absorbs duplicates into the same block.
 - **Problem:** identical `(site_id, start_time, end_time)` rows are summed twice in hours but merge into one counted block, so hours and counts are computed from inconsistent record sets.
 - **Evidence:** 2,979 duplicated keys / 3,284 surplus rows in `matched_events_annual_data.parquet` (small relative to 7.27 million rows, but concentrated on specific sites).
 - **Suggested fix:** deduplicate exact `(site_id, start_time, end_time)` rows in `load_data()` with a logged drop count. Separately decide whether overlapping (non-identical) intervals at the same site should be union-merged for the hours measure; the duplicate source is worth tracing upstream in the merge script.
-- **Resolution (2026-08-10):** won't fix because the proposed duplicate key is at the wrong grain. Upstream, multiple monitored outlets can be assigned the same works-level `site_id`; coincident events at distinct outlets are therefore legitimate rows, and their durations intentionally sum to outlet-hours. The 2,979 coincident works/timestamp groups contain zero duplicates after adding the complete source identity tuple (`site_name_ea`, `site_name_wa_sc`, both permit references, `activity_reference`, and `unique_id`). Deduplicating by works and timestamps would silently discard real outlet activity. The script now documents this contract and a fixture pins the expected result: two simultaneous two-hour outlet events produce four outlet-hours.
+- **Resolution (2026-08-10; terminology updated 2026-08-11):** won't fix because the proposed duplicate key is at the wrong grain. Multiple monitored outlets can be assigned the same Site Group `site_id`; coincident events at distinct outlets are legitimate rows, and their durations intentionally sum to outlet-hours. The 2,979 coincident Site Group/timestamp sets contain zero duplicates after adding the complete source identity tuple (`site_name_ea`, `site_name_wa_sc`, both permit references, `activity_reference`, and `unique_id`). Deduplicating by Site Group and timestamps would silently discard real outlet activity. A fixture pins the expected result: two simultaneous two-hour outlet events produce four outlet-hours.
 - **Flagged by:** adversarial; confirmed empirically by the orchestrator.
 
-### 3a. `[x]` Yearly count fallback mixes works-level and outlet-level counts
+### 3a. `[x]` Yearly count fallback mixes Site Group-level and outlet-level counts
 
 - **Where:** `scripts/R/03_data_enrichment/aggregate_spill_stats.R`, inside the yearly branch of `complete_data_observations()`.
-- **Problem:** event-derived `spill_count_yr` applies the 12/24 method once to the combined works-level event stream, while `spill_count_ea_crosswalk` sums annual counts across the works' monitored outlets. Coalescing the latter into the former changes the count estimand according to data source: two outlets spilling simultaneously count as one event-derived works spill but two outlet-summed EA spills.
-- **Evidence:** 832 `reported_positive` works-years currently have no matched event data and therefore receive the cross-grain fallback; 831 carry a positive EA outlet count and one carries zero. The corresponding EA count remains separately available as `spill_count_ea_crosswalk`.
-- **Resolution (2026-08-10):** `spill_count_yr` is now consistently a works-level count. Event-derived values take precedence, `reported_zero` works-years remain zero, and EA-only positive, `reported_na`, and `absent` works-years remain `NA`. `spill_hrs_yr` still uses the EA fallback because both event-derived and crosswalk hours are additive outlet-hours. Output names and schemas are unchanged. Downstream yearly consumers differ in their existing missing-value policy: `grid_long_difference_{sales,rentals}.R` and the main hedonic scripts propagate `NA`, while mapping/support summaries and `did_trends_full.R` use `na.rm = TRUE`; that broader policy remains tracked under related finding R1 rather than changed here.
-- **Regeneration note (2026-08-10):** the canonical yearly Parquet had not been regenerated after this resolution and still contained the old EA outlet-count fallback for 832 EA-only Works-years. The low-findings rebuild corrected those stale values to `NA`; this additional artifact change was reviewed and explicitly accepted alongside the new exact-boundary corrections.
+- **Problem:** event-derived `spill_count_yr` applies the 12/24 method once to the combined Site Group event stream, while `spill_count_ea_crosswalk` sums annual counts across the group's monitored outlets. Coalescing the latter into the former changes the count estimand according to data source: two outlets spilling simultaneously count as one event-derived Site Group spill but two outlet-summed EA spills.
+- **Evidence:** 832 `reported_positive` Site Group-years had no matched event data and therefore received the cross-grain fallback; 831 carried a positive EA outlet count and one carried zero. The corresponding EA count remains separately available as `spill_count_ea_crosswalk`.
+- **Resolution (2026-08-10; terminology updated 2026-08-11):** `spill_count_yr` is consistently a Site Group-level count. Event-derived values take precedence, `reported_zero` Site Group-years remain zero, and EA-only positive, `reported_na`, and `absent` Site Group-years remain `NA`. `spill_hrs_yr` still uses the EA fallback because both event-derived and crosswalk hours are additive outlet-hours.
+- **Regeneration note (2026-08-10):** the yearly Parquet had not been regenerated after this resolution and still contained the old EA outlet-count fallback for 832 EA-only Site Group-years. The low-findings rebuild corrected those stale values to `NA`.
 
 ---
 
@@ -77,7 +77,7 @@
 - **Where:** `aggregate_spill_stats.R:63-65`.
 - **Problem:** `annual_return_edm.parquet` is never read anywhere in the script (single grep hit is the assignment itself). It misstates the script's input surface; the EA totals now come from the crosswalk.
 - **Suggested fix:** delete the entry.
-- **Resolution (2026-08-10):** the unused configuration entry has been removed. The works-year crosswalk remains the script's sole declared source of EA annual totals.
+- **Resolution (2026-08-10; terminology updated 2026-08-11):** the unused configuration entry has been removed. The Site Group-year crosswalk remains the script's sole declared source of EA annual totals.
 
 ### 7. `[-]` No guards for inverted or open-ended events at the yearly grain (latent)
 
@@ -116,7 +116,7 @@
 - **Where:** `aggregate_spill_stats.R:95-106` and the three metadata joins (lines 213–216, 244–247, 276–279).
 - **Problem:** grain safety currently rests entirely on the upstream `stop()` check in `merge_outputs_utils.R:520-523`. (Verified: the crosswalk is unique at site/year/company — 55,960 rows, zero duplicate keys — so there is **no live join fanout**.) A local assertion would fail fast if the upstream invariant is ever weakened.
 - **Suggested fix:** assert crosswalk uniqueness on `(site_id, year, water_company)` and required columns before the joins, mirroring the preflight checks in `merge_individ_annual_location.R`.
-- **Resolution (2026-08-10):** the aggregator now declares and preflights the required columns for both Parquet inputs using schema metadata, reads only those columns, rejects duplicate Works-year-company metadata before completion joins, and asserts the yearly, monthly, and quarterly output keys both after completion and before export. Focused tests cover missing columns, exact and conflicting duplicate metadata keys, output uniqueness, and the existing status/hour/count contracts.
+- **Resolution (2026-08-10; terminology updated 2026-08-11):** the aggregator declares and preflights the required columns for both Parquet inputs using schema metadata, reads only those columns, rejects duplicate Site Group-year-company metadata before completion joins, and asserts yearly, monthly, and quarterly output keys after completion and before export.
 
 ### 12. `[x]` Logging: stale numeric prefix and colour codes written to file
 
@@ -133,7 +133,7 @@
 - `aggregate_spill_stats.R:153` — the comment "(D13: uses quarter-split data)" is wrong: the quarterly result uses month-split data grouped by quarter.
 - `aggregate_spill_stats.R:304` — `export_results()` doc mentions only `$yearly` and `$monthly`; it also writes quarterly.
 - `aggregate_spill_stats.R:338-340` — the "imported from shared utilities" notes sit before `main()` although `split_monthly_records()` is never called directly in this file; move next to the `source()` call or delete.
-- **Resolution (2026-08-10):** the script now uses the approved purpose/author/date/input/output/log header and the shared fail-fast `rv sync` bootstrap. Its roxygen and nearby comments describe event inputs, Works grain, additive outlet-hours, all three output periods, calendar columns, and utility ownership accurately. The direct pipeline documentation names both canonical inputs and all three outputs, and the tracked test notebook points to the renamed plain log.
+- **Resolution (2026-08-10; terminology updated 2026-08-11):** the script uses the approved header and shared fail-fast `rv sync` bootstrap. Its documentation describes event inputs, Site Group grain, additive outlet-hours, all three output periods, calendar columns, and utility ownership accurately. Direct pipeline documentation names both inputs and all three outputs.
 
 ---
 
@@ -160,7 +160,7 @@
 - **Timestamps:** stored as UTC POSIXct; zero `NA` values; zero inverted intervals in the current merged events.
 - **`gap` variable staleness in `count_spills()`:** safe — the first iteration short-circuits on `is.na(block_end)` before `gap` is read, and `gap` is reassigned whenever `block_end` is set.
 - **Quarterly counting of month-split pieces:** traced cases show counting the split pieces reproduces the count for the unsplit event, apart from the boundary cases in findings 2 and 8.
-- **`spill_count_ea` / `spill_hrs_ea` semantics:** confirmed works-year annual totals summed across member outlets with an all-`NA` guard (so they cannot silently differ across rows).
+- **`spill_count_ea` / `spill_hrs_ea` semantics:** confirmed Site Group-year annual totals summed across member outlets with an all-`NA` guard.
 
 ---
 

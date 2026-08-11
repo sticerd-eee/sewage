@@ -281,7 +281,7 @@ source(
   local = script_env
 )
 entry_data <- tibble(
-  site_id = c(1L, 1L, 2L, 2L),
+  site_id_canonical = c(1L, 1L, 2L, 2L),
   year = c(2021L, 2022L, 2021L, 2021L),
   water_company = "Test Water",
   outlet_discharge_ngr = "TQ3000080000",
@@ -292,9 +292,12 @@ entry_data <- tibble(
   edm_operation_percent = NA_real_,
   edm_operation_reason = NA_character_
 )
-entry_summary <- script_env$summarise_site_metadata(entry_data)
-entry_resolved <- entry_summary[entry_summary$site_id == 1L, ]
-entry_conflict <- entry_summary[entry_summary$site_id == 2L, ]
+entry_summary <- script_env$summarise_canonical_metadata(
+  entry_data,
+  metadata_years = c(2021L, 2022L)
+)
+entry_resolved <- entry_summary[entry_summary$site_id_canonical == 1L, ]
+entry_conflict <- entry_summary[entry_summary$site_id_canonical == 2L, ]
 assert_identical(
   as.character(entry_resolved$edm_commission_date),
   "2021-03-01",

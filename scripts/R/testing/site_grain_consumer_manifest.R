@@ -38,7 +38,8 @@ scripts/R/testing/diff_aggregate_spill_stats_ch9.R,historical_only,U1,Historical
 scripts/R/testing/investigate_partial_availability_missingness.qmd,active_canonical,U5,Notebook studies canonical availability histories
 scripts/R/testing/london_total_shares_houses_spills.qmd,active_site_group,U5,London notebook uses Site Group coordinates
 scripts/R/testing/missing_observation_patterns_2021_2023.qmd,active_canonical,U5,Notebook studies canonical availability histories
-scripts/R/testing/reconcile_merge_rebuild.R,historical_only,U1,Historical Works-era rebuild comparison
+scripts/R/testing/reconcile_merge_rebuild.R,historical_only,U1,Historical pre-rename merge rebuild comparison
+scripts/R/testing/reconcile_site_grain_migration.R,non_reader,U7,End-to-end migration audit reads artifacts only when run as the retained validator
 scripts/R/testing/reconcile_site_group_consumers.R,non_reader,U5,Audits reader classifications and fixture reconciliation only
 scripts/R/testing/reconcile_unique_spill_sites_grain.R,active_canonical,U3,Canonical inventory reconciliation
 scripts/R/testing/site_grain_consumer_manifest.R,non_reader,U5,Declares grain-token ownership and reader classification

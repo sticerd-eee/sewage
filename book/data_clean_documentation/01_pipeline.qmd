@@ -114,7 +114,7 @@ digraph DataPipeline {
     style='filled,rounded'; fillcolor='#fffbeb'; color='#f97316'; fontcolor='#7c2d12'; penwidth=2;
     node [style='filled,rounded', rx=6, ry=6, fillcolor='#e0e7ff', color='#6366f1', penwidth=2, fontcolor='#312e81'];
     S07 [label='combine_2021-2023_and_api_edm_data.R\\nHarmonises and combines 2021-2023 EDM data with API 2024+ data'];
-    S10 [label='merge_individ_annual_location.R\\nMerges location data from annual datasets with individual spill data'];
+    S10 [label='merge_individ_annual_location.R\\nLinks event records to Site Groups and publishes the group register'];
   }
   
   subgraph cluster_ENR {
@@ -122,8 +122,8 @@ digraph DataPipeline {
     style='filled,rounded'; fillcolor='#f0fdf4'; color='#22c55e'; fontcolor='#14532d'; penwidth=2;
     node [style='filled,rounded', rx=6, ry=6, fillcolor='#e0e7ff', color='#6366f1', penwidth=2, fontcolor='#312e81'];
     S09 [label='create_annual_return_lookup.R\\nBuilds cross-year lookup table linking same spill sites'];
-    S12 [label='aggregate_spill_stats.R\\nAggregates individual sewage overflow spills into statistics'];
-    S13 [label='create_unique_spill_sites.R\\nCreates unique spill sites dataset by cleaning location data'];
+    S12 [label='aggregate_spill_stats.R\\nAggregates event records at Site Group grain'];
+    S13 [label='create_unique_spill_sites.R\\nResolves one metadata row per Canonical Spill Site'];
   }
 
   subgraph cluster_FEA {
@@ -167,10 +167,11 @@ digraph DataPipeline {
   D07 [label='data/processed/combined_edm_data.parquet\\nAll EDM data combined (2021-2024+)'];
   D08 [label='data/processed/annual_return_edm.parquet\\nProcessed annual return data'];
   D09 [label='data/processed/annual_return_lookup.parquet\\nAnnual return lookup table'];
-  D10 [label='data/processed/matched_events_annual_data.parquet\\nMatched events with annual data'];
+  D10 [label='data/processed/matched_events_annual_data/\\nmatched_events_annual_data.parquet\\nEvent records keyed by Site Group'];
+  D10G [label='data/processed/matched_events_annual_data/\\nsite_group_crosswalk.parquet\\nSite Group membership and group-year evidence'];
   D11 [label='data/processed/consent_discharges_db.csv\\nCleaned EA consented discharges database'];
-  D12 [label='data/processed/agg_spill_stats/agg_spill_*.parquet\\nAggregated spill statistics (monthly/quarterly/yearly)'];
-  D13 [label='data/processed/unique_spill_sites.parquet\\nUnique spill sites dataset with location data'];
+  D12 [label='data/processed/agg_spill_stats/agg_spill_*.parquet\\nSite Group spill statistics (monthly/quarterly/yearly)'];
+  D13 [label='data/processed/unique_spill_sites.parquet\\nCanonical Spill Sites keyed by site_id_canonical'];
   D14 [label='data/processed/house_price.parquet\\nCleaned house price data with postcode coordinates'];
   D15 [label='data/processed/spill_house_lookup.parquet\\nSpatial lookup between spills and houses within 10km'];
   D16 [label='output/log/edm_api_download_log.csv\\nDownload log for API data fetching'];
@@ -194,13 +195,14 @@ digraph DataPipeline {
   {D03, D06} -> S07 -> D07;
   S08 -> D08 -> {S09, S10};
   S09 -> D09;
-  {D07, D08, D09} -> S10 -> D10;
+  {D07, D08, D09} -> S10 -> {D10, D10G};
   S11 -> D11;
-  D10 -> {S12, S13};
+  {D10, D10G} -> S12;
+  {D08, D09, D10G} -> S13;
   S12 -> D12 -> S17 -> D17;
   S13 -> D13;
   S14 -> D14;
-  {D13, D14} -> S15 -> D15;
+  {D10G, D14} -> S15 -> D15;
   {D12, D14, D15} -> S16 -> F01;
   {D14, D15} -> S18 -> F02;
   {D14, D15} -> S19 -> F03;
@@ -308,8 +310,10 @@ digraph DataPipeline {
 **Spill Statistics Aggregation**
 
 - **script_name**: `aggregate_spill_stats.R`
-- **purpose**: Aggregates individual sewage overflow spills into monthly, quarterly, and yearly statistics using the 12/24 hour counting method.
-- **inputs**: `["data/processed/matched_events_annual_data/matched_events_annual_data.parquet"]`
+- **purpose**: Aggregates matched event records into monthly, quarterly, and yearly Site Group statistics using the 12/24 hour counting method and explicit group-year annual status.
+- **inputs**:
+  - `"data/processed/matched_events_annual_data/matched_events_annual_data.parquet"`
+  - `"data/processed/matched_events_annual_data/site_group_crosswalk.parquet"`
 - **outputs**: 
   - `"data/processed/agg_spill_stats/agg_spill_yr.parquet"`
   - `"data/processed/agg_spill_stats/agg_spill_mo.parquet"`
@@ -318,8 +322,11 @@ digraph DataPipeline {
 **Unique Spill Sites Creation**
 
 - **script_name**: `create_unique_spill_sites.R`
-- **purpose**: Creates unique spill sites dataset by cleaning location data and parsing British National Grid coordinates from merged EDM data.
-- **inputs**: `["data/processed/matched_events_annual_data/matched_events_annual_data.parquet"]`
+- **purpose**: Creates one row per Canonical Spill Site (`site_id_canonical`) in the Annual Return Lookup and attaches its Site Group (`site_id`). Availability, location, operation, closure, and classified commissioning fields remain canonical metadata.
+- **inputs**:
+  - `"data/processed/annual_return_edm.parquet"`
+  - `"data/processed/annual_return_lookup.parquet"`
+  - `"data/processed/matched_events_annual_data/site_group_crosswalk.parquet"`
 - **outputs**: 
   - `"data/processed/unique_spill_sites.parquet"`
   - `"data/processed/unique_spill_sites.xlsx"`
@@ -329,10 +336,10 @@ digraph DataPipeline {
 **Spatial Matching**
 
 - **script_name**: `10km_site_house_sale_match.R`
-- **purpose**: Performs spatial matching between house sales and spill sites within 10km radius using spatial joins and distance calculations.
+- **purpose**: Performs spatial matching between house sales and the unique Site Group projection. The output count is `n_site_groups`; canonical inventory rows are not deduplicated for this group-keyed task.
 - **inputs**: 
   - `"data/processed/house_price.parquet"`
-  - `"data/processed/unique_spill_sites.parquet"`
+  - `"data/processed/matched_events_annual_data/site_group_crosswalk.parquet"`
 - **outputs**: `["data/processed/spill_house_lookup.parquet"]`
 
 **Spill Statistics Computing**
@@ -360,7 +367,7 @@ digraph DataPipeline {
 **Individual and Annual Data Merging**
 
 - **script_name**: `merge_individ_annual_location.R`
-- **purpose**: Merges location data from annual sewage overflow datasets with individual spill data using windfall, many-to-many, and fuzzy matching methods.
+- **purpose**: Links individual event records to Site Groups and publishes the Site Group Register. A Site Group is a rule-based project aggregate, not a verified physical wastewater works.
 - **inputs**: 
   - `"data/processed/combined_edm_data.parquet"`
   - `"data/processed/annual_return_edm.parquet"`
@@ -369,7 +376,8 @@ digraph DataPipeline {
   - `"data/processed/matched_events_annual_data/matched_events_annual_data.parquet"`
   - `"data/processed/matched_events_annual_data/events_unmatched.parquet"`
   - `"data/processed/matched_events_annual_data/annual_unmatched.parquet"`
-  - `"data/processed/matched_events_annual_data/site_metadata.parquet"`
+  - `"data/processed/matched_events_annual_data/site_group_crosswalk.parquet"`
+  - `"data/processed/matched_events_annual_data/near_miss_report.parquet"`
 
 ### Master Dataset Assembly Layer {#sec-01-03-06-master-dataset-assembly}
 

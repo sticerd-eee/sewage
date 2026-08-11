@@ -5,16 +5,13 @@ Sanity-check review of the whole script `scripts/R/03_data_enrichment/create_uni
 maintainability) plus sub-agents that traced the upstream key spaces and audited every downstream
 consumer. Findings are ordered by severity. Each item is a checkbox so this file doubles as a todo list.
 
-**Verdict: the script is fundamentally sound.** One real logic bug in the commission-date
-resolution (item 1), one reproducibility hazard (item 2), and a handful of low-severity
-robustness/hygiene items. No structural problems were found in the availability flags, the
-works-member remapping, the NLO carryforward, or the output schema.
+**Status (2026-08-11): resolved by the Canonical Spill Site grain migration.** The original review below is retained as defect evidence. The replacement builder is keyed by `site_id_canonical`, derives exact lookup coverage and Site Group membership with fail-closed checks, uses Annual Return row presence for availability, and delegates commissioning to the classified evidence resolver.
 
 ---
 
 ## P1 — should fix
 
-### 1. [ ] `resolve_commission_date()` lets a "to be installed" future date beat an actual earlier commission date
+### 1. [x] `resolve_commission_date()` lets a "to be installed" future date beat an actual earlier commission date
 
 - **Where:** `create_unique_spill_sites.R:298-325` (resolution rules), interacting with
   `parse_commission_date()` and `get_commission_date_precision()`.
@@ -40,7 +37,7 @@ works-member remapping, the NLO carryforward, or the output schema.
 
 ## P2 — worth fixing
 
-### 2. [ ] Month-name date parsing is locale-dependent
+### 2. [x] Month-name date parsing is locale-dependent
 
 - **Where:** `create_unique_spill_sites.R:174-176, 189-191` (`as.Date(date_str, format = "%d %b %Y")`).
 - **What happens:** `%b`/`%B` parsing depends on `LC_TIME`. Under a non-English locale
@@ -53,7 +50,7 @@ works-member remapping, the NLO carryforward, or the output schema.
   with `sprintf("%s-%02d-01", year_str, month_num)`; or wrap the parse in
   `withr::with_locale(c(LC_TIME = "C"), ...)`.
 
-### 3. [ ] Upstream: a lookup site whose rows fall outside the configured years can silently vanish from the crosswalk
+### 3. [x] Upstream: a lookup site whose rows fall outside the configured years can silently vanish from the crosswalk
 
 - **Where:** `scripts/R/05_data_integration/merge_individ_annual_location.R:211-267`
   (`filter_years_with_guard`), affecting the site universe this script builds.
@@ -65,7 +62,7 @@ works-member remapping, the NLO carryforward, or the output schema.
 - **Suggested fix:** add a coverage assertion in the merge script (or a testing-script check)
   that `lookup$site_id ⊆ {crosswalk$site_id} ∪ {parsed site_id_members}`.
 
-### 4. [ ] Consumer: `aggregate_daily_spill_rainfall.R` selects only `available_year_2021/2022/2023`, omitting 2024
+### 4. [x] Consumer: `aggregate_daily_spill_rainfall.R` selects only `available_year_2021/2022/2023`, omitting 2024
 
 - **Where:** `scripts/R/03_data_enrichment/aggregate_daily_spill_rainfall.R:87-88`.
 - **What happens:** the output schema now carries `available_year_2024`, but this consumer's
@@ -74,7 +71,7 @@ works-member remapping, the NLO carryforward, or the output schema.
 
 ## P3 — low priority / hygiene
 
-### 5. [ ] Any-4-digit-year fallback mangles Excel-serial text
+### 5. [x] Any-4-digit-year fallback mangles Excel-serial text
 
 - **Where:** `create_unique_spill_sites.R:219` (parser fallback) and `:258` (precision scorer).
 - **What happens:** `parse_commission_date("44531")` returns `4453-01-01` with precision 2
@@ -84,12 +81,12 @@ works-member remapping, the NLO carryforward, or the output schema.
 - **Suggested fix:** constrain both regexes to `\b(19|20)\d{2}\b`, and optionally decode 5-digit
   serials via `as.Date(as.numeric(text), origin = "1899-12-30")` (44531 → 2021-12-01).
 
-### 6. [ ] `purrr` and `tibble` are listed in `REQUIRED_PACKAGES` but never used
+### 6. [x] `purrr` and `tibble` are listed in `REQUIRED_PACKAGES` but never used
 
 - **Where:** `create_unique_spill_sites.R:35-50`. No `purrr::`/`tibble::` calls and no
   unqualified usage anywhere in the file. Remove them (keep `rnrfa` — it is used by `ngr_utils.R`).
 
-### 7. [ ] Hardcoded `2021:2024` defaults duplicated across six function signatures
+### 7. [x] Hardcoded `2021:2024` defaults duplicated across six function signatures
 
 - **Where:** lines 332, 448, 514, 638-639, 759-760, 852-853.
 - **What happens:** `main()` always passes `CONFIG$availability_years`/`CONFIG$metadata_years`,
@@ -99,7 +96,7 @@ works-member remapping, the NLO carryforward, or the output schema.
 - **Suggested fix:** drop the literal defaults, or define `DEFAULT_YEARS <- 2021:2024` once and
   reference it.
 
-### 8. [ ] `annual_status == "reported_na"` counts as an available/reporting year — undocumented choice
+### 8. [x] `annual_status == "reported_na"` counts as an available/reporting year — undocumented choice
 
 - **Where:** `create_unique_spill_sites.R:352` (`is_reporting_year = annual_status != "absent"`).
 - **What happens:** the status domain is exactly `absent / reported_na / reported_positive /
@@ -107,7 +104,7 @@ works-member remapping, the NLO carryforward, or the output schema.
   `reported_na` year (return filed, both spill metrics NA) is treated as reporting. Defensible,
   but worth a one-line comment stating it is intentional.
 
-### 9. [ ] Log-file prefix "13" no longer matches the documented pipeline position (step 14)
+### 9. [x] Log-file prefix "13" no longer matches the documented pipeline position (step 14)
 
 - **Where:** `create_unique_spill_sites.R:52`; `docs/pipeline_documentation.md` lists this script
   as step 14. Sibling scripts' prefixes are also out of sync with the doc's ordinal list
@@ -115,38 +112,14 @@ works-member remapping, the NLO carryforward, or the output schema.
 
 ---
 
-## Verified clean (no action needed)
+## Migration closure evidence (2026-08-11)
 
-- **Works member map join** (`main()` lines 944-946): dplyr keeps the x-side join key unsuffixed,
-  so `coalesce(site_id.y, site_id)` behaves correctly (verified on dplyr 1.2.1). The feared
-  member-to-multiple-works fan-out does not occur in the current data (13,990/13,990
-  self-membership, zero duplicate member mappings) — though no assertion protects the invariant.
-- **`site_id_members` separator:** upstream writes a bare `";"` (no space) at
-  `merge_works_register_utils.R:447` and `merge_outputs_utils.R:198`; `separate_rows(sep = ";")`
-  is correct. Zero rows with spaced separators in the parquet.
-- **Key-space alignment:** crosswalk `site_id` is by construction a subset of the lookup's
-  `site_id` sequence, so mapping annual rows through the lookup and then through the member map
-  is coherent.
-- **`edm_operation_percent`:** confirmed 0-100 scale in the data; only one casing variant of the
-  "no longer operational" reason string exists, so the NLO detection regex is safe.
-- **Downstream consumers:** all ~20 production consumers (data cleaning, enrichment, feature
-  engineering, analysis datasets, descriptive analysis, book chapters) use only columns the
-  script still emits. The only stale references to retired columns (`spill_count_ea`,
-  `annual_status`, `site_id_members`, `*_matched`) are in scratch files under
-  `scripts/R/testing/` (`diff_unique_spill_sites_ch8.R`, `test_create_unique_spill_sites_ch8.R`),
-  which were written against the pre-migration schema and are expected to be stale.
-
-## Testing gaps noted by reviewers
-
-- No unit tests for `parse_commission_date` / `get_commission_date_precision` /
-  `resolve_commission_date` (a mixed future/actual fixture, the pre-2016 sentinel, an Excel
-  serial, and a forced non-English locale would have caught items 1, 2, and 5).
-- No end-to-end assertion that `edm_commission_date` is never later than the site's last
-  reporting year.
-- No invariant check that the works member map is one-to-one before the fan-out-prone
-  `left_join` in `main()`.
-- Within-site-year conflicting commission texts are collapsed by `first_non_na` in parquet row
-  order before resolution, so conflicted sites' dates depend on upstream row order (warned, but
-  the tie-break is arbitrary).
+- Items 1, 2, and 5 are covered by `test_edm_commission_contracts.R`: a reviewed 63-form golden fixture, locale-independent month parsing, explicit Excel serial decoding, future/actual chronology, pre-2016 evidence, and closed status/precision/date combinations.
+- Item 3 is covered by the canonical builder and `reconcile_site_grain_migration.R`: every Annual Return Lookup ID appears once in canonical output and once in Site Group membership, with the group ID equal to its smallest member.
+- Item 4 is superseded at the correct grain. Rainfall consumers obtain requested-year availability from Site Group annual status rather than from canonical rows.
+- Items 6, 7, and 9 were removed as stale implementation assumptions: the current dependency list reflects real utility use, configured years have one owner, and the log uses the plain script name.
+- Item 8 is now explicit: canonical availability means Annual Return row presence, including a row whose spill metrics are missing; closure evidence never carries availability forward.
+- Operation percentage and reason conflicts are detected before collapse and yield `NA` plus year-specific conflict flags. Commission observations are resolved from the full canonical history, independent of row order.
+- Group-keyed consumers use the unique Site Group projection. No consumer deduplicates repeated `unique_spill_sites.site_id` to select canonical metadata.
 
 *Run artifacts: `/tmp/compound-engineering/ce-code-review/20260706-234714-681b1af5/`*

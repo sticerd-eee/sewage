@@ -37,8 +37,8 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 
 ### 03_data_enrichment
 
-- `aggregate_spill_stats.R`: reads the matched event feed and Works-year crosswalk,
-  applies the Environment Agency 12/24 counting method at Works grain, and writes
+- `aggregate_spill_stats.R`: reads the matched event feed and Site Group-year crosswalk,
+  applies the Environment Agency 12/24 counting method at Site Group grain, and writes
   `agg_spill_yr.parquet`, `agg_spill_mo.parquet`, and `agg_spill_qtr.parquet` under
   `data/processed/agg_spill_stats/`. Monthly and quarterly outputs retain both
   explicit calendar columns and the stable `month_id` / `qtr_id` keys.
@@ -47,7 +47,7 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
   - `annual_return_lookup_edges.parquet`: kept match edges behind the lookup.
   - Pre-resolution conflict audit (refreshed every run, zero-row when clean): `annual_return_lookup_conflict_summary.parquet`, `annual_return_lookup_conflict_records.parquet`, `annual_return_lookup_conflict_edges.parquet`, `annual_return_lookup_resolution_kept_edges.parquet`, `annual_return_lookup_resolution_dropped_edges.parquet`, `annual_return_lookup_conflicts.xlsx`.
   - Post-resolution diagnostics (`annual_return_lookup_post_resolution_*.parquet`, `annual_return_lookup_post_resolution_conflicts.xlsx`): written only when the final same-year safety net trips; a healthy run deletes any stale copies, so their absence is the expected state.
-- `create_unique_spill_sites.R`: builds the canonical spill-sites dataset.
+- `create_unique_spill_sites.R`: builds one row per Canonical Spill Site in the Annual Return Lookup, keyed by `site_id_canonical`. The repeated `site_id` column records Site Group membership; availability, location, operation, closure, and commissioning fields remain canonical metadata.
 - `aggregate_rainfall_stats.R`: aggregates rainfall to site-period level.
 - `identify_dry_spills.R`: identifies dry spills using spill and rainfall information.
 - `aggregate_dry_spill_stats.R`: integrates dry-spill metrics into the main aggregation outputs.
@@ -55,14 +55,14 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 
 ### 04_feature_engineering
 
-- `10km_site_house_sale_match.R`: spatially matches house sales to nearby spill sites.
-- `10km_site_rental_match.R`: spatially matches rental listings to nearby spill sites.
+- `10km_site_house_sale_match.R`: spatially matches house sales to the unique Site Group projection and writes `n_site_groups` as the nearby-group count.
+- `10km_site_rental_match.R`: spatially matches rental listings to the unique Site Group projection and writes `n_site_groups` as the nearby-group count.
 - `compute_spill_stats.R`: builds enhanced spill statistics and treatment indicators.
 
 ### 05_data_integration
 
 - `combine_2021-2023_and_api_edm_data.R`: combines historical and API-era EDM records.
-- `merge_individ_annual_location.R`: links spill events to annual-return works identities, locations, and EA totals through a works-register crosswalk. Outputs under `data/processed/matched_events_annual_data/`: `site_works_crosswalk.parquet` (canonical works-year artefact), `matched_events_annual_data.parquet` (pure event grain), `events_unmatched.parquet` (reason-coded), `annual_unmatched.parquet`, and `near_miss_report.parquet`. Manual match decisions live in `data/processed/matched_events_annual_data_manual_overrides.csv`.
+- `merge_individ_annual_location.R`: links spill events to Site Groups and annual-return evidence through the Site Group Register. Outputs under `data/processed/matched_events_annual_data/`: `site_group_crosswalk.parquet` (one row per Site Group, year, and company), `matched_events_annual_data.parquet` (pure event grain), `events_unmatched.parquet` (reason-coded), `annual_unmatched.parquet`, and `near_miss_report.parquet`. The crosswalk retains membership, annual status, group spill totals, representative location, and event-match evidence; canonical commissioning and operation metadata are deliberately excluded. Manual match decisions live in `data/processed/matched_events_annual_data_manual_overrides.csv`.
 
 ### 06_analysis_datasets
 
@@ -102,9 +102,9 @@ The `scripts/R/09_analysis/` folder contains the main descriptive, hedonic, repe
 
 12. `combine_2021-2023_and_api_edm_data.R` — combine historical and API EDM data.
 13. `create_annual_return_lookup.R` — build cross-year site lookup tables.
-14. `merge_individ_annual_location.R` — merge location data into individual spill records (reads the combined EDM data and the lookup; produces the works crosswalk consumed by the next two steps).
-15. `create_unique_spill_sites.R` — create the canonical spill-sites dataset.
-16. `aggregate_spill_stats.R` — produce the main spill aggregations.
+14. `merge_individ_annual_location.R` — attach event records to Site Groups and publish the Site Group crosswalk.
+15. `create_unique_spill_sites.R` — resolve canonical metadata and create the one-row-per-`site_id_canonical` inventory.
+16. `aggregate_spill_stats.R` — produce Site Group-keyed spill aggregations from matched events and group-year status.
 17. `clean_rainfall_data.R` — clean rainfall inputs and site-grid lookups.
 18. `aggregate_rainfall_stats.R` — aggregate rainfall by year, month, and quarter.
 19. `identify_dry_spills.R` — identify and classify dry spills.

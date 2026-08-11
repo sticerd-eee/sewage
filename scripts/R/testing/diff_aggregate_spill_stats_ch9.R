@@ -13,10 +13,27 @@ invisible(lapply(required_packages, function(pkg) {
   library(pkg, character.only = TRUE)
 }))
 
-output_root <- here::here("output", "merge_rebuild_downstream_migration_2026-07-06")
-baseline_dir <- file.path(output_root, "baseline_old_pipeline", "agg_spill_stats")
-new_dir <- here::here("data", "processed", "agg_spill_stats")
-evidence_dir <- file.path(output_root, "ch9")
+path_from_env <- function(name, fallback) {
+  value <- Sys.getenv(name, unset = "")
+  if (nzchar(value)) value else fallback
+}
+
+output_root <- path_from_env(
+  "AGGREGATE_DIFF_OUTPUT_ROOT",
+  here::here("output", "merge_rebuild_downstream_migration_2026-07-06")
+)
+baseline_dir <- path_from_env(
+  "AGGREGATE_DIFF_BASELINE_DIR",
+  file.path(output_root, "baseline_old_pipeline", "agg_spill_stats")
+)
+new_dir <- path_from_env(
+  "AGGREGATE_DIFF_NEW_DIR",
+  here::here("data", "processed", "agg_spill_stats")
+)
+evidence_dir <- path_from_env(
+  "AGGREGATE_DIFF_EVIDENCE_DIR",
+  file.path(output_root, "ch9")
+)
 dir.create(evidence_dir, recursive = TRUE, showWarnings = FALSE)
 
 files <- tibble::tribble(
@@ -46,7 +63,7 @@ new_outputs <- setNames(
 crosswalk <- arrow::read_parquet(
   here::here(
     "data", "processed", "matched_events_annual_data",
-    "site_works_crosswalk.parquet"
+    "site_group_crosswalk.parquet"
   )
 )
 events <- arrow::read_parquet(
@@ -227,7 +244,7 @@ if (any(!status_check$yearly_ok | !status_check$monthly_ok | !status_check$quart
   blockers <- c(blockers, "New outputs do not preserve crosswalk annual_status membership.")
 }
 if (absent_handling$absent_rows_with_crosswalk_fallback > 0) {
-  blockers <- c(blockers, "Absent works-years received non-NA crosswalk fallback totals.")
+  blockers <- c(blockers, "Absent Site Group-years received non-NA crosswalk fallback totals.")
 }
 
 removed_descriptive <- column_diff %>%
@@ -258,12 +275,12 @@ report_lines <- c(
   "",
   "## Executive checks",
   "",
-  glue::glue("- Crosswalk contract: {n_distinct(crosswalk$site_id)} works / {nrow(crosswalk)} works-years."),
+  glue::glue("- Crosswalk contract: {n_distinct(crosswalk$site_id)} Site Groups / {nrow(crosswalk)} Site Group-years."),
   glue::glue("- Old baseline yearly: {nrow(old_outputs$yearly)} rows / {n_distinct(old_outputs$yearly$site_id)} site_ids / {ncol(old_outputs$yearly)} columns."),
   glue::glue("- New CH9 yearly: {nrow(new_outputs$yearly)} rows / {n_distinct(new_outputs$yearly$site_id)} site_ids / {ncol(new_outputs$yearly)} columns."),
-  glue::glue("- Common-year site count moves from {common_year_summary$site_ids[common_year_summary$source == 'old_baseline']} old site_ids to {common_year_summary$site_ids[common_year_summary$source == 'new_ch9']} works, matching the expected works-collapse direction."),
+  glue::glue("- Common-year site count moves from {common_year_summary$site_ids[common_year_summary$source == 'old_baseline']} legacy site_ids to {common_year_summary$site_ids[common_year_summary$source == 'new_ch9']} Site Groups, matching the expected grouping direction."),
   "- Reported-zero and reported-na site-years are preserved from the crosswalk in yearly/monthly/quarterly grids; see `aggregate_spill_stats_status_check.csv`.",
-  "- Absent works-years are not EA-fallback members. They appear only because a reporting or event works is crossed across `CONFIG$years`; their crosswalk fallback totals remain `NA`.",
+  "- Absent Site Group-years are not EA-fallback members. They appear only because a reporting or event Site Group is crossed across `CONFIG$years`; their crosswalk fallback totals remain `NA`.",
   "",
   "## File Summary",
   "",
@@ -289,7 +306,7 @@ report_lines <- c(
   format_table(absent_handling),
   "```",
   "",
-  "Interpretation: `absent_rows_with_crosswalk_fallback` must be zero. Any non-NA stats on absent rows come from pure events matched to absent works-years, not from EA fallback.",
+  "Interpretation: `absent_rows_with_crosswalk_fallback` must be zero. Any non-NA stats on absent rows come from pure events matched to absent Site Group-years, not from EA fallback.",
   "",
   "## Column Changes",
   "",
