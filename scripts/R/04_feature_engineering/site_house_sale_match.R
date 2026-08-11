@@ -266,7 +266,7 @@ validate_house_stage <- function(stage_path, expected_schema,
   }
 
   sample_ids <- unique(sample_expected$house_id)
-  sample_parts <- vector("list", reader$num_row_groups)
+  sample_parts <- list()
   covered_properties <- 0L
   for (row_group_index in seq_len(reader$num_row_groups)) {
     row_group <- reader$ReadRowGroup(row_group_index - 1L)$to_data_frame()
@@ -292,11 +292,14 @@ validate_house_stage <- function(stage_path, expected_schema,
       stop("Staged house lookup contains inconsistent Site Group counts.", call. = FALSE)
     }
     covered_properties <- covered_properties + dplyr::n_distinct(row_group$house_id)
-    sample_parts[[row_group_index]] <- row_group[
+    sample_rows <- row_group[
       row_group$house_id %in% sample_ids,
       ,
       drop = FALSE
     ]
+    if (nrow(sample_rows) > 0L) {
+      sample_parts[[length(sample_parts) + 1L]] <- sample_rows
+    }
   }
   if (covered_properties != expected_input_rows) {
     stop("Staged house lookup does not cover every eligible house.", call. = FALSE)
@@ -331,7 +334,7 @@ write_house_lookup <- function(houses_sf, spill_sites_sf, spill_lookup,
     {
       if (writer_open) try(writer$Close(), silent = TRUE)
       if (stream_open) try(output_stream$close(), silent = TRUE)
-      if (file.exists(stage_path)) unlink(stage_path)
+      unlink(stage_path)
     },
     add = TRUE
   )
