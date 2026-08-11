@@ -14,16 +14,25 @@
 #   SITE_GRAIN_NEW_AGG_DIR          candidate aggregate directory
 #   SITE_GRAIN_BASELINE_EVENTS      pre-migration matched events (optional)
 #   SITE_GRAIN_NEW_EVENTS           candidate matched events
-#   SITE_GRAIN_BASELINE_PROPERTY    pre-migration property lookup validation artifact
-#   SITE_GRAIN_NEW_PROPERTY         candidate property lookup validation artifact
+#   SITE_GRAIN_BASELINE_HOUSE_PROPERTY_SIDECAR
+#                                      sampled pre-migration house lookup sidecar
+#   SITE_GRAIN_NEW_HOUSE_PROPERTY_SIDECAR
+#                                      sampled candidate house lookup sidecar
+#   SITE_GRAIN_BASELINE_RENTAL_PROPERTY_SIDECAR
+#                                      sampled pre-migration rental lookup sidecar
+#   SITE_GRAIN_NEW_RENTAL_PROPERTY_SIDECAR
+#                                      sampled candidate rental lookup sidecar
 #   SITE_GRAIN_BASELINE_RAINFALL    pre-migration rainfall validation artifact
 #   SITE_GRAIN_NEW_RAINFALL         candidate rainfall validation artifact
 #   SITE_GRAIN_BASELINE_DRY_SPILL   pre-migration dry-spill validation artifact
 #   SITE_GRAIN_NEW_DRY_SPILL        candidate dry-spill validation artifact
-#   SITE_GRAIN_BASELINE_EXPOSURE    pre-migration exposure validation artifact
-#   SITE_GRAIN_NEW_EXPOSURE         candidate exposure validation artifact
-#   SITE_GRAIN_BASELINE_MAP_SUPPORT pre-migration map-support validation artifact
-#   SITE_GRAIN_NEW_MAP_SUPPORT      candidate map-support validation artifact
+#   SITE_GRAIN_BASELINE_EXPOSURE_SIDECAR
+#                                      pre-migration population-table sidecar
+#   SITE_GRAIN_NEW_EXPOSURE_SIDECAR candidate population-table sidecar
+#   SITE_GRAIN_BASELINE_MAP_SUPPORT_SIDECAR
+#                                      pre-migration map-support sidecar
+#   SITE_GRAIN_NEW_MAP_SUPPORT_SIDECAR
+#                                      candidate map-support sidecar
 #   SITE_GRAIN_ALLOW_PENDING_PUBLICATION  true only for pre-publication temp proof
 #
 # ==============================================================================
@@ -317,40 +326,45 @@ reconcile_event_totals <- function(baseline_path, candidate_path) {
 
 consumer_artifact_contracts <- function() {
   list(
-    property = list(
-      baseline_env = "SITE_GRAIN_BASELINE_PROPERTY",
-      candidate_env = "SITE_GRAIN_NEW_PROPERTY",
-      key_options = list(c("house_id", "site_id"), c("rental_id", "site_id")),
+    house_property = list(
+      baseline_env = "SITE_GRAIN_BASELINE_HOUSE_PROPERTY_SIDECAR",
+      candidate_env = "SITE_GRAIN_NEW_HOUSE_PROPERTY_SIDECAR",
+      key = c("house_id", "site_id"),
+      values = c("distance_m", "distance_km", "n_site_groups")
+    ),
+    rental_property = list(
+      baseline_env = "SITE_GRAIN_BASELINE_RENTAL_PROPERTY_SIDECAR",
+      candidate_env = "SITE_GRAIN_NEW_RENTAL_PROPERTY_SIDECAR",
+      key = c("rental_id", "site_id"),
       values = c("distance_m", "distance_km", "n_site_groups")
     ),
     rainfall = list(
       baseline_env = "SITE_GRAIN_BASELINE_RAINFALL",
       candidate_env = "SITE_GRAIN_NEW_RAINFALL",
-      key_options = list(c("site_id", "water_company", "year")),
+      key = c("site_id", "water_company", "year"),
       values = c("rainfall_r1_yr", "rainfall_r9_yr")
     ),
     dry_spill = list(
       baseline_env = "SITE_GRAIN_BASELINE_DRY_SPILL",
       candidate_env = "SITE_GRAIN_NEW_DRY_SPILL",
-      key_options = list(c(
-        "site_id", "year", "water_company", "start_time", "end_time"
-      )),
+      key = c("site_id", "year", "water_company", "start_time", "end_time"),
       values = c(
+        "ngr",
         "rainfall_1cell_d01_na_rm", "rainfall_1cell_d01_strict",
         "rainfall_max_9cell_d01_na_rm", "rainfall_max_9cell_d01_strict",
         "rainfall_max_9cell_d0123_na_rm", "rainfall_max_9cell_d0123_strict"
       )
     ),
     exposure = list(
-      baseline_env = "SITE_GRAIN_BASELINE_EXPOSURE",
-      candidate_env = "SITE_GRAIN_NEW_EXPOSURE",
-      key_options = list(c("site_id", "period")),
-      values = c("population", "spill_total")
+      baseline_env = "SITE_GRAIN_BASELINE_EXPOSURE_SIDECAR",
+      candidate_env = "SITE_GRAIN_NEW_EXPOSURE_SIDECAR",
+      key = c("category", "distance_m"),
+      values = c("n_sites", "population")
     ),
     map_support = list(
-      baseline_env = "SITE_GRAIN_BASELINE_MAP_SUPPORT",
-      candidate_env = "SITE_GRAIN_NEW_MAP_SUPPORT",
-      key_options = list(c("site_id", "period")),
+      baseline_env = "SITE_GRAIN_BASELINE_MAP_SUPPORT_SIDECAR",
+      candidate_env = "SITE_GRAIN_NEW_MAP_SUPPORT_SIDECAR",
+      key = c("site_id", "period"),
       values = c("easting", "northing", "spill_total")
     )
   )
@@ -380,10 +394,11 @@ read_consumer_artifact <- function(path, label) {
   )
 }
 
-normalise_consumer_artifact <- function(data, artifact) {
+normalise_consumer_artifact <- function(data, artifact, role) {
   data <- tibble::as_tibble(data)
   if (
-    artifact == "property" &&
+    role == "baseline" &&
+      artifact %in% c("house_property", "rental_property") &&
       "n_discharge_outlet" %in% names(data) &&
       !"n_site_groups" %in% names(data)
   ) {
@@ -392,18 +407,20 @@ normalise_consumer_artifact <- function(data, artifact) {
   data
 }
 
-resolve_consumer_key <- function(baseline, candidate, key_options, artifact) {
-  available <- vapply(key_options, function(key) {
-    all(key %in% names(baseline)) && all(key %in% names(candidate))
-  }, logical(1))
+assert_consumer_artifact_schema <- function(data, contract, label) {
+  expected <- c(contract$key, contract$values)
+  missing <- setdiff(expected, names(data))
+  unexpected <- setdiff(names(data), expected)
   assert_true(
-    sum(available) == 1L,
+    length(missing) == 0L && length(unexpected) == 0L,
     paste0(
-      artifact, " validation artifacts must share exactly one supported key: ",
-      paste(vapply(key_options, paste, collapse = " + ", FUN.VALUE = character(1)), collapse = "; ")
+      label, " schema mismatch; expected exactly: ",
+      paste(expected, collapse = ", "),
+      if (length(missing) > 0L) paste0("; missing: ", paste(missing, collapse = ", ")) else "",
+      if (length(unexpected) > 0L) paste0("; unexpected: ", paste(unexpected, collapse = ", ")) else ""
     )
   )
-  key_options[[which(available)]]
+  invisible(data)
 }
 
 reconcile_consumer_artifacts <- function(
@@ -444,16 +461,19 @@ reconcile_consumer_artifacts <- function(
     baseline <- read_consumer_artifact(
       baseline_path, paste0(artifact, " baseline")
     ) |>
-      normalise_consumer_artifact(artifact)
+      normalise_consumer_artifact(artifact, "baseline")
     candidate <- read_consumer_artifact(
       candidate_path, paste0(artifact, " candidate")
     ) |>
-      normalise_consumer_artifact(artifact)
-    key <- resolve_consumer_key(
-      baseline, candidate, contract$key_options, artifact
+      normalise_consumer_artifact(artifact, "candidate")
+    assert_consumer_artifact_schema(
+      baseline, contract, paste0(artifact, " baseline")
+    )
+    assert_consumer_artifact_schema(
+      candidate, contract, paste0(artifact, " candidate")
     )
     comparison <- consumer_env$reconcile_consumer_artifact(
-      baseline, candidate, key, contract$values, artifact
+      baseline, candidate, contract$key, contract$values, artifact
     )
     assert_true(
       comparison$unexplained_changes == 0L,
