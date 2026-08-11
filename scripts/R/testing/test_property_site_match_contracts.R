@@ -81,7 +81,10 @@ producer_specs <- list(
       )
     ),
     id_column = "house_id",
-    prepare_property = "prepare_house_data"
+    prepare_property = "prepare_house_data",
+    match_chunk = "match_house_chunk",
+    data_key = "house",
+    schema_function = "house_lookup_schema"
   ),
   rentals = list(
     env = source_producer(
@@ -91,7 +94,10 @@ producer_specs <- list(
       )
     ),
     id_column = "rental_id",
-    prepare_property = "prepare_rental_data"
+    prepare_property = "prepare_rental_data",
+    match_chunk = "match_rental_chunk",
+    data_key = "rentals",
+    schema_function = "rental_lookup_schema"
   )
 )
 
@@ -113,23 +119,46 @@ normalise_lookup <- function(lookup, id_column) {
     as.data.frame()
 }
 
-run_match <- function(spec, properties = property_fixture, chunk_size = 100L) {
+run_match <- function(spec, properties = property_fixture) {
   id_column <- spec$id_column
   names(properties)[names(properties) == "property_id"] <- id_column
   property_sf <- spec$env[[spec$prepare_property]](properties)
   sites <- spec$env$prepare_spill_sites(site_fixture)
-
-  arguments <- list(
+  do.call(spec$env[[spec$match_chunk]], list(
     property_sf,
     sites$spill_sf,
     sites$lookup,
     radius_km = 10
+  ))
+}
+
+run_stream <- function(spec, properties = property_fixture, chunk_size = 2L,
+                       output_path = tempfile(fileext = ".parquet"),
+                       fail_at = NULL) {
+  names(properties)[names(properties) == "property_id"] <- spec$id_column
+  data <- setNames(list(properties), spec$data_key)
+  data$spill <- site_fixture
+  spec$env$process_spatial_data(
+    data,
+    output_path = output_path,
+    radius_km = 10,
+    chunk_size = chunk_size,
+    fail_at = fail_at
   )
-  if (!is.null(chunk_size) &&
-      "chunk_size" %in% names(formals(spec$env$perform_spatial_join))) {
-    arguments$chunk_size <- chunk_size
-  }
-  do.call(spec$env$perform_spatial_join, arguments)
+  output_path
+}
+
+stage_siblings <- function(output_path) {
+  candidates <- list.files(
+    dirname(output_path),
+    all.files = TRUE,
+    full.names = TRUE,
+    no.. = TRUE
+  )
+  candidates[startsWith(
+    basename(candidates),
+    paste0(".", basename(output_path), ".stage-")
+  )]
 }
 
 for (producer_name in names(producer_specs)) {
@@ -148,7 +177,7 @@ for (producer_name in names(producer_specs)) {
   )
   assert_true(
     identical(
-      formals(spec$env$perform_spatial_join)["radius_km"],
+      formals(spec$env[[spec$match_chunk]])["radius_km"],
       alist(radius_km = )
     ),
     paste(producer_name, "matching must require an explicit radius.")
@@ -219,13 +248,84 @@ for (producer_name in names(producer_specs)) {
     paste(producer_name, "must reject duplicate property identifiers.")
   )
 
-  one_chunk <- normalise_lookup(run_match(spec, chunk_size = 100L), id_column)
-  single_row_chunks <- normalise_lookup(run_match(spec, chunk_size = 1L), id_column)
+  one_chunk_path <- run_stream(spec, chunk_size = 100L)
+  one_chunk <- normalise_lookup(arrow::read_parquet(one_chunk_path), id_column)
+  single_row_path <- run_stream(spec, chunk_size = 1L)
+  single_row_chunks <- normalise_lookup(
+    arrow::read_parquet(single_row_path),
+    id_column
+  )
   assert_identical(
     single_row_chunks,
     one_chunk,
     paste(producer_name, "must be invariant to chunk boundaries.")
   )
+  exact_multiple_path <- run_stream(spec, chunk_size = 5L)
+  partial_chunk_path <- run_stream(spec, chunk_size = 2L)
+  assert_identical(
+    normalise_lookup(arrow::read_parquet(exact_multiple_path), id_column),
+    one_chunk,
+    paste(producer_name, "must preserve exact-multiple chunk output.")
+  )
+  assert_identical(
+    normalise_lookup(arrow::read_parquet(partial_chunk_path), id_column),
+    one_chunk,
+    paste(producer_name, "must preserve final-partial-chunk output.")
+  )
+
+  unmatched_first <- property_fixture[c(5L, 1:4), ]
+  unmatched_first_path <- run_stream(
+    spec,
+    properties = unmatched_first,
+    chunk_size = 1L
+  )
+  unmatched_first_reader <- arrow::ParquetFileReader$create(unmatched_first_path)
+  assert_identical(
+    unmatched_first_reader$GetSchema()$ToString(),
+    spec$env[[spec$schema_function]]()$ToString(),
+    paste(producer_name, "must retain its schema when the first chunk is unmatched.")
+  )
+
+  canonical_path <- tempfile(paste0(producer_name, "-canonical-"), fileext = ".parquet")
+  arrow::write_parquet(result, canonical_path)
+  Sys.setFileTime(canonical_path, Sys.time() - 120)
+  canonical_bytes <- unname(tools::md5sum(canonical_path))
+  canonical_mtime <- file.info(canonical_path)$mtime
+  for (failure_point in c(
+    "after_first_row_group", "close", "validation", "sample_oracle", "promotion"
+  )) {
+    failure <- tryCatch(
+      {
+        run_stream(
+          spec,
+          chunk_size = 2L,
+          output_path = canonical_path,
+          fail_at = failure_point
+        )
+        NULL
+      },
+      error = identity
+    )
+    assert_true(
+      inherits(failure, "error"),
+      paste(producer_name, "must propagate", failure_point, "failures.")
+    )
+    assert_identical(
+      unname(tools::md5sum(canonical_path)),
+      canonical_bytes,
+      paste(producer_name, "must preserve canonical bytes after", failure_point)
+    )
+    assert_identical(
+      file.info(canonical_path)$mtime,
+      canonical_mtime,
+      paste(producer_name, "must preserve canonical mtime after", failure_point)
+    )
+    assert_identical(
+      stage_siblings(canonical_path),
+      character(),
+      paste(producer_name, "must clean its stage after", failure_point)
+    )
+  }
 
   diagnostic_properties <- tibble(
     property_id = 1:4,
@@ -269,11 +369,11 @@ for (producer_name in names(producer_specs)) {
   )
 
   all_ineligible <- diagnostic_properties[2:4, ]
-  assert_error_contains(
+  suppressWarnings(assert_error_contains(
     spec$env[[spec$prepare_property]](all_ineligible),
     "No coordinate-eligible",
     paste(producer_name, "must reject an all-ineligible property input.")
-  )
+  ))
 }
 
 producer_paths <- c(
@@ -296,6 +396,14 @@ assert_true(
 assert_true(
   !grepl("10km_site_", producer_text, fixed = TRUE),
   "Property-match producers must use radius-neutral operational filenames."
+)
+assert_true(
+  !grepl("split\\s*\\(", producer_text),
+  "Property-match producers must iterate row-index ranges without split()."
+)
+assert_true(
+  !grepl("bind_rows\\s*\\(chunks", producer_text),
+  "Property-match producers must not accumulate and bind all result chunks."
 )
 
 cat("Property-site match producer contract tests passed.\n")

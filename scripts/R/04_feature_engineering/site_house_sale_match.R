@@ -212,11 +212,106 @@ match_house_chunk <- function(houses_sf, spill_sites_sf, spill_lookup, radius_km
   chunk_result
 }
 
-perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup,
-                                 radius_km, chunk_size) {
-  if (anyDuplicated(houses_sf$house_id)) {
-    stop("House input must be unique on house_id.", call. = FALSE)
+house_lookup_schema <- function() {
+  arrow::schema(
+    house_id = arrow::int32(),
+    site_id = arrow::int32(),
+    distance_m = arrow::float64(),
+    distance_km = arrow::float64(),
+    n_site_groups = arrow::int32()
+  )
+}
+
+normalise_house_lookup <- function(data) {
+  tibble::tibble(
+    house_id = as.integer(data$house_id),
+    site_id = as.integer(data$site_id),
+    distance_m = as.double(data$distance_m),
+    distance_km = as.double(data$distance_km),
+    n_site_groups = as.integer(data$n_site_groups)
+  )
+}
+
+create_stage_path <- function(output_path) {
+  tempfile(
+    pattern = paste0(".", basename(output_path), ".stage-"),
+    tmpdir = dirname(output_path),
+    fileext = ".parquet"
+  )
+}
+
+sort_house_lookup <- function(data) {
+  data <- as.data.frame(data)
+  data <- data[order(data$house_id, data$site_id, na.last = TRUE), , drop = FALSE]
+  row.names(data) <- NULL
+  data
+}
+
+validate_house_stage <- function(stage_path, expected_schema,
+                                 expected_input_rows, expected_output_rows,
+                                 expected_row_groups, radius_km,
+                                 sample_expected) {
+  reader <- arrow::ParquetFileReader$create(stage_path)
+  if (reader$GetSchema()$ToString() != expected_schema$ToString()) {
+    stop("Staged house lookup schema does not match the explicit contract.", call. = FALSE)
   }
+  if (reader$num_rows != expected_output_rows) {
+    stop(
+      "Staged house lookup row count changed during publication.",
+      call. = FALSE
+    )
+  }
+  if (reader$num_row_groups != expected_row_groups) {
+    stop("Staged house lookup row-group count is incomplete.", call. = FALSE)
+  }
+
+  sample_ids <- unique(sample_expected$house_id)
+  sample_parts <- vector("list", reader$num_row_groups)
+  covered_properties <- 0L
+  for (row_group_index in seq_len(reader$num_row_groups)) {
+    row_group <- reader$ReadRowGroup(row_group_index - 1L)$to_data_frame()
+    if (nrow(row_group) == 0L) {
+      stop("Staged house lookup contains an empty row group.", call. = FALSE)
+    }
+    if (anyDuplicated(row_group[c("house_id", "site_id")])) {
+      stop("Staged house lookup contains duplicate house-site keys.", call. = FALSE)
+    }
+    if (any(
+      !is.na(row_group$distance_m) &
+        (row_group$distance_m < 0 | row_group$distance_m > radius_km * 1000 + 1e-6)
+    )) {
+      stop("Staged house lookup contains a distance outside the configured radius.", call. = FALSE)
+    }
+    group_counts <- row_group |>
+      dplyr::summarise(
+        expected_count = sum(!is.na(.data$site_id)),
+        observed_count = dplyr::first(.data$n_site_groups),
+        .by = "house_id"
+      )
+    if (any(group_counts$expected_count != group_counts$observed_count)) {
+      stop("Staged house lookup contains inconsistent Site Group counts.", call. = FALSE)
+    }
+    covered_properties <- covered_properties + dplyr::n_distinct(row_group$house_id)
+    sample_parts[[row_group_index]] <- row_group[
+      row_group$house_id %in% sample_ids,
+      ,
+      drop = FALSE
+    ]
+  }
+  if (covered_properties != expected_input_rows) {
+    stop("Staged house lookup does not cover every eligible house.", call. = FALSE)
+  }
+
+  sample_actual <- do.call(rbind, sample_parts)
+  if (!identical(sort_house_lookup(sample_actual), sort_house_lookup(sample_expected))) {
+    stop("Staged house lookup disagrees with the direct sample recomputation.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+write_house_lookup <- function(houses_sf, spill_sites_sf, spill_lookup,
+                               output_path, radius_km, chunk_size,
+                               fail_at = NULL) {
   if (!is.numeric(radius_km) || length(radius_km) != 1L ||
       is.na(radius_km) || radius_km <= 0) {
     stop("radius_km must be one positive number.", call. = FALSE)
@@ -226,53 +321,132 @@ perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup,
     stop("chunk_size must be one positive integer.", call. = FALSE)
   }
 
+  dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
+  stage_path <- create_stage_path(output_path)
+  writer <- NULL
+  output_stream <- NULL
+  writer_open <- FALSE
+  stream_open <- FALSE
+  on.exit(
+    {
+      if (writer_open) try(writer$Close(), silent = TRUE)
+      if (stream_open) try(output_stream$close(), silent = TRUE)
+      if (file.exists(stage_path)) unlink(stage_path)
+    },
+    add = TRUE
+  )
+
+  schema <- house_lookup_schema()
+  output_stream <- arrow::FileOutputStream$create(stage_path)
+  stream_open <- TRUE
+  writer_properties <- arrow::ParquetWriterProperties$create(names(schema))
+  writer <- arrow::ParquetFileWriter$create(
+    schema,
+    output_stream,
+    properties = writer_properties
+  )
+  writer_open <- TRUE
+
   starts <- seq.int(1L, nrow(houses_sf), by = as.integer(chunk_size))
-  chunks <- vector("list", length(starts))
-  for (index in seq_along(starts)) {
-    start <- starts[[index]]
+  output_rows <- 0L
+  for (row_group_index in seq_along(starts)) {
+    start <- starts[[row_group_index]]
     end <- min(start + chunk_size - 1L, nrow(houses_sf))
-    logger::log_info(
-      "Processing house rows {start}:{end} of {nrow(houses_sf)}"
-    )
-    chunks[[index]] <- match_house_chunk(
+    logger::log_info("Writing house rows {start}:{end} of {nrow(houses_sf)}")
+    chunk <- match_house_chunk(
       houses_sf[start:end, ],
       spill_sites_sf,
       spill_lookup,
       radius_km = radius_km
-    )
-  }
-  dplyr::bind_rows(chunks)
-}
+    ) |>
+      normalise_house_lookup()
+    table <- arrow::Table$create(chunk, schema = schema)
+    writer$WriteTable(table, chunk_size = table$num_rows)
+    output_rows <- output_rows + nrow(chunk)
+    rm(chunk, table)
 
-process_spatial_data <- function(data, radius_km, chunk_size) {
-  houses_sf <- prepare_house_data(data$house)
-  spill_data <- prepare_spill_sites(data$spill)
-  perform_spatial_join(
-    houses_sf,
-    spill_data$spill_sf,
-    spill_data$lookup,
+    if (identical(fail_at, "after_first_row_group") && row_group_index == 1L) {
+      stop("Injected failure after the first house row group.", call. = FALSE)
+    }
+  }
+
+  writer$Close()
+  writer_open <- FALSE
+  if (identical(fail_at, "close")) {
+    stop("Injected house writer close failure.", call. = FALSE)
+  }
+  output_stream$close()
+  stream_open <- FALSE
+
+  if (identical(fail_at, "validation")) {
+    stop("Injected house staged validation failure.", call. = FALSE)
+  }
+  sample_indices <- unique(as.integer(round(seq(
+    1,
+    nrow(houses_sf),
+    length.out = min(10L, nrow(houses_sf))
+  ))))
+  sample_expected <- match_house_chunk(
+    houses_sf[sample_indices, ],
+    spill_sites_sf,
+    spill_lookup,
+    radius_km = radius_km
+  ) |>
+    normalise_house_lookup()
+  if (identical(fail_at, "sample_oracle")) {
+    sample_expected$n_site_groups[[1]] <- sample_expected$n_site_groups[[1]] + 1L
+  }
+  validate_house_stage(
+    stage_path,
+    expected_schema = schema,
+    expected_input_rows = nrow(houses_sf),
+    expected_output_rows = output_rows,
+    expected_row_groups = length(starts),
     radius_km = radius_km,
-    chunk_size = chunk_size
+    sample_expected = sample_expected
+  )
+
+  if (identical(fail_at, "promotion")) {
+    stop("Injected house promotion failure.", call. = FALSE)
+  }
+  if (!file.rename(stage_path, output_path)) {
+    stop("Failed to promote the staged house lookup.", call. = FALSE)
+  }
+  logger::log_info(
+    "Published {output_rows} house lookup rows across {length(starts)} row groups to {output_path}"
+  )
+  list(
+    input_rows = nrow(houses_sf),
+    output_rows = output_rows,
+    row_groups = length(starts),
+    output_path = output_path
   )
 }
 
-export_data <- function(data, output_path = CONFIG$output_path) {
-  dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
-  arrow::write_parquet(data, output_path)
-  logger::log_info("Data exported successfully to {output_path}")
-  invisible(output_path)
+process_spatial_data <- function(data, output_path, radius_km, chunk_size,
+                                 fail_at = NULL) {
+  houses_sf <- prepare_house_data(data$house)
+  spill_data <- prepare_spill_sites(data$spill)
+  write_house_lookup(
+    houses_sf,
+    spill_data$spill_sf,
+    spill_data$lookup,
+    output_path = output_path,
+    radius_km = radius_km,
+    chunk_size = chunk_size,
+    fail_at = fail_at
+  )
 }
 
 main <- function() {
   initialise_environment()
   initialise_logging()
-  data <- load_data()
-  matched_data <- process_spatial_data(
-    data,
+  process_spatial_data(
+    load_data(),
+    output_path = CONFIG$output_path,
     radius_km = CONFIG$radius_km,
     chunk_size = CONFIG$chunk_size
   )
-  export_data(matched_data)
   invisible(NULL)
 }
 
