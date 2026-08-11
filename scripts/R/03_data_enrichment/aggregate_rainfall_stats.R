@@ -81,7 +81,11 @@ CONFIG <- list(
   
   # Memory management settings - optimised for large site-day grid processing
   sites_per_chunk = 500,  # Processes ~500 sites × 1,095 days = 547K records per chunk (prevents 16GB memory limit)
-  n_cores = min(6, parallel::detectCores() - 2)  # Reserve cores for system stability during intensive processing
+  n_cores = max(
+    1L,
+    min(6L, parallel::detectCores() - 2L),
+    na.rm = TRUE
+  )  # Reserve cores when detectable; otherwise use one worker
 )
 
 # Data Loading Functions

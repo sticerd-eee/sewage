@@ -253,7 +253,11 @@ aggregate_spills_to_msoa <- function(data, spill_sites, years) {
 
   # Convert to sf and filter for year range
   spill_sites_sf <- dat_clean %>%
-    filter(year %in% !!years) %>%
+    filter(
+      year %in% !!years,
+      is.finite(easting),
+      is.finite(northing)
+    ) %>%
     mutate(
       across(
         c(spill_count_yr, spill_hrs_yr),
@@ -321,7 +325,12 @@ aggregate_dry_spills_to_msoa <- function(data, spill_sites, years) {
       dry_spill_count_yr = dry_spill_count_yr_r1_d01_weak,
       dry_spill_hrs_yr = dry_spill_hrs_yr_r1_d01_weak
     ) %>%
-    filter(!is.na(dry_spill_count_yr), !is.na(dry_spill_hrs_yr)) %>%
+    filter(
+      !is.na(dry_spill_count_yr),
+      !is.na(dry_spill_hrs_yr),
+      is.finite(easting),
+      is.finite(northing)
+    ) %>%
     mutate(
       across(
         c(dry_spill_count_yr, dry_spill_hrs_yr),

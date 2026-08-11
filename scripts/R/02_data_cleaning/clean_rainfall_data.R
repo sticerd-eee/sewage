@@ -70,7 +70,11 @@ CONFIG <- list(
   end_date = as.Date("2023-12-31"),
   
   # Parallel processing settings optimized for M1 MacBook Pro (8 cores, 16GB RAM)
-  n_cores = min(6, parallel::detectCores() - 2)  # Use 6 cores, leave 2 free for system
+  n_cores = max(
+    1L,
+    min(6L, parallel::detectCores() - 2L),
+    na.rm = TRUE
+  )  # Use up to 6 cores; fall back to 1 when detection is unavailable
 )
 
 # Functions

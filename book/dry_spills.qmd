@@ -41,7 +41,6 @@ required_packages <- c(
   "tmap",
   "leaflet",
   "htmltools",
-  "servr",
   "viridis",
   "readxl",
   "reactable",
@@ -244,7 +243,7 @@ compute_dry_summary <- function(data, sample = c("EA", "BBC"), thr = 1.25) {
       dplyr::filter(
         water_company != "Welsh Water",
         !(water_company == "United Utilities" &
-          spill_count_yr / spill_count_ea > thr)
+          spill_count_yr / spill_count_ea_crosswalk > thr)
       )
   }
 
@@ -367,7 +366,10 @@ united22 <- dat_yr %>%
   filter(water_company == "United Utilities") %>%
   group_by(year) %>%
   summarise(
-    prop_gt_1.3 = mean(spill_count_yr / spill_count_ea > thr, na.rm = TRUE)
+    prop_gt_1.3 = mean(
+      spill_count_yr / spill_count_ea_crosswalk > thr,
+      na.rm = TRUE
+    )
   ) %>%
   pull(prop_gt_1.3)
 

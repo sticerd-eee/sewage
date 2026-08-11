@@ -330,6 +330,16 @@ assert_true(
   !anyDuplicated(house_lookup[c("house_id", "site_id")]),
   "House lookup keys must remain unique."
 )
+assert_error_contains(
+  house_env$perform_spatial_join(
+    house_points[c(1L, 1L), ],
+    house_spills$spill_sf,
+    house_spills$lookup,
+    radius_km = 0.1
+  ),
+  "unique on house_id",
+  "House matching must fail before chunking duplicate house IDs."
+)
 
 rental_env <- new.env(parent = globalenv())
 sys.source(
@@ -366,6 +376,17 @@ assert_true(
 assert_true(
   !anyDuplicated(rental_lookup[c("rental_id", "site_id")]),
   "Rental lookup keys must remain unique."
+)
+assert_error_contains(
+  rental_env$perform_spatial_join(
+    rental_points[c(1L, 1L), ],
+    rental_spills$spill_sf,
+    rental_spills$lookup,
+    radius_km = 0.1,
+    chunk_size = 1L
+  ),
+  "unique on rental_id",
+  "Rental matching must fail before chunking duplicate rental IDs."
 )
 
 cat("All Site Group consumer contract tests passed.\n")

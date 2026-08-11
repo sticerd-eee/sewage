@@ -39,7 +39,6 @@ required_packages <- c(
   "tmap",
   "leaflet",
   "htmltools",
-  "servr",
   "viridis",
   "readxl"
 )
@@ -118,7 +117,8 @@ spill_sites <- read_site_group_projection(
     "data", "processed", "matched_events_annual_data",
     "site_group_crosswalk.parquet"
   ),
-  years = 2021:2024
+  years = 2021:2024,
+  include_availability = TRUE
 )
 
 # UK Map
@@ -222,7 +222,7 @@ tmap_save(
 # Join yearly spill aggregates with site metadata
 # Why: ensure coordinates and company/site attributes are available for spatial aggregation
 dat_yr_clean <- left_join(
-  select(dat_yr, -ngr),
+  select(dat_yr, -any_of("ngr")),
   spill_sites,
   by = join_by(water_company, site_id)
 )

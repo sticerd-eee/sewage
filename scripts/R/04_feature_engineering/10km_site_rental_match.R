@@ -143,6 +143,10 @@ perform_spatial_join <- function(rentals_sf, spill_sites_sf, spill_lookup,
                                  chunk_size = CONFIG$chunk_size) {
   logger::log_info("Performing spatial join between rentals and spill sites")
 
+  if (anyDuplicated(rentals_sf$rental_id)) {
+    stop("Rental input must be unique on rental_id.", call. = FALSE)
+  }
+
   radius_m <- radius_km * 1000
 
   rental_chunks <- split(
@@ -159,7 +163,7 @@ perform_spatial_join <- function(rentals_sf, spill_sites_sf, spill_lookup,
       dist = radius_m,
       left = TRUE
     )
-    left_join_site_group_projection(
+    chunk_result <- left_join_site_group_projection(
       spatial_matches,
       spill_lookup,
       context = "Rental-match Site Group geometry join"
@@ -176,13 +180,14 @@ perform_spatial_join <- function(rentals_sf, spill_sites_sf, spill_lookup,
       ungroup() %>%
       st_drop_geometry() %>%
       select(rental_id, site_id, distance_m, distance_km, n_site_groups)
+
+    if (anyDuplicated(chunk_result[c("rental_id", "site_id")])) {
+      stop("Rental Site Group lookup must be unique on rental_id, site_id.", call. = FALSE)
+    }
+    chunk_result
   })
 
-  result <- dplyr::bind_rows(merged_chunks)
-  if (anyDuplicated(result[c("rental_id", "site_id")])) {
-    stop("Rental Site Group lookup must be unique on rental_id, site_id.", call. = FALSE)
-  }
-  result
+  dplyr::bind_rows(merged_chunks)
 }
 
 

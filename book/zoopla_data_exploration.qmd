@@ -40,7 +40,6 @@ required_packages <- c(
   "data.table",
   "reactable",
   "htmlwidgets",
-  "reactablefmtr",
   "logger",
   "readxl",
   "DIDmultiplegtDYN"
@@ -62,6 +61,9 @@ if (!dir.exists(dirname(log_path))) {
 }
 logger::log_appender(logger::appender_file(log_path))
 logger::log_layout(logger::layout_glue_colors)
+
+book_figures_dir <- here::here("book", "book_figs")
+dir.create(book_figures_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Ggplot theme
 theme_pref <- theme_minimal() +

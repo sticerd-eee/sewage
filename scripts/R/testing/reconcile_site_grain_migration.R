@@ -11,7 +11,9 @@
 #   SITE_GRAIN_NEW_UNIQUE           canonical candidate parquet
 #   SITE_GRAIN_EVIDENCE_DIR         reconciliation evidence directory
 #   SITE_GRAIN_BASELINE_AGG_DIR     pre-migration aggregate directory (optional)
+#   SITE_GRAIN_OLD_AGG_DIR          pre-migration monthly aggregates for exposure
 #   SITE_GRAIN_NEW_AGG_DIR          candidate aggregate directory
+#   SITE_GRAIN_POPULATION_RASTER    population raster override (optional)
 #   SITE_GRAIN_BASELINE_EVENTS      pre-migration matched events (optional)
 #   SITE_GRAIN_NEW_EVENTS           candidate matched events
 #   SITE_GRAIN_BASELINE_HOUSE_PROPERTY_SIDECAR
@@ -33,6 +35,12 @@
 #                                      pre-migration map-support sidecar
 #   SITE_GRAIN_NEW_MAP_SUPPORT_SIDECAR
 #                                      candidate map-support sidecar
+#   SITE_GRAIN_BASELINE_SITE_GROUP_PROJECTION
+#                                      authoritative pre-migration location sidecar
+#                                      (site_id, easting, northing)
+#   SITE_GRAIN_NEW_SITE_GROUP_PROJECTION
+#                                      authoritative candidate location sidecar
+#                                      (site_id, easting, northing)
 #   SITE_GRAIN_ALLOW_PENDING_PUBLICATION  true only for pre-publication temp proof
 #
 # ==============================================================================
@@ -261,8 +269,8 @@ reconcile_aggregate_outputs <- function(baseline_dir, candidate_dir) {
     assert_true(file.exists(new_path), paste0("Missing aggregate candidate: ", new_path))
     old <- read_parquet(old_path)
     new <- read_parquet(new_path)
-    key <- specs$key[[index]]
-    values <- specs$values[[index]]
+    key <- unlist(specs$key[[index]], use.names = FALSE)
+    values <- unlist(specs$values[[index]], use.names = FALSE)
     assert_unique_key(old, key, paste0(specs$file[index], " baseline"))
     assert_unique_key(new, key, paste0(specs$file[index], " candidate"))
     assert_true(nrow(old) == nrow(new), paste0(specs$file[index], " row count changed."))
@@ -380,6 +388,33 @@ consumer_artifact_paths_from_env <- function(
   })
 }
 
+authoritative_location_paths_from_env <- function() {
+  list(
+    baseline = path_from_env("SITE_GRAIN_BASELINE_SITE_GROUP_PROJECTION"),
+    candidate = path_from_env("SITE_GRAIN_NEW_SITE_GROUP_PROJECTION")
+  )
+}
+
+exposure_recompute_inputs_from_env <- function() {
+  list(
+    baseline_agg_dir = path_from_env(
+      "SITE_GRAIN_OLD_AGG_DIR",
+      path_from_env("SITE_GRAIN_BASELINE_AGG_DIR")
+    ),
+    candidate_agg_dir = path_from_env(
+      "SITE_GRAIN_NEW_AGG_DIR",
+      here::here("data", "processed", "agg_spill_stats")
+    ),
+    population_raster = path_from_env(
+      "SITE_GRAIN_POPULATION_RASTER",
+      here::here(
+        "data", "raw", "population_grid", "data",
+        "uk_residential_population_2021.tif"
+      )
+    )
+  )
+}
+
 read_consumer_artifact <- function(path, label) {
   extension <- tolower(tools::file_ext(path))
   if (extension == "parquet") {
@@ -423,23 +458,600 @@ assert_consumer_artifact_schema <- function(data, contract, label) {
   invisible(data)
 }
 
+compare_consumer_artifact <- function(baseline, candidate, contract, artifact) {
+  assert_unique_key(baseline, contract$key, paste0(artifact, " baseline"))
+  assert_unique_key(candidate, contract$key, paste0(artifact, " candidate"))
+
+  membership <- full_join(
+    transmute(baseline, !!!rlang::syms(contract$key), in_baseline = TRUE),
+    transmute(candidate, !!!rlang::syms(contract$key), in_candidate = TRUE),
+    by = contract$key
+  ) |>
+    mutate(
+      in_baseline = tidyr::replace_na(.data$in_baseline, FALSE),
+      in_candidate = tidyr::replace_na(.data$in_candidate, FALSE)
+    )
+  shared <- inner_join(
+    select(baseline, all_of(c(contract$key, contract$values))),
+    select(candidate, all_of(c(contract$key, contract$values))),
+    by = contract$key,
+    suffix = c("_baseline", "_candidate")
+  )
+  changed_columns <- character()
+  for (value in contract$values) {
+    changed_column <- paste0("changed_", value)
+    shared[[changed_column]] <- !same_values(
+      shared[[paste0(value, "_baseline")]],
+      shared[[paste0(value, "_candidate")]]
+    )
+    changed_columns <- c(changed_columns, changed_column)
+  }
+  shared$changed_value_count <- rowSums(shared[changed_columns])
+
+  list(
+    baseline = baseline,
+    candidate = candidate,
+    removed = filter(membership, .data$in_baseline & !.data$in_candidate),
+    added = filter(membership, !.data$in_baseline & .data$in_candidate),
+    changed = filter(shared, .data$changed_value_count > 0L),
+    baseline_rows = nrow(baseline),
+    candidate_rows = nrow(candidate)
+  )
+}
+
+site_ids_are_attributable <- function(site_ids, changed_site_ids) {
+  as.character(site_ids) %in% changed_site_ids
+}
+
+passed_consumer_check <- function(artifact, detail) {
+  tibble(
+    check = paste0("consumer_", artifact, "_artifact"),
+    status = "passed",
+    detail = detail
+  )
+}
+
+assert_bng_coordinate_domain <- function(data, label) {
+  valid <- is.finite(data$easting) & is.finite(data$northing) &
+    data$easting >= 0 & data$easting <= 700000 &
+    data$northing >= 0 & data$northing <= 1300000
+  assert_true(
+    all(valid),
+    paste0(label, " contains coordinates outside the British National Grid domain.")
+  )
+}
+
+validate_map_against_projection <- function(map, projection, role) {
+  assert_bng_coordinate_domain(map, paste0("map_support ", role))
+  map_site_ids <- sort(unique(as.character(map$site_id)))
+  projection_site_ids <- sort(unique(as.character(projection$site_id)))
+  assert_true(
+    length(setdiff(map_site_ids, projection_site_ids)) == 0L,
+    paste0(
+      "map_support ", role,
+      " contains site IDs absent from the authoritative Site Group projection."
+    )
+  )
+  compared <- left_join(
+    select(map, all_of(c("site_id", "easting", "northing"))),
+    projection,
+    by = "site_id",
+    suffix = c("_map", "_projection")
+  )
+  assert_bng_coordinate_domain(
+    transmute(
+      compared,
+      easting = .data$easting_projection,
+      northing = .data$northing_projection
+    ),
+    paste0("authoritative Site Group projection ", role, " map domain")
+  )
+  assert_true(
+    all(
+      same_values(compared$easting_map, compared$easting_projection) &
+        same_values(compared$northing_map, compared$northing_projection)
+    ),
+    paste0(
+      "map_support ", role,
+      " coordinates do not match authoritative Site Group projection."
+    )
+  )
+}
+
+reconcile_map_support_artifact <- function(comparison, location_comparison) {
+  assert_true(
+    nrow(comparison$removed) == 0L && nrow(comparison$added) == 0L,
+    "map_support consumer artifact drift: map keys changed."
+  )
+  spill_changes <- comparison$changed |>
+    filter(.data$changed_spill_total)
+  assert_true(
+    nrow(spill_changes) == 0L,
+    "map_support consumer artifact unrelated drift: spill totals changed."
+  )
+  assert_true(
+    nrow(location_comparison$removed) == 0L &&
+      nrow(location_comparison$added) == 0L,
+    "Authoritative Site Group projection membership changed."
+  )
+  validate_map_against_projection(
+    comparison$baseline, location_comparison$baseline, "baseline"
+  )
+  validate_map_against_projection(
+    comparison$candidate, location_comparison$candidate, "candidate"
+  )
+  coordinate_changes <- comparison$changed |>
+    filter(.data$changed_easting | .data$changed_northing)
+  authoritative_changes <- location_comparison$changed |>
+    filter(
+      .data$changed_ngr | .data$changed_easting | .data$changed_northing,
+      as.character(.data$site_id) %in% as.character(comparison$baseline$site_id)
+    )
+  changed_site_ids <- sort(unique(as.character(authoritative_changes$site_id)))
+  list(
+    check = passed_consumer_check(
+      "map_support",
+      paste0(
+        comparison$candidate_rows, " map keys and spill totals unchanged; ",
+        nrow(coordinate_changes), " coordinate row(s) across ",
+        length(changed_site_ids),
+        " Site Group(s) classified as representative-location metadata changes"
+      )
+    ),
+    changed_site_ids = changed_site_ids
+  )
+}
+
+reconcile_rainfall_artifact <- function(comparison, changed_site_ids) {
+  assert_true(
+    nrow(comparison$removed) == 0L && nrow(comparison$added) == 0L,
+    "rainfall consumer artifact drift: rainfall keys changed."
+  )
+  unrelated <- comparison$changed |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  assert_true(
+    nrow(unrelated) == 0L,
+    paste0(
+      "rainfall consumer artifact unrelated drift on ", nrow(unrelated),
+      " row(s) outside changed-location Site Groups."
+    )
+  )
+  passed_consumer_check(
+    "rainfall",
+    paste0(
+      comparison$candidate_rows, " rainfall keys unchanged; ",
+      nrow(comparison$changed),
+      " value row(s) classified as representative-location policy changes"
+    )
+  )
+}
+
+reconcile_dry_spill_artifact <- function(comparison, changed_site_ids) {
+  unrelated_removed <- comparison$removed |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  unrelated_added <- comparison$added |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  unrelated_changed <- comparison$changed |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  unrelated_count <- nrow(unrelated_removed) + nrow(unrelated_added) +
+    nrow(unrelated_changed)
+  assert_true(
+    unrelated_count == 0L,
+    paste0(
+      "dry_spill consumer artifact unrelated drift: ", unrelated_count,
+      " key/value row(s) outside changed-location Site Groups."
+    )
+  )
+  passed_consumer_check(
+    "dry_spill",
+    paste0(
+      comparison$candidate_rows, " candidate rows; classified spatial-policy drift: ",
+      nrow(comparison$removed), " removed key(s), ",
+      nrow(comparison$added), " added key(s), ",
+      nrow(comparison$changed), " changed value row(s)"
+    )
+  )
+}
+
+validate_property_neighborhood_counts <- function(
+    data, artifact, property_id, role) {
+  sentinel_rows <- filter(data, .data$site_id == -1L)
+  assert_true(
+    nrow(sentinel_rows) == 0L || all(
+      sentinel_rows$n_site_groups == 0L &
+        is.na(sentinel_rows$distance_m) &
+        is.na(sentinel_rows$distance_km)
+    ),
+    paste0(
+      artifact, " ", role,
+      " unmatched sentinel rows must have zero Site Groups and missing distances."
+    )
+  )
+  matched_rows <- filter(data, .data$site_id != -1L)
+  assert_true(
+    all(
+      is.finite(matched_rows$distance_m) & matched_rows$distance_m >= 0 &
+        is.finite(matched_rows$distance_km) & matched_rows$distance_km >= 0 &
+        abs(matched_rows$distance_km - matched_rows$distance_m / 1000) < 1e-9
+    ),
+    paste0(
+      artifact, " ", role,
+      " matched rows must have non-negative, internally consistent distances."
+    )
+  )
+  counts <- data |>
+    group_by(across(all_of(property_id))) |>
+    summarise(
+      declared_values = n_distinct(.data$n_site_groups),
+      declared_count = first(.data$n_site_groups),
+      observed_count = n_distinct(.data$site_id[.data$site_id != -1L]),
+      .groups = "drop"
+    )
+  assert_true(
+    all(
+      counts$declared_values == 1L &
+        counts$declared_count == counts$observed_count
+    ),
+    paste0(
+      artifact, " ", role,
+      " sidecar n_site_groups must equal its unique non-sentinel Site Group rows per property."
+    )
+  )
+}
+
+reconcile_property_artifact <- function(
+    comparison, changed_site_ids, artifact, property_id) {
+  validate_property_neighborhood_counts(
+    comparison$baseline, artifact, property_id, "baseline"
+  )
+  validate_property_neighborhood_counts(
+    comparison$candidate, artifact, property_id, "candidate"
+  )
+
+  baseline_neighborhoods <- comparison$baseline |>
+    filter(site_ids_are_attributable(.data$site_id, changed_site_ids)) |>
+    pull(all_of(property_id))
+  candidate_neighborhoods <- comparison$candidate |>
+    filter(site_ids_are_attributable(.data$site_id, changed_site_ids)) |>
+    pull(all_of(property_id))
+  affected_properties <- unique(as.character(c(
+    baseline_neighborhoods, candidate_neighborhoods
+  )))
+
+  unrelated_membership <- bind_rows(comparison$removed, comparison$added) |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  distance_changes <- comparison$changed |>
+    filter(.data$changed_distance_m | .data$changed_distance_km)
+  unrelated_distance <- distance_changes |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  count_changes <- comparison$changed |>
+    filter(.data$changed_n_site_groups)
+  unrelated_count <- count_changes |>
+    filter(!as.character(.data[[property_id]]) %in% affected_properties)
+  unrelated_rows <- nrow(unrelated_membership) + nrow(unrelated_distance) +
+    nrow(unrelated_count)
+  assert_true(
+    unrelated_rows == 0L,
+    paste0(
+      artifact, " consumer artifact unrelated drift: ", unrelated_rows,
+      " row(s) outside changed-location Site Groups/property neighborhoods."
+    )
+  )
+
+  passed_consumer_check(
+    artifact,
+    paste0(
+      comparison$candidate_rows, " candidate sidecar rows; classified spatial-policy drift: ",
+      nrow(comparison$removed), " removed key(s), ",
+      nrow(comparison$added), " added key(s), ",
+      nrow(distance_changes), " distance row(s), ",
+      nrow(count_changes), " count row(s) across ",
+      length(affected_properties), " affected property neighborhood(s)"
+    )
+  )
+}
+
+exposure_contract <- function() {
+  list(
+    key = c("category", "distance_m"),
+    values = c("n_sites", "population")
+  )
+}
+
+assert_exposure_domain <- function(data, label) {
+  contract <- exposure_contract()
+  assert_consumer_artifact_schema(data, contract, label)
+  assert_unique_key(data, contract$key, label)
+  expected_grid <- tidyr::expand_grid(
+    category = c("Any Spill", "Dry Spills", "Zero Spills"),
+    distance_m = c(50, 100, 250, 500, 1000)
+  )
+  observed_grid <- arrange(
+    select(data, all_of(contract$key)), .data$category, .data$distance_m
+  )
+  expected_grid <- arrange(expected_grid, .data$category, .data$distance_m)
+  assert_true(
+    identical(
+      paste(observed_grid$category, observed_grid$distance_m),
+      paste(expected_grid$category, expected_grid$distance_m)
+    ),
+    paste0(label, " must contain the complete supported category-distance grid.")
+  )
+  valid_n_sites <- is.finite(data$n_sites) & data$n_sites >= 0 &
+    data$n_sites == round(data$n_sites)
+  valid_population <- is.finite(data$population) & data$population >= 0 &
+    data$population == round(data$population) &
+    data$population %% 1000 == 0
+  assert_true(
+    all(valid_n_sites),
+    paste0(label, " has invalid n_sites values.")
+  )
+  assert_true(
+    all(valid_population),
+    paste0(label, " population must use non-negative nearest-1000 precision.")
+  )
+  category_summary <- data |>
+    summarise(
+      distinct_n_sites = n_distinct(.data$n_sites),
+      n_sites = first(.data$n_sites),
+      .by = "category"
+    )
+  assert_true(
+    all(category_summary$distinct_n_sites == 1L),
+    paste0(label, " must repeat one n_sites value within each category.")
+  )
+  ordered <- arrange(data, .data$category, .data$distance_m) |>
+    group_by(.data$category) |>
+    summarise(monotone = all(diff(.data$population) >= 0), .groups = "drop")
+  assert_true(
+    all(ordered$monotone),
+    paste0(label, " population must be non-decreasing with distance.")
+  )
+  n_any <- category_summary$n_sites[category_summary$category == "Any Spill"]
+  n_dry <- category_summary$n_sites[category_summary$category == "Dry Spills"]
+  assert_true(
+    n_dry <= n_any,
+    paste0(label, " Dry Spills site count cannot exceed Any Spill.")
+  )
+  population_wide <- data |>
+    select("category", "distance_m", "population") |>
+    tidyr::pivot_wider(names_from = "category", values_from = "population")
+  assert_true(
+    all(population_wide$`Dry Spills` <= population_wide$`Any Spill`),
+    paste0(label, " Dry Spills population cannot exceed Any Spill population.")
+  )
+  invisible(data)
+}
+
+assert_exposure_matches_expected <- function(actual, expected, role) {
+  contract <- exposure_contract()
+  assert_exposure_domain(actual, paste0("exposure ", role, " sidecar"))
+  assert_exposure_domain(
+    expected, paste0("independently recomputed exposure ", role)
+  )
+  comparison <- compare_consumer_artifact(
+    expected, actual, contract, paste0("exposure ", role, " expectation")
+  )
+  drift <- nrow(comparison$removed) + nrow(comparison$added) +
+    nrow(comparison$changed)
+  assert_true(
+    drift == 0L,
+    paste0(
+      "exposure ", role,
+      " sidecar does not equal independent recomputation: ",
+      nrow(comparison$removed), " removed key(s), ",
+      nrow(comparison$added), " added key(s), ",
+      nrow(comparison$changed), " changed row(s)."
+    )
+  )
+}
+
+population_within_union_buffers <- function(population_raster, points, distance_m) {
+  if (length(points) == 0L) return(0)
+  buffers <- terra::buffer(points, width = distance_m)
+  dissolved <- terra::aggregate(buffers, dissolve = TRUE)
+  cropped <- terra::crop(population_raster, dissolved)
+  values <- terra::extract(cropped, dissolved, fun = sum, na.rm = TRUE)
+  sum(as.numeric(unlist(values[, -1, drop = FALSE])), na.rm = TRUE)
+}
+
+read_exposure_site_status <- function(agg_dir) {
+  all_path <- file.path(agg_dir, "agg_spill_mo.parquet")
+  dry_path <- file.path(agg_dir, "agg_spill_dry_mo.parquet")
+  all_mo <- arrow::read_parquet(all_path)
+  dry_mo <- arrow::read_parquet(dry_path)
+  assert_required_columns(
+    all_mo,
+    c("site_id", "water_company", "month_id", "spill_count_mo"),
+    paste0("Exposure aggregate ", all_path)
+  )
+  dry_count_column <- "dry_spill_count_mo_r1_d0123_strict"
+  assert_required_columns(
+    dry_mo,
+    c("site_id", "water_company", "month_id", dry_count_column),
+    paste0("Exposure dry aggregate ", dry_path)
+  )
+  all_status <- all_mo |>
+    mutate(year = 2021L + floor((.data$month_id - 1L) / 12L)) |>
+    filter(.data$year %in% 2021:2023) |>
+    summarise(
+      total_spills = sum(.data$spill_count_mo, na.rm = TRUE),
+      .by = c("site_id", "water_company")
+    )
+  dry_status <- dry_mo |>
+    mutate(year = 2021L + floor((.data$month_id - 1L) / 12L)) |>
+    filter(.data$year %in% 2021:2023) |>
+    summarise(
+      total_dry = sum(.data[[dry_count_column]], na.rm = TRUE),
+      .by = c("site_id", "water_company")
+    )
+  status <- all_status |>
+    left_join(dry_status, by = c("site_id", "water_company")) |>
+    mutate(
+      total_dry = tidyr::replace_na(.data$total_dry, 0),
+      any_spill = .data$total_spills > 0,
+      has_dry = .data$total_dry > 0
+    ) |>
+    select("site_id", "any_spill", "has_dry")
+  assert_unique_key(status, "site_id", paste0("Exposure status from ", agg_dir))
+  status
+}
+
+recompute_population_exposure <- function(locations, agg_dir, population_raster_path) {
+  assert_true(
+    requireNamespace("rnrfa", quietly = TRUE),
+    "Exposure recomputation requires the rnrfa package."
+  )
+  status <- read_exposure_site_status(agg_dir)
+  ngr_locations <- locations |>
+    transmute(
+      site_id = as.integer(.data$site_id),
+      ngr = toupper(gsub("\\s+", "", as.character(.data$ngr)))
+    ) |>
+    filter(
+      !is.na(.data$ngr),
+      grepl("^[A-Z]{2}[0-9]{2,10}$", .data$ngr),
+      nchar(sub("^[A-Z]{2}", "", .data$ngr)) %% 2L == 0L
+    )
+  parsed <- rnrfa::osg_parse(ngr_locations$ngr, coord_system = "WGS84")
+  geocoded <- bind_cols(
+    ngr_locations,
+    tibble(
+      lon = as.numeric(parsed[[1]]),
+      lat = as.numeric(parsed[[2]])
+    )
+  ) |>
+    filter(is.finite(.data$lon), is.finite(.data$lat)) |>
+    inner_join(status, by = "site_id")
+  assert_unique_key(
+    geocoded, "site_id", paste0("Exposure geocoded sites from ", agg_dir)
+  )
+  sites_sf <- sf::st_as_sf(
+    geocoded,
+    coords = c("lon", "lat"),
+    crs = 4326
+  )
+  population_raster <- terra::rast(population_raster_path)
+  if (terra::is.lonlat(population_raster)) {
+    population_raster <- terra::project(
+      population_raster, "EPSG:27700", method = "near"
+    )
+    sites_sf <- sf::st_transform(sites_sf, 27700)
+  } else {
+    sites_sf <- sf::st_transform(sites_sf, terra::crs(population_raster))
+  }
+  sites <- terra::vect(sites_sf)
+  categories <- list(
+    "Any Spill" = which(as.data.frame(sites)$any_spill),
+    "Dry Spills" = which(as.data.frame(sites)$has_dry),
+    "Zero Spills" = which(!as.data.frame(sites)$any_spill)
+  )
+  distances <- c(50, 100, 250, 500, 1000)
+  bind_rows(lapply(names(categories), function(category) {
+    category_points <- sites[categories[[category]], ]
+    tibble(
+      category = category,
+      distance_m = distances,
+      n_sites = length(category_points),
+      population = vapply(
+        distances,
+        function(distance_m) {
+          round(population_within_union_buffers(
+            population_raster, category_points, distance_m
+          ) / 1000) * 1000
+        },
+        numeric(1)
+      )
+    )
+  }))
+}
+
+recompute_exposure_expectations <- function(
+    baseline_locations, candidate_locations, inputs) {
+  list(
+    baseline = recompute_population_exposure(
+      baseline_locations, inputs$baseline_agg_dir, inputs$population_raster
+    ),
+    candidate = recompute_population_exposure(
+      candidate_locations, inputs$candidate_agg_dir, inputs$population_raster
+    )
+  )
+}
+
+reconcile_exposure_artifact <- function(comparison, expectations) {
+  assert_true(
+    identical(sort(names(expectations)), c("baseline", "candidate")),
+    "Exposure expectations must contain baseline and candidate tables."
+  )
+  assert_exposure_matches_expected(
+    comparison$baseline, expectations$baseline, "baseline"
+  )
+  assert_exposure_matches_expected(
+    comparison$candidate, expectations$candidate, "candidate"
+  )
+  changed_n_sites <- comparison$changed |>
+    filter(.data$changed_n_sites)
+  changed_population <- comparison$changed |>
+    filter(.data$changed_population)
+  joined <- inner_join(
+    comparison$baseline,
+    comparison$candidate,
+    by = c("category", "distance_m"),
+    suffix = c("_baseline", "_candidate")
+  )
+  changed_categories <- sort(unique(comparison$changed$category))
+  n_site_deltas <- joined |>
+    filter(.data$n_sites_baseline != .data$n_sites_candidate) |>
+    distinct(
+      .data$category, .data$n_sites_baseline, .data$n_sites_candidate
+    ) |>
+    transmute(
+      label = paste0(
+        .data$category, " ",
+        if_else(
+          .data$n_sites_candidate - .data$n_sites_baseline >= 0,
+          "+",
+          ""
+        ),
+        .data$n_sites_candidate - .data$n_sites_baseline
+      )
+    ) |>
+    pull(.data$label)
+  passed_consumer_check(
+    "exposure",
+    paste0(
+      comparison$candidate_rows, " category-distance rows; ",
+      nrow(comparison$changed), " aggregate row(s) and ",
+      sum(comparison$changed$changed_value_count),
+      " value cell(s) independently reproduced; classified deltas: ",
+      nrow(changed_n_sites), " n_sites row(s), ",
+      nrow(changed_population), " population row(s); categories ",
+      if (length(changed_categories) == 0L) {
+        "none"
+      } else {
+        paste(changed_categories, collapse = ", ")
+      },
+      "; n_sites category deltas ",
+      if (length(n_site_deltas) == 0L) {
+        "none"
+      } else {
+        paste(n_site_deltas, collapse = ", ")
+      }
+    )
+  )
+}
+
 reconcile_consumer_artifacts <- function(
     paths = consumer_artifact_paths_from_env(),
     contracts = consumer_artifact_contracts(),
-    consumer_env = NULL) {
+    location_paths = authoritative_location_paths_from_env(),
+    exposure_inputs = exposure_recompute_inputs_from_env(),
+    exposure_expectations = NULL) {
   assert_true(
     identical(sort(names(paths)), sort(names(contracts))),
     "Consumer artifact paths must cover every declared reconciliation contract."
   )
-  if (is.null(consumer_env)) {
-    consumer_env <- new.env(parent = globalenv())
-    sys.source(
-      here::here("scripts", "R", "testing", "reconcile_site_group_consumers.R"),
-      envir = consumer_env
-    )
-  }
-
-  bind_rows(lapply(names(contracts), function(artifact) {
+  artifacts <- lapply(names(contracts), function(artifact) {
     contract <- contracts[[artifact]]
     artifact_paths <- paths[[artifact]]
     baseline_path <- artifact_paths$baseline
@@ -451,10 +1063,13 @@ reconcile_consumer_artifacts <- function(
       else if (!file.exists(candidate_path)) paste0("candidate unavailable: ", candidate_path)
     )
     if (length(unavailable) > 0L) {
-      return(tibble(
-        check = paste0("consumer_", artifact, "_artifact"),
-        status = "pending_publication",
-        detail = paste(unavailable, collapse = "; ")
+      return(list(
+        available = FALSE,
+        check = tibble(
+          check = paste0("consumer_", artifact, "_artifact"),
+          status = "pending_publication",
+          detail = paste(unavailable, collapse = "; ")
+        )
       ))
     }
 
@@ -472,27 +1087,183 @@ reconcile_consumer_artifacts <- function(
     assert_consumer_artifact_schema(
       candidate, contract, paste0(artifact, " candidate")
     )
-    comparison <- consumer_env$reconcile_consumer_artifact(
-      baseline, candidate, contract$key, contract$values, artifact
-    )
-    assert_true(
-      comparison$unexplained_changes == 0L,
-      paste0(
-        artifact, " consumer artifact drift: ",
-        comparison$removed_keys, " removed key(s), ",
-        comparison$added_keys, " added key(s), ",
-        comparison$changed_rows, " changed row(s)."
+    list(
+      available = TRUE,
+      comparison = compare_consumer_artifact(
+        baseline, candidate, contract, artifact
       )
     )
-    tibble(
-      check = paste0("consumer_", artifact, "_artifact"),
-      status = "passed",
-      detail = paste0(
-        comparison$candidate_rows, " candidate rows read from ", candidate_path,
-        "; keyed values unchanged"
-      )
+  })
+  names(artifacts) <- names(contracts)
+  checks <- lapply(artifacts, function(artifact) artifact$check)
+
+  location_unavailable <- c(
+    if (!nzchar(location_paths$baseline)) {
+      "no SITE_GRAIN_BASELINE_SITE_GROUP_PROJECTION path supplied"
+    } else if (!file.exists(location_paths$baseline)) {
+      paste0("baseline projection unavailable: ", location_paths$baseline)
+    },
+    if (!nzchar(location_paths$candidate)) {
+      "no SITE_GRAIN_NEW_SITE_GROUP_PROJECTION path supplied"
+    } else if (!file.exists(location_paths$candidate)) {
+      paste0("candidate projection unavailable: ", location_paths$candidate)
+    }
+  )
+  location_comparison <- NULL
+  baseline_locations <- NULL
+  candidate_locations <- NULL
+  if (length(location_unavailable) == 0L) {
+    location_contract <- list(
+      key = "site_id", values = c("ngr", "easting", "northing")
     )
-  }))
+    baseline_locations <- read_consumer_artifact(
+      location_paths$baseline, "authoritative Site Group projection baseline"
+    )
+    candidate_locations <- read_consumer_artifact(
+      location_paths$candidate, "authoritative Site Group projection candidate"
+    )
+    assert_consumer_artifact_schema(
+      baseline_locations, location_contract,
+      "authoritative Site Group projection baseline"
+    )
+    assert_consumer_artifact_schema(
+      candidate_locations, location_contract,
+      "authoritative Site Group projection candidate"
+    )
+    location_comparison <- compare_consumer_artifact(
+      baseline_locations,
+      candidate_locations,
+      location_contract,
+      "authoritative Site Group projection"
+    )
+  }
+
+  changed_site_ids <- character()
+  if (artifacts$map_support$available && !is.null(location_comparison)) {
+    map_result <- reconcile_map_support_artifact(
+      artifacts$map_support$comparison, location_comparison
+    )
+    checks$map_support <- map_result$check
+    changed_site_ids <- map_result$changed_site_ids
+  } else if (artifacts$map_support$available) {
+    checks$map_support <- tibble(
+      check = "consumer_map_support_artifact",
+      status = "pending_publication",
+      detail = paste(location_unavailable, collapse = "; ")
+    )
+  }
+  if (artifacts$house_property$available) {
+    checks$house_property <- reconcile_property_artifact(
+      artifacts$house_property$comparison,
+      changed_site_ids,
+      "house_property",
+      "house_id"
+    )
+  }
+  if (artifacts$rental_property$available) {
+    checks$rental_property <- reconcile_property_artifact(
+      artifacts$rental_property$comparison,
+      changed_site_ids,
+      "rental_property",
+      "rental_id"
+    )
+  }
+  if (artifacts$rainfall$available) {
+    checks$rainfall <- reconcile_rainfall_artifact(
+      artifacts$rainfall$comparison, changed_site_ids
+    )
+  }
+  if (artifacts$dry_spill$available) {
+    checks$dry_spill <- reconcile_dry_spill_artifact(
+      artifacts$dry_spill$comparison, changed_site_ids
+    )
+  }
+
+  if (artifacts$exposure$available) {
+    expectations <- exposure_expectations
+    if (is.null(expectations)) {
+      unavailable_aggregate_paths <- function(directory) {
+        paths <- file.path(
+          directory,
+          c("agg_spill_mo.parquet", "agg_spill_dry_mo.parquet")
+        )
+        missing <- paths[!file.exists(paths)]
+        if (length(missing) == 0L) character() else paste0("unavailable: ", missing)
+      }
+      exposure_input_errors <- c(
+        if (!nzchar(exposure_inputs$baseline_agg_dir)) {
+          "no SITE_GRAIN_OLD_AGG_DIR path supplied"
+        } else {
+          unavailable_aggregate_paths(exposure_inputs$baseline_agg_dir)
+        },
+        if (!nzchar(exposure_inputs$candidate_agg_dir)) {
+          "no SITE_GRAIN_NEW_AGG_DIR path supplied"
+        } else {
+          unavailable_aggregate_paths(exposure_inputs$candidate_agg_dir)
+        },
+        if (!nzchar(exposure_inputs$population_raster)) {
+          "no SITE_GRAIN_POPULATION_RASTER path supplied"
+        } else if (!file.exists(exposure_inputs$population_raster)) {
+          paste0("unavailable: ", exposure_inputs$population_raster)
+        }
+      )
+      if (
+        is.null(location_comparison) || length(exposure_input_errors) > 0L
+      ) {
+        checks$exposure <- tibble(
+          check = "consumer_exposure_artifact",
+          status = "pending_publication",
+          detail = paste0(
+            if (is.null(location_comparison)) {
+              "authoritative Site Group projections unavailable"
+            } else {
+              ""
+            },
+            if (
+              is.null(location_comparison) && length(exposure_input_errors) > 0L
+            ) {
+              "; "
+            } else {
+              ""
+            },
+            if (length(exposure_input_errors) > 0L) {
+              paste0(
+                "exposure recomputation input(s) unavailable: ",
+                paste(exposure_input_errors, collapse = ", ")
+              )
+            } else {
+              ""
+            }
+          )
+        )
+      } else {
+        assert_true(
+          requireNamespace("sf", quietly = TRUE) &&
+            requireNamespace("terra", quietly = TRUE),
+          "Exposure recomputation requires the sf and terra packages."
+        )
+        expectations <- recompute_exposure_expectations(
+          baseline_locations, candidate_locations, exposure_inputs
+        )
+      }
+    }
+    if (!is.null(expectations)) {
+      checks$exposure <- reconcile_exposure_artifact(
+        artifacts$exposure$comparison, expectations
+      )
+    }
+  }
+
+  for (artifact in names(contracts)) {
+    if (artifacts[[artifact]]$available) {
+      checks[[artifact]]$detail <- paste0(
+        checks[[artifact]]$detail,
+        "; candidate rows read from ", paths[[artifact]]$candidate
+      )
+    }
+  }
+
+  bind_rows(checks[names(contracts)])
 }
 
 reconcile_consumer_manifest <- function(
@@ -511,7 +1282,7 @@ reconcile_consumer_manifest <- function(
       status = "passed",
       detail = paste0(sum(summary$files), " classified grain-token surfaces; no fixture fanout")
     ),
-    reconcile_consumer_artifacts(paths, consumer_env = consumer_env)
+    reconcile_consumer_artifacts(paths)
   )
 }
 
@@ -753,7 +1524,10 @@ main <- function() {
       )
     ),
     reconcile_aggregate_outputs(
-      path_from_env("SITE_GRAIN_BASELINE_AGG_DIR"),
+      path_from_env(
+        "SITE_GRAIN_BASELINE_AGG_DIR",
+        path_from_env("SITE_GRAIN_OLD_AGG_DIR")
+      ),
       path_from_env(
         "SITE_GRAIN_NEW_AGG_DIR",
         here::here("data", "processed", "agg_spill_stats")

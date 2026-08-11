@@ -139,6 +139,10 @@ prepare_house_data <- function(house_data) {
 perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup, radius_km = 10) {
   logger::log_info("Performing spatial join between houses and spill sites")
 
+  if (anyDuplicated(houses_sf$house_id)) {
+    stop("House input must be unique on house_id.", call. = FALSE)
+  }
+
   radius_m <- radius_km * 1000
   chunk_size <- 2000
 
@@ -155,7 +159,7 @@ perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup, radius
       dist = radius_m,
       left = TRUE
     )
-    left_join_site_group_projection(
+    chunk_result <- left_join_site_group_projection(
       spatial_matches,
       spill_lookup,
       context = "House-match Site Group geometry join"
@@ -172,13 +176,14 @@ perform_spatial_join <- function(houses_sf, spill_sites_sf, spill_lookup, radius
       ungroup() %>%
       st_drop_geometry() %>%
       select(house_id, site_id, distance_m, distance_km, n_site_groups)
+
+    if (anyDuplicated(chunk_result[c("house_id", "site_id")])) {
+      stop("House Site Group lookup must be unique on house_id, site_id.", call. = FALSE)
+    }
+    chunk_result
   })
 
-  result <- dplyr::bind_rows(merged_chunks)
-  if (anyDuplicated(result[c("house_id", "site_id")])) {
-    stop("House Site Group lookup must be unique on house_id, site_id.", call. = FALSE)
-  }
-  result
+  dplyr::bind_rows(merged_chunks)
 }
 
 
