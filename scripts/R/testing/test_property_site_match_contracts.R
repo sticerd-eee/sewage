@@ -133,7 +133,9 @@ run_match <- function(spec, properties = property_fixture) {
 
 run_stream <- function(spec, properties = property_fixture, chunk_size = 2L,
                        output_path = tempfile(fileext = ".parquet"),
-                       fail_at = NULL) {
+                       fail_at = NULL,
+                       close_writer = function(writer) writer$Close(),
+                       promote_stage = function(from, to) file.rename(from, to)) {
   names(properties)[names(properties) == "property_id"] <- spec$id_column
   data <- setNames(list(properties), spec$data_key)
   data$spill <- site_fixture
@@ -142,7 +144,9 @@ run_stream <- function(spec, properties = property_fixture, chunk_size = 2L,
     output_path = output_path,
     radius_km = 10,
     chunk_size = chunk_size,
-    fail_at = fail_at
+    fail_at = fail_at,
+    close_writer = close_writer,
+    promote_stage = promote_stage
   )
   output_path
 }
@@ -290,17 +294,26 @@ for (producer_name in names(producer_specs)) {
   Sys.setFileTime(canonical_path, Sys.time() - 120)
   canonical_bytes <- unname(tools::md5sum(canonical_path))
   canonical_mtime <- file.info(canonical_path)$mtime
-  for (failure_point in c(
-    "after_first_row_group", "close", "validation", "sample_oracle", "promotion"
-  )) {
+  failure_cases <- list(
+    after_first_row_group = list(fail_at = "after_first_row_group"),
+    close = list(close_writer = function(writer) {
+      stop("Injected writer close operation failure.", call. = FALSE)
+    }),
+    validation = list(fail_at = "validation"),
+    sample_oracle = list(fail_at = "sample_oracle"),
+    promotion = list(promote_stage = function(from, to) FALSE)
+  )
+  for (failure_point in names(failure_cases)) {
     failure <- tryCatch(
       {
-        run_stream(
-          spec,
-          chunk_size = 2L,
-          output_path = canonical_path,
-          fail_at = failure_point
-        )
+        do.call(run_stream, c(
+          list(
+            spec = spec,
+            chunk_size = 2L,
+            output_path = canonical_path
+          ),
+          failure_cases[[failure_point]]
+        ))
         NULL
       },
       error = identity

@@ -316,7 +316,9 @@ validate_house_stage <- function(stage_path, expected_schema,
 
 write_house_lookup <- function(houses_sf, spill_sites_sf, spill_lookup,
                                output_path, radius_km, chunk_size,
-                               fail_at = NULL) {
+                               fail_at = NULL,
+                               close_writer = function(writer) writer$Close(),
+                               promote_stage = function(from, to) file.rename(from, to)) {
   if (!is.numeric(radius_km) || length(radius_km) != 1L ||
       is.na(radius_km) || radius_km <= 0) {
     stop("radius_km must be one positive number.", call. = FALSE)
@@ -377,11 +379,8 @@ write_house_lookup <- function(houses_sf, spill_sites_sf, spill_lookup,
     }
   }
 
-  writer$Close()
+  close_writer(writer)
   writer_open <- FALSE
-  if (identical(fail_at, "close")) {
-    stop("Injected house writer close failure.", call. = FALSE)
-  }
   output_stream$close()
   stream_open <- FALSE
   rm(writer, output_stream, writer_properties)
@@ -416,10 +415,7 @@ write_house_lookup <- function(houses_sf, spill_sites_sf, spill_lookup,
   )
   gc(verbose = FALSE)
 
-  if (identical(fail_at, "promotion")) {
-    stop("Injected house promotion failure.", call. = FALSE)
-  }
-  if (!file.rename(stage_path, output_path)) {
+  if (!promote_stage(stage_path, output_path)) {
     stop("Failed to promote the staged house lookup.", call. = FALSE)
   }
   logger::log_info(
@@ -434,7 +430,9 @@ write_house_lookup <- function(houses_sf, spill_sites_sf, spill_lookup,
 }
 
 process_spatial_data <- function(data, output_path, radius_km, chunk_size,
-                                 fail_at = NULL) {
+                                 fail_at = NULL,
+                                 close_writer = function(writer) writer$Close(),
+                                 promote_stage = function(from, to) file.rename(from, to)) {
   houses_sf <- prepare_house_data(data$house)
   spill_data <- prepare_spill_sites(data$spill)
   write_house_lookup(
@@ -444,7 +442,9 @@ process_spatial_data <- function(data, output_path, radius_km, chunk_size,
     output_path = output_path,
     radius_km = radius_km,
     chunk_size = chunk_size,
-    fail_at = fail_at
+    fail_at = fail_at,
+    close_writer = close_writer,
+    promote_stage = promote_stage
   )
 }
 
