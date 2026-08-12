@@ -76,28 +76,42 @@ load_data <- function() {
     dplyr::collect() |>
     as.data.table()
   rental_dt[, rented_est := as.POSIXct(rented_est, tz = "UTC")]
+  rental_dt[, cutoff_year := as.integer(format(
+    rented_est - 1,
+    "%Y",
+    tz = "UTC"
+  ))]
   setkey(rental_dt, rental_id)
   logger::log_info("Rental data loaded: {nrow(rental_dt)} rows")
   
-  rental_years <- sort(unique(lubridate::year(rental_dt$rented_est)))
-  min_rental_year <- min(rental_years)
-  max_rental_year <- max(rental_years)
-  sample_years <- seq(min_rental_year, max_rental_year)
-  logger::log_info("Rental year window for missingness: {min_rental_year}-{max_rental_year}")
+  transaction_cutoff_years <- sort(unique(rental_dt$cutoff_year))
+  max_cutoff_year <- max(transaction_cutoff_years)
+  cutoff_years <- if (max_cutoff_year >= CONFIG$base_year) {
+    c(
+      transaction_cutoff_years[transaction_cutoff_years == CONFIG$base_year - 1L],
+      seq.int(CONFIG$base_year, max_cutoff_year)
+    )
+  } else {
+    CONFIG$base_year - 1L
+  }
+  logger::log_info(
+    "Rental exposure completeness prefixes: {CONFIG$base_year}-{max_cutoff_year}; keyed by site_id and cutoff_year"
+  )
   
   site_group_crosswalk_dt <- arrow::read_parquet(CONFIG$site_group_crosswalk_path) |>
     as.data.table()
-  site_missing_dt <- derive_site_group_missing_flags(
+  site_missing_dt <- derive_site_group_prefix_missing_flags(
     site_group_crosswalk_dt,
-    sample_years
+    CONFIG$base_year,
+    cutoff_years
   ) |>
     data.table::as.data.table()
-  setkey(site_missing_dt, site_id)
+  setkey(site_missing_dt, site_id, cutoff_year)
   logger::log_info(
-    "Site Group crosswalk loaded: {nrow(site_group_crosswalk_dt)} rows; missing flags for {nrow(site_missing_dt)} groups"
+    "Site Group crosswalk loaded: {nrow(site_group_crosswalk_dt)} rows; {nrow(site_missing_dt)} prefix flags"
   )
   logger::log_info(
-    "Sites flagged as missing in rental-year window: {site_missing_dt[site_missing == TRUE, .N]}"
+    "Site-cutoff prefixes flagged as missing: {site_missing_dt[site_missing == TRUE, .N]}"
   )
   
   # Load spill lookup - filter to max radius threshold to reduce join size
@@ -148,19 +162,41 @@ create_joined_events <- function(rental_ids, data) {
     on = "rental_id",
     nomatch = 0L
   ]
-  lookup_chunk <- lookup_chunk[, .(rental_id, site_id, distance_m)]
-  lookup_chunk <- data$site_missing_dt[lookup_chunk, on = "site_id"]
-  lookup_chunk[, site_missing := fifelse(is.na(site_missing), TRUE, site_missing)]
+  lookup_pairs <- lookup_chunk[, .(rental_id, site_id, distance_m)]
+  rental_sites <- rental_chunk[lookup_pairs, on = "rental_id", nomatch = 0L]
+  assert_left_row_count(
+    lookup_pairs,
+    rental_sites,
+    "Rental transaction attachment to lookup pairs"
+  )
+  rental_sites_with_missing <- data$site_missing_dt[
+    rental_sites,
+    on = .(site_id, cutoff_year)
+  ]
+  assert_left_row_count(
+    rental_sites,
+    rental_sites_with_missing,
+    "Rental Site Group prefix missingness join"
+  )
+  rental_sites_with_missing[, site_missing := fifelse(
+    is.na(site_missing), TRUE, site_missing
+  )]
+  rental_sites_with_missing[, cutoff_year := NULL]
+  lookup_chunk <- rental_sites_with_missing[, .(
+    rental_id, site_id, distance_m, site_missing
+  )]
   
   if (nrow(lookup_chunk) == 0) {
     return(list(events_dt = NULL, lookup_chunk = lookup_chunk))
   }
   
-  # Join: rental -> spill_lookup
-  rental_sites <- lookup_chunk[rental_chunk, on = "rental_id", nomatch = NULL]
-  
   # Join: rental_sites -> raw_events
-  joined <- data$raw_events_dt[rental_sites, on = "site_id", nomatch = NULL, allow.cartesian = TRUE]
+  joined <- data$raw_events_dt[
+    rental_sites_with_missing,
+    on = "site_id",
+    nomatch = NULL,
+    allow.cartesian = TRUE
+  ]
   
   # Filter to overlapping events and clamp times
   joined <- joined[start_time < rented_est & end_time >= CONFIG$window_start]

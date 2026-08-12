@@ -75,28 +75,43 @@ load_data <- function() {
     dplyr::filter(date_of_transfer >= CONFIG$window_start) |>
     dplyr::collect() |>
     as.data.table()
+  house_dt[, date_of_transfer := as.POSIXct(date_of_transfer, tz = "UTC")]
+  house_dt[, cutoff_year := as.integer(format(
+    date_of_transfer - 1,
+    "%Y",
+    tz = "UTC"
+  ))]
   setkey(house_dt, house_id)
   logger::log_info("House price data loaded: {nrow(house_dt)} rows")
 
-  sale_years <- sort(unique(lubridate::year(house_dt$date_of_transfer)))
-  min_sale_year <- min(sale_years)
-  max_sale_year <- max(sale_years)
-  sample_years <- seq(min_sale_year, max_sale_year)
-  logger::log_info("Sale year window for missingness: {min_sale_year}-{max_sale_year}")
+  transaction_cutoff_years <- sort(unique(house_dt$cutoff_year))
+  max_cutoff_year <- max(transaction_cutoff_years)
+  cutoff_years <- if (max_cutoff_year >= CONFIG$base_year) {
+    c(
+      transaction_cutoff_years[transaction_cutoff_years == CONFIG$base_year - 1L],
+      seq.int(CONFIG$base_year, max_cutoff_year)
+    )
+  } else {
+    CONFIG$base_year - 1L
+  }
+  logger::log_info(
+    "Sale exposure completeness prefixes: {CONFIG$base_year}-{max_cutoff_year}; keyed by site_id and cutoff_year"
+  )
 
   site_group_crosswalk_dt <- arrow::read_parquet(CONFIG$site_group_crosswalk_path) |>
     as.data.table()
-  site_missing_dt <- derive_site_group_missing_flags(
+  site_missing_dt <- derive_site_group_prefix_missing_flags(
     site_group_crosswalk_dt,
-    sample_years
+    CONFIG$base_year,
+    cutoff_years
   ) |>
     data.table::as.data.table()
-  setkey(site_missing_dt, site_id)
+  setkey(site_missing_dt, site_id, cutoff_year)
   logger::log_info(
-    "Site Group crosswalk loaded: {nrow(site_group_crosswalk_dt)} rows; missing flags for {nrow(site_missing_dt)} groups"
+    "Site Group crosswalk loaded: {nrow(site_group_crosswalk_dt)} rows; {nrow(site_missing_dt)} prefix flags"
   )
   logger::log_info(
-    "Sites flagged as missing in sale-year window: {site_missing_dt[site_missing == TRUE, .N]}"
+    "Site-cutoff prefixes flagged as missing: {site_missing_dt[site_missing == TRUE, .N]}"
   )
 
  # Load spill lookup - filter to max radius threshold to reduce join size
@@ -147,19 +162,41 @@ create_joined_events <- function(house_ids, data) {
     on = "house_id",
     nomatch = 0L
   ]
-  lookup_chunk <- lookup_chunk[, .(house_id, site_id, distance_m)]
-  lookup_chunk <- data$site_missing_dt[lookup_chunk, on = "site_id"]
-  lookup_chunk[, site_missing := fifelse(is.na(site_missing), TRUE, site_missing)]
+  lookup_pairs <- lookup_chunk[, .(house_id, site_id, distance_m)]
+  house_sites <- house_chunk[lookup_pairs, on = "house_id", nomatch = 0L]
+  assert_left_row_count(
+    lookup_pairs,
+    house_sites,
+    "House transaction attachment to lookup pairs"
+  )
+  house_sites_with_missing <- data$site_missing_dt[
+    house_sites,
+    on = .(site_id, cutoff_year)
+  ]
+  assert_left_row_count(
+    house_sites,
+    house_sites_with_missing,
+    "House Site Group prefix missingness join"
+  )
+  house_sites_with_missing[, site_missing := fifelse(
+    is.na(site_missing), TRUE, site_missing
+  )]
+  house_sites_with_missing[, cutoff_year := NULL]
+  lookup_chunk <- house_sites_with_missing[, .(
+    house_id, site_id, distance_m, site_missing
+  )]
 
   if (nrow(lookup_chunk) == 0) {
     return(list(events_dt = NULL, lookup_chunk = lookup_chunk))
   }
 
-  # Join: house -> spill_lookup
-  house_sites <- lookup_chunk[house_chunk, on = "house_id", nomatch = NULL]
-
   # Join: house_sites -> raw_events
-  joined <- data$raw_events_dt[house_sites, on = "site_id", nomatch = NULL, allow.cartesian = TRUE]
+  joined <- data$raw_events_dt[
+    house_sites_with_missing,
+    on = "site_id",
+    nomatch = NULL,
+    allow.cartesian = TRUE
+  ]
 
   # Filter to overlapping events and clamp times
   joined <- joined[start_time < date_of_transfer & end_time >= CONFIG$window_start]
