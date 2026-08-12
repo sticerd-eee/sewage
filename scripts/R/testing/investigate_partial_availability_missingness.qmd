@@ -35,6 +35,10 @@ install_if_missing <- function(packages) {
 }
 install_if_missing(required_packages)
 
+source(here::here(
+  "scripts", "R", "utils", "annual_return_mapping_utils.R"
+))
+
 USE_SAMPLE <- FALSE
 SAMPLE_N <- 500L
 YEARS <- 2021:2023
@@ -47,7 +51,10 @@ path_lookup <- here::here("data", "processed", "annual_return_lookup.parquet")
 ## Load Data & Define Partial-Availability Population
 
 ```{r}
-unique_sites <- arrow::read_parquet(path_unique_sites)
+unique_sites <- arrow::read_parquet(path_unique_sites) |>
+  # This notebook deliberately studies Canonical Spill Site histories.
+  dplyr::select(-"site_id")
+stopifnot(!anyDuplicated(unique_sites$site_id_canonical))
 annual_return <- arrow::read_parquet(path_annual_return)
 lookup <- arrow::read_parquet(path_lookup)
 
@@ -139,7 +146,7 @@ id_cols <- paste0("site_id_", YEARS)
 
 # Pivot lookup from wide to long
 lookup_long <- lookup |>
-  dplyr::select(site_id, dplyr::any_of(id_cols)) |>
+  dplyr::select(site_id_canonical = site_id, dplyr::any_of(id_cols)) |>
   tidyr::pivot_longer(
     cols = dplyr::any_of(id_cols),
     names_to = "id_year_col",
@@ -148,7 +155,16 @@ lookup_long <- lookup |>
   dplyr::mutate(year = as.integer(readr::parse_number(id_year_col))) |>
   dplyr::filter(year %in% YEARS, !is.na(year_site_id)) |>
   dplyr::group_by(year, year_site_id) |>
-  dplyr::summarise(site_id = dplyr::first(site_id), .groups = "drop")
+  dplyr::summarise(
+    site_id_canonical = {
+      ids <- unique(stats::na.omit(.data$site_id_canonical))
+      if (length(ids) != 1L) {
+        stop("Annual lookup does not map a year-specific site to exactly one canonical site.")
+      }
+      ids[[1]]
+    },
+    .groups = "drop"
+  )
 
 # Pivot annual return from wide to long, matching year to the correct site_id column
 annual_long <- annual_return |>
@@ -165,22 +181,27 @@ annual_long <- annual_return |>
     values_to = "year_site_id"
   ) |>
   dplyr::mutate(id_year = as.integer(readr::parse_number(id_year_col))) |>
-  dplyr::filter(year == id_year, !is.na(year_site_id)) |>
+  dplyr::filter(year == id_year) |>
   dplyr::select(-id_year_col, -id_year)
 
-# Join to get canonical site_id
+# Join to get the explicit Canonical Spill Site key.
 annual_mapped <- annual_long |>
   dplyr::left_join(lookup_long, by = c("year", "year_site_id")) |>
-  dplyr::mutate(
-    site_id = dplyr::coalesce(as.integer(site_id), as.integer(year_site_id))
-  ) |>
+  finalise_annual_lookup_mapping() |>
   dplyr::select(-year_site_id)
 
-cat("Annual return rows mapped to canonical site_id:", nrow(annual_mapped), "\n")
+cat("Annual return rows mapped to site_id_canonical:", nrow(annual_mapped), "\n")
 
 # Filter to partial-availability sites
 annual_partial <- annual_mapped |>
-  dplyr::filter(site_id %in% partial_sites$site_id)
+  dplyr::filter(site_id_canonical %in% partial_sites$site_id_canonical)
+
+duplicate_canonical_site_years <- annual_partial |>
+  dplyr::count(site_id_canonical, year, name = "n") |>
+  dplyr::filter(n != 1L)
+if (nrow(duplicate_canonical_site_years) > 0L) {
+  stop("Annual return rows must be unique at site_id_canonical-year grain.")
+}
 
 cat("Annual return rows for partial-availability sites:", nrow(annual_partial), "\n")
 ```
@@ -194,37 +215,37 @@ are NA in the annual return. When both are NA, the row fails both the zero-spill
 ```{r}
 # Build a site-year panel from partial sites
 site_year_panel <- tidyr::expand_grid(
-  site_id = partial_sites$site_id,
+  site_id_canonical = partial_sites$site_id_canonical,
   year = YEARS
 )
 
 # Add availability flag from unique_sites
 avail_long <- partial_sites |>
-  dplyr::select(site_id, dplyr::all_of(avail_cols)) |>
+  dplyr::select(site_id_canonical, dplyr::all_of(avail_cols)) |>
   tidyr::pivot_longer(
     cols = dplyr::all_of(avail_cols),
     names_to = "avail_col",
     values_to = "available"
   ) |>
   dplyr::mutate(year = as.integer(stringr::str_extract(avail_col, "\\d{4}"))) |>
-  dplyr::select(site_id, year, available)
+  dplyr::select(site_id_canonical, year, available)
 
 site_year_panel <- site_year_panel |>
-  dplyr::left_join(avail_long, by = c("site_id", "year"))
+  dplyr::left_join(avail_long, by = c("site_id_canonical", "year"))
 
 # Add spill metrics from annual return
 site_year_panel <- site_year_panel |>
   dplyr::left_join(
     annual_partial |>
-      dplyr::select(site_id, year, spill_hrs_ea, spill_count_ea) |>
-      dplyr::distinct(site_id, year, .keep_all = TRUE),
-    by = c("site_id", "year")
+      dplyr::select(site_id_canonical, year, spill_hrs_ea, spill_count_ea),
+    by = c("site_id_canonical", "year")
   ) |>
   dplyr::mutate(
     both_na = is.na(spill_hrs_ea) & is.na(spill_count_ea),
     in_annual_return = !is.na(spill_hrs_ea) | !is.na(spill_count_ea) |
-      (site_id %in% annual_partial$site_id &
-         paste(site_id, year) %in% paste(annual_partial$site_id, annual_partial$year))
+      (site_id_canonical %in% annual_partial$site_id_canonical &
+         paste(site_id_canonical, year) %in%
+           paste(annual_partial$site_id_canonical, annual_partial$year))
   )
 
 # Cross-tab: both_na vs available
@@ -258,7 +279,8 @@ cat("Exceptions: available=FALSE but spill metrics NOT both NA:",
 not_in_ar <- site_year_panel |>
   dplyr::filter(
     available == FALSE,
-    !paste(site_id, year) %in% paste(annual_partial$site_id, annual_partial$year)
+    !paste(site_id_canonical, year) %in%
+      paste(annual_partial$site_id_canonical, annual_partial$year)
   )
 cat("Missing site-years with no annual return row at all:", nrow(not_in_ar), "\n")
 ```
@@ -275,15 +297,20 @@ For each missing site-year, gather the `edm_operation_reason` from four sources 
 ```{r}
 # Prepare reason from annual return (source 1 & 3)
 ar_reasons <- annual_partial |>
-  dplyr::select(site_id, year, edm_operation_reason, edm_operation_percent) |>
-  dplyr::distinct(site_id, year, .keep_all = TRUE)
+  dplyr::select(
+    site_id_canonical, year, edm_operation_reason, edm_operation_percent
+  )
 
 # Prepare reason from unique_sites wide columns (source 2 & 4)
 reason_cols <- paste0("edm_operation_reason_", YEARS)
 percent_cols <- paste0("edm_operation_percent_", YEARS)
 
 us_reasons <- partial_sites |>
-  dplyr::select(site_id, dplyr::all_of(reason_cols), dplyr::all_of(percent_cols)) |>
+  dplyr::select(
+    site_id_canonical,
+    dplyr::all_of(reason_cols),
+    dplyr::all_of(percent_cols)
+  ) |>
   tidyr::pivot_longer(
     cols = dplyr::all_of(reason_cols),
     names_to = "reason_col",
@@ -298,12 +325,12 @@ us_reasons <- partial_sites |>
   ) |>
   dplyr::mutate(pct_year = as.integer(stringr::str_extract(pct_col, "\\d{4}"))) |>
   dplyr::filter(year == pct_year) |>
-  dplyr::select(site_id, year, us_reason, us_percent)
+  dplyr::select(site_id_canonical, year, us_reason, us_percent)
 
 # Build missing site-years
 missing_site_years <- site_year_panel |>
   dplyr::filter(available == FALSE) |>
-  dplyr::select(site_id, year)
+  dplyr::select(site_id_canonical, year)
 
 # Join all four reason sources
 missing_reasons <- missing_site_years |>
@@ -311,12 +338,12 @@ missing_reasons <- missing_site_years |>
   dplyr::left_join(
     ar_reasons |> dplyr::rename(ar_reason_y = edm_operation_reason,
                                  ar_percent_y = edm_operation_percent),
-    by = c("site_id", "year")
+    by = c("site_id_canonical", "year")
   ) |>
   # Source 2: unique_sites for year Y
   dplyr::left_join(
     us_reasons |> dplyr::rename(us_reason_y = us_reason, us_percent_y = us_percent),
-    by = c("site_id", "year")
+    by = c("site_id_canonical", "year")
   ) |>
   # Source 3: annual return for year Y-1
   dplyr::left_join(
@@ -324,14 +351,14 @@ missing_reasons <- missing_site_years |>
       dplyr::mutate(year = year + 1L) |>
       dplyr::rename(ar_reason_ym1 = edm_operation_reason,
                      ar_percent_ym1 = edm_operation_percent),
-    by = c("site_id", "year")
+    by = c("site_id_canonical", "year")
   ) |>
   # Source 4: unique_sites for year Y-1
   dplyr::left_join(
     us_reasons |>
       dplyr::mutate(year = year + 1L) |>
       dplyr::rename(us_reason_ym1 = us_reason, us_percent_ym1 = us_percent),
-    by = c("site_id", "year")
+    by = c("site_id_canonical", "year")
   )
 
 # Coalesce: prefer Y direct, then Y unique_sites, then Y-1 direct, then Y-1 unique_sites
@@ -443,8 +470,8 @@ if (nrow(missing_pct_available) > 0) {
 ```{r}
 missing_with_company <- missing_reasons |>
   dplyr::left_join(
-    partial_sites |> dplyr::select(site_id, water_company),
-    by = "site_id"
+    partial_sites |> dplyr::select(site_id_canonical, water_company),
+    by = "site_id_canonical"
   )
 
 get_top_reason <- function(x) {
@@ -550,10 +577,10 @@ if (nrow(disappearing) > 0) {
 
   # Get reasons for the transition year from annual return
   transition_reasons <- disappearing_transitions |>
-    dplyr::select(site_id, pattern, first_missing_year) |>
+    dplyr::select(site_id_canonical, pattern, first_missing_year) |>
     dplyr::left_join(
       ar_reasons |> dplyr::rename(transition_reason = edm_operation_reason),
-      by = c("site_id", "first_missing_year" = "year")
+      by = c("site_id_canonical", "first_missing_year" = "year")
     ) |>
     dplyr::mutate(
       transition_reason = tidyr::replace_na(transition_reason, "(no annual return row)")
@@ -578,16 +605,18 @@ if (nrow(disappearing) > 0) {
 ```{r}
 # Asset type for partial-availability sites
 partial_asset <- annual_mapped |>
-  dplyr::filter(site_id %in% partial_sites$site_id) |>
-  dplyr::distinct(site_id, asset_type) |>
-  dplyr::group_by(site_id) |>
-  dplyr::summarise(asset_type = dplyr::first(asset_type), .groups = "drop")
+  dplyr::filter(site_id_canonical %in% partial_sites$site_id_canonical) |>
+  dplyr::summarise(
+    asset_type = paste(sort(unique(stats::na.omit(asset_type))), collapse = "; "),
+    .by = site_id_canonical
+  )
 
 # Asset type for all sites
 all_asset <- annual_mapped |>
-  dplyr::distinct(site_id, asset_type) |>
-  dplyr::group_by(site_id) |>
-  dplyr::summarise(asset_type = dplyr::first(asset_type), .groups = "drop")
+  dplyr::summarise(
+    asset_type = paste(sort(unique(stats::na.omit(asset_type))), collapse = "; "),
+    .by = site_id_canonical
+  )
 
 asset_comparison <- dplyr::bind_rows(
   partial_asset |> dplyr::mutate(group = "Partial availability"),

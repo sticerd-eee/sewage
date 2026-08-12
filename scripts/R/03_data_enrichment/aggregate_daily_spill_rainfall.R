@@ -38,6 +38,7 @@ initialise_environment <- function() {
 
   # Source shared utilities for spill aggregation and rainfall indicators.
   source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
+  source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 }
 
 #' Set up logging configuration
@@ -58,7 +59,7 @@ setup_logging <- function() {
 CONFIG <- list(
   # Input file paths
   spill_events_path = here::here("data", "processed", "matched_events_annual_data", "matched_events_annual_data.parquet"),
-  spill_sites_path  = here::here("data", "processed", "unique_spill_sites.parquet"),
+  site_group_crosswalk_path = here::here("data", "processed", "matched_events_annual_data", "site_group_crosswalk.parquet"),
   rainfall_path     = here::here("data", "processed", "rainfall", "rainfall_data_cleaned.parquet"),
   lookup_path       = here::here("data", "processed", "rainfall", "spill_site_grid_lookup.parquet"),
 
@@ -70,6 +71,7 @@ CONFIG <- list(
   start_date = as.Date("2021-01-01"),
   end_date   = as.Date("2023-12-31"),
   study_years = 2021:2023,
+  site_group_years = 2021:2024,
   rainfall_lookback_days = 3L,
 
   # Memory management
@@ -82,13 +84,18 @@ CONFIG <- list(
 #' Load unique spill sites with availability flags
 #' @return data.table with site_id, water_company, ngr, available_year_* columns
 load_spill_sites <- function() {
-  logger::log_info("Loading spill sites from: {basename(CONFIG$spill_sites_path)}")
-  sites_dt <- arrow::read_parquet(CONFIG$spill_sites_path) |>
-    select(site_id, water_company, ngr,
-           available_year_2021, available_year_2022, available_year_2023) |>
+  logger::log_info("Loading Site Groups from: {basename(CONFIG$site_group_crosswalk_path)}")
+  availability_columns <- paste0("available_year_", CONFIG$site_group_years)
+  sites_dt <- read_site_group_projection(
+    CONFIG$site_group_crosswalk_path,
+    years = CONFIG$site_group_years,
+    include_availability = TRUE
+  ) |>
+    dplyr::select("site_id", "water_company", "ngr", dplyr::all_of(availability_columns)) |>
     as.data.table()
 
-  logger::log_info("Loaded {nrow(sites_dt)} unique spill sites")
+  assert_unique_site_groups(sites_dt, "Daily-panel Site Group projection")
+  logger::log_info("Loaded {nrow(sites_dt)} unique Site Groups")
   return(sites_dt)
 }
 
@@ -147,20 +154,7 @@ aggregate_daily_spills <- function(events_dt) {
                       spill_count = integer(), spill_hrs = numeric()))
   }
 
-  dt <- copy(events_dt)
-
-  # Clamp events to year boundaries (same as prepare_spill_data() in utils)
-  dt[, c("lower", "upper") := {
-    lr <- as.POSIXct(ISOdatetime(year, 1, 1, 0, 0, 0), tz = "UTC")
-    ur <- as.POSIXct(ISOdatetime(year + 1, 1, 1, 0, 0, 0), tz = "UTC")
-    list(lr, ur)
-  }, by = year]
-
-  dt[, `:=`(
-    start_time = pmax(start_time, lower),
-    end_time   = pmin(end_time,   upper)
-  )]
-  dt[, c("lower", "upper") := NULL]
+  dt <- clamp_spill_records_to_year(copy(events_dt))
 
   # Split into daily records
   daily_dt <- split_daily_records(dt)
@@ -265,7 +259,13 @@ process_chunk <- function(chunk_sites, events_dt, rainfall_dt, lookup_dt,
     grid[, year := data.table::year(date)]
 
     # 2. Join site metadata (water_company)
+    grid_before_metadata <- data.table::copy(grid)
     grid <- chunk_sites[, .(site_id, water_company)][grid, on = "site_id"]
+    assert_left_row_count(
+      grid_before_metadata,
+      grid,
+      "Daily-panel Site Group metadata join"
+    )
 
     # 3. Compute daily spill aggregates
     chunk_events <- events_dt[site_id %in% chunk_sites$site_id]

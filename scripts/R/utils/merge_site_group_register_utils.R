@@ -1,28 +1,27 @@
 ############################################################
-# Merge Works Register Utilities
+# Merge Site Group Register Utilities
 # Project: Sewage
 ############################################################
 
-#' Utilities for constructing a year-invariant works register over canonical
-#' annual-return lookup site IDs.
+#' Utilities for constructing a year-invariant Site Group register over
+#' Canonical Spill Site IDs from the annual-return lookup.
 #'
 #' Defines functions only. File reads, writes, and logging are owned by the
 #' orchestrating script.
 
-WORKS_REGISTER_MEMBERSHIP_PROTOTYPE <- tibble::tibble(
+SITE_GROUP_REGISTER_MEMBERSHIP_PROTOTYPE <- tibble::tibble(
   site_id = integer(),
-  member_site_id = integer(),
+  site_id_canonical = integer(),
   water_company = character(),
   component_id = integer(),
   n_members = integer(),
-  site_id_members = character()
+  site_id_canonical_members = character()
 )
 
-WORKS_REGISTER_RESOLVER_PROTOTYPE <- tibble::tibble(
+SITE_GROUP_REGISTER_RESOLVER_PROTOTYPE <- tibble::tibble(
   annual_row_id = integer(),
   site_id = integer(),
-  member_site_id = integer(),
-  canonical_site_id = integer(),
+  site_id_canonical = integer(),
   water_company = character(),
   year = integer(),
   annual_site_id = integer(),
@@ -43,13 +42,10 @@ WORKS_REGISTER_RESOLVER_PROTOTYPE <- tibble::tibble(
   easting = double(),
   northing = double(),
   spill_hrs_ea = double(),
-  spill_count_ea = double(),
-  edm_operation_percent = double(),
-  no_full_years_edm_data = double(),
-  edm_commission_date = as.Date(character())
+  spill_count_ea = double()
 )
 
-WORKS_REGISTER_EDGE_PROTOTYPE <- tibble::tibble(
+SITE_GROUP_REGISTER_EDGE_PROTOTYPE <- tibble::tibble(
   water_company = character(),
   site_name_ea_norm = character(),
   site_id_from = integer(),
@@ -59,7 +55,7 @@ WORKS_REGISTER_EDGE_PROTOTYPE <- tibble::tibble(
   distance_m = double()
 )
 
-WORKS_REGISTER_NEAR_MISS_PROTOTYPE <- tibble::tibble(
+SITE_GROUP_REGISTER_NEAR_MISS_PROTOTYPE <- tibble::tibble(
   water_company = character(),
   site_name_ea_norm = character(),
   site_id_from = integer(),
@@ -68,30 +64,17 @@ WORKS_REGISTER_NEAR_MISS_PROTOTYPE <- tibble::tibble(
   reason = character()
 )
 
-normalise_works_text <- function(x) {
+normalise_register_value <- function(x) {
   x <- as.character(x)
   x <- stringr::str_squish(stringr::str_to_upper(stringr::str_trim(x)))
   x[x %in% c("", "TBC", "N/A", "NA")] <- NA_character_
   x
-}
-
-normalise_register_permit <- function(x) {
-  x <- as.character(x)
-  x <- stringr::str_squish(stringr::str_to_upper(stringr::str_trim(x)))
-  x[x %in% c("", "TBC", "N/A", "NA")] <- NA_character_
-  x
-}
-
-parse_iso_date_or_na <- function(x) {
-  x <- as.character(x)
-  x[!stringr::str_detect(x, "^\\d{4}-\\d{2}-\\d{2}$")] <- NA_character_
-  as.Date(x)
 }
 
 annual_lookup_long <- function(lookup_tbl) {
   if (is.null(lookup_tbl) || nrow(lookup_tbl) == 0) {
     return(tibble::tibble(
-      canonical_site_id = integer(),
+      site_id_canonical = integer(),
       year = integer(),
       annual_site_id = integer()
     ))
@@ -104,12 +87,12 @@ annual_lookup_long <- function(lookup_tbl) {
       values_to = "annual_site_id"
     ) %>%
     dplyr::mutate(
-      canonical_site_id = as.integer(.data$site_id),
+      site_id_canonical = as.integer(.data$site_id),
       year = as.integer(stringr::str_remove(.data$year_col, "^site_id_")),
       annual_site_id = as.integer(.data$annual_site_id)
     ) %>%
     dplyr::filter(!is.na(.data$annual_site_id)) %>%
-    dplyr::select("canonical_site_id", "year", "annual_site_id")
+    dplyr::select("site_id_canonical", "year", "annual_site_id")
 }
 
 attach_annual_site_id <- function(annual_rows, years = 2021:2024) {
@@ -141,11 +124,11 @@ attach_annual_site_id <- function(annual_rows, years = 2021:2024) {
   dplyr::mutate(annual_rows, annual_site_id = !!annual_site_id)
 }
 
-prepare_works_register_annual_rows <- function(annual_rows, lookup_tbl = NULL,
+prepare_site_group_register_annual_rows <- function(annual_rows, lookup_tbl = NULL,
                                                years = 2021:2024) {
   if (nrow(annual_rows) == 0) {
-    return(WORKS_REGISTER_RESOLVER_PROTOTYPE %>%
-      dplyr::select(-"site_id", -"member_site_id"))
+    return(SITE_GROUP_REGISTER_RESOLVER_PROTOTYPE %>%
+      dplyr::select(-"site_id"))
   }
 
   rows <- annual_rows %>%
@@ -155,10 +138,10 @@ prepare_works_register_annual_rows <- function(annual_rows, lookup_tbl = NULL,
       year = as.integer(.data$year)
     )
 
-  if (!"canonical_site_id" %in% names(rows)) {
+  if (!"site_id_canonical" %in% names(rows)) {
     if (is.null(lookup_tbl)) {
       stop(
-        "lookup_tbl is required when annual_rows lacks canonical_site_id.",
+        "lookup_tbl is required when annual_rows lacks site_id_canonical.",
         call. = FALSE
       )
     }
@@ -168,7 +151,7 @@ prepare_works_register_annual_rows <- function(annual_rows, lookup_tbl = NULL,
       dplyr::left_join(lookup_long, by = c("year", "annual_site_id"))
 
     missing_links <- rows %>%
-      dplyr::filter(is.na(.data$canonical_site_id))
+      dplyr::filter(is.na(.data$site_id_canonical))
     if (nrow(missing_links) > 0) {
       stop(
         "Annual rows without lookup links: ", nrow(missing_links),
@@ -185,45 +168,37 @@ prepare_works_register_annual_rows <- function(annual_rows, lookup_tbl = NULL,
   if (!"permit_reference_ea" %in% names(rows)) rows$permit_reference_ea <- NA_character_
   if (!"spill_hrs_ea" %in% names(rows)) rows$spill_hrs_ea <- NA_real_
   if (!"spill_count_ea" %in% names(rows)) rows$spill_count_ea <- NA_real_
-  if (!"edm_operation_percent" %in% names(rows)) rows$edm_operation_percent <- NA_real_
-  if (!"no_full_years_edm_data" %in% names(rows)) rows$no_full_years_edm_data <- NA_real_
-  if (!"edm_commission_date" %in% names(rows)) rows$edm_commission_date <- as.Date(NA)
-
   coords <- parse_bng_coordinates(clean_ngr(rows$outlet_discharge_ngr))
 
   rows %>%
     dplyr::mutate(
-      canonical_site_id = as.integer(.data$canonical_site_id),
+      site_id_canonical = as.integer(.data$site_id_canonical),
       water_company = as.character(.data$water_company),
       site_name_ea = as.character(.data$site_name_ea),
-      site_name_ea_norm = normalise_works_text(.data$site_name_ea),
+      site_name_ea_norm = normalise_register_value(.data$site_name_ea),
       site_name_wa_sc = as.character(.data$site_name_wa_sc),
-      site_name_wa_sc_norm = normalise_works_text(.data$site_name_wa_sc),
+      site_name_wa_sc_norm = normalise_register_value(.data$site_name_wa_sc),
       permit_reference_ea = as.character(.data$permit_reference_ea),
       permit_reference_ea_norm =
-        normalise_register_permit(.data$permit_reference_ea),
+        normalise_register_value(.data$permit_reference_ea),
       permit_reference_wa_sc = as.character(.data$permit_reference_wa_sc),
       permit_reference_wa_sc_norm =
-        normalise_register_permit(.data$permit_reference_wa_sc),
+        normalise_register_value(.data$permit_reference_wa_sc),
       activity_reference = as.character(.data$activity_reference),
       activity_reference_norm =
-        normalise_register_permit(.data$activity_reference),
+        normalise_register_value(.data$activity_reference),
       unique_id = as.character(.data$unique_id),
-      unique_id_norm = normalise_register_permit(.data$unique_id),
+      unique_id_norm = normalise_register_value(.data$unique_id),
       outlet_discharge_ngr = as.character(.data$outlet_discharge_ngr),
       ngr_clean = clean_ngr(.data$outlet_discharge_ngr),
       easting = coords$easting,
       northing = coords$northing,
       spill_hrs_ea = as.numeric(.data$spill_hrs_ea),
-      spill_count_ea = as.numeric(.data$spill_count_ea),
-      edm_operation_percent = as.numeric(.data$edm_operation_percent),
-      no_full_years_edm_data =
-        suppressWarnings(as.numeric(.data$no_full_years_edm_data)),
-      edm_commission_date = parse_iso_date_or_na(.data$edm_commission_date)
+      spill_count_ea = as.numeric(.data$spill_count_ea)
     ) %>%
     dplyr::select(
       "annual_row_id",
-      "canonical_site_id",
+      "site_id_canonical",
       "water_company",
       "year",
       "annual_site_id",
@@ -244,10 +219,7 @@ prepare_works_register_annual_rows <- function(annual_rows, lookup_tbl = NULL,
       "easting",
       "northing",
       "spill_hrs_ea",
-      "spill_count_ea",
-      "edm_operation_percent",
-      "no_full_years_edm_data",
-      "edm_commission_date"
+      "spill_count_ea"
     )
 }
 
@@ -283,11 +255,11 @@ site_pair_metrics <- function(left_rows, right_rows) {
 }
 
 build_register_pairs_for_name <- function(group_rows, config) {
-  site_ids <- sort(unique(group_rows$canonical_site_id))
+  site_ids <- sort(unique(group_rows$site_id_canonical))
   if (length(site_ids) < 2L) {
     return(list(
-      edges = WORKS_REGISTER_EDGE_PROTOTYPE,
-      near_misses = WORKS_REGISTER_NEAR_MISS_PROTOTYPE
+      edges = SITE_GROUP_REGISTER_EDGE_PROTOTYPE,
+      near_misses = SITE_GROUP_REGISTER_NEAR_MISS_PROTOTYPE
     ))
   }
 
@@ -297,15 +269,15 @@ build_register_pairs_for_name <- function(group_rows, config) {
 
   for (i in seq_along(pair_grid)) {
     pair <- pair_grid[[i]]
-    left <- group_rows %>% dplyr::filter(.data$canonical_site_id == pair[[1L]])
-    right <- group_rows %>% dplyr::filter(.data$canonical_site_id == pair[[2L]])
+    left <- group_rows %>% dplyr::filter(.data$site_id_canonical == pair[[1L]])
+    right <- group_rows %>% dplyr::filter(.data$site_id_canonical == pair[[2L]])
     metrics <- site_pair_metrics(left, right)
 
     has_ngr_match <- !is.na(metrics$distance_m) &&
-      metrics$distance_m <= config$works_merge_ngr_m
+      metrics$distance_m <= config$site_group_merge_ngr_m
     has_near_miss <- !is.na(metrics$distance_m) &&
-      metrics$distance_m > config$works_merge_ngr_m &&
-      metrics$distance_m <= config$works_near_miss_m
+      metrics$distance_m > config$site_group_merge_ngr_m &&
+      metrics$distance_m <= config$site_group_near_miss_m
 
     if (metrics$has_permit_match || has_ngr_match) {
       justification <- dplyr::case_when(
@@ -336,13 +308,13 @@ build_register_pairs_for_name <- function(group_rows, config) {
 
   list(
     edges = dplyr::bind_rows(edge_rows) %>%
-      conform_works_table(WORKS_REGISTER_EDGE_PROTOTYPE),
+      conform_site_group_table(SITE_GROUP_REGISTER_EDGE_PROTOTYPE),
     near_misses = dplyr::bind_rows(near_rows) %>%
-      conform_works_table(WORKS_REGISTER_NEAR_MISS_PROTOTYPE)
+      conform_site_group_table(SITE_GROUP_REGISTER_NEAR_MISS_PROTOTYPE)
   )
 }
 
-conform_works_table <- function(tbl, prototype) {
+conform_site_group_table <- function(tbl, prototype) {
   if (is.null(tbl) || nrow(tbl) == 0) {
     return(prototype)
   }
@@ -362,11 +334,11 @@ conform_works_table <- function(tbl, prototype) {
     )
 }
 
-build_works_register_edges <- function(prepared_annual_rows, config) {
+build_site_group_register_edges <- function(prepared_annual_rows, config) {
   if (nrow(prepared_annual_rows) == 0) {
     return(list(
-      edges = WORKS_REGISTER_EDGE_PROTOTYPE,
-      near_misses = WORKS_REGISTER_NEAR_MISS_PROTOTYPE
+      edges = SITE_GROUP_REGISTER_EDGE_PROTOTYPE,
+      near_misses = SITE_GROUP_REGISTER_NEAR_MISS_PROTOTYPE
     ))
   }
 
@@ -384,7 +356,7 @@ build_works_register_edges <- function(prepared_annual_rows, config) {
         .data$water_company, .data$site_name_ea_norm,
         .data$site_id_from, .data$site_id_to, .data$justification
       ) %>%
-      conform_works_table(WORKS_REGISTER_EDGE_PROTOTYPE),
+      conform_site_group_table(SITE_GROUP_REGISTER_EDGE_PROTOTYPE),
     near_misses = purrr::map(pair_results, "near_misses") %>%
       dplyr::bind_rows() %>%
       dplyr::distinct() %>%
@@ -392,16 +364,16 @@ build_works_register_edges <- function(prepared_annual_rows, config) {
         .data$water_company, .data$site_name_ea_norm,
         .data$site_id_from, .data$site_id_to
       ) %>%
-      conform_works_table(WORKS_REGISTER_NEAR_MISS_PROTOTYPE)
+      conform_site_group_table(SITE_GROUP_REGISTER_NEAR_MISS_PROTOTYPE)
   )
 }
 
-build_works_membership <- function(nodes, edges) {
+build_site_group_membership <- function(nodes, edges) {
   if (nrow(nodes) == 0) {
-    return(WORKS_REGISTER_MEMBERSHIP_PROTOTYPE)
+    return(SITE_GROUP_REGISTER_MEMBERSHIP_PROTOTYPE)
   }
 
-  vertices <- sort(unique(nodes$canonical_site_id))
+  vertices <- sort(unique(nodes$site_id_canonical))
   parent <- stats::setNames(vertices, as.character(vertices))
 
   find_root <- function(x) {
@@ -430,12 +402,12 @@ build_works_membership <- function(nodes, edges) {
   }
 
   raw_membership <- nodes %>%
-    dplyr::distinct(.data$canonical_site_id, .data$water_company) %>%
-    dplyr::mutate(root_id = purrr::map_int(.data$canonical_site_id, find_root))
+    dplyr::distinct(.data$site_id_canonical, .data$water_company) %>%
+    dplyr::mutate(root_id = purrr::map_int(.data$site_id_canonical, find_root))
 
   component_lookup <- raw_membership %>%
     dplyr::group_by(.data$root_id) %>%
-    dplyr::summarise(site_id = min(.data$canonical_site_id), .groups = "drop") %>%
+    dplyr::summarise(site_id = min(.data$site_id_canonical), .groups = "drop") %>%
     dplyr::arrange(.data$site_id) %>%
     dplyr::mutate(component_id = dplyr::row_number())
 
@@ -444,59 +416,58 @@ build_works_membership <- function(nodes, edges) {
     dplyr::group_by(.data$component_id) %>%
     dplyr::mutate(
       n_members = dplyr::n(),
-      site_id_members = paste(sort(.data$canonical_site_id), collapse = ";")
+      site_id_canonical_members = paste(sort(.data$site_id_canonical), collapse = ";")
     ) %>%
     dplyr::ungroup() %>%
     dplyr::transmute(
       site_id = as.integer(.data$site_id),
-      member_site_id = as.integer(.data$canonical_site_id),
+      site_id_canonical = as.integer(.data$site_id_canonical),
       water_company = .data$water_company,
       component_id = as.integer(.data$component_id),
       n_members = as.integer(.data$n_members),
-      site_id_members = .data$site_id_members
+      site_id_canonical_members = .data$site_id_canonical_members
     ) %>%
-    dplyr::arrange(.data$site_id, .data$member_site_id) %>%
-    conform_works_table(WORKS_REGISTER_MEMBERSHIP_PROTOTYPE)
+    dplyr::arrange(.data$site_id, .data$site_id_canonical) %>%
+    conform_site_group_table(SITE_GROUP_REGISTER_MEMBERSHIP_PROTOTYPE)
 }
 
-build_works_register <- function(
+build_site_group_register <- function(
     annual_rows,
     lookup_tbl = NULL,
-    config = list(works_merge_ngr_m = 250, works_near_miss_m = 1000),
+    config = list(site_group_merge_ngr_m = 250, site_group_near_miss_m = 1000),
     years = 2021:2024) {
-  prepared <- prepare_works_register_annual_rows(annual_rows, lookup_tbl, years)
+  prepared <- prepare_site_group_register_annual_rows(annual_rows, lookup_tbl, years)
 
   if (nrow(prepared) == 0) {
     return(list(
-      membership = WORKS_REGISTER_MEMBERSHIP_PROTOTYPE,
-      resolver = WORKS_REGISTER_RESOLVER_PROTOTYPE,
-      edges = WORKS_REGISTER_EDGE_PROTOTYPE,
-      near_misses = WORKS_REGISTER_NEAR_MISS_PROTOTYPE,
+      membership = SITE_GROUP_REGISTER_MEMBERSHIP_PROTOTYPE,
+      resolver = SITE_GROUP_REGISTER_RESOLVER_PROTOTYPE,
+      edges = SITE_GROUP_REGISTER_EDGE_PROTOTYPE,
+      near_misses = SITE_GROUP_REGISTER_NEAR_MISS_PROTOTYPE,
       edge_summary = tibble::tibble(justification = character(), n_edges = integer())
     ))
   }
 
-  pair_outputs <- build_works_register_edges(prepared, config)
+  pair_outputs <- build_site_group_register_edges(prepared, config)
 
   nodes <- prepared %>%
-    dplyr::distinct(.data$canonical_site_id, .data$water_company)
+    dplyr::distinct(.data$site_id_canonical, .data$water_company)
 
-  membership <- build_works_membership(nodes, pair_outputs$edges)
+  membership <- build_site_group_membership(nodes, pair_outputs$edges)
 
   resolver <- prepared %>%
     dplyr::left_join(
       membership %>%
         dplyr::select(
           site_id,
-          member_site_id,
+          site_id_canonical,
           water_company
-        ) %>%
-        dplyr::mutate(canonical_site_id = .data$member_site_id),
-      by = c("canonical_site_id", "water_company")
+        ),
+      by = c("site_id_canonical", "water_company")
     ) %>%
-    dplyr::select(dplyr::all_of(names(WORKS_REGISTER_RESOLVER_PROTOTYPE))) %>%
+    dplyr::select(dplyr::all_of(names(SITE_GROUP_REGISTER_RESOLVER_PROTOTYPE))) %>%
     dplyr::arrange(.data$year, .data$water_company, .data$annual_site_id) %>%
-    conform_works_table(WORKS_REGISTER_RESOLVER_PROTOTYPE)
+    conform_site_group_table(SITE_GROUP_REGISTER_RESOLVER_PROTOTYPE)
 
   edge_summary <- pair_outputs$edges %>%
     dplyr::count(.data$justification, name = "n_edges") %>%

@@ -12,7 +12,7 @@
 # Inputs:
 #   - data/processed/agg_spill_stats/agg_spill_yr.parquet
 #   - data/processed/agg_spill_stats/agg_spill_dry_yr.parquet
-#   - data/processed/unique_spill_sites.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #   - data/raw/shapefiles/msoa_bcg_2021/
 #   - data/raw/shapefiles/msoa_population_2021/sapemsoasyoatablefinal.xlsx
 #   - data/raw/shapefiles/local_authorities_uk_buc/
@@ -73,6 +73,7 @@ initialise_environment <- function() {
 }
 
 initialise_environment()
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 
 
 # ==============================================================================
@@ -172,11 +173,13 @@ dry_spills <- rio::import(
   here::here("data", "processed", "agg_spill_stats", "agg_spill_dry_yr.parquet")
 )
 
-spill_sites <- rio::import(
-  here::here("data", "processed", "unique_spill_sites.parquet"),
-  trust = TRUE
-) |>
-  dplyr::distinct(water_company, site_id, .keep_all = TRUE)
+spill_sites <- read_site_group_projection(
+  here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  years = 2021:2024
+)
 
 msoa_boundaries <- sf::st_read(
   here::here("data", "raw", "shapefiles", "msoa_bcg_2021"),
@@ -247,16 +250,15 @@ site_lookup <- spill_sites |>
 # ==============================================================================
 # 6. Aggregate to MSOA
 # ==============================================================================
-regular_joined <- regular_spills |>
+regular_in_scope <- regular_spills |>
   dplyr::filter(year %in% TARGET_YEARS) |>
-  dplyr::select(-dplyr::any_of("ngr")) |>
-  dplyr::left_join(
-    site_lookup |>
-      dplyr::select(
-        water_company, site_id, msoa_code, msoa_name, matched_msoa, is_london
-      ),
-    by = c("water_company", "site_id")
-  ) |>
+  dplyr::select(-dplyr::any_of("ngr"))
+regular_joined <- left_join_site_group_projection(
+  regular_in_scope,
+  site_lookup |>
+    dplyr::select(site_id, msoa_code, msoa_name, matched_msoa, is_london),
+  context = "Regular map-support Site Group join"
+) |>
   dplyr::mutate(
     matched_msoa = tidyr::replace_na(matched_msoa, FALSE),
     is_london = tidyr::replace_na(is_london, FALSE)
@@ -278,17 +280,16 @@ regular_map <- msoa_meta |>
     distinct_sites = tidyr::replace_na(distinct_sites, 0L)
   )
 
-dry_joined <- dry_spills |>
+dry_in_scope <- dry_spills |>
   dplyr::filter(year %in% TARGET_YEARS) |>
   dplyr::select(-dplyr::any_of("ngr")) |>
-  dplyr::mutate(dry_spill_count_total = .data[[DRY_SPILL_COUNT_COL]]) |>
-  dplyr::left_join(
-    site_lookup |>
-      dplyr::select(
-        water_company, site_id, msoa_code, msoa_name, matched_msoa, is_london
-      ),
-    by = c("water_company", "site_id")
-  ) |>
+  dplyr::mutate(dry_spill_count_total = .data[[DRY_SPILL_COUNT_COL]])
+dry_joined <- left_join_site_group_projection(
+  dry_in_scope,
+  site_lookup |>
+    dplyr::select(site_id, msoa_code, msoa_name, matched_msoa, is_london),
+  context = "Dry map-support Site Group join"
+) |>
   dplyr::mutate(
     matched_msoa = tidyr::replace_na(matched_msoa, FALSE),
     is_london = tidyr::replace_na(is_london, FALSE)

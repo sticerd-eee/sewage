@@ -2,8 +2,8 @@
 # Individual and Annual EDM Location Merge
 # ==============================================================================
 #
-# Purpose: Link event-level EDM spill records to annual-return works identities,
-#          locations, and annual EA totals through a works-register crosswalk.
+# Purpose: Link event-level EDM spill records to Site Group identities,
+#          locations, and annual EA totals through a Site Group crosswalk.
 #
 # Author: Jacopo Olivieri
 # Date: 2025-05-18
@@ -15,7 +15,7 @@
 #   - data/processed/annual_return_lookup.parquet
 #
 # Outputs:
-#   - data/processed/matched_events_annual_data/site_works_crosswalk.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #   - data/processed/matched_events_annual_data/matched_events_annual_data.parquet
 #   - data/processed/matched_events_annual_data/events_unmatched.parquet
 #   - data/processed/matched_events_annual_data/annual_unmatched.parquet
@@ -96,8 +96,8 @@ CONFIG <- list(
     "data", "processed", "matched_events_annual_data_manual_overrides.csv"
   ),
   output_dir = here::here("data", "processed", "matched_events_annual_data"),
-  works_merge_ngr_m = 250,
-  works_near_miss_m = 1000,
+  site_group_merge_ngr_m = 250,
+  site_group_near_miss_m = 1000,
   agreement_rel_error = 0.25,
   agreement_runner_up_ratio = 2,
   agreement_abs_floor_hrs = 1,
@@ -124,7 +124,7 @@ INPUT_CONTRACT <- list(
 
 source(here::here("scripts", "R", "utils", "ngr_utils.R"), local = TRUE)
 source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"), local = TRUE)
-source(here::here("scripts", "R", "utils", "merge_works_register_utils.R"), local = TRUE)
+source(here::here("scripts", "R", "utils", "merge_site_group_register_utils.R"), local = TRUE)
 source(here::here("scripts", "R", "utils", "merge_matching_utils.R"), local = TRUE)
 source(here::here("scripts", "R", "utils", "merge_outputs_utils.R"), local = TRUE)
 
@@ -286,25 +286,25 @@ log_decision_counts <- function(decisions) {
 
 log_output_counts <- function(outputs) {
   logger::log_info(
-    "Output rows: crosswalk={nrow(outputs$site_works_crosswalk)}, matched_events={nrow(outputs$matched_events)}, events_unmatched={nrow(outputs$events_unmatched)}, annual_unmatched={nrow(outputs$annual_unmatched)}, near_miss_report={nrow(outputs$near_miss_report)}"
+    "Output rows: crosswalk={nrow(outputs$site_group_crosswalk)}, matched_events={nrow(outputs$matched_events)}, events_unmatched={nrow(outputs$events_unmatched)}, annual_unmatched={nrow(outputs$annual_unmatched)}, near_miss_report={nrow(outputs$near_miss_report)}"
   )
 }
 
 build_merge_outputs_from_data <- function(events, annual_returns, lookup,
                                           manual_overrides = tibble::tibble(),
                                           config = CONFIG) {
-  logger::log_info("Building works register")
-  register <- build_works_register(
+  logger::log_info("Building Site Group register")
+  register <- build_site_group_register(
     annual_returns,
     lookup,
     config = list(
-      works_merge_ngr_m = config$works_merge_ngr_m,
-      works_near_miss_m = config$works_near_miss_m
+      site_group_merge_ngr_m = config$site_group_merge_ngr_m,
+      site_group_near_miss_m = config$site_group_near_miss_m
     ),
     years = config$years
   )
   logger::log_info(
-    "Works register: members={nrow(register$membership)}, edges={nrow(register$edges)}, near_misses={nrow(register$near_misses)}"
+    "Site Group register: members={nrow(register$membership)}, edges={nrow(register$edges)}, near_misses={nrow(register$near_misses)}"
   )
   if (nrow(register$edge_summary) > 0) {
     logger::log_info("Register edges by justification: {paste(register$edge_summary$justification, register$edge_summary$n_edges, sep='=', collapse=', ')}")

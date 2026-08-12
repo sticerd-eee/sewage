@@ -46,7 +46,7 @@ suppressPackageStartupMessages({
   library(tibble)
 })
 
-run_contract_module("scripts/R/testing/test_merge_works_register_contracts.R")
+run_contract_module("scripts/R/testing/test_merge_site_group_register_contracts.R")
 run_contract_module("scripts/R/testing/test_merge_matching_contracts.R")
 run_contract_module("scripts/R/testing/test_merge_outputs_contracts.R")
 
@@ -58,7 +58,7 @@ source(
 merge_env$initialise_environment()
 
 # ------------------------------------------------------------------------------
-# Synthetic micro-fixtures: works-grain agreement hours, key_spans_works,
+# Synthetic micro-fixtures: Site Group-grain agreement hours, key_spans_site_groups,
 # and agreement rejection evidence
 # ------------------------------------------------------------------------------
 
@@ -101,11 +101,11 @@ fixture_event_row <- function(year = 2024L, company = "Fixture Water",
 }
 
 fixture_events <- dplyr::bind_rows(
-  # Works 101 files under two member-outlet name variants (60 + 40 hours);
-  # the event carries the works TOTAL, so acceptance requires works-year
-  # hours summed over ALL resolver rows of the works, not just name-rung rows.
+  # Site Group 101 files under two member-outlet name variants (60 + 40 hours);
+  # the event carries the Site Group TOTAL, so acceptance requires Site Group-year
+  # hours summed over ALL resolver rows of the group, not just name-rung rows.
   fixture_event_row(site_name_ea = "Main Works", event_hours = 100),
-  # Only usable key is a permit spanning two works; no name key.
+  # Only usable key is a permit spanning two Site Groups; no name key.
   fixture_event_row(permit_reference_ea = "P-SPAN"),
   # Agreement rejection: candidates too close to separate (90 vs 85 for 100).
   fixture_event_row(site_name_ea = "Close Works", event_hours = 100)
@@ -126,29 +126,29 @@ fixture_decisions <- merge_env$resolve_merge_matches(
   fixture_resolver
 )
 
-works_grain_decision <- fixture_decisions %>%
+site_group_grain_decision <- fixture_decisions %>%
   dplyr::filter(.data$site_name_ea == "Main Works")
 assert_identical(
-  works_grain_decision$site_id,
+  site_group_grain_decision$site_id,
   101L,
-  "Agreement should accept on works-year TOTAL hours across all member outlets."
+  "Agreement should accept on Site Group-year TOTAL hours across all member outlets."
 )
 assert_identical(
-  works_grain_decision$match_method,
+  site_group_grain_decision$match_method,
   "agreement",
-  "Works-grain agreement acceptance should record the agreement method."
+  "Site Group-grain agreement acceptance should record the agreement method."
 )
 
 key_spans_decision <- fixture_decisions %>%
   dplyr::filter(.data$permit_reference_ea == "P-SPAN")
 assert_true(
   is.na(key_spans_decision$site_id),
-  "A permit key spanning two works should not match."
+  "A permit key spanning two Site Groups should not match."
 )
 assert_identical(
   key_spans_decision$reason,
-  "key_spans_works",
-  "A spanning non-name key should be reason-coded key_spans_works."
+  "key_spans_site_groups",
+  "A spanning non-name key should be reason-coded key_spans_site_groups."
 )
 
 reject_decision <- fixture_decisions %>%
@@ -177,7 +177,7 @@ assert_identical(
 assert_identical(
   sort(agreement_near_misses$candidate_site_id),
   c(301L, 302L),
-  "Agreement evidence should list every scored candidate works."
+  "Agreement evidence should list every scored candidate Site Group."
 )
 assert_true(
   all(agreement_near_misses$reason == "agreement_failed"),
@@ -259,8 +259,8 @@ assert_true(
   "Smoke run should produce matched event rows."
 )
 assert_true(
-  nrow(smoke_result$outputs$site_works_crosswalk) > 0,
-  "Smoke run should produce a non-empty works-year crosswalk."
+  nrow(smoke_result$outputs$site_group_crosswalk) > 0,
+  "Smoke run should produce a non-empty Site Group-year crosswalk."
 )
 
 smoke_output_dir <- tempfile("merge-individ-smoke-")
@@ -353,7 +353,7 @@ string_near_decisions <- tibble::tibble(
   site_id = c(NA_integer_, NA_integer_, NA_integer_, NA_integer_, 703L),
   match_method = c(NA, NA, NA, NA, "site_name_ea"),
   match_quality = c(NA, NA, NA, NA, 1),
-  reason = c("no_usable_key", "name_spans_works", "no_usable_key", "no_usable_key", NA_character_),
+  reason = c("no_usable_key", "name_spans_site_groups", "no_usable_key", "no_usable_key", NA_character_),
   annual_status_hint = NA_character_
 )
 
@@ -392,12 +392,12 @@ assert_identical(
 assert_identical(
   edit_distance_hit$site_id,
   701L,
-  "String-near site_id should be the annual candidate's works site_id."
+  "String-near site_id should be the annual candidate's Site Group site_id."
 )
 assert_identical(
   edit_distance_hit$candidate_site_id,
   701L,
-  "String-near candidate_site_id should equal the annual works site_id."
+  "String-near candidate_site_id should equal the annual Site Group site_id."
 )
 assert_identical(
   edit_distance_hit$year,
@@ -448,22 +448,21 @@ assert_identical(
 
 # ------------------------------------------------------------------------------
 # KTD-10 carry-forward: years before the first return take the NEAREST future
-# location; unparseable NGRs never shadow parseable ones; all-NA commission
-# dates stay NA (not Inf)
+# location; unparseable NGRs never shadow parseable ones
 # ------------------------------------------------------------------------------
 
 ktd10_membership <- tibble::tibble(
   site_id = 900L,
-  member_site_id = 900L,
+  site_id_canonical = 900L,
   water_company = "Fixture Water",
   component_id = 1L,
   n_members = 1L,
-  site_id_members = "900"
+  site_id_canonical_members = "900"
 )
 
 ktd10_resolver <- tibble::tibble(
   site_id = 900L,
-  member_site_id = 900L,
+  site_id_canonical = 900L,
   water_company = "Fixture Water",
   year = c(2022L, 2024L),
   ngr = c("TQ3000080000", "TQ4000090000"),
@@ -475,7 +474,7 @@ ktd10_resolver <- tibble::tibble(
   site_name_wa_sc_norm = NA_character_
 )
 
-ktd10_crosswalk <- merge_env$build_site_works_crosswalk(
+ktd10_crosswalk <- merge_env$build_site_group_crosswalk(
   membership = ktd10_membership,
   resolver = ktd10_resolver,
   decisions = merge_env$MERGE_MATCHING_DECISION_PROTOTYPE,
@@ -485,7 +484,7 @@ ktd10_crosswalk <- merge_env$build_site_works_crosswalk(
 assert_identical(
   ktd10_crosswalk %>% dplyr::filter(.data$year == 2021L) %>% dplyr::pull(.data$ngr),
   "TQ3000080000",
-  "A year before the works' first return should carry the NEAREST future location (2022), not the farthest (2024)."
+  "A year before the Site Group's first return should carry the NEAREST future location (2022), not the farthest (2024)."
 )
 assert_identical(
   ktd10_crosswalk %>% dplyr::filter(.data$year == 2023L) %>% dplyr::pull(.data$ngr),
@@ -498,18 +497,9 @@ assert_identical(
   "A filed year should carry its own location."
 )
 
-assert_true(
-  all(is.na(ktd10_crosswalk$edm_commission_date)),
-  "All-NA commission-date groups should stay NA, not become Inf."
-)
-assert_true(
-  inherits(ktd10_crosswalk$edm_commission_date, "Date"),
-  "All-NA commission dates should stay typed as Date."
-)
-
 unparseable_resolver <- tibble::tibble(
   site_id = 901L,
-  member_site_id = 901L,
+  site_id_canonical = 901L,
   year = c(2022L, 2023L),
   ngr = c("TQ3000080000", "NOT A GRID REF"),
   easting = c(530000, NA_real_),

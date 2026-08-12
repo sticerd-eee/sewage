@@ -30,6 +30,33 @@ for(pkg in required_packages) {
 # Functions
 ############################################################
 
+#' Clamp spill records to their labelled calendar year
+#'
+#' Uses explicit UTC year boundaries so results do not depend on the machine
+#' timezone.
+#'
+#' @param df Data frame containing year, start_time, and end_time
+#' @return data.table with start_time and end_time clamped to the labelled year
+#' @export
+clamp_spill_records_to_year <- function(df) {
+  dt <- as.data.table(df)
+
+  dt[, c("year_start", "year_end") := {
+    list(
+      ISOdatetime(year, 1, 1, 0, 0, 0, tz = "UTC"),
+      ISOdatetime(year + 1, 1, 1, 0, 0, 0, tz = "UTC")
+    )
+  }, by = year]
+
+  dt[, `:=`(
+    start_time = pmax(start_time, year_start),
+    end_time = pmin(end_time, year_end)
+  )]
+  dt[, c("year_start", "year_end") := NULL]
+
+  dt[]
+}
+
 #' Split records that cross month boundaries into separate monthly records
 #'
 #' This function handles spills that span multiple months by creating separate
@@ -48,8 +75,8 @@ split_monthly_records <- function(df) {
     by = "month"
   )
   cal <- data.table(
-    month_start = as.POSIXct(all_months,               tz = "UTC"),
-    month_end   = as.POSIXct(all_months + months(1), tz = "UTC") - 1
+    month_start = as.POSIXct(all_months, tz = "UTC"),
+    month_end = as.POSIXct(all_months + months(1), tz = "UTC")
   )
   
   # 2. Key both tables for an interval‐overlap join
@@ -65,8 +92,10 @@ split_monthly_records <- function(df) {
       .SD[, setdiff(names(dt), c("start_time","end_time")), with = FALSE]
     )
   ]
-  
-  # 4. Return as a data.frame (or data.table)
+
+  # Closed interval joins also match records that only touch a boundary.
+  out <- out[end_time > start_time]
+
   return(out[])
 }
 
@@ -124,29 +153,19 @@ split_daily_records <- function(df) {
 #' year boundaries and creating separate datasets for yearly and monthly analysis.
 #'
 #' @param data Input dataframe containing spill data with start_time, end_time, year
+#' @param base_year Integer base year used to construct sequential month and quarter IDs
 #' @return List of data tables prepared for yearly and monthly aggregation
 #'   \itemize{
 #'     \item yearly: Data table with year boundary handling
 #'     \item monthly: Data table with month splits and added month/quarter columns
 #'   }
 #' @export
-prepare_spill_data <- function(data) {
+prepare_spill_data <- function(data, base_year) {
   # Initial data prep and year boundary handling
   dt <- as.data.table(data) 
   ## Remove key NAs
   dt <- dt[!is.na(site_id) & !is.na(start_time)]
-  ## Truncate start/end times that cross year boundaries
-  dt[, c("lower", "upper") := {
-    lr <- as.POSIXct(ISOdatetime(year, 1, 1, 0, 0, 0), tz = "UTC")
-    ur <- as.POSIXct(ISOdatetime(year + 1, 1, 1, 0, 0, 0), tz = "UTC")
-    list(lr, ur)
-  }, by = year]
-  
-  dt[, `:=`(
-    start_time = pmax(start_time, lower),
-    end_time   = pmin(end_time,   upper)
-  )]
-  dt[, c("lower", "upper") := NULL]
+  dt <- clamp_spill_records_to_year(dt)
   data.table::setkey(dt, site_id, start_time)
   
   # Prepare yearly dataset
@@ -156,7 +175,6 @@ prepare_spill_data <- function(data) {
   dt_monthly <- split_monthly_records(dt)
   dt_monthly[, month := data.table::month(start_time)]
   dt_monthly[, quarter := ceiling(month/3)] 
-  base_year <- 2021
   dt_monthly[, month_id := (year - base_year) * 12 + month]
   dt_monthly[, qtr_id := (year - base_year) * 4 + quarter]
   
@@ -170,7 +188,7 @@ prepare_spill_data <- function(data) {
 #'
 #' This function implements the Environment Agency's 12/24 hour counting methodology
 #' for aggregating overlapping or consecutive spill events:
-#' - First spill or spills with >0 hour gap: Creates 12-hour block (counts as 1)
+#' - First spill or a spill at/after the active block end: Creates a 12-hour block
 #' - Subsequent spills within blocks: Creates 24-hour blocks
 #' - Long spills: Generate additional 24-hour blocks if duration exceeds block size
 #'
@@ -205,13 +223,9 @@ count_spills <- function(start_times, end_times) {
     current_start <- start_times[i]
     current_end <- end_times[i]
     
-    # Calculate difference between spill start and current block end
-    if (!is.na(block_end)) {
-      gap <- (current_start - block_end) / 3600
-    }
-    
-    # 12-hour block (first spill or >24h gap)
-    if (is.na(block_end) || gap > 0) {
+    # Block endpoints are excluded: a spill beginning at or after the current
+    # endpoint starts a new 12-hour counting block.
+    if (is.na(block_end) || current_start >= block_end) {
       block_start <- current_start
       block_end <- current_start + dur12
       
@@ -224,7 +238,7 @@ count_spills <- function(start_times, end_times) {
       block_start <- block_end + (dur24 * spill_over_12h)
       block_end <- block_start + dur24
     } else {
-      # 24 hour block
+      # A spill inside the active sequence advances through 24-hour blocks.
       # Update spill count
       diff_current <- (current_end - block_start) / 3600
       spill_over_24h <- ceiling(pmax(0, diff_current) / 24)

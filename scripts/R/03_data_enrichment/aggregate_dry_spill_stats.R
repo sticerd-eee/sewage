@@ -164,7 +164,7 @@ aggregate_indicator_spills <- function(indicator, spills_dt) {
   }
   
   # Prepare data for temporal aggregation (adds month/quarter columns)
-  prepared_data <- prepare_spill_data(dry_spills)
+  prepared_data <- prepare_spill_data(dry_spills, CONFIG$base_year)
   
   # Define aggregation parameters for each temporal period
   aggregations <- list(

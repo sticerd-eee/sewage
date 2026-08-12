@@ -1,0 +1,1605 @@
+# ==============================================================================
+# Reconcile the Canonical Spill Site / Site Group migration
+# ==============================================================================
+#
+# This retained validation script is read-only with respect to production data.
+# It accepts temporary candidate paths so a migration can be proved before the
+# coordinated production publication step.
+#
+# Environment overrides:
+#   SITE_GRAIN_BASELINE_UNIQUE      legacy unique_spill_sites parquet (optional)
+#   SITE_GRAIN_NEW_UNIQUE           canonical candidate parquet
+#   SITE_GRAIN_EVIDENCE_DIR         reconciliation evidence directory
+#   SITE_GRAIN_BASELINE_AGG_DIR     pre-migration aggregate directory (optional)
+#   SITE_GRAIN_OLD_AGG_DIR          pre-migration monthly aggregates for exposure
+#   SITE_GRAIN_NEW_AGG_DIR          candidate aggregate directory
+#   SITE_GRAIN_POPULATION_RASTER    population raster override (optional)
+#   SITE_GRAIN_BASELINE_EVENTS      pre-migration matched events (optional)
+#   SITE_GRAIN_NEW_EVENTS           candidate matched events
+#   SITE_GRAIN_BASELINE_HOUSE_PROPERTY_SIDECAR
+#                                      sampled pre-migration house lookup sidecar
+#   SITE_GRAIN_NEW_HOUSE_PROPERTY_SIDECAR
+#                                      sampled candidate house lookup sidecar
+#   SITE_GRAIN_BASELINE_RENTAL_PROPERTY_SIDECAR
+#                                      sampled pre-migration rental lookup sidecar
+#   SITE_GRAIN_NEW_RENTAL_PROPERTY_SIDECAR
+#                                      sampled candidate rental lookup sidecar
+#   SITE_GRAIN_BASELINE_RAINFALL    pre-migration rainfall validation artifact
+#   SITE_GRAIN_NEW_RAINFALL         candidate rainfall validation artifact
+#   SITE_GRAIN_BASELINE_DRY_SPILL   pre-migration dry-spill validation artifact
+#   SITE_GRAIN_NEW_DRY_SPILL        candidate dry-spill validation artifact
+#   SITE_GRAIN_BASELINE_EXPOSURE_SIDECAR
+#                                      pre-migration population-table sidecar
+#   SITE_GRAIN_NEW_EXPOSURE_SIDECAR candidate population-table sidecar
+#   SITE_GRAIN_BASELINE_MAP_SUPPORT_SIDECAR
+#                                      pre-migration map-support sidecar
+#   SITE_GRAIN_NEW_MAP_SUPPORT_SIDECAR
+#                                      candidate map-support sidecar
+#   SITE_GRAIN_BASELINE_SITE_GROUP_PROJECTION
+#                                      authoritative pre-migration location sidecar
+#                                      (site_id, easting, northing)
+#   SITE_GRAIN_NEW_SITE_GROUP_PROJECTION
+#                                      authoritative candidate location sidecar
+#                                      (site_id, easting, northing)
+#   SITE_GRAIN_ALLOW_PENDING_PUBLICATION  true only for pre-publication temp proof
+#
+# ==============================================================================
+
+suppressPackageStartupMessages({
+  library(arrow)
+  library(dplyr)
+  library(here)
+  library(readr)
+  library(stringr)
+  library(tibble)
+  library(tidyr)
+})
+
+path_from_env <- function(name, fallback = "") {
+  value <- Sys.getenv(name, unset = "")
+  if (nzchar(value)) value else fallback
+}
+
+assert_true <- function(condition, message) {
+  if (!isTRUE(condition)) stop(message, call. = FALSE)
+}
+
+assert_required_columns <- function(data, required, label) {
+  missing <- setdiff(required, names(data))
+  if (length(missing) > 0L) {
+    stop(label, " is missing columns: ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  invisible(data)
+}
+
+assert_unique_key <- function(data, key, label) {
+  assert_required_columns(data, key, label)
+  assert_true(
+    all(stats::complete.cases(data[key])),
+    paste0(label, " has missing key values.")
+  )
+  assert_true(
+    !anyDuplicated(data[key]),
+    paste0(label, " is not unique on ", paste(key, collapse = " + "), ".")
+  )
+  invisible(data)
+}
+
+same_values <- function(left, right) {
+  both_na <- is.na(left) & is.na(right)
+  both_na | (!is.na(left) & !is.na(right) & as.character(left) == as.character(right))
+}
+
+expand_site_group_membership <- function(crosswalk) {
+  assert_required_columns(
+    crosswalk,
+    c("site_id", "year", "water_company", "site_id_canonical_members", "annual_status"),
+    "Site Group crosswalk"
+  )
+  assert_unique_key(
+    crosswalk,
+    c("site_id", "year", "water_company"),
+    "Site Group crosswalk"
+  )
+  assert_true(
+    all(crosswalk$annual_status %in% c(
+      "reported_zero", "reported_positive", "reported_na", "absent"
+    )),
+    "Site Group crosswalk contains an unknown annual_status."
+  )
+
+  crosswalk |>
+    distinct(.data$site_id, .data$water_company, .data$site_id_canonical_members) |>
+    separate_longer_delim("site_id_canonical_members", delim = ";") |>
+    transmute(
+      site_id = as.integer(.data$site_id),
+      site_id_canonical = suppressWarnings(as.integer(trimws(.data$site_id_canonical_members))),
+      water_company = .data$water_company
+    ) |>
+    distinct()
+}
+
+reconcile_canonical_contract <- function(candidate, lookup, crosswalk, annual) {
+  required <- c(
+    "site_id", "site_id_canonical", "water_company", "ngr",
+    "edm_commission_date", "edm_commission_date_precision",
+    "edm_commission_resolution_status", "no_longer_operational_year"
+  )
+  assert_required_columns(candidate, required, "Canonical candidate")
+  assert_unique_key(candidate, "site_id_canonical", "Canonical candidate")
+  assert_unique_key(lookup, "site_id", "Annual Return Lookup")
+
+  lookup_ids <- sort(as.integer(lookup$site_id))
+  candidate_ids <- sort(as.integer(candidate$site_id_canonical))
+  assert_true(
+    identical(candidate_ids, lookup_ids),
+    "Canonical candidate IDs do not exactly equal the Annual Return Lookup universe."
+  )
+
+  membership <- expand_site_group_membership(crosswalk)
+  assert_true(
+    !anyNA(membership$site_id_canonical),
+    "Site Group membership contains a missing or non-integer canonical ID."
+  )
+  assert_unique_key(membership, "site_id_canonical", "Canonical Site Group membership")
+  assert_true(
+    identical(sort(membership$site_id_canonical), lookup_ids),
+    "Site Group membership does not cover every lookup ID exactly once."
+  )
+
+  representative_check <- membership |>
+    group_by(.data$site_id) |>
+    summarise(smallest_member = min(.data$site_id_canonical), .groups = "drop")
+  assert_true(
+    all(representative_check$site_id == representative_check$smallest_member),
+    "A Site Group ID is not its smallest canonical member ID."
+  )
+
+  attached <- candidate |>
+    select("site_id", "site_id_canonical", "water_company") |>
+    inner_join(
+      membership |>
+        transmute(
+          site_id_expected = .data$site_id,
+          site_id_canonical = .data$site_id_canonical,
+          water_company_expected = .data$water_company
+        ),
+      by = "site_id_canonical"
+    )
+  assert_true(
+    nrow(attached) == nrow(candidate) &&
+      all(attached$site_id == attached$site_id_expected) &&
+      all(attached$water_company == attached$water_company_expected),
+    "Canonical candidate Site Group IDs or companies disagree with crosswalk membership."
+  )
+
+  builder <- new.env(parent = globalenv())
+  sys.source(
+    here::here("scripts", "R", "03_data_enrichment", "create_unique_spill_sites.R"),
+    envir = builder
+  )
+  builder$validate_commission_resolution(candidate)
+
+  future_only <- candidate$edm_commission_resolution_status == "future_only"
+  assert_true(
+    all(is.na(candidate$edm_commission_date[future_only])),
+    "A future-only history acquired an observed commission date."
+  )
+
+  years <- builder$CONFIG$years
+  mapped <- builder$map_annual_to_canonical_sites(annual, lookup, years)
+  expected_availability <- mapped |>
+    distinct(.data$site_id_canonical, .data$year) |>
+    mutate(expected = TRUE) |>
+    complete(
+      site_id_canonical = lookup_ids,
+      year = years,
+      fill = list(expected = FALSE)
+    )
+  observed_availability <- candidate |>
+    select("site_id_canonical", all_of(paste0("available_year_", years))) |>
+    pivot_longer(
+      starts_with("available_year_"),
+      names_to = "year",
+      values_to = "observed"
+    ) |>
+    mutate(year = as.integer(sub("available_year_", "", .data$year)))
+  availability <- inner_join(
+    expected_availability,
+    observed_availability,
+    by = c("site_id_canonical", "year")
+  )
+  assert_true(
+    nrow(availability) == length(lookup_ids) * length(years) &&
+      all(availability$expected == availability$observed),
+    "Canonical availability does not equal Annual Return row presence."
+  )
+
+  for (year in years) {
+    for (stem in c("edm_operation_percent", "edm_operation_reason")) {
+      value <- paste0(stem, "_", year)
+      conflict <- paste0(stem, "_conflict_", year)
+      assert_required_columns(candidate, c(value, conflict), "Canonical candidate")
+      assert_true(
+        all(!candidate[[conflict]] | is.na(candidate[[value]])),
+        paste0("Conflicted ", stem, " values must be NA for ", year, ".")
+      )
+    }
+  }
+
+  list(
+    membership = membership,
+    availability = availability,
+    years = years
+  )
+}
+
+reconcile_legacy_inventory <- function(baseline, candidate) {
+  if (is.null(baseline)) {
+    return(tibble(check = "legacy_inventory", status = "pending_publication", detail = "No baseline path supplied"))
+  }
+  assert_unique_key(baseline, "site_id", "Legacy unique_spill_sites baseline")
+  candidate_groups <- candidate |>
+    distinct(.data$site_id)
+  assert_true(
+    identical(sort(as.integer(baseline$site_id)), sort(as.integer(candidate_groups$site_id))),
+    "Site Group membership changed relative to the legacy unique inventory."
+  )
+  tibble(
+    check = "legacy_inventory",
+    status = "passed",
+    detail = paste0(nrow(baseline), " legacy groups; ", nrow(candidate), " canonical sites")
+  )
+}
+
+reconcile_aggregate_outputs <- function(baseline_dir, candidate_dir) {
+  if (!nzchar(baseline_dir)) {
+    return(tibble(check = "aggregate_stability", status = "pending_publication", detail = "No baseline aggregate directory supplied"))
+  }
+  specs <- tribble(
+    ~file, ~key, ~values,
+    "agg_spill_yr.parquet", list(c("site_id", "water_company", "year")), list(c("spill_count_yr", "spill_hrs_yr", "annual_status")),
+    "agg_spill_mo.parquet", list(c("site_id", "water_company", "month_id")), list(c("spill_count_mo", "spill_hrs_mo", "annual_status")),
+    "agg_spill_qtr.parquet", list(c("site_id", "water_company", "qtr_id")), list(c("spill_count_qt", "spill_hrs_qt", "annual_status"))
+  )
+  bind_rows(lapply(seq_len(nrow(specs)), function(index) {
+    old_path <- file.path(baseline_dir, specs$file[index])
+    new_path <- file.path(candidate_dir, specs$file[index])
+    assert_true(file.exists(old_path), paste0("Missing aggregate baseline: ", old_path))
+    assert_true(file.exists(new_path), paste0("Missing aggregate candidate: ", new_path))
+    old <- read_parquet(old_path)
+    new <- read_parquet(new_path)
+    key <- unlist(specs$key[[index]], use.names = FALSE)
+    values <- unlist(specs$values[[index]], use.names = FALSE)
+    assert_unique_key(old, key, paste0(specs$file[index], " baseline"))
+    assert_unique_key(new, key, paste0(specs$file[index], " candidate"))
+    assert_true(nrow(old) == nrow(new), paste0(specs$file[index], " row count changed."))
+    compared <- full_join(
+      select(old, all_of(c(key, values))),
+      select(new, all_of(c(key, values))),
+      by = key,
+      suffix = c("_old", "_new")
+    )
+    assert_true(nrow(compared) == nrow(old), paste0(specs$file[index], " key membership changed."))
+    for (value in values) {
+      assert_true(
+        all(same_values(compared[[paste0(value, "_old")]], compared[[paste0(value, "_new")]])),
+        paste0(specs$file[index], " changed ", value, ".")
+      )
+    }
+    tibble(
+      check = paste0("aggregate_stability_", sub("\\.parquet$", "", specs$file[index])),
+      status = "passed",
+      detail = paste0(nrow(new), " keys and core values unchanged")
+    )
+  }))
+}
+
+reconcile_event_totals <- function(baseline_path, candidate_path) {
+  if (!nzchar(baseline_path)) {
+    return(tibble(check = "matched_event_stability", status = "pending_publication", detail = "No baseline event path supplied"))
+  }
+  assert_true(file.exists(baseline_path), paste0("Missing matched-event baseline: ", baseline_path))
+  assert_true(file.exists(candidate_path), paste0("Missing matched-event candidate: ", candidate_path))
+  summarise_events <- function(path) {
+    read_parquet(path, col_select = c(site_id, year, water_company, start_time, end_time)) |>
+      group_by(.data$site_id, .data$year, .data$water_company) |>
+      summarise(
+        matched_event_rows = n(),
+        event_hours = sum(as.numeric(difftime(.data$end_time, .data$start_time, units = "hours"))),
+        .groups = "drop"
+      )
+  }
+  old <- summarise_events(baseline_path)
+  new <- summarise_events(candidate_path)
+  key <- c("site_id", "year", "water_company")
+  assert_unique_key(old, key, "Matched-event baseline summary")
+  assert_unique_key(new, key, "Matched-event candidate summary")
+  compared <- full_join(old, new, by = key, suffix = c("_old", "_new"))
+  assert_true(
+    nrow(compared) == nrow(old) && nrow(old) == nrow(new),
+    "Matched-event Site Group keys changed."
+  )
+  assert_true(
+    all(compared$matched_event_rows_old == compared$matched_event_rows_new) &&
+      all(abs(compared$event_hours_old - compared$event_hours_new) < 1e-9),
+    "Matched-event Site Group row counts or hours changed."
+  )
+  tibble(
+    check = "matched_event_stability",
+    status = "passed",
+    detail = paste0(nrow(new), " Site Group-year-company totals unchanged")
+  )
+}
+
+consumer_artifact_contracts <- function() {
+  list(
+    house_property = list(
+      baseline_env = "SITE_GRAIN_BASELINE_HOUSE_PROPERTY_SIDECAR",
+      candidate_env = "SITE_GRAIN_NEW_HOUSE_PROPERTY_SIDECAR",
+      key = c("house_id", "site_id"),
+      values = c("distance_m", "distance_km", "n_site_groups")
+    ),
+    rental_property = list(
+      baseline_env = "SITE_GRAIN_BASELINE_RENTAL_PROPERTY_SIDECAR",
+      candidate_env = "SITE_GRAIN_NEW_RENTAL_PROPERTY_SIDECAR",
+      key = c("rental_id", "site_id"),
+      values = c("distance_m", "distance_km", "n_site_groups")
+    ),
+    rainfall = list(
+      baseline_env = "SITE_GRAIN_BASELINE_RAINFALL",
+      candidate_env = "SITE_GRAIN_NEW_RAINFALL",
+      key = c("site_id", "water_company", "year"),
+      values = c("rainfall_r1_yr", "rainfall_r9_yr")
+    ),
+    dry_spill = list(
+      baseline_env = "SITE_GRAIN_BASELINE_DRY_SPILL",
+      candidate_env = "SITE_GRAIN_NEW_DRY_SPILL",
+      key = c("site_id", "year", "water_company", "start_time", "end_time"),
+      values = c(
+        "ngr",
+        "rainfall_1cell_d01_na_rm", "rainfall_1cell_d01_strict",
+        "rainfall_max_9cell_d01_na_rm", "rainfall_max_9cell_d01_strict",
+        "rainfall_max_9cell_d0123_na_rm", "rainfall_max_9cell_d0123_strict"
+      )
+    ),
+    exposure = list(
+      baseline_env = "SITE_GRAIN_BASELINE_EXPOSURE_SIDECAR",
+      candidate_env = "SITE_GRAIN_NEW_EXPOSURE_SIDECAR",
+      key = c("category", "distance_m"),
+      values = c("n_sites", "population")
+    ),
+    map_support = list(
+      baseline_env = "SITE_GRAIN_BASELINE_MAP_SUPPORT_SIDECAR",
+      candidate_env = "SITE_GRAIN_NEW_MAP_SUPPORT_SIDECAR",
+      key = c("site_id", "period"),
+      values = c("easting", "northing", "spill_total")
+    )
+  )
+}
+
+consumer_artifact_paths_from_env <- function(
+    contracts = consumer_artifact_contracts()) {
+  lapply(contracts, function(contract) {
+    list(
+      baseline = path_from_env(contract$baseline_env),
+      candidate = path_from_env(contract$candidate_env)
+    )
+  })
+}
+
+authoritative_location_paths_from_env <- function() {
+  list(
+    baseline = path_from_env("SITE_GRAIN_BASELINE_SITE_GROUP_PROJECTION"),
+    candidate = path_from_env("SITE_GRAIN_NEW_SITE_GROUP_PROJECTION")
+  )
+}
+
+exposure_recompute_inputs_from_env <- function() {
+  list(
+    baseline_agg_dir = path_from_env(
+      "SITE_GRAIN_OLD_AGG_DIR",
+      path_from_env("SITE_GRAIN_BASELINE_AGG_DIR")
+    ),
+    candidate_agg_dir = path_from_env(
+      "SITE_GRAIN_NEW_AGG_DIR",
+      here::here("data", "processed", "agg_spill_stats")
+    ),
+    population_raster = path_from_env(
+      "SITE_GRAIN_POPULATION_RASTER",
+      here::here(
+        "data", "raw", "population_grid", "data",
+        "uk_residential_population_2021.tif"
+      )
+    )
+  )
+}
+
+read_consumer_artifact <- function(path, label) {
+  extension <- tolower(tools::file_ext(path))
+  if (extension == "parquet") {
+    return(arrow::read_parquet(path))
+  }
+  if (extension == "csv") {
+    return(readr::read_csv(path, show_col_types = FALSE))
+  }
+  stop(
+    label, " must be a .parquet or .csv validation artifact: ", path,
+    call. = FALSE
+  )
+}
+
+normalise_consumer_artifact <- function(data, artifact, role) {
+  data <- tibble::as_tibble(data)
+  if (
+    role == "baseline" &&
+      artifact %in% c("house_property", "rental_property") &&
+      "n_discharge_outlet" %in% names(data) &&
+      !"n_site_groups" %in% names(data)
+  ) {
+    data <- rename(data, n_site_groups = "n_discharge_outlet")
+  }
+  data
+}
+
+assert_consumer_artifact_schema <- function(data, contract, label) {
+  expected <- c(contract$key, contract$values)
+  missing <- setdiff(expected, names(data))
+  unexpected <- setdiff(names(data), expected)
+  assert_true(
+    length(missing) == 0L && length(unexpected) == 0L,
+    paste0(
+      label, " schema mismatch; expected exactly: ",
+      paste(expected, collapse = ", "),
+      if (length(missing) > 0L) paste0("; missing: ", paste(missing, collapse = ", ")) else "",
+      if (length(unexpected) > 0L) paste0("; unexpected: ", paste(unexpected, collapse = ", ")) else ""
+    )
+  )
+  invisible(data)
+}
+
+compare_consumer_artifact <- function(baseline, candidate, contract, artifact) {
+  assert_unique_key(baseline, contract$key, paste0(artifact, " baseline"))
+  assert_unique_key(candidate, contract$key, paste0(artifact, " candidate"))
+
+  membership <- full_join(
+    transmute(baseline, !!!rlang::syms(contract$key), in_baseline = TRUE),
+    transmute(candidate, !!!rlang::syms(contract$key), in_candidate = TRUE),
+    by = contract$key
+  ) |>
+    mutate(
+      in_baseline = tidyr::replace_na(.data$in_baseline, FALSE),
+      in_candidate = tidyr::replace_na(.data$in_candidate, FALSE)
+    )
+  shared <- inner_join(
+    select(baseline, all_of(c(contract$key, contract$values))),
+    select(candidate, all_of(c(contract$key, contract$values))),
+    by = contract$key,
+    suffix = c("_baseline", "_candidate")
+  )
+  changed_columns <- character()
+  for (value in contract$values) {
+    changed_column <- paste0("changed_", value)
+    shared[[changed_column]] <- !same_values(
+      shared[[paste0(value, "_baseline")]],
+      shared[[paste0(value, "_candidate")]]
+    )
+    changed_columns <- c(changed_columns, changed_column)
+  }
+  shared$changed_value_count <- rowSums(shared[changed_columns])
+
+  list(
+    baseline = baseline,
+    candidate = candidate,
+    removed = filter(membership, .data$in_baseline & !.data$in_candidate),
+    added = filter(membership, !.data$in_baseline & .data$in_candidate),
+    changed = filter(shared, .data$changed_value_count > 0L),
+    baseline_rows = nrow(baseline),
+    candidate_rows = nrow(candidate)
+  )
+}
+
+site_ids_are_attributable <- function(site_ids, changed_site_ids) {
+  as.character(site_ids) %in% changed_site_ids
+}
+
+passed_consumer_check <- function(artifact, detail) {
+  tibble(
+    check = paste0("consumer_", artifact, "_artifact"),
+    status = "passed",
+    detail = detail
+  )
+}
+
+assert_bng_coordinate_domain <- function(data, label) {
+  valid <- is.finite(data$easting) & is.finite(data$northing) &
+    data$easting >= 0 & data$easting <= 700000 &
+    data$northing >= 0 & data$northing <= 1300000
+  assert_true(
+    all(valid),
+    paste0(label, " contains coordinates outside the British National Grid domain.")
+  )
+}
+
+validate_map_against_projection <- function(map, projection, role) {
+  assert_bng_coordinate_domain(map, paste0("map_support ", role))
+  map_site_ids <- sort(unique(as.character(map$site_id)))
+  projection_site_ids <- sort(unique(as.character(projection$site_id)))
+  assert_true(
+    length(setdiff(map_site_ids, projection_site_ids)) == 0L,
+    paste0(
+      "map_support ", role,
+      " contains site IDs absent from the authoritative Site Group projection."
+    )
+  )
+  compared <- left_join(
+    select(map, all_of(c("site_id", "easting", "northing"))),
+    projection,
+    by = "site_id",
+    suffix = c("_map", "_projection")
+  )
+  assert_bng_coordinate_domain(
+    transmute(
+      compared,
+      easting = .data$easting_projection,
+      northing = .data$northing_projection
+    ),
+    paste0("authoritative Site Group projection ", role, " map domain")
+  )
+  assert_true(
+    all(
+      same_values(compared$easting_map, compared$easting_projection) &
+        same_values(compared$northing_map, compared$northing_projection)
+    ),
+    paste0(
+      "map_support ", role,
+      " coordinates do not match authoritative Site Group projection."
+    )
+  )
+}
+
+reconcile_map_support_artifact <- function(comparison, location_comparison) {
+  assert_true(
+    nrow(comparison$removed) == 0L && nrow(comparison$added) == 0L,
+    "map_support consumer artifact drift: map keys changed."
+  )
+  spill_changes <- comparison$changed |>
+    filter(.data$changed_spill_total)
+  assert_true(
+    nrow(spill_changes) == 0L,
+    "map_support consumer artifact unrelated drift: spill totals changed."
+  )
+  assert_true(
+    nrow(location_comparison$removed) == 0L &&
+      nrow(location_comparison$added) == 0L,
+    "Authoritative Site Group projection membership changed."
+  )
+  validate_map_against_projection(
+    comparison$baseline, location_comparison$baseline, "baseline"
+  )
+  validate_map_against_projection(
+    comparison$candidate, location_comparison$candidate, "candidate"
+  )
+  coordinate_changes <- comparison$changed |>
+    filter(.data$changed_easting | .data$changed_northing)
+  authoritative_changes <- location_comparison$changed |>
+    filter(
+      .data$changed_ngr | .data$changed_easting | .data$changed_northing,
+      as.character(.data$site_id) %in% as.character(comparison$baseline$site_id)
+    )
+  changed_site_ids <- sort(unique(as.character(authoritative_changes$site_id)))
+  list(
+    check = passed_consumer_check(
+      "map_support",
+      paste0(
+        comparison$candidate_rows, " map keys and spill totals unchanged; ",
+        nrow(coordinate_changes), " coordinate row(s) across ",
+        length(changed_site_ids),
+        " Site Group(s) classified as representative-location metadata changes"
+      )
+    ),
+    changed_site_ids = changed_site_ids
+  )
+}
+
+reconcile_rainfall_artifact <- function(comparison, changed_site_ids) {
+  assert_true(
+    nrow(comparison$removed) == 0L && nrow(comparison$added) == 0L,
+    "rainfall consumer artifact drift: rainfall keys changed."
+  )
+  unrelated <- comparison$changed |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  assert_true(
+    nrow(unrelated) == 0L,
+    paste0(
+      "rainfall consumer artifact unrelated drift on ", nrow(unrelated),
+      " row(s) outside changed-location Site Groups."
+    )
+  )
+  passed_consumer_check(
+    "rainfall",
+    paste0(
+      comparison$candidate_rows, " rainfall keys unchanged; ",
+      nrow(comparison$changed),
+      " value row(s) classified as representative-location policy changes"
+    )
+  )
+}
+
+reconcile_dry_spill_artifact <- function(comparison, changed_site_ids) {
+  unrelated_removed <- comparison$removed |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  unrelated_added <- comparison$added |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  unrelated_changed <- comparison$changed |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  unrelated_count <- nrow(unrelated_removed) + nrow(unrelated_added) +
+    nrow(unrelated_changed)
+  assert_true(
+    unrelated_count == 0L,
+    paste0(
+      "dry_spill consumer artifact unrelated drift: ", unrelated_count,
+      " key/value row(s) outside changed-location Site Groups."
+    )
+  )
+  passed_consumer_check(
+    "dry_spill",
+    paste0(
+      comparison$candidate_rows, " candidate rows; classified spatial-policy drift: ",
+      nrow(comparison$removed), " removed key(s), ",
+      nrow(comparison$added), " added key(s), ",
+      nrow(comparison$changed), " changed value row(s)"
+    )
+  )
+}
+
+validate_property_neighborhood_counts <- function(
+    data, artifact, property_id, role) {
+  sentinel_rows <- filter(data, .data$site_id == -1L)
+  assert_true(
+    nrow(sentinel_rows) == 0L || all(
+      sentinel_rows$n_site_groups == 0L &
+        is.na(sentinel_rows$distance_m) &
+        is.na(sentinel_rows$distance_km)
+    ),
+    paste0(
+      artifact, " ", role,
+      " unmatched sentinel rows must have zero Site Groups and missing distances."
+    )
+  )
+  matched_rows <- filter(data, .data$site_id != -1L)
+  assert_true(
+    all(
+      is.finite(matched_rows$distance_m) & matched_rows$distance_m >= 0 &
+        is.finite(matched_rows$distance_km) & matched_rows$distance_km >= 0 &
+        abs(matched_rows$distance_km - matched_rows$distance_m / 1000) < 1e-9
+    ),
+    paste0(
+      artifact, " ", role,
+      " matched rows must have non-negative, internally consistent distances."
+    )
+  )
+  counts <- data |>
+    group_by(across(all_of(property_id))) |>
+    summarise(
+      declared_values = n_distinct(.data$n_site_groups),
+      declared_count = first(.data$n_site_groups),
+      observed_count = n_distinct(.data$site_id[.data$site_id != -1L]),
+      .groups = "drop"
+    )
+  assert_true(
+    all(
+      counts$declared_values == 1L &
+        counts$declared_count == counts$observed_count
+    ),
+    paste0(
+      artifact, " ", role,
+      " sidecar n_site_groups must equal its unique non-sentinel Site Group rows per property."
+    )
+  )
+}
+
+reconcile_property_artifact <- function(
+    comparison, changed_site_ids, artifact, property_id) {
+  validate_property_neighborhood_counts(
+    comparison$baseline, artifact, property_id, "baseline"
+  )
+  validate_property_neighborhood_counts(
+    comparison$candidate, artifact, property_id, "candidate"
+  )
+
+  baseline_neighborhoods <- comparison$baseline |>
+    filter(site_ids_are_attributable(.data$site_id, changed_site_ids)) |>
+    pull(all_of(property_id))
+  candidate_neighborhoods <- comparison$candidate |>
+    filter(site_ids_are_attributable(.data$site_id, changed_site_ids)) |>
+    pull(all_of(property_id))
+  affected_properties <- unique(as.character(c(
+    baseline_neighborhoods, candidate_neighborhoods
+  )))
+
+  unrelated_membership <- bind_rows(comparison$removed, comparison$added) |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  distance_changes <- comparison$changed |>
+    filter(.data$changed_distance_m | .data$changed_distance_km)
+  unrelated_distance <- distance_changes |>
+    filter(!site_ids_are_attributable(.data$site_id, changed_site_ids))
+  count_changes <- comparison$changed |>
+    filter(.data$changed_n_site_groups)
+  unrelated_count <- count_changes |>
+    filter(!as.character(.data[[property_id]]) %in% affected_properties)
+  unrelated_rows <- nrow(unrelated_membership) + nrow(unrelated_distance) +
+    nrow(unrelated_count)
+  assert_true(
+    unrelated_rows == 0L,
+    paste0(
+      artifact, " consumer artifact unrelated drift: ", unrelated_rows,
+      " row(s) outside changed-location Site Groups/property neighborhoods."
+    )
+  )
+
+  passed_consumer_check(
+    artifact,
+    paste0(
+      comparison$candidate_rows, " candidate sidecar rows; classified spatial-policy drift: ",
+      nrow(comparison$removed), " removed key(s), ",
+      nrow(comparison$added), " added key(s), ",
+      nrow(distance_changes), " distance row(s), ",
+      nrow(count_changes), " count row(s) across ",
+      length(affected_properties), " affected property neighborhood(s)"
+    )
+  )
+}
+
+exposure_contract <- function() {
+  list(
+    key = c("category", "distance_m"),
+    values = c("n_sites", "population")
+  )
+}
+
+assert_exposure_domain <- function(data, label) {
+  contract <- exposure_contract()
+  assert_consumer_artifact_schema(data, contract, label)
+  assert_unique_key(data, contract$key, label)
+  expected_grid <- tidyr::expand_grid(
+    category = c("Any Spill", "Dry Spills", "Zero Spills"),
+    distance_m = c(50, 100, 250, 500, 1000)
+  )
+  observed_grid <- arrange(
+    select(data, all_of(contract$key)), .data$category, .data$distance_m
+  )
+  expected_grid <- arrange(expected_grid, .data$category, .data$distance_m)
+  assert_true(
+    identical(
+      paste(observed_grid$category, observed_grid$distance_m),
+      paste(expected_grid$category, expected_grid$distance_m)
+    ),
+    paste0(label, " must contain the complete supported category-distance grid.")
+  )
+  valid_n_sites <- is.finite(data$n_sites) & data$n_sites >= 0 &
+    data$n_sites == round(data$n_sites)
+  valid_population <- is.finite(data$population) & data$population >= 0 &
+    data$population == round(data$population) &
+    data$population %% 1000 == 0
+  assert_true(
+    all(valid_n_sites),
+    paste0(label, " has invalid n_sites values.")
+  )
+  assert_true(
+    all(valid_population),
+    paste0(label, " population must use non-negative nearest-1000 precision.")
+  )
+  category_summary <- data |>
+    summarise(
+      distinct_n_sites = n_distinct(.data$n_sites),
+      n_sites = first(.data$n_sites),
+      .by = "category"
+    )
+  assert_true(
+    all(category_summary$distinct_n_sites == 1L),
+    paste0(label, " must repeat one n_sites value within each category.")
+  )
+  ordered <- arrange(data, .data$category, .data$distance_m) |>
+    group_by(.data$category) |>
+    summarise(monotone = all(diff(.data$population) >= 0), .groups = "drop")
+  assert_true(
+    all(ordered$monotone),
+    paste0(label, " population must be non-decreasing with distance.")
+  )
+  n_any <- category_summary$n_sites[category_summary$category == "Any Spill"]
+  n_dry <- category_summary$n_sites[category_summary$category == "Dry Spills"]
+  assert_true(
+    n_dry <= n_any,
+    paste0(label, " Dry Spills site count cannot exceed Any Spill.")
+  )
+  population_wide <- data |>
+    select("category", "distance_m", "population") |>
+    tidyr::pivot_wider(names_from = "category", values_from = "population")
+  assert_true(
+    all(population_wide$`Dry Spills` <= population_wide$`Any Spill`),
+    paste0(label, " Dry Spills population cannot exceed Any Spill population.")
+  )
+  invisible(data)
+}
+
+assert_exposure_matches_expected <- function(actual, expected, role) {
+  contract <- exposure_contract()
+  assert_exposure_domain(actual, paste0("exposure ", role, " sidecar"))
+  assert_exposure_domain(
+    expected, paste0("independently recomputed exposure ", role)
+  )
+  comparison <- compare_consumer_artifact(
+    expected, actual, contract, paste0("exposure ", role, " expectation")
+  )
+  drift <- nrow(comparison$removed) + nrow(comparison$added) +
+    nrow(comparison$changed)
+  assert_true(
+    drift == 0L,
+    paste0(
+      "exposure ", role,
+      " sidecar does not equal independent recomputation: ",
+      nrow(comparison$removed), " removed key(s), ",
+      nrow(comparison$added), " added key(s), ",
+      nrow(comparison$changed), " changed row(s)."
+    )
+  )
+}
+
+population_within_union_buffers <- function(population_raster, points, distance_m) {
+  if (length(points) == 0L) return(0)
+  buffers <- terra::buffer(points, width = distance_m)
+  dissolved <- terra::aggregate(buffers, dissolve = TRUE)
+  cropped <- terra::crop(population_raster, dissolved)
+  values <- terra::extract(cropped, dissolved, fun = sum, na.rm = TRUE)
+  sum(as.numeric(unlist(values[, -1, drop = FALSE])), na.rm = TRUE)
+}
+
+read_exposure_site_status <- function(agg_dir) {
+  all_path <- file.path(agg_dir, "agg_spill_mo.parquet")
+  dry_path <- file.path(agg_dir, "agg_spill_dry_mo.parquet")
+  all_mo <- arrow::read_parquet(all_path)
+  dry_mo <- arrow::read_parquet(dry_path)
+  assert_required_columns(
+    all_mo,
+    c("site_id", "water_company", "month_id", "spill_count_mo"),
+    paste0("Exposure aggregate ", all_path)
+  )
+  dry_count_column <- "dry_spill_count_mo_r1_d0123_strict"
+  assert_required_columns(
+    dry_mo,
+    c("site_id", "water_company", "month_id", dry_count_column),
+    paste0("Exposure dry aggregate ", dry_path)
+  )
+  all_status <- all_mo |>
+    mutate(year = 2021L + floor((.data$month_id - 1L) / 12L)) |>
+    filter(.data$year %in% 2021:2023) |>
+    summarise(
+      total_spills = sum(.data$spill_count_mo, na.rm = TRUE),
+      .by = c("site_id", "water_company")
+    )
+  dry_status <- dry_mo |>
+    mutate(year = 2021L + floor((.data$month_id - 1L) / 12L)) |>
+    filter(.data$year %in% 2021:2023) |>
+    summarise(
+      total_dry = sum(.data[[dry_count_column]], na.rm = TRUE),
+      .by = c("site_id", "water_company")
+    )
+  status <- all_status |>
+    left_join(dry_status, by = c("site_id", "water_company")) |>
+    mutate(
+      total_dry = tidyr::replace_na(.data$total_dry, 0),
+      any_spill = .data$total_spills > 0,
+      has_dry = .data$total_dry > 0
+    ) |>
+    select("site_id", "any_spill", "has_dry")
+  assert_unique_key(status, "site_id", paste0("Exposure status from ", agg_dir))
+  status
+}
+
+recompute_population_exposure <- function(locations, agg_dir, population_raster_path) {
+  assert_true(
+    requireNamespace("rnrfa", quietly = TRUE),
+    "Exposure recomputation requires the rnrfa package."
+  )
+  status <- read_exposure_site_status(agg_dir)
+  ngr_locations <- locations |>
+    transmute(
+      site_id = as.integer(.data$site_id),
+      ngr = toupper(gsub("\\s+", "", as.character(.data$ngr)))
+    ) |>
+    filter(
+      !is.na(.data$ngr),
+      grepl("^[A-Z]{2}[0-9]{2,10}$", .data$ngr),
+      nchar(sub("^[A-Z]{2}", "", .data$ngr)) %% 2L == 0L
+    )
+  parsed <- rnrfa::osg_parse(ngr_locations$ngr, coord_system = "WGS84")
+  geocoded <- bind_cols(
+    ngr_locations,
+    tibble(
+      lon = as.numeric(parsed[[1]]),
+      lat = as.numeric(parsed[[2]])
+    )
+  ) |>
+    filter(is.finite(.data$lon), is.finite(.data$lat)) |>
+    inner_join(status, by = "site_id")
+  assert_unique_key(
+    geocoded, "site_id", paste0("Exposure geocoded sites from ", agg_dir)
+  )
+  sites_sf <- sf::st_as_sf(
+    geocoded,
+    coords = c("lon", "lat"),
+    crs = 4326
+  )
+  population_raster <- terra::rast(population_raster_path)
+  if (terra::is.lonlat(population_raster)) {
+    population_raster <- terra::project(
+      population_raster, "EPSG:27700", method = "near"
+    )
+    sites_sf <- sf::st_transform(sites_sf, 27700)
+  } else {
+    sites_sf <- sf::st_transform(sites_sf, terra::crs(population_raster))
+  }
+  sites <- terra::vect(sites_sf)
+  categories <- list(
+    "Any Spill" = which(as.data.frame(sites)$any_spill),
+    "Dry Spills" = which(as.data.frame(sites)$has_dry),
+    "Zero Spills" = which(!as.data.frame(sites)$any_spill)
+  )
+  distances <- c(50, 100, 250, 500, 1000)
+  bind_rows(lapply(names(categories), function(category) {
+    category_points <- sites[categories[[category]], ]
+    tibble(
+      category = category,
+      distance_m = distances,
+      n_sites = length(category_points),
+      population = vapply(
+        distances,
+        function(distance_m) {
+          round(population_within_union_buffers(
+            population_raster, category_points, distance_m
+          ) / 1000) * 1000
+        },
+        numeric(1)
+      )
+    )
+  }))
+}
+
+recompute_exposure_expectations <- function(
+    baseline_locations, candidate_locations, inputs) {
+  list(
+    baseline = recompute_population_exposure(
+      baseline_locations, inputs$baseline_agg_dir, inputs$population_raster
+    ),
+    candidate = recompute_population_exposure(
+      candidate_locations, inputs$candidate_agg_dir, inputs$population_raster
+    )
+  )
+}
+
+reconcile_exposure_artifact <- function(comparison, expectations) {
+  assert_true(
+    identical(sort(names(expectations)), c("baseline", "candidate")),
+    "Exposure expectations must contain baseline and candidate tables."
+  )
+  assert_exposure_matches_expected(
+    comparison$baseline, expectations$baseline, "baseline"
+  )
+  assert_exposure_matches_expected(
+    comparison$candidate, expectations$candidate, "candidate"
+  )
+  changed_n_sites <- comparison$changed |>
+    filter(.data$changed_n_sites)
+  changed_population <- comparison$changed |>
+    filter(.data$changed_population)
+  joined <- inner_join(
+    comparison$baseline,
+    comparison$candidate,
+    by = c("category", "distance_m"),
+    suffix = c("_baseline", "_candidate")
+  )
+  changed_categories <- sort(unique(comparison$changed$category))
+  n_site_deltas <- joined |>
+    filter(.data$n_sites_baseline != .data$n_sites_candidate) |>
+    distinct(
+      .data$category, .data$n_sites_baseline, .data$n_sites_candidate
+    ) |>
+    transmute(
+      label = paste0(
+        .data$category, " ",
+        if_else(
+          .data$n_sites_candidate - .data$n_sites_baseline >= 0,
+          "+",
+          ""
+        ),
+        .data$n_sites_candidate - .data$n_sites_baseline
+      )
+    ) |>
+    pull(.data$label)
+  passed_consumer_check(
+    "exposure",
+    paste0(
+      comparison$candidate_rows, " category-distance rows; ",
+      nrow(comparison$changed), " aggregate row(s) and ",
+      sum(comparison$changed$changed_value_count),
+      " value cell(s) independently reproduced; classified deltas: ",
+      nrow(changed_n_sites), " n_sites row(s), ",
+      nrow(changed_population), " population row(s); categories ",
+      if (length(changed_categories) == 0L) {
+        "none"
+      } else {
+        paste(changed_categories, collapse = ", ")
+      },
+      "; n_sites category deltas ",
+      if (length(n_site_deltas) == 0L) {
+        "none"
+      } else {
+        paste(n_site_deltas, collapse = ", ")
+      }
+    )
+  )
+}
+
+reconcile_consumer_artifacts <- function(
+    paths = consumer_artifact_paths_from_env(),
+    contracts = consumer_artifact_contracts(),
+    location_paths = authoritative_location_paths_from_env(),
+    exposure_inputs = exposure_recompute_inputs_from_env(),
+    exposure_expectations = NULL) {
+  assert_true(
+    identical(sort(names(paths)), sort(names(contracts))),
+    "Consumer artifact paths must cover every declared reconciliation contract."
+  )
+  artifacts <- lapply(names(contracts), function(artifact) {
+    contract <- contracts[[artifact]]
+    artifact_paths <- paths[[artifact]]
+    baseline_path <- artifact_paths$baseline
+    candidate_path <- artifact_paths$candidate
+    unavailable <- c(
+      if (!nzchar(baseline_path)) paste0("no ", contract$baseline_env, " path supplied")
+      else if (!file.exists(baseline_path)) paste0("baseline unavailable: ", baseline_path),
+      if (!nzchar(candidate_path)) paste0("no ", contract$candidate_env, " path supplied")
+      else if (!file.exists(candidate_path)) paste0("candidate unavailable: ", candidate_path)
+    )
+    if (length(unavailable) > 0L) {
+      return(list(
+        available = FALSE,
+        check = tibble(
+          check = paste0("consumer_", artifact, "_artifact"),
+          status = "pending_publication",
+          detail = paste(unavailable, collapse = "; ")
+        )
+      ))
+    }
+
+    baseline <- read_consumer_artifact(
+      baseline_path, paste0(artifact, " baseline")
+    ) |>
+      normalise_consumer_artifact(artifact, "baseline")
+    candidate <- read_consumer_artifact(
+      candidate_path, paste0(artifact, " candidate")
+    ) |>
+      normalise_consumer_artifact(artifact, "candidate")
+    assert_consumer_artifact_schema(
+      baseline, contract, paste0(artifact, " baseline")
+    )
+    assert_consumer_artifact_schema(
+      candidate, contract, paste0(artifact, " candidate")
+    )
+    list(
+      available = TRUE,
+      comparison = compare_consumer_artifact(
+        baseline, candidate, contract, artifact
+      )
+    )
+  })
+  names(artifacts) <- names(contracts)
+  checks <- lapply(artifacts, function(artifact) artifact$check)
+
+  location_unavailable <- c(
+    if (!nzchar(location_paths$baseline)) {
+      "no SITE_GRAIN_BASELINE_SITE_GROUP_PROJECTION path supplied"
+    } else if (!file.exists(location_paths$baseline)) {
+      paste0("baseline projection unavailable: ", location_paths$baseline)
+    },
+    if (!nzchar(location_paths$candidate)) {
+      "no SITE_GRAIN_NEW_SITE_GROUP_PROJECTION path supplied"
+    } else if (!file.exists(location_paths$candidate)) {
+      paste0("candidate projection unavailable: ", location_paths$candidate)
+    }
+  )
+  location_comparison <- NULL
+  baseline_locations <- NULL
+  candidate_locations <- NULL
+  if (length(location_unavailable) == 0L) {
+    location_contract <- list(
+      key = "site_id", values = c("ngr", "easting", "northing")
+    )
+    baseline_locations <- read_consumer_artifact(
+      location_paths$baseline, "authoritative Site Group projection baseline"
+    )
+    candidate_locations <- read_consumer_artifact(
+      location_paths$candidate, "authoritative Site Group projection candidate"
+    )
+    assert_consumer_artifact_schema(
+      baseline_locations, location_contract,
+      "authoritative Site Group projection baseline"
+    )
+    assert_consumer_artifact_schema(
+      candidate_locations, location_contract,
+      "authoritative Site Group projection candidate"
+    )
+    location_comparison <- compare_consumer_artifact(
+      baseline_locations,
+      candidate_locations,
+      location_contract,
+      "authoritative Site Group projection"
+    )
+  }
+
+  changed_site_ids <- character()
+  if (artifacts$map_support$available && !is.null(location_comparison)) {
+    map_result <- reconcile_map_support_artifact(
+      artifacts$map_support$comparison, location_comparison
+    )
+    checks$map_support <- map_result$check
+    changed_site_ids <- map_result$changed_site_ids
+  } else if (artifacts$map_support$available) {
+    checks$map_support <- tibble(
+      check = "consumer_map_support_artifact",
+      status = "pending_publication",
+      detail = paste(location_unavailable, collapse = "; ")
+    )
+  }
+  if (artifacts$house_property$available) {
+    checks$house_property <- reconcile_property_artifact(
+      artifacts$house_property$comparison,
+      changed_site_ids,
+      "house_property",
+      "house_id"
+    )
+  }
+  if (artifacts$rental_property$available) {
+    checks$rental_property <- reconcile_property_artifact(
+      artifacts$rental_property$comparison,
+      changed_site_ids,
+      "rental_property",
+      "rental_id"
+    )
+  }
+  if (artifacts$rainfall$available) {
+    checks$rainfall <- reconcile_rainfall_artifact(
+      artifacts$rainfall$comparison, changed_site_ids
+    )
+  }
+  if (artifacts$dry_spill$available) {
+    checks$dry_spill <- reconcile_dry_spill_artifact(
+      artifacts$dry_spill$comparison, changed_site_ids
+    )
+  }
+
+  if (artifacts$exposure$available) {
+    expectations <- exposure_expectations
+    if (is.null(expectations)) {
+      unavailable_aggregate_paths <- function(directory) {
+        paths <- file.path(
+          directory,
+          c("agg_spill_mo.parquet", "agg_spill_dry_mo.parquet")
+        )
+        missing <- paths[!file.exists(paths)]
+        if (length(missing) == 0L) character() else paste0("unavailable: ", missing)
+      }
+      exposure_input_errors <- c(
+        if (!nzchar(exposure_inputs$baseline_agg_dir)) {
+          "no SITE_GRAIN_OLD_AGG_DIR path supplied"
+        } else {
+          unavailable_aggregate_paths(exposure_inputs$baseline_agg_dir)
+        },
+        if (!nzchar(exposure_inputs$candidate_agg_dir)) {
+          "no SITE_GRAIN_NEW_AGG_DIR path supplied"
+        } else {
+          unavailable_aggregate_paths(exposure_inputs$candidate_agg_dir)
+        },
+        if (!nzchar(exposure_inputs$population_raster)) {
+          "no SITE_GRAIN_POPULATION_RASTER path supplied"
+        } else if (!file.exists(exposure_inputs$population_raster)) {
+          paste0("unavailable: ", exposure_inputs$population_raster)
+        }
+      )
+      if (
+        is.null(location_comparison) || length(exposure_input_errors) > 0L
+      ) {
+        checks$exposure <- tibble(
+          check = "consumer_exposure_artifact",
+          status = "pending_publication",
+          detail = paste0(
+            if (is.null(location_comparison)) {
+              "authoritative Site Group projections unavailable"
+            } else {
+              ""
+            },
+            if (
+              is.null(location_comparison) && length(exposure_input_errors) > 0L
+            ) {
+              "; "
+            } else {
+              ""
+            },
+            if (length(exposure_input_errors) > 0L) {
+              paste0(
+                "exposure recomputation input(s) unavailable: ",
+                paste(exposure_input_errors, collapse = ", ")
+              )
+            } else {
+              ""
+            }
+          )
+        )
+      } else {
+        assert_true(
+          requireNamespace("sf", quietly = TRUE) &&
+            requireNamespace("terra", quietly = TRUE),
+          "Exposure recomputation requires the sf and terra packages."
+        )
+        expectations <- recompute_exposure_expectations(
+          baseline_locations, candidate_locations, exposure_inputs
+        )
+      }
+    }
+    if (!is.null(expectations)) {
+      checks$exposure <- reconcile_exposure_artifact(
+        artifacts$exposure$comparison, expectations
+      )
+    }
+  }
+
+  for (artifact in names(contracts)) {
+    if (artifacts[[artifact]]$available) {
+      checks[[artifact]]$detail <- paste0(
+        checks[[artifact]]$detail,
+        "; candidate rows read from ", paths[[artifact]]$candidate
+      )
+    }
+  }
+
+  bind_rows(checks[names(contracts)])
+}
+
+reconcile_consumer_manifest <- function(
+    paths = consumer_artifact_paths_from_env()) {
+  consumer_env <- new.env(parent = globalenv())
+  sys.source(
+    here::here("scripts", "R", "testing", "reconcile_site_group_consumers.R"),
+    envir = consumer_env
+  )
+  summary <- consumer_env$audit_site_grain_manifest()
+  fixture <- consumer_env$run_fixture_reconciliation()
+  assert_true(all(fixture$unexplained_changes == 0L), "Consumer fixture reconciliation found fanout or drift.")
+  bind_rows(
+    tibble(
+      check = "consumer_manifest",
+      status = "passed",
+      detail = paste0(sum(summary$files), " classified grain-token surfaces; no fixture fanout")
+    ),
+    reconcile_consumer_artifacts(paths)
+  )
+}
+
+reconciliation_gate_mode <- function(checks, allow_pending_publication = FALSE) {
+  unknown <- setdiff(unique(checks$status), c("passed", "pending_publication"))
+  assert_true(
+    length(unknown) == 0L,
+    paste0("Migration reconciliation has unknown check status(es): ", paste(unknown, collapse = ", "))
+  )
+  pending <- checks |>
+    filter(.data$status == "pending_publication")
+  if (nrow(pending) == 0L) return("complete")
+  if (!allow_pending_publication) {
+    stop(
+      "Migration reconciliation has pending publication/baseline gate(s): ",
+      paste(pending$check, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  "pending_publication"
+}
+
+reconcile_figure_denominators <- function(candidate) {
+  figure_env <- new.env(parent = globalenv())
+  sys.source(
+    here::here("scripts", "R", "utils", "edm_commission_figure_utils.R"),
+    envir = figure_env
+  )
+  figure <- figure_env$prepare_edm_commission_figure_data(candidate)
+  assert_true(
+    sum(figure$completeness$n_canonical_sites) == nrow(candidate),
+    "Commission completeness categories do not exhaust the canonical universe."
+  )
+  assert_true(
+    sum(figure$annual_timing$n_canonical_sites) == figure$diagnostics$n_resolved,
+    "Commission annual timing does not exhaust the resolved denominator."
+  )
+  assert_true(
+    nrow(figure$timing_categories |> filter(.data$timing_basis == "imprecise_pre_2016")) == 1L,
+    "Pre-2016 evidence is not represented separately."
+  )
+  list(
+    check = tibble(
+      check = "commission_figure_denominators",
+      status = "passed",
+      detail = paste0(
+        figure$diagnostics$n_canonical_sites, " canonical sites; ",
+        figure$diagnostics$n_resolved, " resolved timing histories; ",
+        figure$diagnostics$n_pre_2016, " pre-2016 histories"
+      )
+    ),
+    completeness = figure$completeness,
+    diagnostics = figure$diagnostics
+  )
+}
+
+check_property_lookup_schema <- function() {
+  paths <- c(
+    here::here("data", "processed", "spill_house_lookup.parquet"),
+    here::here("data", "processed", "zoopla", "spill_rental_lookup.parquet")
+  )
+  present <- paths[file.exists(paths)]
+  if (length(present) == 0L) {
+    return(tibble(check = "property_lookup_schema", status = "pending_publication", detail = "No property lookup artifacts found"))
+  }
+  blockers <- character()
+  for (path in present) {
+    columns <- names(arrow::open_dataset(path)$schema)
+    if (!"n_site_groups" %in% columns) {
+      blockers <- c(blockers, paste0(path, " is missing n_site_groups"))
+    }
+    if ("n_discharge_outlet" %in% columns) {
+      blockers <- c(blockers, paste0(path, " retains n_discharge_outlet"))
+    }
+  }
+  if (length(blockers) > 0L) {
+    return(tibble(
+      check = "property_lookup_schema",
+      status = "pending_publication",
+      detail = paste(blockers, collapse = "; ")
+    ))
+  }
+  tibble(
+    check = "property_lookup_schema",
+    status = "passed",
+    detail = paste0(length(present), " lookup schema(s) use n_site_groups")
+  )
+}
+
+audit_stale_contracts <- function(root = here::here()) {
+  candidates <- list.files(
+    root,
+    pattern = "\\.(R|Rmd|qmd|md)$",
+    recursive = TRUE,
+    full.names = TRUE
+  )
+  relative <- sub(paste0("^", root, "/?"), "", candidates)
+  excluded <- grepl(
+    paste0(
+      "(^|/)(docs/plans|docs/solutions|docs/meetings|docs/wayfinder|docs/ideas|",
+      "todos/_archive|output|book/_freeze|residual-review-findings)(/|$)"
+    ),
+    relative
+  )
+  candidates <- candidates[!excluded]
+  relative <- relative[!excluded]
+  patterns <- c(
+    legacy_crosswalk_path = "site_works_crosswalk\\.parquet",
+    legacy_property_count = "n_discharge_outlet",
+    removed_commission_seam = "summarise_site_metadata",
+    obsolete_glossary_heading = "^### Works( Register)?$",
+    obsolete_grain_prose = "\\bWorks[- ](grain|year|register|crosswalk)\\b"
+  )
+  allowed <- tribble(
+    ~path, ~pattern, ~reason,
+    "scripts/R/testing/reconcile_site_grain_migration.R", "legacy_crosswalk_path", "Retained stale-contract detector",
+    "scripts/R/testing/reconcile_site_grain_migration.R", "legacy_property_count", "Retained stale-contract detector",
+    "scripts/R/testing/reconcile_site_grain_migration.R", "removed_commission_seam", "Retained stale-contract detector",
+    "scripts/R/testing/reconcile_site_group_consumers.R", "legacy_crosswalk_path", "Manifest discovery detects unreviewed legacy readers",
+    "scripts/R/testing/test_reconcile_site_grain_migration_contracts.R", "legacy_property_count", "Legacy-baseline fixture proves the property count rename reconciles",
+    "scripts/R/testing/test_merge_outputs_contracts.R", "legacy_crosswalk_path", "Negative assertion proves the alias is absent",
+    "scripts/R/testing/test_site_group_consumer_contracts.R", "legacy_property_count", "Negative assertions prove the old count is absent",
+    "todos/2026-07-06-review-create-unique-spill-sites.md", "obsolete_grain_prose", "Historical defect rationale retained below resolved status"
+  )
+
+  findings <- bind_rows(lapply(seq_along(candidates), function(index) {
+    lines <- readLines(candidates[index], warn = FALSE)
+    bind_rows(lapply(names(patterns), function(pattern_name) {
+      hits <- which(grepl(patterns[[pattern_name]], lines, ignore.case = TRUE, perl = TRUE))
+      if (length(hits) == 0L) return(NULL)
+      tibble(
+        path = relative[index],
+        line = hits,
+        pattern = pattern_name,
+        text = trimws(lines[hits])
+      )
+    }))
+  }))
+  if (nrow(findings) == 0L) {
+    findings <- tibble(
+      path = character(), line = integer(), pattern = character(), text = character()
+    )
+  }
+  classified <- findings |>
+    left_join(allowed, by = c("path", "pattern")) |>
+    mutate(exempt = !is.na(.data$reason))
+  blockers <- classified |>
+    filter(!.data$exempt)
+  assert_true(
+    nrow(blockers) == 0L,
+    paste0(
+      "Stale live grain contract(s): ",
+      paste0(blockers$path, ":", blockers$line, " [", blockers$pattern, "]", collapse = ", ")
+    )
+  )
+  list(
+    check = tibble(
+      check = "stale_contract_scan",
+      status = "passed",
+      detail = paste0(nrow(classified), " justified historical/negative detector occurrence(s); zero live blockers")
+    ),
+    findings = classified
+  )
+}
+
+check_freshness <- function(candidate_path, producer_paths) {
+  candidate_time <- file.info(candidate_path)$mtime
+  existing <- producer_paths[file.exists(producer_paths)]
+  stale <- existing[file.info(existing)$mtime > candidate_time]
+  assert_true(
+    length(stale) == 0L,
+    paste0("Canonical candidate is older than producer/input(s): ", paste(stale, collapse = ", "))
+  )
+  tibble(
+    check = "canonical_candidate_freshness",
+    status = "passed",
+    detail = paste0("Candidate is newer than ", length(existing), " producer/input files")
+  )
+}
+
+main <- function() {
+  allow_pending_publication <- tolower(path_from_env(
+    "SITE_GRAIN_ALLOW_PENDING_PUBLICATION",
+    "false"
+  )) %in% c("1", "true", "yes")
+  candidate_path <- path_from_env(
+    "SITE_GRAIN_NEW_UNIQUE",
+    path_from_env("UNIQUE_SPILL_SITES_NEW", here::here("data", "processed", "unique_spill_sites.parquet"))
+  )
+  baseline_path <- path_from_env(
+    "SITE_GRAIN_BASELINE_UNIQUE",
+    path_from_env("UNIQUE_SPILL_SITES_BASELINE")
+  )
+  evidence_dir <- path_from_env(
+    "SITE_GRAIN_EVIDENCE_DIR",
+    file.path(tempdir(), "site_grain_migration_evidence")
+  )
+  lookup_path <- here::here("data", "processed", "annual_return_lookup.parquet")
+  annual_path <- here::here("data", "processed", "annual_return_edm.parquet")
+  crosswalk_path <- here::here(
+    "data", "processed", "matched_events_annual_data", "site_group_crosswalk.parquet"
+  )
+  required_paths <- c(candidate_path, lookup_path, annual_path, crosswalk_path)
+  missing <- required_paths[!file.exists(required_paths)]
+  assert_true(length(missing) == 0L, paste0("Missing migration input(s): ", paste(missing, collapse = ", ")))
+  assert_true(
+    !file.exists(here::here(
+      "data", "processed", "matched_events_annual_data", "site_works_crosswalk.parquet"
+    )),
+    "The legacy Works-named crosswalk still exists beside the Site Group artifact."
+  )
+
+  candidate <- read_parquet(candidate_path)
+  lookup <- read_parquet(lookup_path)
+  annual <- read_parquet(annual_path)
+  crosswalk <- read_parquet(crosswalk_path)
+  baseline <- if (nzchar(baseline_path)) read_parquet(baseline_path) else NULL
+
+  canonical <- reconcile_canonical_contract(candidate, lookup, crosswalk, annual)
+  figure <- reconcile_figure_denominators(candidate)
+  stale_contracts <- audit_stale_contracts()
+  checks <- bind_rows(
+    tibble(
+      check = c("lookup_coverage", "membership_exactly_once", "commission_contract", "availability_row_presence"),
+      status = "passed",
+      detail = c(
+        paste0(nrow(candidate), " canonical IDs"),
+        paste0(nrow(canonical$membership), " canonical memberships in ", n_distinct(candidate$site_id), " Site Groups"),
+        "Closed status/precision/date vocabulary; future-only dates absent",
+        paste0(nrow(canonical$availability), " canonical site-year cells")
+      )
+    ),
+    reconcile_legacy_inventory(baseline, candidate),
+    reconcile_event_totals(
+      path_from_env("SITE_GRAIN_BASELINE_EVENTS"),
+      path_from_env(
+        "SITE_GRAIN_NEW_EVENTS",
+        here::here("data", "processed", "matched_events_annual_data", "matched_events_annual_data.parquet")
+      )
+    ),
+    reconcile_aggregate_outputs(
+      path_from_env(
+        "SITE_GRAIN_BASELINE_AGG_DIR",
+        path_from_env("SITE_GRAIN_OLD_AGG_DIR")
+      ),
+      path_from_env(
+        "SITE_GRAIN_NEW_AGG_DIR",
+        here::here("data", "processed", "agg_spill_stats")
+      )
+    ),
+    reconcile_consumer_manifest(),
+    stale_contracts$check,
+    figure$check,
+    check_property_lookup_schema(),
+    check_freshness(
+      candidate_path,
+      c(
+        here::here("scripts", "R", "03_data_enrichment", "create_unique_spill_sites.R"),
+        here::here("scripts", "R", "utils", "edm_commission_utils.R"),
+        lookup_path,
+        annual_path,
+        crosswalk_path
+      )
+    ),
+    tibble(
+      check = "production_canonical_publication",
+      status = if (normalizePath(candidate_path, mustWork = TRUE) == normalizePath(
+        here::here("data", "processed", "unique_spill_sites.parquet"),
+        mustWork = FALSE
+      )) "passed" else "pending_publication",
+      detail = if (normalizePath(candidate_path, mustWork = TRUE) == normalizePath(
+        here::here("data", "processed", "unique_spill_sites.parquet"),
+        mustWork = FALSE
+      )) "Production canonical artifact was validated" else
+        "Temporary canonical candidate validated; coordinated production publication remains pending"
+    )
+  )
+
+  dir.create(evidence_dir, recursive = TRUE, showWarnings = FALSE)
+  write_csv(checks, file.path(evidence_dir, "migration_checks.csv"))
+  write_csv(
+    candidate |>
+      count(.data$edm_commission_resolution_status, .data$edm_commission_date_precision),
+    file.path(evidence_dir, "commission_status_counts.csv")
+  )
+  write_csv(figure$completeness, file.path(evidence_dir, "commission_figure_completeness.csv"))
+  write_csv(figure$diagnostics, file.path(evidence_dir, "commission_figure_denominators.csv"))
+  write_csv(stale_contracts$findings, file.path(evidence_dir, "stale_contract_exemptions.csv"))
+  writeLines(
+    c(
+      "# Canonical Spill Site grain migration reconciliation",
+      "",
+      paste0("Generated: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")),
+      "",
+      paste0("- Canonical candidate: `", candidate_path, "`"),
+      paste0("- Canonical rows: ", nrow(candidate)),
+      paste0("- Site Groups: ", n_distinct(candidate$site_id)),
+      paste0("- Crosswalk rows: ", nrow(crosswalk)),
+      paste0(
+        "- Gate mode: `",
+        if (any(checks$status == "pending_publication")) "pending_publication" else "complete",
+        "`"
+      ),
+      "",
+      "All checks with supplied evidence passed. Checks marked",
+      "`pending_publication` require the coordinated production publication or",
+      "a supplied pre-migration baseline before the strict gate can pass."
+    ),
+    file.path(evidence_dir, "reconciliation.md")
+  )
+  print(checks, n = Inf)
+  gate_mode <- reconciliation_gate_mode(checks, allow_pending_publication)
+  if (gate_mode == "pending_publication") {
+    cat("Canonical Spill Site / Site Group pre-publication checks passed; publication gates remain pending.\n")
+  } else {
+    cat("Canonical Spill Site / Site Group migration reconciliation passed.\n")
+  }
+}
+
+if (sys.nframe() == 0L) main()

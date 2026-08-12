@@ -10,10 +10,10 @@
 # Date: 2026-03-09
 #
 # Inputs:
-#   - data/processed/unique_spill_sites.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #   - data/processed/rainfall/spill_site_grid_lookup.parquet
 #   - data/processed/rainfall/rainfall_data_cleaned.parquet
-#   - data/processed/rainfall/spill_blocks_rainfall_yr.parquet
+#   - data/processed/rainfall/dry_spills.parquet
 #   - data/raw/haduk_rainfall_data/rainfall_YYYY_MM.nc
 #   - data/raw/rivers/OSRivers_shapefile/WatercourseLink.shp
 #
@@ -27,10 +27,10 @@
 # ==============================================================================
 # 1. Configuration
 # ==============================================================================
-TARGET_SITE_ID <- 8001L
+TARGET_SITE_ID <- 14710L
 TARGET_WATER_COMPANY <- "Thames Water"
 TARGET_YEAR <- 2023L
-TARGET_BLOCK_START <- "2023-02-09 05:46:00"
+TARGET_EVENT_START <- "2023-02-09 05:46:00"
 DRY_THRESHOLD_MM <- 0.25
 MAP_PADDING_LEFT_M <- 1100
 MAP_PADDING_RIGHT_M <- 1100
@@ -77,6 +77,7 @@ install_if_missing <- function(packages) {
 }
 
 install_if_missing(required_packages)
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 
 
 # ==============================================================================
@@ -165,8 +166,12 @@ theme_pref <- theme_minimal(base_family = FONT_FAMILY) +
 # 4. Helper Functions
 # ==============================================================================
 load_target_event <- function() {
-  site_data <- arrow::read_parquet(
-    here::here("data", "processed", "unique_spill_sites.parquet")
+  site_data <- read_site_group_projection(
+    here::here(
+      "data", "processed", "matched_events_annual_data",
+      "site_group_crosswalk.parquet"
+    ),
+    years = 2021:2024
   ) |>
     dplyr::filter(
       .data$site_id == TARGET_SITE_ID,
@@ -177,26 +182,26 @@ load_target_event <- function() {
     stop("Expected exactly one matching site row.")
   }
 
-  block_candidates <- arrow::read_parquet(
-    here::here("data", "processed", "rainfall", "spill_blocks_rainfall_yr.parquet")
+  event_candidates <- arrow::read_parquet(
+    here::here("data", "processed", "rainfall", "dry_spills.parquet")
   ) |>
     dplyr::filter(
       .data$site_id == TARGET_SITE_ID,
       .data$year == TARGET_YEAR
     )
 
-  block_data <- block_candidates |>
+  event_data <- event_candidates |>
     dplyr::mutate(
-      block_start_chr = format(.data$block_start, "%Y-%m-%d %H:%M:%S", tz = "UTC")
+      event_start_chr = format(.data$start_time, "%Y-%m-%d %H:%M:%S", tz = "UTC")
     ) |>
-    dplyr::filter(.data$block_start_chr == TARGET_BLOCK_START) |>
-    dplyr::select(-"block_start_chr")
+    dplyr::filter(.data$event_start_chr == TARGET_EVENT_START) |>
+    dplyr::select(-"event_start_chr")
 
-  if (nrow(block_data) != 1) {
-    stop("Expected exactly one matching spill block.")
+  if (nrow(event_data) != 1) {
+    stop("Expected exactly one matching dry-spill event.")
   }
 
-  list(site = site_data, block = block_data)
+  list(site = site_data, event = event_data)
 }
 
 load_site_lookup <- function(site_id, site_ngr) {
@@ -502,8 +507,8 @@ cat("Loading target event...\n")
 
 target <- load_target_event()
 site_row <- target$site
-block_row <- target$block
-spill_date <- as.Date(block_row$block_start)
+event_row <- target$event
+spill_date <- as.Date(event_row$start_time)
 
 site_id <- site_row$site_id[[1]]
 site_ngr <- site_row$ngr[[1]]
@@ -519,8 +524,8 @@ rainfall_by_day <- load_rainfall_for_event(lookup, spill_date)
 
 event_max <- max(rainfall_by_day$rainfall, na.rm = TRUE)
 
-if (abs(event_max - block_row$rainfall_max_9cell_d01_na_rm[[1]]) > 1e-8) {
-  stop("Reconstructed rainfall maximum does not match stored block classification.")
+if (abs(event_max - event_row$rainfall_max_9cell_d01_na_rm[[1]]) > 1e-8) {
+  stop("Reconstructed rainfall maximum does not match stored event classification.")
 }
 
 grid_bounds <- read_grid_bounds(spill_date)

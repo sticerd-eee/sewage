@@ -8,27 +8,25 @@ Shared domain vocabulary for this project - entities, named processes, and statu
 The yearly company-reported event-duration monitoring return for storm overflow assets, combining site identifiers, permit/activity references, location fields, and reporting-year metadata.
 
 ### Monitored Discharge Point
-A single monitored overflow asset at a wastewater works — a storm tank, inlet overflow, or network outfall — and the unit recorded by one Annual Return EDM row.
-
-One works can carry several Monitored Discharge Points that share every identifying field (names, permits, location) while reporting different spill behavior. Per-monitor unique identifiers exist only from the 2023 return onward (re-keyed each year, with a bridge to the prior year's identifiers); earlier returns carry no monitor-level key, so monitor-multiples in those years cannot be tracked individually across years.
+A single monitored overflow asset reported in an Annual Return EDM row. Several points can share names, permits, and locations while reporting different spill behaviour.
 
 ### Annual-Return Site
 A reporting-year-specific record of one Monitored Discharge Point in the Annual Return EDM. It is not automatically a stable cross-year entity, because identifiers and reporting structures can change between returns.
 
 ### Canonical Spill Site
-A stable project-level site identity used to connect records that refer to the same storm overflow asset across years and datasets.
+A stable project-level identity for one Monitored Discharge Point across reporting years. Canonical metadata, availability, and commissioning history belong to this entity.
 
 ### Annual-Return Lookup
 The cross-year mapping that assigns year-specific Annual-Return Sites to Canonical Spill Sites.
 
-### Works
-A wastewater works as observed by event data: the year-invariant collapse of all Monitored Discharge Points (outlets) that file annual returns under the same company and normalised site name with corroborating evidence (shared permit or near-identical location). Events name works; annual returns name outlets. Identified by the smallest member Canonical Spill Site id.
+### Site Group
+A project-created grouping of Canonical Spill Sites used to connect event, location, and annual-return evidence that cannot be assigned reliably to one member. A Site Group supports group-level spill summaries but is not evidence of a verified physical wastewater works.
 
-### Works Register
-The graph built on top of the Annual-Return Lookup whose connected components define each Works: nodes are Canonical Spill Sites, edges require same company + same normalised name + a corroborator (identical EA permit, or grid-reference distance within the configured threshold). Membership is year-invariant by construction.
+### Site Group Register
+The authoritative record of Site Group membership and reporting-year status. It links each Canonical Spill Site to exactly one Site Group and records group-level event and annual-return evidence.
 
 ### Annual Status
-The per-works-year classification that disambiguates the absence of events in the positives-only event feed: `reported_zero` (return filed, both metrics zero), `reported_positive`, `reported_na` (return filed, metrics missing), or `absent` (no return that year).
+The per-Site-Group-year classification that disambiguates the absence of events in the positives-only event feed: `reported_zero` (return filed, both metrics zero), `reported_positive`, `reported_na` (return filed, metrics missing), or `absent` (no return that year).
 
 ### Record-Linkage Component
 A connected group of Annual-Return Sites implied by pairwise matching evidence. A component is only valid as one canonical track when it satisfies the project's site-identity invariants.

@@ -29,6 +29,7 @@ initialise_environment <- function() {
 
   # Source shared utilities for count_spills function
   source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
+  source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 }
 
 #' Set up logging configuration
@@ -52,42 +53,14 @@ CONFIG <- list(
   base_year = 2021,
   window_start = as.POSIXct("2021-01-01 00:00:00", tz = "UTC"),
   chunk_size = 100000,  # Number of rentals to process per batch
-  unique_spill_sites_path = here::here("data", "processed", "unique_spill_sites.parquet")
+  site_group_crosswalk_path = here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  )
 )
 
 # Data Loading Functions
 ############################################################
-
-#' Derive site-level missing flags for the rental-year window
-#' @param unique_sites_dt Unique spill sites data.table
-#' @param rental_years Integer vector of rental years
-#' @return data.table with site_id and site_missing
-derive_site_missing_flags <- function(unique_sites_dt, rental_years) {
-  if (is.null(unique_sites_dt) || nrow(unique_sites_dt) == 0) {
-    return(data.table(site_id = character(), site_missing = logical()))
-  }
-
-  avail_cols <- paste0("available_year_", rental_years)
-  missing_cols <- setdiff(avail_cols, names(unique_sites_dt))
-  if (length(missing_cols) > 0) {
-    logger::log_warn(
-      "Missing availability columns in unique spill sites: {paste(missing_cols, collapse = ', ')}; treating as missing"
-    )
-    for (col in missing_cols) {
-      unique_sites_dt[, (col) := FALSE]
-    }
-  }
-
-  unique_sites_dt[, (avail_cols) := lapply(.SD, function(x) {
-    x <- as.logical(x)
-    fifelse(is.na(x), FALSE, x)
-  }), .SDcols = avail_cols]
-
-  unique_sites_dt[, site_missing := !Reduce(`&`, .SD), .SDcols = avail_cols]
-  site_missing_dt <- unique_sites_dt[, .(site_missing = any(site_missing)), by = site_id]
-  setkey(site_missing_dt, site_id)
-  return(site_missing_dt)
-}
 
 #' Load datasets from parquet files
 #' @return List containing rental_dt, spill_lookup_dt, raw_events_dt, site_missing_dt
@@ -111,11 +84,16 @@ load_data <- function() {
   sample_years <- seq(min_rental_year, max_rental_year)
   logger::log_info("Rental year window for missingness: {min_rental_year}-{max_rental_year}")
 
-  unique_sites_dt <- arrow::read_parquet(CONFIG$unique_spill_sites_path) |>
+  site_group_crosswalk_dt <- arrow::read_parquet(CONFIG$site_group_crosswalk_path) |>
     as.data.table()
-  site_missing_dt <- derive_site_missing_flags(unique_sites_dt, sample_years)
+  site_missing_dt <- derive_site_group_missing_flags(
+    site_group_crosswalk_dt,
+    sample_years
+  ) |>
+    data.table::as.data.table()
+  setkey(site_missing_dt, site_id)
   logger::log_info(
-    "Unique spill sites loaded: {nrow(unique_sites_dt)} rows; missing flags for {nrow(site_missing_dt)} sites"
+    "Site Group crosswalk loaded: {nrow(site_group_crosswalk_dt)} rows; missing flags for {nrow(site_missing_dt)} groups"
   )
   logger::log_info(
     "Sites flagged as missing in rental-year window: {site_missing_dt[site_missing == TRUE, .N]}"
