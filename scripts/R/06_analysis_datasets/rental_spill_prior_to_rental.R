@@ -75,6 +75,7 @@ load_data <- function() {
     dplyr::filter(rented_est >= CONFIG$window_start) |>
     dplyr::collect() |>
     as.data.table()
+  rental_dt[, rented_est := as.POSIXct(rented_est, tz = "UTC")]
   setkey(rental_dt, rental_id)
   logger::log_info("Rental data loaded: {nrow(rental_dt)} rows")
   
