@@ -201,8 +201,7 @@ assert_identical(
   tibble(
     site_id = c(10L, 20L),
     cutoff_year = c(2020L, 2020L),
-    site_missing = c(FALSE, FALSE),
-    has_unknown_event_evidence = c(FALSE, FALSE)
+    site_missing = c(FALSE, FALSE)
   ),
   paste0(
     "The explicit pre-base cutoff must be a non-missing empty prefix for known ",
@@ -217,9 +216,9 @@ assert_identical(
   vapply(prefix_missingness_fixture, typeof, character(1)),
   c(
     site_id = "integer", cutoff_year = "integer",
-    site_missing = "logical", has_unknown_event_evidence = "logical"
+    site_missing = "logical"
   ),
-  "Prefix completeness must preserve integer keys and logical flags."
+  "Default prefix completeness must preserve its historical public columns and types."
 )
 
 invalid_prefix_status_fixture <- prefix_crosswalk_fixture

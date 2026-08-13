@@ -286,7 +286,8 @@ evidence_messages <- capture.output(
   evidence_state_result <- derive_site_group_prefix_missing_flags(
     evidence_state_fixture,
     base_year = 2023L,
-    cutoff_years = 2023L
+    cutoff_years = 2023L,
+    include_event_evidence = TRUE
   ),
   type = "message"
 )
@@ -313,7 +314,8 @@ cutoff_evidence_fixture <- tibble(
 cutoff_evidence_result <- suppressMessages(derive_site_group_prefix_missing_flags(
   cutoff_evidence_fixture,
   base_year = 2022L,
-  cutoff_years = 2022:2023
+  cutoff_years = 2022:2023,
+  include_event_evidence = TRUE
 ))
 assert_identical(
   cutoff_evidence_result$has_unknown_event_evidence,

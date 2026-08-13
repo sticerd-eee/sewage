@@ -137,10 +137,13 @@ read_site_group_missing_flags <- function(file_path, years) {
 #' @param base_year First year in the exposure window.
 #' @param cutoff_years Exclusive transaction cutoff years to return. Values may
 #'   include `base_year - 1L` for the explicit empty prefix.
+#' @param include_event_evidence Whether to include cumulative unknown-event
+#'   evidence alongside the historical prefix-missingness contract.
 #' @return A tibble unique on `site_id` and `cutoff_year`, with logical
-#'   `site_missing` and `has_unknown_event_evidence`.
+#'   `site_missing` and, when requested, `has_unknown_event_evidence`.
 derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
-                                                   cutoff_years) {
+                                                   cutoff_years,
+                                                   include_event_evidence = FALSE) {
   required_columns <- c(
     "site_id", "year", "water_company", "annual_status",
     "matched_event_count"
@@ -317,8 +320,14 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
     )
   }
 
-  dplyr::bind_rows(empty_prefixes, non_empty_prefixes) |>
+  prefixes <- dplyr::bind_rows(empty_prefixes, non_empty_prefixes) |>
     dplyr::arrange(.data$site_id, .data$cutoff_year)
+  if (!isTRUE(include_event_evidence)) {
+    prefixes <- dplyr::select(
+      prefixes, "site_id", "cutoff_year", "site_missing"
+    )
+  }
+  prefixes
 }
 
 #' Derive one explicit metadata row per Site Group.

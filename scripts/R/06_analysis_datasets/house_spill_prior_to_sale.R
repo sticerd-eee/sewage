@@ -102,7 +102,8 @@ load_data <- function() {
   site_missing_dt <- derive_site_group_prefix_missing_flags(
     site_group_crosswalk_dt,
     CONFIG$base_year,
-    transaction_cutoff_years
+    transaction_cutoff_years,
+    include_event_evidence = TRUE
   ) |>
     data.table::as.data.table()
   setkey(site_missing_dt, site_id, cutoff_year)
