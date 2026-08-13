@@ -1,30 +1,30 @@
 # Code review — `house_spill_prior_to_sale.R` and `rental_spill_prior_to_rental.R`
 
 - **Original review:** 2026-07-07
-- **Updated review:** 2026-08-12
+- **Updated review:** 2026-08-14
 - **Scope:** whole-file audit of `scripts/R/06_analysis_datasets/house_spill_prior_to_sale.R` and `scripts/R/06_analysis_datasets/rental_spill_prior_to_rental.R`, including `site_group_utils.R`, `spill_aggregation_utils.R`, relevant tests and consumers, the current Parquet inputs, and the outputs regenerated on 2026-08-11.
 - **Method:** independent correctness, adversarial, testing, maintainability, performance/reliability, and project-standards passes. The load-bearing findings were then checked directly with R 4.6.0, Arrow 24.0.0, DuckDB queries over the production Parquet files, targeted type-dispatch probes, and an independent validation pass.
-- **Verdict:** **not ready to treat as a clean, guarded production step.** The current outputs have the expected schema, unique key grain, configured radius set, and lookup-pair membership. However, they contain active semantic defects: global missingness removes valid early transaction-site observations (finding 4), reported-positive years with no matched events are treated as observed zero/partial exposure (finding 11), and window-start transactions contain `NaN` rates (finding 2). Several latent paths can also void or corrupt a future rerun while the script exits normally.
+- **Verdict:** **ready as a guarded production step.** The focused contracts, shared streaming engine, and staged publisher now enforce the agreed eligibility, evidence, schema, key, and publication contracts. All four production outputs were regenerated and reconciled against their accepted eligible baselines on 2026-08-14.
 
 **Status key:** `[ ]` open · `[x]` fixed · `[-]` won't fix (note why)
 
 ## Current status summary
 
-| # | Finding | Status on 2026-08-12 | Priority |
+| # | Finding | Current status | Priority |
 |---:|---|---|---|
 | 1 | Date/POSIXct comparison depends on lubridate | Resolved 2026-08-13 | P1 |
-| 2 | Zero-day windows produce `NaN` | Still current in the August outputs | P2 decision |
-| 3 | Broken empty-chunk schema | Still current; also promotes `site_id` to character | P2 |
+| 2 | Zero-day windows produce `NaN` | Resolved 2026-08-14 | P2 decision |
+| 3 | Broken empty-chunk schema | Resolved 2026-08-14 | P2 |
 | 4 | Global rather than transaction-specific missingness | Resolved 2026-08-13 | P1 decision |
 | 5 | Future year can void the sample | Resolved 2026-08-13 | P1 |
 | 6 | Stale Arrow partitions | Resolved 2026-08-13 | P1 |
 | 7 | Missing output-contract test | Resolved 2026-08-13 | P1 |
-| 8 | Hand-maintained twin scripts | Still current and part of four parallel implementations | P2 |
-| 9 | Debug/dead-code debris | Still current | P3 advisory |
-| 10 | Per-pair interpreted loop | Still current scaling concern | P3 advisory |
+| 8 | Hand-maintained twin scripts | Resolved 2026-08-14 | P2 |
+| 9 | Debug/dead-code debris | Resolved 2026-08-14 | P3 advisory |
+| 10 | Per-pair interpreted loop | Won't fix 2026-08-14 | P3 advisory |
 | 11 | Reported-positive years with no matched events are undercounted | Resolved 2026-08-13 | P1 decision |
-| 12 | Empty eligible transaction input fails opaquely | **New** | P2 |
-| 13 | Chunking does not bound peak memory | **New** | P2 scaling |
+| 12 | Empty eligible transaction input fails opaquely | Resolved 2026-08-14 | P2 |
+| 13 | Chunking does not bound peak memory | Resolved 2026-08-14 | P2 scaling |
 
 ## High
 
@@ -101,7 +101,9 @@
 
 ## Moderate
 
-### 2. `[ ]` Transactions on 2021-01-01 emit zero-day windows and `NaN` averages
+### 2. `[x]` Transactions on 2021-01-01 emit zero-day windows and `NaN` averages
+
+- **Resolution (2026-08-14):** the shared loader computes integer complete 24-hour days from the UTC window start and retains only transactions with at least 30 complete days before deriving cutoffs, prefixes, or chunks. Boundary contracts exclude 29 days 23 hours 59 minutes and retain exactly 30 days. All four regenerated outputs have a minimum window of 30 days and staged validation rejects `NaN` or infinite rates.
 
 - **Where:** input filters at line `75`, denominators at `house_spill_prior_to_sale.R:257-262` and `rental_spill_prior_to_rental.R:256-261`, and divisions at house `:350-356` / rental `:349-355`.
 - **Problem:** the inclusive `>= CONFIG$window_start` filter admits transactions whose exposure interval has zero days. Their non-missing metrics are zero, so the four rates evaluate `0 / 0 = NaN`.
@@ -109,7 +111,9 @@
 - **Decision required:** either exclude boundary transactions with a strict `>` filter, or retain them with all four averages explicitly set to `NA_real_` when `n_days_in_window == 0`. Apply and document one rule in both scripts.
 - **Validation:** correctness and adversarial confirmed the arithmetic; current output counts were measured directly.
 
-### 3. `[ ]` Empty-chunk prototypes corrupt identifier types and the rental schema
+### 3. `[x]` Empty-chunk prototypes corrupt identifier types and the rental schema
+
+- **Resolution (2026-08-14):** the shared engine owns literal typed schemas for all four variants. Site-grain empty chunks write no fragment; radius-grain no-site chunks write the complete typed zero-site grid. Every populated chunk and the reopened stage are checked against the exact public schema and keys. Mixed empty/populated fixtures and all four regenerated datasets pass those checks.
 
 - **Where:** house `process_chunk():284-296`; rental `process_chunk():283-295`.
 - **Problem:** both empty prototypes declare transaction IDs and `site_id` as `character()` although production inputs are `int32`. The rental prototype also declares `price` instead of `listing_price`. If one chunk has no pair within 1,000 m, `rbindlist(..., fill = TRUE)` promotes all real identifiers to character and adds an all-`NA` rental `price` column.
@@ -117,21 +121,27 @@
 - **Suggested fix:** define one typed output prototype per pipeline from the actual contract, or at minimum use `integer()` identifiers and `listing_price` in the rental prototype. Test one empty and one populated chunk together.
 - **Validation:** correctness, adversarial, and the independent validator reproduced the corruption.
 
-### 8. `[ ]` Four prior-exposure builders maintain the same preparation logic independently
+### 8. `[x]` Four prior-exposure builders maintain the same preparation logic independently
+
+- **Resolution (2026-08-14):** one closed `sale|rental × site|radius` engine in `prior_exposure_utils.R` now owns eligibility, completeness prefixes, event clipping and aggregation, rates, schema normalization, chunk validation, and streaming publication. The four producer files retain only configuration, bootstrap, compatibility delegates, and a short main entrypoint. Parity contracts exercise all four variants through that shared seam.
 
 - **Where:** these two files plus `cross_section_prior_to_sale.R` and `cross_section_prior_to_rental.R`.
 - **Problem:** loading, date clipping, missingness, event joining, chunking, rate construction, and export logic are copied across sale/rental and site/radius products. Finding 3 is a demonstrated copy-paste divergence, and every correction in this review otherwise requires parallel edits.
 - **Suggested fix:** after the measurement decisions in findings 2, 4, and 11 are settled, extract a shared transaction-to-site exposure preparation helper. Keep thin sale/rental wrappers and separate final reducers for the intentionally different output grains. Add parity fixtures before consolidating.
 - **Validation:** the maintainability pass and a mechanical comparison confirmed the repeated structure.
 
-### 12. `[ ]` An empty eligible transaction input fails with opaque base-R sequence errors
+### 12. `[x]` An empty eligible transaction input fails with opaque base-R sequence errors
+
+- **Resolution (2026-08-14):** the shared loader now stops immediately after the 30-day eligibility filter when no transaction remains, with a variant- and window-specific error before cutoff, prefix, or chunk construction. Focused contracts cover the empty retained cohort for every variant.
 
 - **Where:** year derivation at lines `81-84` and chunk starts at house `:314-318` / rental `:313-317`.
 - **Problem:** if filtering leaves zero eligible transactions, `min()`/`max()` operate on an empty year vector and `seq()` receives non-finite endpoints; even a bypass of that point makes `seq(1L, 0L, by = chunk_size)` fail with `wrong sign in 'by' argument`.
 - **Suggested fix:** fail fast immediately after collection with an input-path and window-specific error. If a zero-row artifact is genuinely a valid product state, return and publish a fully typed empty prototype instead. Cover the chosen contract in both scripts.
 - **Validation:** testing, performance/reliability, and the independent validator reproduced the failure.
 
-### 13. `[ ]` Chunking bounds the cartesian join but not peak pipeline memory
+### 13. `[x]` Chunking bounds the cartesian join but not peak pipeline memory
+
+- **Resolution (2026-08-14):** completed chunk results are now validated, written to a run-specific stage, removed, and garbage-collected before the next sequential chunk; no result list or final in-memory bind remains. All four production runs completed through this path. The largest output contained 11,419,359 rows and published in 39 chunks with 6.23 GB maximum resident memory; per-chunk logs and failure fixtures confirm that partial stages cannot replace the canonical dataset. Eager input collection remains an explicit, measured boundary rather than an unresolved output-accumulation defect.
 
 - **Where:** all transaction, lookup, and event inputs are collected at lines `71-123`; all chunk results are retained inside `rbindlist(lapply(...))` at house `:322-332` / rental `:321-331`.
 - **Problem:** the 10,000-ID chunks limit only the per-chunk event expansion. The run still holds every input in memory, retains every completed chunk result until `lapply()` finishes, and allocates the combined result while that list remains live.
@@ -141,13 +151,17 @@
 
 ## Low / advisory
 
-### 9. `[ ]` Debug markers, dead alternatives, stale comments, and bootstrap debris remain
+### 9. `[x]` Debug markers, dead alternatives, stale comments, and bootstrap debris remain
+
+- **Resolution (2026-08-14):** all four entrypoints now use the standard header and `script_setup.R` fail-fast bootstrap, source the shared utilities locally, and contain no runtime installation, stale test markers, commented alternatives, or list-binding implementation. `spill_aggregation_utils.R` now reports `rv sync` guidance instead of installing packages while leaving `count_spills()` unchanged.
 
 - **Where:** both scripts at `:222` (`# TEST: REMOVE LATER` above live production code), `:235-241` (commented alternative implementation), and house `:315` / rental `:314` (commented test truncation). The `# Shallow copy` comment at `:227` is inaccurate; house `:378` retains an unresolved `# CHANGE`; `fs` is loaded but unused; and the bootstrap installs missing packages at runtime.
 - **Problem:** the comments make the authoritative path unclear and invite deletion of live code. Runtime package installation also mutates the execution environment instead of failing against the project's `rv`-managed dependency contract.
 - **Suggested fix:** delete the test markers and dead blocks, correct/remove stale comments, remove unused dependencies, and use a shared fail-fast project bootstrap. Rename the house log consistently if desired.
 
-### 10. `[ ]` `count_spills()` remains an interpreted loop invoked once per transaction-site group
+### 10. `[-]` `count_spills()` remains an interpreted loop invoked once per transaction-site group
+
+- **Won't fix (2026-08-14):** this is an advisory scaling concern, not a correctness defect. The refactor deliberately preserves the established `count_spills()` interface and exact boundary behavior rather than introducing a second counting implementation. The streaming engine now records transaction, lookup-pair, joined-event, output-row, and elapsed-time diagnostics for every chunk, providing the agreed instrumentation for any future evidence-driven optimization.
 
 - **Where:** `calculate_metrics_by_radius():198-202` in both scripts, calling the loop in `spill_aggregation_utils.R:199-253`.
 - **Problem:** this is still the dominant algorithmic scaling concern as radii, years, or matched-site fan-out grow. It is not a correctness defect, and the current full runs completed.
@@ -209,4 +223,4 @@
 
 ## Verdict
 
-**Not ready.** Fix or explicitly decide findings 4 and 11 before relying on the current exposure sample, then install the output contract and publication safeguards. The current files are structurally consistent on their happy path, but they are not yet protected against silent semantic corruption or unsafe reruns.
+**Ready.** The measurement decisions for findings 2, 4, and 11 are implemented, the producer/output contracts and publication safeguards are installed, and the four regenerated canonical datasets passed full eligible-baseline reconciliation. Finding 10 remains an explicitly accepted instrumentation item rather than a correctness blocker.
