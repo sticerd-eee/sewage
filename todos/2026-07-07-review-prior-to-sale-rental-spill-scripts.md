@@ -17,12 +17,12 @@
 | 3 | Broken empty-chunk schema | Still current; also promotes `site_id` to character | P2 |
 | 4 | Global rather than transaction-specific missingness | Resolved 2026-08-13 | P1 decision |
 | 5 | Future year can void the sample | Resolved 2026-08-13 | P1 |
-| 6 | Stale Arrow partitions | Still current and broader: publication is also non-atomic | P1 |
-| 7 | Missing output-contract test | Still current | P1 |
+| 6 | Stale Arrow partitions | Resolved 2026-08-13 | P1 |
+| 7 | Missing output-contract test | Resolved 2026-08-13 | P1 |
 | 8 | Hand-maintained twin scripts | Still current and part of four parallel implementations | P2 |
 | 9 | Debug/dead-code debris | Still current | P3 advisory |
 | 10 | Per-pair interpreted loop | Still current scaling concern | P3 advisory |
-| 11 | Reported-positive years with no matched events are undercounted | **New** | P1 decision |
+| 11 | Reported-positive years with no matched events are undercounted | Resolved 2026-08-13 | P1 decision |
 | 12 | Empty eligible transaction input fails opaquely | **New** | P2 |
 | 13 | Chunking does not bound peak memory | **New** | P2 scaling |
 
@@ -60,7 +60,9 @@
 - **Suggested fix:** validate transaction dates and required years before deriving flags. Stop with the unsupported year list when a transaction window exceeds crosswalk coverage, and reject implausible future dates. Add a publication gate that refuses an all-missing result.
 - **Validation:** correctness, adversarial, and the independent validator reproduced the all-site failure.
 
-### 6. `[ ]` Direct Arrow writes retain stale partitions and can expose mixed run generations
+### 6. `[x]` Direct Arrow writes retain stale partitions and can expose mixed run generations
+
+- **Resolution (2026-08-13):** both site-level producers now publish through a shared staged-generation helper. It rejects empty candidates, reopens and validates the literal schema, row count, and configured radii, then promotes through a checked recoverable `.prev` generation. Focused tests cover obsolete-radius removal, promotion failure with successful restoration, promotion plus restoration failure, interrupted state detection, and empty-candidate rejection. Both full outputs published successfully with only `radius=250`, `500`, and `1000`; their `.prev` datasets reopened as the exact preceding generations.
 
 - **Where:** `house_spill_prior_to_sale.R:370-394` and `rental_spill_prior_to_rental.R:369-392`.
 - **Problem:** both scripts write directly into the live radius-partitioned dataset. Arrow's default `existing_data_behavior = "overwrite"` replaces colliding files but does not remove a radius absent from the new run. `"delete_matching"` deletes only partitions receiving new data, so it also leaves a radius removed from `CONFIG$radius_thresholds`. A failed write can additionally leave readers with a partial mix of old and new partitions.
@@ -68,7 +70,9 @@
 - **Suggested fix:** write to a unique sibling staging directory, reopen and validate the complete dataset, then promote it over the live directory through a controlled replacement with a recoverable backup or version manifest. Validate the exact radius set after publication. Do not treat `delete_matching` alone as the fix.
 - **Validation:** correctness, adversarial, performance/reliability, and the independent validator confirmed the failure mode.
 
-### 7. `[ ]` No producer or output-contract test covers either script
+### 7. `[x]` No producer or output-contract test covers either script
+
+- **Resolution (2026-08-13):** `test_prior_exposure_contracts.R` now executes isolated sale and rental producer fixtures and the shared publisher contract. Together with the prerequisite prior-window contract work, the suite covers transaction-specific completeness, unsupported years, rental timestamp clipping, sale/rental final-output evidence parity, public schemas, stale-partition removal, and publication recovery. The full regenerated outputs were also reconciled to their snapshots for schemas, row counts, keys, radii, stable fields, and evidence-attributed masking. Findings 2, 3, and 12 remain separately open; this closure does not claim zero-day, mixed empty-chunk, or empty-cohort coverage.
 
 - **Where:** project-level gap under `scripts/R/testing/`.
 - **Problem:** the existing Site Group consumer tests validate the crosswalk helper but do not execute these producers or audit their outputs. The defects in findings 1-6 and 11-12 can therefore ship with a green script exit.
@@ -84,7 +88,9 @@
 - **Current structural baseline:** the August outputs have zero duplicate `(id, site_id, radius)` keys. At radius 1,000, all 4,283,449 house lookup pairs and all 2,299,421 rental lookup pairs appear exactly once, with no stale output-only pairs.
 - **Validation:** testing and the independent validator confirmed that no focused contract exists.
 
-### 11. `[ ]` Reported-positive Site Group-years with no matched events are treated as observed zero or partial exposure
+### 11. `[x]` Reported-positive Site Group-years with no matched events are treated as observed zero or partial exposure
+
+- **Resolution (2026-08-13):** the shared prefix helper now marks event evidence unknown for `reported_positive` years with zero matched events and for `reported_na`/`absent` years, while preserving `reported_zero` as observed zero. Both site-level producers carry that flag internally and mask counts, hours, and derived rates only after final zero filling; the public 13-column schemas are unchanged. Full-output reconciliation found 968,674 newly masked sale rows and 392,654 newly masked rental rows, all attributable to the new evidence-gap rule, with zero material changes outside those gaps, exact pre-change key sets and row counts, and unchanged `site_missing`.
 
 - **Where:** missingness is reduced to `annual_status == "absent"` at `load_data():89-92`; raw events are loaded at `:114-123`; unmatched transaction-site pairs are zero-filled at `calculate_metrics_by_radius():198-219`.
 - **Problem:** the event feed is positives-only and not complete for every reported-positive Site Group-year. When a positive annual return has no matched event rows, these scripts do not mark the year unknown. A transaction-site pair instead receives zero for that missing year, or a cumulative total that omits the year. This conflicts with the repaired `aggregate_spill_stats.R` contract, which keeps EA-only positive counts and subannual metrics `NA` rather than interpreting absent event matches as zero.
