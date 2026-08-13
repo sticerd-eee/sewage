@@ -197,11 +197,8 @@ create_joined_events <- function(house_ids, data) {
   }
   
   # Join: house_sites -> raw_events
-  event_pairs <- house_sites_with_missing[, .(
-    house_id, site_id, date_of_transfer
-  )]
   joined <- data$raw_events_dt[
-    event_pairs,
+    house_sites_with_missing,
     on = "site_id",
     nomatch = NULL,
     allow.cartesian = TRUE

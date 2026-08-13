@@ -197,11 +197,8 @@ create_joined_events <- function(rental_ids, data) {
   }
   
   # Join: rental_sites -> raw_events
-  event_pairs <- rental_sites_with_missing[, .(
-    rental_id, site_id, rented_est
-  )]
   joined <- data$raw_events_dt[
-    event_pairs,
+    rental_sites_with_missing,
     on = "site_id",
     nomatch = NULL,
     allow.cartesian = TRUE
