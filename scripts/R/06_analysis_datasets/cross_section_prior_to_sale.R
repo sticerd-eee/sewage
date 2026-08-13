@@ -86,14 +86,6 @@ load_data <- function() {
 
   transaction_cutoff_years <- sort(unique(house_dt$cutoff_year))
   max_cutoff_year <- max(transaction_cutoff_years)
-  cutoff_years <- if (max_cutoff_year >= CONFIG$base_year) {
-    c(
-      transaction_cutoff_years[transaction_cutoff_years == CONFIG$base_year - 1L],
-      seq.int(CONFIG$base_year, max_cutoff_year)
-    )
-  } else {
-    CONFIG$base_year - 1L
-  }
   logger::log_info(
     "Sale exposure completeness prefixes: {CONFIG$base_year}-{max_cutoff_year}; keyed by site_id and cutoff_year"
   )
@@ -103,7 +95,7 @@ load_data <- function() {
   site_missing_dt <- derive_site_group_prefix_missing_flags(
     site_group_crosswalk_dt,
     CONFIG$base_year,
-    cutoff_years
+    transaction_cutoff_years
   ) |>
     data.table::as.data.table()
   setkey(site_missing_dt, site_id, cutoff_year)

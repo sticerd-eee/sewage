@@ -305,8 +305,8 @@ for (label in names(producer_specs)) {
   )
   assert_identical(
     sort(unique(data$site_missing_dt$cutoff_year)),
-    2020:2024,
-    paste(label, "must request every prefix through the maximum needed cutoff")
+    c(2020L, 2022L, 2024L),
+    paste(label, "must return only transaction-relevant completeness prefixes")
   )
   assert_true(
     !data$site_missing_dt[site_id == 10L & cutoff_year == 2022L, site_missing] &&
