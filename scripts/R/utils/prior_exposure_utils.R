@@ -394,11 +394,10 @@ prior_exposure_transaction_site_metrics <- function(joined, contract) {
 
 prior_exposure_reduce_site <- function(site_metrics, radii) {
   if (is.null(site_metrics) || nrow(site_metrics) == 0L) return(NULL)
-  result <- data.table::rbindlist(lapply(sort(radii), function(radius_value) {
-    rows <- data.table::copy(site_metrics[distance_m <= radius_value])
-    rows[, radius := radius_value]
-    rows
-  }), use.names = TRUE)
+  radii <- sort(radii)
+  result <- site_metrics[rep(seq_len(.N), each = length(radii))]
+  result[, radius := rep(radii, times = nrow(site_metrics))]
+  result <- result[distance_m <= radius]
   result[site_missing == TRUE, `:=`(
     spill_hrs = NA_real_, spill_count = NA_real_
   )]
@@ -489,9 +488,8 @@ prior_exposure_site_prototype <- function(contract) {
   prior_exposure_project_public(result, contract)
 }
 
-prior_exposure_process_chunk <- function(transaction_ids, data) {
+prior_exposure_process_joined_chunk <- function(transaction_ids, data, joined) {
   contract <- data$contract
-  joined <- prior_exposure_join_events(transaction_ids, data)
   site_metrics <- prior_exposure_transaction_site_metrics(joined, contract)
   metadata <- prior_exposure_metadata(data$transaction_dt, transaction_ids)
 
@@ -520,6 +518,11 @@ prior_exposure_process_chunk <- function(transaction_ids, data) {
   prior_exposure_project_public(result, contract)
 }
 
+prior_exposure_process_chunk <- function(transaction_ids, data) {
+  joined <- prior_exposure_join_events(transaction_ids, data)
+  prior_exposure_process_joined_chunk(transaction_ids, data, joined)
+}
+
 prior_exposure_calculate_metrics <- function(
     lookup_dt, events_dt, market, grain, radii) {
   contract <- prior_exposure_variant(market, grain)
@@ -542,32 +545,6 @@ prior_exposure_calculate_metrics <- function(
   if (!is.null(result) && "transaction_id" %in% names(result)) {
     data.table::setnames(result, "transaction_id", contract$id)
   }
-  result
-}
-
-prior_exposure_build <- function(data) {
-  contract <- data$contract
-  transaction_ids <- data$transaction_dt$transaction_id
-  starts <- seq.int(1L, length(transaction_ids), by = data$config$chunk_size)
-  result <- data.table::rbindlist(lapply(starts, function(start) {
-    end <- min(start + data$config$chunk_size - 1L, length(transaction_ids))
-    prior_exposure_process_chunk(transaction_ids[start:end], data)
-  }), use.names = TRUE)
-  key_columns <- if (contract$grain == "site") {
-    c(contract$id, "site_id", "radius")
-  } else {
-    c(contract$id, "radius")
-  }
-  if (anyDuplicated(result[, ..key_columns])) {
-    stop("Prior-exposure result contains duplicate public keys.", call. = FALSE)
-  }
-  rate_columns <- grep("_(daily|weekly)_avg$", names(result), value = TRUE)
-  if (any(vapply(result[, ..rate_columns], function(x) {
-    any(!is.na(x) & !is.finite(x))
-  }, logical(1)))) {
-    stop("Prior-exposure rates must be finite or NA.", call. = FALSE)
-  }
-  data.table::setorderv(result, key_columns)
   result
 }
 
@@ -630,7 +607,7 @@ prior_exposure_validate_and_cast_public <- function(data, expected_schema) {
   }
   rate_columns <- grep("_(daily|weekly)_avg$", names(result), value = TRUE)
   if (any(vapply(result[, ..rate_columns], function(x) {
-    any(!is.na(x) & !is.finite(x))
+    any(is.nan(x) | (!is.na(x) & !is.finite(x)))
   }, logical(1)))) {
     stop("Published prior-exposure rates must be finite or NA.", call. = FALSE)
   }
@@ -648,26 +625,7 @@ prior_exposure_prepare_public <- function(data, market, grain) {
   prior_exposure_validate_and_cast_public(data[, schema$names, with = FALSE], schema)
 }
 
-#' Publish a complete radius-partitioned prior-exposure generation.
-#'
-#' The candidate is written and validated beside the canonical directory before
-#' the canonical generation is moved. Publication assumes one writer per path.
-#'
-#' @param data Complete in-memory candidate.
-#' @param output_path Canonical Arrow dataset directory.
-#' @param expected_schema Literal on-disk Arrow schema, including Hive radius.
-#' @param expected_radii Exact configured integer radius set.
-#' @param rename_path Injectable directory-rename seam used by focused tests.
-#' @return `output_path`, invisibly.
-publish_prior_exposure_dataset <- function(
-    data, output_path, expected_schema, expected_radii,
-    rename_path = file.rename) {
-  data <- prior_exposure_validate_and_cast_public(data, expected_schema)
-  expected_rows <- nrow(data)
-  if (is.null(expected_rows) || expected_rows == 0L) {
-    stop("Cannot publish an empty prior-exposure candidate.", call. = FALSE)
-  }
-
+prior_exposure_validate_radii <- function(expected_radii) {
   expected_radii <- as.numeric(expected_radii)
   if (length(expected_radii) == 0L || anyNA(expected_radii) ||
       any(!is.finite(expected_radii)) || any(expected_radii < 0) ||
@@ -676,30 +634,99 @@ publish_prior_exposure_dataset <- function(
       anyDuplicated(expected_radii)) {
     stop("expected_radii must be unique, nonnegative integers.", call. = FALSE)
   }
-  expected_radii <- sort(as.integer(expected_radii))
+  sort(as.integer(expected_radii))
+}
 
+prior_exposure_create_stage <- function(output_path) {
   parent_dir <- dirname(output_path)
   dir.create(parent_dir, recursive = TRUE, showWarnings = FALSE)
-  stage_path <- tempfile(
+  tempfile(
     pattern = paste0(".", basename(output_path), ".stage-"),
     tmpdir = parent_dir
   )
-  on.exit({
-    if (dir.exists(stage_path)) {
-      cleanup_status <- unlink(stage_path, recursive = TRUE)
-      if (cleanup_status != 0L && dir.exists(stage_path)) {
-        warning("Could not remove prior-exposure stage: ", stage_path, call. = FALSE)
-      }
-    }
-  }, add = TRUE)
+}
 
+prior_exposure_public_key_columns <- function(contract) {
+  if (contract$grain == "site") {
+    c(contract$id, "site_id", "radius")
+  } else {
+    c(contract$id, "radius")
+  }
+}
+
+prior_exposure_expected_chunk_keys <- function(transaction_ids, data) {
+  contract <- data$contract
+  radii <- sort(as.integer(data$config$radius_thresholds))
+  if (contract$grain == "radius") {
+    keys <- data.table::CJ(
+      transaction_id = as.integer(transaction_ids),
+      radius = radii,
+      unique = TRUE
+    )
+  } else {
+    lookup <- data$internal_lookup_dt[
+      data.table::data.table(transaction_id = transaction_ids),
+      on = "transaction_id", nomatch = 0L
+    ]
+    if (nrow(lookup) == 0L) {
+      keys <- data.table::data.table(
+        transaction_id = integer(), site_id = integer(), radius = integer()
+      )
+    } else {
+      lookup <- lookup[
+        , .(distance_m = min(distance_m)), by = .(transaction_id, site_id)
+      ]
+      keys <- lookup[rep(seq_len(.N), each = length(radii))]
+      keys[, radius := rep(radii, times = nrow(lookup))]
+      keys <- keys[distance_m <= radius, .(transaction_id, site_id, radius)]
+    }
+  }
+  data.table::setnames(keys, "transaction_id", contract$id)
+  data.table::setorderv(keys, prior_exposure_public_key_columns(contract))
+  keys
+}
+
+prior_exposure_validate_chunk_keys <- function(chunk, expected_keys, contract) {
+  key_columns <- prior_exposure_public_key_columns(contract)
+  actual_keys <- data.table::copy(chunk[, ..key_columns])
+  if (anyDuplicated(actual_keys)) {
+    stop("Prior-exposure chunk contains duplicate public keys.", call. = FALSE)
+  }
+  data.table::setorderv(actual_keys, key_columns)
+  expected_keys <- data.table::copy(expected_keys)
+  data.table::setorderv(expected_keys, key_columns)
+  data.table::setkeyv(actual_keys, NULL)
+  data.table::setkeyv(expected_keys, NULL)
+  if (!identical(actual_keys, expected_keys)) {
+    stop(
+      "Prior-exposure chunk keys do not exactly match their expected keys.",
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
+}
+
+prior_exposure_write_chunk <- function(chunk, stage_path, chunk_index) {
+  # The stage itself is unique per run; the monotone chunk index therefore
+  # gives every write a collision-proof namespace inside that stage.
+  fragment_token <- sprintf("chunk-%010d", as.integer(chunk_index))
   arrow::write_dataset(
-    data,
+    chunk,
     path = stage_path,
     format = "parquet",
-    partitioning = "radius"
+    partitioning = "radius",
+    basename_template = paste0(fragment_token, "-{i}.parquet"),
+    existing_data_behavior = "overwrite"
   )
+  invisible(stage_path)
+}
 
+prior_exposure_validate_stage <- function(
+    stage_path, expected_schema, expected_radii, expected_rows) {
+  if (!dir.exists(stage_path) || expected_rows == 0) {
+    stop("Cannot publish an empty prior-exposure stage.", call. = FALSE)
+  }
+  expected_radii <- prior_exposure_validate_radii(expected_radii)
   staged <- tryCatch(
     arrow::open_dataset(stage_path),
     error = function(error) {
@@ -735,7 +762,6 @@ publish_prior_exposure_dataset <- function(
       call. = FALSE
     )
   }
-
   staged_radii <- staged_summary |>
     dplyr::pull(.data$radius) |>
     as.integer() |>
@@ -749,6 +775,40 @@ publish_prior_exposure_dataset <- function(
     )
   }
 
+  rate_columns <- grep("_(daily|weekly)_avg$", expected_schema$names, value = TRUE)
+  checked_rows <- 0
+  fragment_paths <- list.files(
+    stage_path, pattern = "[.]parquet$", recursive = TRUE, full.names = TRUE
+  )
+  for (fragment_path in fragment_paths) {
+    reader <- arrow::ParquetFileReader$create(fragment_path)
+    for (row_group_index in seq_len(reader$num_row_groups)) {
+      batch <- reader$ReadRowGroup(row_group_index - 1L)$to_data_frame()
+      if ("n_days_in_window" %in% names(batch) &&
+          (anyNA(batch$n_days_in_window) || any(batch$n_days_in_window < 30L))) {
+        stop(
+          "Published prior-exposure rows require at least 30 complete days.",
+          call. = FALSE
+        )
+      }
+      if (any(vapply(batch[, rate_columns, drop = FALSE], function(value) {
+        any(is.nan(value) | (!is.na(value) & !is.finite(value)))
+      }, logical(1)))) {
+        stop("Published prior-exposure rates must be finite or NA.", call. = FALSE)
+      }
+      checked_rows <- checked_rows + nrow(batch)
+      rm(batch)
+      gc(verbose = FALSE)
+    }
+  }
+  if (!identical(as.numeric(checked_rows), as.numeric(expected_rows))) {
+    stop("Staged prior-exposure bounded scan did not conserve rows.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+prior_exposure_promote_stage <- function(stage_path, output_path,
+                                         rename_path = file.rename) {
   previous_path <- paste0(output_path, ".prev")
   canonical_exists <- dir.exists(output_path)
   previous_exists <- dir.exists(previous_path)
@@ -770,7 +830,6 @@ publish_prior_exposure_dataset <- function(
         )
       }
     }
-
     preserved <- isTRUE(rename_path(output_path, previous_path))
     if (!preserved || dir.exists(output_path) || !dir.exists(previous_path)) {
       recoverable <- if (dir.exists(previous_path)) {
@@ -790,7 +849,6 @@ publish_prior_exposure_dataset <- function(
   if (promoted && dir.exists(output_path) && !dir.exists(stage_path)) {
     return(invisible(output_path))
   }
-
   if (canonical_exists) {
     restored <- isTRUE(rename_path(previous_path, output_path))
     if (restored && dir.exists(output_path) && !dir.exists(previous_path)) {
@@ -805,6 +863,167 @@ publish_prior_exposure_dataset <- function(
       call. = FALSE
     )
   }
-
   stop("Failed to promote the first prior-exposure generation.", call. = FALSE)
+}
+
+#' Stream prior-exposure chunks into one validated sibling stage.
+#'
+#' @param data Eagerly loaded prior-exposure inputs.
+#' @param output_path Canonical Arrow dataset directory.
+#' @param join_chunk Injectable event-join seam used by focused tests.
+#' @param process_joined Injectable reducer seam used by focused tests.
+#' @param write_chunk Injectable stage-writer seam used by focused tests.
+#' @param before_publish Injectable validation-failure seam used by focused tests.
+#' @param publish_dataset Injectable publication seam used by focused tests.
+#' @return `output_path`, invisibly.
+prior_exposure_stream <- function(
+    data, output_path,
+    join_chunk = prior_exposure_join_events,
+    process_joined = prior_exposure_process_joined_chunk,
+    write_chunk = prior_exposure_write_chunk,
+    before_publish = function(stage_path) invisible(stage_path),
+    publish_dataset = publish_prior_exposure_dataset) {
+  contract <- data$contract
+  expected_schema <- contract$schema
+  expected_radii <- prior_exposure_validate_radii(data$config$radius_thresholds)
+  chunk_size <- data$config$chunk_size
+  if (!is.numeric(chunk_size) || length(chunk_size) != 1L || is.na(chunk_size) ||
+      chunk_size < 1 || chunk_size != floor(chunk_size)) {
+    stop("chunk_size must be one positive integer.", call. = FALSE)
+  }
+
+  transaction_ids <- data$transaction_dt$transaction_id
+  if (!is.integer(transaction_ids) || anyNA(transaction_ids) ||
+      anyDuplicated(transaction_ids)) {
+    stop(
+      "Streaming requires unique, nonmissing integer transaction identifiers.",
+      call. = FALSE
+    )
+  }
+  stage_path <- prior_exposure_create_stage(output_path)
+  on.exit({
+    if (dir.exists(stage_path)) {
+      cleanup_status <- unlink(stage_path, recursive = TRUE)
+      if (cleanup_status != 0L && dir.exists(stage_path)) {
+        warning("Could not remove prior-exposure stage: ", stage_path, call. = FALSE)
+      }
+    }
+  }, add = TRUE)
+
+  starts <- seq.int(1L, length(transaction_ids), by = as.integer(chunk_size))
+  expected_rows <- 0
+  written_rows <- 0
+  assigned_transactions <- 0
+  for (chunk_index in seq_along(starts)) {
+    started_at <- proc.time()[["elapsed"]]
+    start <- starts[[chunk_index]]
+    end <- min(start + as.integer(chunk_size) - 1L, length(transaction_ids))
+    chunk_ids <- transaction_ids[start:end]
+    if (anyNA(chunk_ids) || anyDuplicated(chunk_ids)) {
+      stop("A streaming chunk has invalid transaction ownership.", call. = FALSE)
+    }
+    assigned_transactions <- assigned_transactions + length(chunk_ids)
+
+    joined <- join_chunk(chunk_ids, data)
+    lookup_rows <- nrow(joined$internal_lookup)
+    joined_event_rows <- if (is.null(joined$events_dt)) 0L else nrow(joined$events_dt)
+    chunk <- process_joined(chunk_ids, data, joined)
+    chunk <- prior_exposure_prepare_public(chunk, contract$market, contract$grain)
+    expected_keys <- prior_exposure_expected_chunk_keys(chunk_ids, data)
+    prior_exposure_validate_chunk_keys(chunk, expected_keys, contract)
+
+    chunk_expected_rows <- nrow(expected_keys)
+    chunk_written_rows <- nrow(chunk)
+    expected_rows <- expected_rows + chunk_expected_rows
+    if (chunk_written_rows > 0L) {
+      write_chunk(chunk, stage_path, chunk_index)
+      written_rows <- written_rows + chunk_written_rows
+    }
+    elapsed <- proc.time()[["elapsed"]] - started_at
+    logger::log_info(
+      paste0(
+        "Prior-exposure chunk {chunk_index}/{length(starts)}: ",
+        "transactions={length(chunk_ids)}, lookup_pairs={lookup_rows}, ",
+        "joined_events={joined_event_rows}, output_rows={chunk_written_rows}, ",
+        "elapsed_seconds={round(elapsed, 3)}, stage={basename(stage_path)}"
+      )
+    )
+    rm(chunk, expected_keys, joined, chunk_ids)
+    gc(verbose = FALSE)
+  }
+  if (!identical(as.numeric(assigned_transactions), as.numeric(length(transaction_ids)))) {
+    stop("Streaming did not assign every transaction exactly once.", call. = FALSE)
+  }
+  if (!identical(as.numeric(written_rows), as.numeric(expected_rows))) {
+    stop("Streaming expected-versus-written row totals differ.", call. = FALSE)
+  }
+
+  before_publish(stage_path)
+  publish_dataset(
+    data = NULL,
+    output_path = output_path,
+    expected_schema = expected_schema,
+    expected_radii = expected_radii,
+    stage_path = stage_path,
+    expected_rows = written_rows
+  )
+  invisible(output_path)
+}
+
+#' Publish a complete radius-partitioned prior-exposure generation.
+#'
+#' A complete in-memory candidate is staged for backwards compatibility. A
+#' caller may instead supply an incrementally assembled sibling `stage_path`.
+#' Both paths use the same validation, backup, promotion, and restoration seam.
+#' Publication assumes one writer per canonical path.
+#'
+#' @param data Complete in-memory candidate, or `NULL` for an existing stage.
+#' @param output_path Canonical Arrow dataset directory.
+#' @param expected_schema Literal on-disk Arrow schema, including Hive radius.
+#' @param expected_radii Exact configured integer radius set.
+#' @param rename_path Injectable directory-rename seam used by focused tests.
+#' @param stage_path Existing incrementally assembled sibling stage.
+#' @param expected_rows Scalar expected row total for `stage_path`.
+#' @return `output_path`, invisibly.
+publish_prior_exposure_dataset <- function(
+    data, output_path, expected_schema, expected_radii,
+    rename_path = file.rename, stage_path = NULL, expected_rows = NULL) {
+  supplied_stage <- !is.null(stage_path)
+  if (supplied_stage && !is.null(data)) {
+    stop("Supply either a complete candidate or an existing stage, not both.", call. = FALSE)
+  }
+  if (!supplied_stage) {
+    data <- prior_exposure_validate_and_cast_public(data, expected_schema)
+    expected_rows <- nrow(data)
+    if (is.null(expected_rows) || expected_rows == 0L) {
+      stop("Cannot publish an empty prior-exposure candidate.", call. = FALSE)
+    }
+    stage_path <- prior_exposure_create_stage(output_path)
+  } else if (!is.numeric(expected_rows) || length(expected_rows) != 1L ||
+      is.na(expected_rows) || !is.finite(expected_rows) ||
+      expected_rows < 0 || expected_rows != floor(expected_rows)) {
+    stop("expected_rows must be one nonnegative integer.", call. = FALSE)
+  }
+  expected_radii <- prior_exposure_validate_radii(expected_radii)
+  on.exit({
+    if (dir.exists(stage_path)) {
+      cleanup_status <- unlink(stage_path, recursive = TRUE)
+      if (cleanup_status != 0L && dir.exists(stage_path)) {
+        warning("Could not remove prior-exposure stage: ", stage_path, call. = FALSE)
+      }
+    }
+  }, add = TRUE)
+
+  if (!supplied_stage) {
+    arrow::write_dataset(
+      data,
+      path = stage_path,
+      format = "parquet",
+      partitioning = "radius"
+    )
+  }
+  prior_exposure_validate_stage(
+    stage_path, expected_schema, expected_radii, expected_rows
+  )
+  prior_exposure_promote_stage(stage_path, output_path, rename_path)
 }

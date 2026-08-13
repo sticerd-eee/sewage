@@ -64,22 +64,17 @@ process_chunk <- function(rental_ids, data) {
 
 create_prior_to_rental_db <- function(data) {
   logger::log_info("Creating prior-to-rental cross-sectional database")
-  result <- prior_exposure_build(data)
-  logger::log_info("Prior-to-rental database created: {nrow(result)} rows")
-  result
+  output_path <- here::here(
+    "data", "processed", "cross_section", "rentals", "prior_to_rental"
+  )
+  prior_exposure_stream(data, output_path)
+  logger::log_info("Prior-to-rental database created and published")
+  invisible(output_path)
 }
 
 export_data <- function(data) {
   tryCatch({
-    output_path <- here::here(
-      "data", "processed", "cross_section", "rentals", "prior_to_rental"
-    )
-    candidate <- prior_exposure_prepare_public(data, "rental", "radius")
-    publish_prior_exposure_dataset(
-      candidate, output_path,
-      prior_exposure_public_schema("rental", "radius"),
-      CONFIG$radius_thresholds
-    )
+    output_path <- create_prior_to_rental_db(data)
     logger::log_info("Data saved to: {output_path}")
   }, error = function(e) {
     logger::log_error("Data export failed: {e$message}")
@@ -90,7 +85,7 @@ export_data <- function(data) {
 main <- function() {
   initialise_environment()
   setup_logging()
-  export_data(create_prior_to_rental_db(load_data()))
+  export_data(load_data())
   logger::log_info("Script completed successfully")
 }
 

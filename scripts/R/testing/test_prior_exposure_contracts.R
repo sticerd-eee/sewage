@@ -20,6 +20,8 @@ suppressPackageStartupMessages({
 source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 source(here::here("scripts", "R", "utils", "prior_exposure_utils.R"))
 
+assert_streaming_seam_exists <- exists("prior_exposure_stream", mode = "function")
+
 assert_true <- function(condition, message) {
   if (!isTRUE(condition)) stop(message, call. = FALSE)
 }
@@ -74,6 +76,16 @@ source_prior_exposure_producer <- function(path) {
     envir = producer_env
   )
   producer_env
+}
+
+collect_prior_exposure_fixture <- function(producer_env, data) {
+  transaction_ids <- data$transaction_dt$transaction_id
+  starts <- seq.int(1L, length(transaction_ids), by = data$config$chunk_size)
+  chunks <- lapply(starts, function(start) {
+    end <- min(start + data$config$chunk_size - 1L, length(transaction_ids))
+    producer_env$process_chunk(transaction_ids[start:end], data)
+  })
+  data.table::rbindlist(chunks, use.names = TRUE)
 }
 
 write_rental_fixture <- function(root) {
@@ -458,7 +470,7 @@ for (label in c("sale_site", "rental_site")) {
   )
   producer_env$CONFIG$radius_thresholds <- 250L
   data <- producer_env$load_data()
-  result <- producer_env[[spec$result]](data)
+  result <- collect_prior_exposure_fixture(producer_env, data)
   evidence_output_results[[label]] <- result
 
   raw_metrics <- c("spill_count", "spill_hrs")
@@ -721,7 +733,7 @@ for (label in names(producer_specs)) {
     paste(label, "must remove cutoff_year before reducers")
   )
 
-  result <- producer_env[[spec$result]](data)
+  result <- collect_prior_exposure_fixture(producer_env, data)
   prefix_results[[label]] <- result
   price_column <- if (grepl("^sale", label)) "price" else "listing_price"
   expected_columns <- if (grepl("site$", label)) {
@@ -1164,7 +1176,7 @@ for (label in c("sale_radius", "rental_radius")) {
   producer_env$CONFIG$radius_thresholds <- c(250L, 500L, 1000L)
   producer_env$CONFIG$chunk_size <- 1L
   data <- producer_env$load_data()
-  result <- producer_env[[spec$result]](data)
+  result <- collect_prior_exposure_fixture(producer_env, data)
   empty_rows <- result[get(spec$id) == 1L]
   assert_identical(
     empty_rows$radius,
@@ -1307,6 +1319,270 @@ for (label in names(variant_schema_signatures)) {
     }
   )
 }
+
+# Streaming stages must preserve chunk-local contracts without accumulation.
+assert_true(
+  assert_streaming_seam_exists,
+  "The shared utility must expose the streaming orchestration seam."
+)
+streaming_results <- list()
+for (label in names(producer_specs)) {
+  spec <- producer_specs[[label]]
+  axes <- strsplit(label, "_", fixed = TRUE)[[1]]
+  producer_env <- source_prior_exposure_producer(spec$path)
+  producer_env$CONFIG$processed_dir <- empty_then_populated_root
+  producer_env$CONFIG$site_group_crosswalk_path <- file.path(
+    empty_then_populated_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+  )
+  producer_env$CONFIG$radius_thresholds <- c(250L, 500L)
+  producer_env$CONFIG$chunk_size <- 1L
+  data <- producer_env$load_data()
+  output_path <- tempfile(paste0("prior-exposure-stream-", label, "-"))
+  written_chunks <- integer()
+  observing_writer <- function(chunk, stage_path, chunk_index) {
+    written_chunks <<- c(written_chunks, as.integer(chunk_index))
+    prior_exposure_write_chunk(chunk, stage_path, chunk_index)
+  }
+  prior_exposure_stream(data, output_path, write_chunk = observing_writer)
+  reopened <- arrow::open_dataset(output_path)
+  result <- reopened |>
+    dplyr::collect() |>
+    data.table::as.data.table()
+  data.table::setorderv(result, spec$grain)
+  streaming_results[[label]] <- result
+
+  expected_written_chunks <- if (grepl("site$", label)) 2L else c(1L, 2L)
+  assert_identical(
+    written_chunks,
+    expected_written_chunks,
+    paste(label, "must write no fragment for an empty site chunk and every radius chunk")
+  )
+  assert_identical(
+    prior_exposure_schema_signature(reopened$schema),
+    variant_schema_signatures[[label]],
+    paste(label, "streaming output must reopen with the literal public schema")
+  )
+  assert_identical(
+    sort(unique(result$radius)),
+    c(250L, 500L),
+    paste(label, "streaming output must preserve exact integer radii")
+  )
+  expected_rows <- if (grepl("site$", label)) 2L else 4L
+  assert_identical(
+    nrow(result), expected_rows,
+    paste(label, "streaming output must conserve its exact row total")
+  )
+  if (grepl("site$", label)) {
+    assert_identical(
+      unique(result[[spec$id]]), 2L,
+      paste(label, "must preserve the populated chunk after an empty first chunk")
+    )
+  } else {
+    assert_identical(
+      sort(unique(result[[spec$id]])), c(1L, 2L),
+      paste(label, "must preserve two same-radius chunk key sets without overwrite")
+    )
+    zero_rows <- result[get(spec$id) == 1L]
+    assert_true(
+      all(zero_rows$spill_count == 0) && all(zero_rows$spill_hrs == 0) &&
+        all(zero_rows$n_spill_sites == 0L) &&
+        all(is.na(zero_rows$mean_distance)) && all(is.na(zero_rows$min_distance)) &&
+        all(!zero_rows$has_missing_site),
+      paste(label, "no-site first chunk must write its complete zero grid")
+    )
+  }
+}
+
+local({
+  diagnostic_lines <- character()
+  logger::log_appender(function(lines) {
+    diagnostic_lines <<- c(diagnostic_lines, as.character(lines))
+  })
+  on.exit(logger::log_appender(logger::appender_console), add = TRUE)
+  diagnostic_env <- source_prior_exposure_producer(producer_specs$sale_radius$path)
+  diagnostic_env$CONFIG$processed_dir <- empty_then_populated_root
+  diagnostic_env$CONFIG$site_group_crosswalk_path <- file.path(
+    empty_then_populated_root,
+    "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  )
+  diagnostic_env$CONFIG$radius_thresholds <- c(250L, 500L)
+  diagnostic_env$CONFIG$chunk_size <- 1L
+  diagnostic_data <- diagnostic_env$load_data()
+  prior_exposure_stream(
+    diagnostic_data,
+    tempfile("prior-exposure-stream-diagnostics-")
+  )
+  diagnostics <- paste(diagnostic_lines, collapse = "\n")
+  for (term in c(
+      "transactions=", "lookup_pairs=", "joined_events=", "output_rows=",
+      "elapsed_seconds=", "stage="
+  )) {
+    assert_true(
+      grepl(term, diagnostics, fixed = TRUE),
+      paste("Streaming diagnostics must include", term)
+    )
+  }
+  assert_true(
+    !any(vapply(
+      c("transaction_id=", "house_id=", "rental_id=", "site_id="),
+      grepl, logical(1), x = diagnostics, fixed = TRUE
+    )),
+    "Streaming diagnostics must not log row-level identifiers."
+  )
+})
+
+# Failures after a completed write and during stage validation must leave the
+# last-known-good canonical generation untouched and avoid the promotion seam.
+failure_env <- source_prior_exposure_producer(producer_specs$sale_radius$path)
+failure_env$CONFIG$processed_dir <- empty_then_populated_root
+failure_env$CONFIG$site_group_crosswalk_path <- file.path(
+  empty_then_populated_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+)
+failure_env$CONFIG$radius_thresholds <- c(250L, 500L)
+failure_env$CONFIG$chunk_size <- 1L
+failure_data <- failure_env$load_data()
+failure_canonical <- tempfile("prior-exposure-stream-failure-")
+prior_exposure_stream(failure_data, failure_canonical)
+read_failure_publication <- function(path) {
+  arrow::open_dataset(path) |>
+    dplyr::collect() |>
+    dplyr::arrange(.data$house_id, .data$radius)
+}
+failure_baseline <- read_failure_publication(failure_canonical)
+
+failed_stage <- NA_character_
+publisher_called <- FALSE
+observing_first_write <- function(chunk, stage_path, chunk_index) {
+  failed_stage <<- stage_path
+  prior_exposure_write_chunk(chunk, stage_path, chunk_index)
+}
+fail_second_chunk <- function(transaction_ids, data, joined) {
+  if (identical(transaction_ids, 2L)) stop("injected second-chunk failure", call. = FALSE)
+  prior_exposure_process_joined_chunk(transaction_ids, data, joined)
+}
+unreached_publisher <- function(...) {
+  publisher_called <<- TRUE
+  stop("publisher must not be reached", call. = FALSE)
+}
+after_write_error <- tryCatch(
+  prior_exposure_stream(
+    failure_data, failure_canonical,
+    process_joined = fail_second_chunk,
+    write_chunk = observing_first_write,
+    publish_dataset = unreached_publisher
+  ),
+  error = identity
+)
+assert_true(
+  inherits(after_write_error, "error") &&
+    grepl("second-chunk", conditionMessage(after_write_error), fixed = TRUE) &&
+    !publisher_called && !dir.exists(failed_stage),
+  "A failure after the first write must clean the stage and never invoke publication."
+)
+assert_identical(
+  read_failure_publication(failure_canonical), failure_baseline,
+  "A failure after the first write must not alter the canonical generation."
+)
+
+promotion_calls <- 0L
+rename_spy <- function(from, to) {
+  promotion_calls <<- promotion_calls + 1L
+  file.rename(from, to)
+}
+validating_publisher <- function(
+    data, output_path, expected_schema, expected_radii, stage_path, expected_rows) {
+  publish_prior_exposure_dataset(
+    data, output_path, expected_schema, expected_radii,
+    rename_path = rename_spy, stage_path = stage_path,
+    expected_rows = expected_rows
+  )
+}
+corrupt_stage_days <- function(stage_path) {
+  fragment <- list.files(
+    stage_path, pattern = "[.]parquet$", recursive = TRUE, full.names = TRUE
+  )[[1L]]
+  rows <- arrow::read_parquet(fragment)
+  rows$n_days_in_window[[1L]] <- 29L
+  arrow::write_parquet(rows, fragment)
+}
+validation_error <- tryCatch(
+  prior_exposure_stream(
+    failure_data, failure_canonical,
+    before_publish = corrupt_stage_days,
+    publish_dataset = validating_publisher
+  ),
+  error = identity
+)
+assert_true(
+  inherits(validation_error, "error") && promotion_calls == 0L,
+  "Stage validation failure must occur before any canonical promotion rename."
+)
+assert_identical(
+  read_failure_publication(failure_canonical), failure_baseline,
+  "Stage validation failure must not alter the canonical generation."
+)
+
+# Chunk-local drift must fail before promotion.
+assert_stream_mutation_fails <- function(label, mutate_result, expected_message) {
+  promotion_reached <- FALSE
+  mutate_chunk <- function(transaction_ids, data, joined) {
+    result <- prior_exposure_process_joined_chunk(transaction_ids, data, joined)
+    mutate_result(result)
+  }
+  error <- tryCatch(
+    prior_exposure_stream(
+      failure_data,
+      tempfile(paste0("prior-exposure-stream-invalid-", label, "-")),
+      process_joined = mutate_chunk,
+      publish_dataset = function(...) {
+        promotion_reached <<- TRUE
+        invisible(NULL)
+      }
+    ),
+    error = identity
+  )
+  assert_true(
+    inherits(error, "error") &&
+      grepl(expected_message, conditionMessage(error), fixed = TRUE) &&
+      !promotion_reached,
+    paste("Streaming must reject", label, "before promotion")
+  )
+}
+assert_stream_mutation_fails(
+  "duplicate chunk key",
+  function(result) data.table::rbindlist(list(result, result[1L])),
+  "duplicate public keys"
+)
+assert_stream_mutation_fails(
+  "missing chunk key", function(result) result[-1L], "expected keys"
+)
+assert_stream_mutation_fails(
+  "wrong radius",
+  function(result) {
+    result$radius[[1L]] <- 999L
+    result
+  },
+  "expected keys"
+)
+for (invalid_rate in c(NaN, Inf, -Inf)) {
+  assert_stream_mutation_fails(
+    paste("invalid rate", invalid_rate),
+    function(result) {
+      result$spill_count_daily_avg[[1L]] <- invalid_rate
+      result
+    },
+    "finite or NA"
+  )
+}
+assert_stream_mutation_fails(
+  "sub-30-day row",
+  function(result) {
+    result$n_days_in_window[[1L]] <- 29L
+    result
+  },
+  "at least 30 complete days"
+)
 
 # All established outputs preserve finite rates and weekly = daily * seven.
 for (label in names(prefix_results)) {
