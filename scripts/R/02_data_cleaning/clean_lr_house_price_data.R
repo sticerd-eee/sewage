@@ -2,7 +2,7 @@
 # HM Land Registry Price Paid Data Cleaner
 # ==============================================================================
 #
-# Purpose: Clean and combine HM Land Registry property sales data for 2021-2023,
+# Purpose: Clean and combine HM Land Registry property sales data for 2021-2024,
 #          enrich with cached/geocoded postcode attributes, and write the
 #          canonical `house_price.parquet` output used by downstream sales
 #          analysis scripts.
@@ -55,7 +55,7 @@ check_required_packages(REQUIRED_PACKAGES)
 ############################################################
 
 CONFIG <- list(
-  years = 2021:2023,
+  years = 2021:2024,
   base_year = 2021,
   input_dir = here::here("data", "raw", "lr_house_price"),
   canonical_output_path = here::here("data", "processed", "house_price.parquet"),
