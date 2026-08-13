@@ -18,6 +18,7 @@ suppressPackageStartupMessages({
 })
 
 source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+source(here::here("scripts", "R", "utils", "prior_exposure_utils.R"))
 
 assert_true <- function(condition, message) {
   if (!isTRUE(condition)) stop(message, call. = FALSE)
@@ -479,6 +480,140 @@ assert_identical(
   evidence_output_results$sale_site$spill_count,
   evidence_output_results$rental_site$spill_count,
   "The isomorphic sale and rental evidence fixtures must have spill-count parity."
+)
+
+# Shared safe-publication regression scope -------------------------------------
+
+publisher_schema <- arrow::schema(
+  id = arrow::int32(),
+  generation = arrow::int32(),
+  site_missing = arrow::bool(),
+  radius = arrow::int32()
+)
+publication_candidate <- function(ids, generation, radii) {
+  tibble(
+    id = as.integer(ids),
+    generation = as.integer(generation),
+    site_missing = FALSE,
+    radius = as.integer(radii)
+  )
+}
+read_publication <- function(path) {
+  arrow::open_dataset(path) |>
+    collect() |>
+    arrange(.data$id, .data$radius)
+}
+
+publication_root <- tempfile("prior-exposure-publication-")
+dir.create(publication_root, recursive = TRUE)
+canonical_path <- file.path(publication_root, "canonical")
+first_generation <- publication_candidate(1:2, 1L, c(250L, 500L))
+second_generation <- publication_candidate(3L, 2L, 250L)
+publish_prior_exposure_dataset(
+  first_generation, canonical_path, publisher_schema, c(250L, 500L)
+)
+publish_prior_exposure_dataset(
+  second_generation, canonical_path, publisher_schema, 250L
+)
+assert_identical(
+  read_publication(canonical_path),
+  second_generation,
+  "A second publication must replace the complete generation and remove stale radii."
+)
+assert_identical(
+  sort(list.dirs(canonical_path, recursive = FALSE, full.names = FALSE)),
+  "radius=250",
+  "The canonical dataset must contain only the configured Hive radius partition."
+)
+assert_identical(
+  read_publication(paste0(canonical_path, ".prev")),
+  first_generation,
+  "Successful replacement must preserve the prior generation as .prev."
+)
+
+restored_path <- file.path(publication_root, "restored")
+publish_prior_exposure_dataset(
+  first_generation, restored_path, publisher_schema, c(250L, 500L)
+)
+promotion_failure <- function(from, to) {
+  if (grepl(".stage-", basename(from), fixed = TRUE) &&
+      identical(to, restored_path)) {
+    return(FALSE)
+  }
+  file.rename(from, to)
+}
+restored_error <- tryCatch(
+  publish_prior_exposure_dataset(
+    second_generation, restored_path, publisher_schema, 250L,
+    rename_path = promotion_failure
+  ),
+  error = identity
+)
+assert_true(inherits(restored_error, "error"), "Injected promotion failure must stop publication.")
+assert_identical(
+  read_publication(restored_path),
+  first_generation,
+  "A failed promotion must restore the exact prior canonical generation."
+)
+
+recoverable_path <- file.path(publication_root, "recoverable")
+publish_prior_exposure_dataset(
+  first_generation, recoverable_path, publisher_schema, c(250L, 500L)
+)
+promotion_and_restore_failure <- function(from, to) {
+  if (identical(to, recoverable_path)) return(FALSE)
+  file.rename(from, to)
+}
+recoverable_error <- tryCatch(
+  publish_prior_exposure_dataset(
+    second_generation, recoverable_path, publisher_schema, 250L,
+    rename_path = promotion_and_restore_failure
+  ),
+  error = identity
+)
+recoverable_prev <- paste0(recoverable_path, ".prev")
+assert_true(
+  inherits(recoverable_error, "error") &&
+    grepl(recoverable_prev, conditionMessage(recoverable_error), fixed = TRUE),
+  "Failed promotion and restoration must report the exact recoverable .prev path."
+)
+assert_identical(
+  read_publication(recoverable_prev),
+  first_generation,
+  "Failed restoration must leave the prior generation readable at .prev."
+)
+
+interrupted_path <- file.path(publication_root, "interrupted")
+interrupted_prev <- paste0(interrupted_path, ".prev")
+arrow::write_dataset(first_generation, interrupted_prev, partitioning = "radius")
+interrupted_error <- tryCatch(
+  publish_prior_exposure_dataset(
+    second_generation, interrupted_path, publisher_schema, 250L
+  ),
+  error = identity
+)
+assert_true(
+  inherits(interrupted_error, "error") &&
+    grepl(interrupted_prev, conditionMessage(interrupted_error), fixed = TRUE),
+  "Canonical-absent/.prev-present state must stop and report the recoverable path."
+)
+assert_identical(
+  read_publication(interrupted_prev),
+  first_generation,
+  "Interrupted-state detection must not delete or move the recoverable generation."
+)
+
+empty_error <- tryCatch(
+  publish_prior_exposure_dataset(
+    first_generation[0, ], file.path(publication_root, "empty"),
+    publisher_schema, c(250L, 500L)
+  ),
+  error = identity
+)
+assert_true(
+  inherits(empty_error, "error") &&
+    grepl("empty", conditionMessage(empty_error), ignore.case = TRUE),
+  "The publisher must reject an empty candidate before writing."
 )
 
 producer_specs <- list(

@@ -30,6 +30,7 @@ initialise_environment <- function() {
   # Source shared utilities for count_spills function
   source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
   source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+  source(here::here("scripts", "R", "utils", "prior_exposure_utils.R"))
 }
 
 #' Set up logging configuration
@@ -423,12 +424,26 @@ export_data <- function(data) {
       )
       
       logger::log_info("Exporting prior-to-sale data to parquet")
-      # CHANGE: Add site_id to partitioning or adjust as needed
-      arrow::write_dataset(
+      output_schema <- arrow::schema(
+        house_id = arrow::int32(),
+        price = arrow::int32(),
+        n_days_in_window = arrow::int32(),
+        site_id = arrow::int32(),
+        distance_m = arrow::float64(),
+        spill_hrs = arrow::float64(),
+        spill_count = arrow::float64(),
+        site_missing = arrow::bool(),
+        spill_count_daily_avg = arrow::float64(),
+        spill_hrs_daily_avg = arrow::float64(),
+        spill_count_weekly_avg = arrow::float64(),
+        spill_hrs_weekly_avg = arrow::float64(),
+        radius = arrow::int32()
+      )
+      publish_prior_exposure_dataset(
         data,
-        path = output_path,
-        format = "parquet",
-        partitioning = c("radius")  # Or just "radius" if preferred
+        output_path,
+        output_schema,
+        CONFIG$radius_thresholds
       )
       
       logger::log_info("Data export complete")
