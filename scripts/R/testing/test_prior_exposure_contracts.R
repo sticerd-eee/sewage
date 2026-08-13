@@ -48,6 +48,20 @@ assert_error_contains <- function(expression, expected, message) {
   }
 }
 
+expected_contract_failures <- character()
+record_expected_contract_failure <- function(label, expression) {
+  tryCatch(
+    force(expression),
+    error = function(error) {
+      expected_contract_failures <<- c(
+        expected_contract_failures,
+        paste0(label, ": ", conditionMessage(error))
+      )
+    }
+  )
+  invisible(NULL)
+}
+
 source_prior_exposure_producer <- function(path) {
   producer_env <- new.env(parent = globalenv())
   sys.source(here::here(path), envir = producer_env)
@@ -173,6 +187,7 @@ assert_true(
   !"package:lubridate" %in% search(),
   "The clean-namespace fixture must run without lubridate attached"
 )
+source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
 
 fixture_root <- tempfile("prior-exposure-contract-")
 dir.create(fixture_root, recursive = TRUE)
@@ -666,7 +681,7 @@ for (label in names(producer_specs)) {
 
   assert_identical(
     data[[spec$transaction]]$cutoff_year,
-    c(2020L, 2022L, 2024L, 2024L),
+    c(2022L, 2024L, 2024L),
     paste(label, "must derive the integer exclusive cutoff year")
   )
   assert_identical(
@@ -676,7 +691,7 @@ for (label in names(producer_specs)) {
   )
   assert_identical(
     sort(unique(data$site_missing_dt$cutoff_year)),
-    c(2020L, 2022L, 2024L),
+    c(2022L, 2024L),
     paste(label, "must return only transaction-relevant completeness prefixes")
   )
   assert_true(
@@ -749,11 +764,6 @@ for (label in names(producer_specs)) {
     !anyDuplicated(result[, spec$grain, with = FALSE]),
     paste(label, "must preserve its unique public grain")
   )
-  assert_true(
-    all(is.nan(result[get(spec$id) == 1L, spill_count_daily_avg])),
-    paste(label, "must preserve the existing zero-day NaN policy at window start")
-  )
-
   if (grepl("site$", label)) {
     assert_true(
       all(!result[get(spec$id) == 2L & site_id == 10L, get(spec$missing)]),
@@ -766,10 +776,6 @@ for (label in names(producer_specs)) {
     assert_true(
       all(result[get(spec$id) == 2L & site_id == 20L, get(spec$missing)]),
       paste(label, "must conservatively mark an entirely absent Site Group")
-    )
-    assert_true(
-      all(!result[get(spec$id) == 1L & site_id == 10L, get(spec$missing)]),
-      paste(label, "must represent the window-start empty prefix as complete")
     )
   } else {
     assert_true(
@@ -808,6 +814,537 @@ for (label in names(producer_specs)) {
   error <- tryCatch(producer_env$load_data(), error = identity)
   assert_true(inherits(error, "error"), paste(label, "must reject an unsupported later year"))
   assert_true(grepl("2025", conditionMessage(error)), paste(label, "must name unsupported 2025"))
+}
+
+# Shared eligibility characterization -----------------------------------------
+
+variant_schema_signatures <- list(
+  sale_site = c(
+    house_id = "int32", price = "int32", n_days_in_window = "int32",
+    site_id = "int32", distance_m = "double", spill_hrs = "double",
+    spill_count = "double", site_missing = "bool",
+    spill_count_daily_avg = "double", spill_hrs_daily_avg = "double",
+    spill_count_weekly_avg = "double", spill_hrs_weekly_avg = "double",
+    radius = "int32"
+  ),
+  rental_site = c(
+    rental_id = "int32", listing_price = "double",
+    n_days_in_window = "int32", site_id = "int32", distance_m = "double",
+    spill_hrs = "double", spill_count = "double", site_missing = "bool",
+    spill_count_daily_avg = "double", spill_hrs_daily_avg = "double",
+    spill_count_weekly_avg = "double", spill_hrs_weekly_avg = "double",
+    radius = "int32"
+  ),
+  sale_radius = c(
+    house_id = "int32", price = "int32", n_days_in_window = "int32",
+    spill_hrs = "double", n_spill_sites = "int32", spill_count = "double",
+    mean_distance = "double", min_distance = "double",
+    has_missing_site = "bool", spill_count_daily_avg = "double",
+    spill_hrs_daily_avg = "double", spill_count_weekly_avg = "double",
+    spill_hrs_weekly_avg = "double", radius = "int32"
+  ),
+  rental_radius = c(
+    rental_id = "int32", listing_price = "double",
+    n_days_in_window = "int32", spill_hrs = "double",
+    n_spill_sites = "int32", spill_count = "double", mean_distance = "double",
+    min_distance = "double", has_missing_site = "bool",
+    spill_count_daily_avg = "double", spill_hrs_daily_avg = "double",
+    spill_count_weekly_avg = "double", spill_hrs_weekly_avg = "double",
+    radius = "int32"
+  )
+)
+
+for (label in names(variant_schema_signatures)) {
+  axes <- strsplit(label, "_", fixed = TRUE)[[1]]
+  record_expected_contract_failure(
+    paste(label, "literal public schema"),
+    assert_identical(
+      prior_exposure_schema_signature(prior_exposure_public_schema(axes[1], axes[2])),
+      variant_schema_signatures[[label]],
+      paste(label, "must resolve to its exact literal reopened Arrow schema")
+    )
+  )
+}
+assert_error_contains(
+  prior_exposure_public_schema("other", "site"),
+  "sale, rental",
+  "The schema resolver must reject an unsupported market."
+)
+assert_error_contains(
+  prior_exposure_public_schema("sale", "other"),
+  "site, radius",
+  "The schema resolver must reject an unsupported grain."
+)
+assert_error_contains(
+  prior_exposure_load_data(
+    list(processed_dir = "must-not-be-read"), "other", "site"
+  ),
+  "sale, rental",
+  "An unsupported engine variant must fail before attempting input loading."
+)
+
+prior_utility_lines <- readLines(here::here(
+  "scripts", "R", "utils", "prior_exposure_utils.R"
+))
+assert_true(
+  !any(grepl("^count_spills <- function", prior_utility_lines)),
+  "The shared prior-exposure module must not reimplement count_spills()."
+)
+count_boundary <- as.POSIXct("2024-01-01 00:00:00", tz = "UTC")
+assert_identical(
+  count_spills(
+    c(count_boundary, count_boundary + 12 * 60 * 60),
+    c(count_boundary + 60, count_boundary + 12 * 60 * 60 + 60)
+  ),
+  2,
+  "The existing count_spills() interface must retain its excluded 12-hour endpoint boundary."
+)
+
+write_eligibility_fixture <- function(root, transaction_times) {
+  zoopla_dir <- file.path(root, "zoopla")
+  event_dir <- file.path(root, "matched_events_annual_data")
+  dir.create(zoopla_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(event_dir, recursive = TRUE, showWarnings = FALSE)
+
+  transaction_times <- as.POSIXct(transaction_times, tz = "UTC")
+  transaction_ids <- seq_along(transaction_times)
+  arrow::write_parquet(
+    tibble(
+      house_id = as.integer(transaction_ids),
+      price = as.integer(transaction_ids * 100000),
+      date_of_transfer = transaction_times
+    ),
+    file.path(root, "house_price.parquet")
+  )
+  arrow::write_parquet(
+    tibble(
+      rental_id = as.integer(transaction_ids),
+      listing_price = as.double(transaction_ids * 1000),
+      rented_est = transaction_times
+    ),
+    file.path(zoopla_dir, "zoopla_rentals.parquet")
+  )
+  arrow::write_parquet(
+    tibble(house_id = integer(), site_id = integer(), distance_m = double()),
+    file.path(root, "spill_house_lookup.parquet")
+  )
+  arrow::write_parquet(
+    tibble(rental_id = integer(), site_id = integer(), distance_m = double()),
+    file.path(zoopla_dir, "spill_rental_lookup.parquet")
+  )
+  arrow::write_parquet(
+    tibble(
+      site_id = 10L,
+      year = 2021L,
+      water_company = "Test Water",
+      annual_status = "reported_zero",
+      matched_event_count = 0L
+    ),
+    file.path(event_dir, "site_group_crosswalk.parquet")
+  )
+  arrow::write_parquet(
+    tibble(
+      site_id = integer(),
+      start_time = as.POSIXct(character(), tz = "UTC"),
+      end_time = as.POSIXct(character(), tz = "UTC"),
+      year = integer()
+    ),
+    file.path(event_dir, "matched_events_annual_data.parquet")
+  )
+
+  invisible(root)
+}
+
+eligibility_root <- tempfile("prior-exposure-eligibility-")
+dir.create(eligibility_root, recursive = TRUE)
+write_eligibility_fixture(
+  eligibility_root,
+  c("2021-01-30 23:59:00", "2021-01-31 00:00:00")
+)
+for (label in names(producer_specs)) {
+  spec <- producer_specs[[label]]
+  producer_env <- source_prior_exposure_producer(spec$path)
+  producer_env$CONFIG$processed_dir <- eligibility_root
+  producer_env$CONFIG$site_group_crosswalk_path <- file.path(
+    eligibility_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+  )
+  data <- producer_env$load_data()
+  transaction_dt <- data[[spec$transaction]]
+  metadata <- if (identical(spec$id, "house_id")) {
+    producer_env$get_house_metadata(transaction_dt)
+  } else {
+    producer_env$get_rental_metadata(transaction_dt)
+  }
+  record_expected_contract_failure(
+    paste(label, "30-complete-day eligibility"),
+    {
+      assert_identical(
+        metadata[[spec$id]],
+        2L,
+        paste(label, "must exclude 29d23h59m and retain exactly 30 complete days")
+      )
+      assert_identical(
+        metadata$n_days_in_window,
+        30L,
+        paste(label, "must expose the exact 30-day integer denominator")
+      )
+    }
+  )
+}
+
+# Empty eligible cohorts must fail before any output stage exists.
+ineligible_root <- tempfile("prior-exposure-ineligible-")
+dir.create(ineligible_root, recursive = TRUE)
+write_eligibility_fixture(
+  ineligible_root,
+  c("2021-01-02 00:00:00", "2021-01-30 23:59:00")
+)
+for (label in names(producer_specs)) {
+  spec <- producer_specs[[label]]
+  producer_env <- source_prior_exposure_producer(spec$path)
+  producer_env$CONFIG$processed_dir <- ineligible_root
+  producer_env$CONFIG$site_group_crosswalk_path <- file.path(
+    ineligible_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+  )
+  stage_sentinel <- file.path(ineligible_root, paste0(label, ".stage"))
+  error <- tryCatch(producer_env$load_data(), error = identity)
+  input_name <- if (identical(spec$id, "house_id")) {
+    "house_price.parquet"
+  } else {
+    "zoopla_rentals.parquet"
+  }
+  record_expected_contract_failure(
+    paste(label, "empty eligible cohort"),
+    {
+      assert_true(inherits(error, "error"), paste(label, "must reject an all-ineligible input"))
+      error_message <- conditionMessage(error)
+      for (term in c(input_name, "2021-01-01", "30", "2")) {
+        assert_true(
+          grepl(term, error_message, fixed = TRUE),
+          paste(label, "empty-cohort error must name", term)
+        )
+      }
+      assert_true(
+        !dir.exists(stage_sentinel),
+        paste(label, "must reject the cohort before staging")
+      )
+    }
+  )
+}
+
+# Transaction identifiers must fail closed before chunk construction.
+rewrite_transaction_ids <- function(root, market, ids, value_name = NULL) {
+  times <- as.POSIXct(rep("2021-03-01 00:00:00", length(ids)), tz = "UTC")
+  if (identical(market, "sale")) {
+    if (is.null(value_name)) value_name <- "price"
+    values <- list(
+      house_id = ids,
+      value = as.integer(seq_along(ids) * 100000),
+      date_of_transfer = times
+    )
+    names(values)[2] <- value_name
+    arrow::write_parquet(tibble::as_tibble(values), file.path(root, "house_price.parquet"))
+  } else {
+    if (is.null(value_name)) value_name <- "listing_price"
+    values <- list(
+      rental_id = ids,
+      value = as.double(seq_along(ids) * 1000),
+      rented_est = times
+    )
+    names(values)[2] <- value_name
+    arrow::write_parquet(
+      tibble::as_tibble(values),
+      file.path(root, "zoopla", "zoopla_rentals.parquet")
+    )
+  }
+}
+
+for (id_case in c("missing", "duplicate", "character")) {
+  for (label in names(producer_specs)) {
+    spec <- producer_specs[[label]]
+    market <- if (identical(spec$id, "house_id")) "sale" else "rental"
+    id_root <- tempfile(paste0("prior-exposure-id-", id_case, "-"))
+    dir.create(id_root, recursive = TRUE)
+    write_eligibility_fixture(id_root, rep("2021-03-01 00:00:00", 2L))
+    ids <- switch(
+      id_case,
+      missing = c(1L, NA_integer_),
+      duplicate = c(1L, 1L),
+      character = c("1", "2")
+    )
+    rewrite_transaction_ids(id_root, market, ids)
+    producer_env <- source_prior_exposure_producer(spec$path)
+    producer_env$CONFIG$processed_dir <- id_root
+    producer_env$CONFIG$site_group_crosswalk_path <- file.path(
+      id_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+    )
+    error <- tryCatch(producer_env$load_data(), error = identity)
+    record_expected_contract_failure(
+      paste(label, id_case, "transaction identifier"),
+      {
+        assert_true(inherits(error, "error"), paste(label, "must reject", id_case, "IDs"))
+        assert_true(
+          grepl(spec$id, conditionMessage(error), fixed = TRUE),
+          paste(label, "identifier error must name", spec$id)
+        )
+      }
+    )
+  }
+}
+
+# Rental inputs must use the established value name, never a phantom `price`.
+wrong_rental_value_root <- tempfile("prior-exposure-rental-value-")
+dir.create(wrong_rental_value_root, recursive = TRUE)
+write_eligibility_fixture(wrong_rental_value_root, "2021-03-01 00:00:00")
+rewrite_transaction_ids(wrong_rental_value_root, "rental", 1L, value_name = "price")
+for (label in c("rental_site", "rental_radius")) {
+  spec <- producer_specs[[label]]
+  producer_env <- source_prior_exposure_producer(spec$path)
+  producer_env$CONFIG$processed_dir <- wrong_rental_value_root
+  producer_env$CONFIG$site_group_crosswalk_path <- file.path(
+    wrong_rental_value_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+  )
+  assert_error_contains(
+    producer_env$load_data(),
+    "listing_price",
+    paste(label, "must reject a rental input with `price` instead of `listing_price`")
+  )
+}
+
+# Site-empty prototypes must bind losslessly with a later populated chunk.
+empty_then_populated_root <- tempfile("prior-exposure-empty-then-populated-")
+dir.create(empty_then_populated_root, recursive = TRUE)
+write_eligibility_fixture(
+  empty_then_populated_root,
+  c("2021-03-01 00:00:00", "2021-03-02 00:00:00")
+)
+arrow::write_parquet(
+  tibble(house_id = 2L, site_id = 10L, distance_m = 100),
+  file.path(empty_then_populated_root, "spill_house_lookup.parquet")
+)
+arrow::write_parquet(
+  tibble(rental_id = 2L, site_id = 10L, distance_m = 100),
+  file.path(empty_then_populated_root, "zoopla", "spill_rental_lookup.parquet")
+)
+for (label in c("sale_site", "rental_site")) {
+  spec <- producer_specs[[label]]
+  producer_env <- source_prior_exposure_producer(spec$path)
+  producer_env$CONFIG$processed_dir <- empty_then_populated_root
+  producer_env$CONFIG$site_group_crosswalk_path <- file.path(
+    empty_then_populated_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+  )
+  data <- producer_env$load_data()
+  empty_chunk <- producer_env$process_chunk(1L, data)
+  populated_chunk <- producer_env$process_chunk(2L, data)
+  record_expected_contract_failure(
+    paste(label, "typed empty site chunk"),
+    {
+      assert_identical(nrow(empty_chunk), 0L, paste(label, "first site chunk must be empty"))
+      assert_identical(
+        names(empty_chunk), names(populated_chunk),
+        paste(label, "empty and populated site chunks must have identical fields")
+      )
+      assert_identical(
+        unname(vapply(empty_chunk, typeof, character(1))),
+        unname(vapply(populated_chunk, typeof, character(1))),
+        paste(label, "empty and populated site chunks must have identical R types")
+      )
+    }
+  )
+}
+
+# Radius grain retains a complete zero-site grid for the empty first chunk.
+for (label in c("sale_radius", "rental_radius")) {
+  spec <- producer_specs[[label]]
+  producer_env <- source_prior_exposure_producer(spec$path)
+  producer_env$CONFIG$processed_dir <- empty_then_populated_root
+  producer_env$CONFIG$site_group_crosswalk_path <- file.path(
+    empty_then_populated_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+  )
+  producer_env$CONFIG$radius_thresholds <- c(250L, 500L, 1000L)
+  producer_env$CONFIG$chunk_size <- 1L
+  data <- producer_env$load_data()
+  result <- producer_env[[spec$result]](data)
+  empty_rows <- result[get(spec$id) == 1L]
+  assert_identical(
+    empty_rows$radius,
+    c(250L, 500L, 1000L),
+    paste(label, "no-site transaction must retain every configured radius")
+  )
+  assert_true(
+    all(empty_rows$spill_count == 0) && all(empty_rows$spill_hrs == 0) &&
+      all(empty_rows$n_spill_sites == 0L),
+    paste(label, "no-site radius rows must contain zero metrics")
+  )
+  assert_true(
+    all(is.na(empty_rows$mean_distance)) && all(is.na(empty_rows$min_distance)) &&
+      all(!empty_rows$has_missing_site),
+    paste(label, "no-site radius rows must have missing distances and observed false missingness")
+  )
+}
+
+# Public candidates must reopen with the literal schemas and reject drift.
+public_contract_candidate <- function(label) {
+  radii <- c(250L, 500L, 1000L)
+  common_rates <- list(
+    spill_count_daily_avg = c(0, 0.5, 1),
+    spill_hrs_daily_avg = c(0, 1, 2),
+    spill_count_weekly_avg = c(0, 3.5, 7),
+    spill_hrs_weekly_avg = c(0, 7, 14),
+    radius = radii
+  )
+  candidate <- switch(
+    label,
+    sale_site = c(list(
+      house_id = rep(1L, 3L), price = rep(100000L, 3L),
+      n_days_in_window = rep(60L, 3L), site_id = rep(10L, 3L),
+      distance_m = rep(100, 3L), spill_hrs = c(0, 60, 120),
+      spill_count = c(0, 30, 60), site_missing = rep(FALSE, 3L)
+    ), common_rates),
+    rental_site = c(list(
+      rental_id = rep(1L, 3L), listing_price = rep(1200, 3L),
+      n_days_in_window = rep(60L, 3L), site_id = rep(10L, 3L),
+      distance_m = rep(100, 3L), spill_hrs = c(0, 60, 120),
+      spill_count = c(0, 30, 60), site_missing = rep(FALSE, 3L)
+    ), common_rates),
+    sale_radius = c(list(
+      house_id = rep(1L, 3L), price = rep(100000L, 3L),
+      n_days_in_window = rep(60L, 3L), spill_hrs = c(0, 60, 120),
+      n_spill_sites = c(0L, 1L, 2L), spill_count = c(0, 30, 60),
+      mean_distance = c(NA_real_, 100, 200), min_distance = c(NA_real_, 100, 100),
+      has_missing_site = rep(FALSE, 3L)
+    ), common_rates),
+    rental_radius = c(list(
+      rental_id = rep(1L, 3L), listing_price = rep(1200, 3L),
+      n_days_in_window = rep(60L, 3L), spill_hrs = c(0, 60, 120),
+      n_spill_sites = c(0L, 1L, 2L), spill_count = c(0, 30, 60),
+      mean_distance = c(NA_real_, 100, 200), min_distance = c(NA_real_, 100, 100),
+      has_missing_site = rep(FALSE, 3L)
+    ), common_rates)
+  )
+  data.table::as.data.table(candidate)
+}
+
+for (label in names(variant_schema_signatures)) {
+  axes <- strsplit(label, "_", fixed = TRUE)[[1]]
+  schema <- prior_exposure_public_schema(axes[1], axes[2])
+  candidate <- public_contract_candidate(label)
+  path <- tempfile(paste0("prior-exposure-public-", label, "-"))
+  publish_prior_exposure_dataset(candidate, path, schema, c(250L, 500L, 1000L))
+  reopened <- arrow::open_dataset(path)
+  assert_identical(
+    prior_exposure_schema_signature(reopened$schema),
+    variant_schema_signatures[[label]],
+    paste(label, "must reopen with its exact schema")
+  )
+
+  character_identifier <- data.table::copy(candidate)
+  character_identifier[[names(candidate)[1]]] <- rep("1", nrow(candidate))
+  drift_cases <- list(
+    missing_field = candidate[, setdiff(names(candidate), "spill_hrs"), with = FALSE],
+    extra_field = data.table::copy(candidate)[, unexpected := 1],
+    reordered_fields = candidate[, rev(names(candidate)), with = FALSE],
+    character_identifier = character_identifier
+  )
+  if (grepl("^rental", label)) {
+    wrong_value <- data.table::copy(candidate)
+    data.table::setnames(wrong_value, "listing_price", "price")
+    drift_cases$wrong_rental_value_name <- wrong_value
+  }
+  for (drift_label in names(drift_cases)) {
+    drift_path <- tempfile(paste0("prior-exposure-drift-", label, "-"))
+    drift_error <- tryCatch(
+      publish_prior_exposure_dataset(
+        drift_cases[[drift_label]], drift_path, schema, c(250L, 500L, 1000L)
+      ),
+      error = identity
+    )
+    assert_true(
+      inherits(drift_error, "error"),
+      paste(label, "must reject", drift_label)
+    )
+  }
+
+  key_columns <- if (grepl("site$", label)) {
+    c(names(candidate)[1], "site_id", "radius")
+  } else {
+    c(names(candidate)[1], "radius")
+  }
+  duplicate_candidate <- data.table::rbindlist(list(candidate, candidate[1]))
+  duplicate_path <- tempfile(paste0("prior-exposure-duplicate-", label, "-"))
+  duplicate_error <- tryCatch(
+    publish_prior_exposure_dataset(
+      duplicate_candidate, duplicate_path, schema, c(250L, 500L, 1000L)
+    ),
+    error = identity
+  )
+  record_expected_contract_failure(
+    paste(label, "duplicate public key"),
+    {
+      assert_true(
+        inherits(duplicate_error, "error"),
+        paste(label, "must reject duplicate key", paste(key_columns, collapse = "/"))
+      )
+    }
+  )
+
+  missing_id_candidate <- data.table::copy(candidate)
+  missing_id_candidate[1, (names(candidate)[1]) := NA_integer_]
+  missing_id_path <- tempfile(paste0("prior-exposure-missing-id-", label, "-"))
+  missing_id_error <- tryCatch(
+    publish_prior_exposure_dataset(
+      missing_id_candidate, missing_id_path, schema, c(250L, 500L, 1000L)
+    ),
+    error = identity
+  )
+  record_expected_contract_failure(
+    paste(label, "missing public transaction identifier"),
+    {
+      assert_true(
+        inherits(missing_id_error, "error"),
+        paste(label, "must reject a missing public transaction identifier")
+      )
+    }
+  )
+}
+
+# All established outputs preserve finite rates and weekly = daily * seven.
+for (label in names(prefix_results)) {
+  result <- prefix_results[[label]]
+  rate_columns <- c(
+    "spill_count_daily_avg", "spill_hrs_daily_avg",
+    "spill_count_weekly_avg", "spill_hrs_weekly_avg"
+  )
+  record_expected_contract_failure(
+    paste(label, "finite-or-NA rates"),
+    assert_true(
+      all(vapply(
+        result[, ..rate_columns],
+        function(column) all(is.na(column) | is.finite(column)),
+        logical(1)
+      )),
+      paste(label, "rates must be finite or NA")
+    )
+  )
+  assert_true(
+    all(
+      is.na(result$spill_count_daily_avg) |
+        result$spill_count_weekly_avg == result$spill_count_daily_avg * 7
+    ) &&
+      all(
+        is.na(result$spill_hrs_daily_avg) |
+          result$spill_hrs_weekly_avg == result$spill_hrs_daily_avg * 7
+      ),
+    paste(label, "weekly rates must equal daily rates times seven")
+  )
+}
+
+if (length(expected_contract_failures) > 0L) {
+  stop(
+    "Expected not-yet-implemented prior-exposure contracts:\n- ",
+    paste(expected_contract_failures, collapse = "\n- "),
+    call. = FALSE
+  )
 }
 
 message("Prior-exposure producer contract tests passed")
