@@ -125,7 +125,7 @@ read_site_group_missing_flags <- function(file_path, years) {
   derive_site_group_missing_flags(arrow::read_parquet(file_path), years)
 }
 
-#' Derive cumulative Site Group missingness for transaction cutoffs.
+#' Derive cumulative Site Group missingness and event evidence for transaction cutoffs.
 #'
 #' Each cutoff covers the prefix from `base_year` through `cutoff_year`. The
 #' cutoff immediately before `base_year` represents an explicit empty prefix
@@ -138,10 +138,13 @@ read_site_group_missing_flags <- function(file_path, years) {
 #' @param cutoff_years Exclusive transaction cutoff years to return. Values may
 #'   include `base_year - 1L` for the explicit empty prefix.
 #' @return A tibble unique on `site_id` and `cutoff_year`, with logical
-#'   `site_missing`.
+#'   `site_missing` and `has_unknown_event_evidence`.
 derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
                                                    cutoff_years) {
-  required_columns <- c("site_id", "year", "water_company", "annual_status")
+  required_columns <- c(
+    "site_id", "year", "water_company", "annual_status",
+    "matched_event_count"
+  )
   missing_columns <- setdiff(required_columns, names(crosswalk))
   if (length(missing_columns) > 0L) {
     stop(
@@ -171,12 +174,26 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
   }
   cutoff_years <- sort(cutoff_years)
 
-  crosswalk <- tibble::as_tibble(crosswalk) |>
+  crosswalk <- tibble::as_tibble(crosswalk)
+  matched_event_count <- crosswalk$matched_event_count
+  if (!is.numeric(matched_event_count) || anyNA(matched_event_count) ||
+      any(!is.finite(matched_event_count)) ||
+      any(matched_event_count < 0) ||
+      any(matched_event_count != floor(matched_event_count)) ||
+      any(matched_event_count > .Machine$integer.max)) {
+    stop(
+      "matched_event_count must contain non-missing, nonnegative, integer-like values.",
+      call. = FALSE
+    )
+  }
+
+  crosswalk <- crosswalk |>
     dplyr::transmute(
       site_id = as.integer(.data$site_id),
       year = as.integer(.data$year),
       water_company = as.character(.data$water_company),
-      annual_status = as.character(.data$annual_status)
+      annual_status = as.character(.data$annual_status),
+      matched_event_count = as.integer(.data$matched_event_count)
     )
 
   if (nrow(crosswalk) == 0L ||
@@ -199,6 +216,30 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
     stop("Each Site Group must have exactly one water_company.", call. = FALSE)
   }
 
+  valid_statuses <- c("absent", "reported_zero", "reported_positive", "reported_na")
+  if (anyNA(crosswalk$annual_status) ||
+      any(!crosswalk$annual_status %in% valid_statuses)) {
+    stop("Requested Site Group years must have valid annual_status values.", call. = FALSE)
+  }
+
+  contradiction_statuses <- c("reported_zero", "reported_na", "absent")
+  contradiction_counts <- crosswalk |>
+    dplyr::filter(
+      .data$annual_status %in% contradiction_statuses,
+      .data$matched_event_count > 0L
+    ) |>
+    dplyr::count(.data$annual_status, name = "n")
+  for (status in contradiction_statuses) {
+    count <- contradiction_counts |>
+      dplyr::filter(.data$annual_status == status) |>
+      dplyr::pull(.data$n)
+    if (length(count) == 0L) count <- 0L
+    message(
+      "Event-bearing Annual Status contradiction: ", status, " = ", count,
+      " Site Group-year(s)."
+    )
+  }
+
   non_empty_cutoffs <- cutoff_years[cutoff_years >= base_year]
   required_years <- if (length(non_empty_cutoffs) == 0L) {
     integer()
@@ -215,20 +256,16 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
     )
   }
 
-  valid_statuses <- c("absent", "reported_zero", "reported_positive", "reported_na")
   observed <- crosswalk |>
     dplyr::filter(.data$year %in% required_years)
-  if (anyNA(observed$annual_status) ||
-      any(!observed$annual_status %in% valid_statuses)) {
-    stop("Requested Site Group years must have valid annual_status values.", call. = FALSE)
-  }
 
   all_site_ids <- sort(unique(crosswalk$site_id))
   non_empty_prefixes <- if (length(required_years) == 0L) {
     tibble::tibble(
       site_id = integer(),
       cutoff_year = integer(),
-      site_missing = logical()
+      site_missing = logical(),
+      has_unknown_event_evidence = logical()
     )
   } else {
     tidyr::expand_grid(
@@ -240,31 +277,43 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
           observed,
           "site_id",
           cutoff_year = "year",
-          "annual_status"
+          "annual_status",
+          "matched_event_count"
         ),
         by = c("site_id", "cutoff_year")
       ) |>
       dplyr::arrange(.data$site_id, .data$cutoff_year) |>
       dplyr::mutate(
         annual_status = tidyr::replace_na(.data$annual_status, "absent"),
+        matched_event_count = tidyr::replace_na(.data$matched_event_count, 0L),
+        event_evidence_unknown =
+          .data$annual_status %in% c("reported_na", "absent") |
+          (.data$annual_status == "reported_positive" &
+            .data$matched_event_count == 0L),
         site_missing = dplyr::cumany(.data$annual_status == "absent"),
+        has_unknown_event_evidence = dplyr::cumany(.data$event_evidence_unknown),
         .by = "site_id"
       ) |>
       dplyr::filter(.data$cutoff_year %in% cutoff_years) |>
-      dplyr::select("site_id", "cutoff_year", "site_missing")
+      dplyr::select(
+        "site_id", "cutoff_year", "site_missing",
+        "has_unknown_event_evidence"
+      )
   }
 
   empty_prefixes <- if ((base_year - 1L) %in% cutoff_years) {
     tibble::tibble(
       site_id = all_site_ids,
       cutoff_year = base_year - 1L,
-      site_missing = FALSE
+      site_missing = FALSE,
+      has_unknown_event_evidence = FALSE
     )
   } else {
     tibble::tibble(
       site_id = integer(),
       cutoff_year = integer(),
-      site_missing = logical()
+      site_missing = logical(),
+      has_unknown_event_evidence = logical()
     )
   }
 

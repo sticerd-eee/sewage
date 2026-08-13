@@ -52,6 +52,7 @@ crosswalk_fixture <- tibble(
     "reported_zero", "reported_positive", "reported_na", "absent",
     "absent", "reported_zero", "reported_positive", "reported_na"
   ),
+  matched_event_count = c(0L, 1L, 0L, 0L, 0L, 0L, 1L, 0L),
   ngr = c(
     "SU1000010000", "SU1000010000", "NOT AN NGR", "NOT AN NGR",
     NA, "SU2000020000", "SU2000020000", "SU2000020000"
@@ -200,7 +201,8 @@ assert_identical(
   tibble(
     site_id = c(10L, 20L),
     cutoff_year = c(2020L, 2020L),
-    site_missing = c(FALSE, FALSE)
+    site_missing = c(FALSE, FALSE),
+    has_unknown_event_evidence = c(FALSE, FALSE)
   ),
   paste0(
     "The explicit pre-base cutoff must be a non-missing empty prefix for known ",
@@ -213,8 +215,11 @@ assert_true(
 )
 assert_identical(
   vapply(prefix_missingness_fixture, typeof, character(1)),
-  c(site_id = "integer", cutoff_year = "integer", site_missing = "logical"),
-  "Prefix completeness must preserve integer keys and logical missingness."
+  c(
+    site_id = "integer", cutoff_year = "integer",
+    site_missing = "logical", has_unknown_event_evidence = "logical"
+  ),
+  "Prefix completeness must preserve integer keys and logical flags."
 )
 
 invalid_prefix_status_fixture <- prefix_crosswalk_fixture

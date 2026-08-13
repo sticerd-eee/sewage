@@ -17,6 +17,8 @@ suppressPackageStartupMessages({
   library(tibble)
 })
 
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+
 assert_true <- function(condition, message) {
   if (!isTRUE(condition)) stop(message, call. = FALSE)
 }
@@ -29,6 +31,19 @@ assert_identical <- function(actual, expected, message) {
       "\nExpected: ", paste(capture.output(str(expected)), collapse = " "),
       call. = FALSE
     )
+  }
+}
+
+assert_error_contains <- function(expression, expected, message) {
+  error_message <- tryCatch(
+    {
+      force(expression)
+      NA_character_
+    },
+    error = function(error) conditionMessage(error)
+  )
+  if (is.na(error_message) || !grepl(expected, error_message, fixed = TRUE)) {
+    stop(message, "\nActual error: ", error_message, call. = FALSE)
   }
 }
 
@@ -79,7 +94,8 @@ write_rental_fixture <- function(root) {
     tidyr::expand_grid(site_id = 10L, year = 2021:2024) |>
       mutate(
         water_company = "Test Water",
-        annual_status = "reported_positive"
+        annual_status = "reported_positive",
+        matched_event_count = 1L
       ),
     file.path(event_dir, "site_group_crosswalk.parquet")
   )
@@ -229,7 +245,8 @@ write_prefix_fixture <- function(root, transaction_times) {
         .data$site_id == 10L & .data$year == 2023L,
         "absent",
         "reported_positive"
-      )
+      ),
+      matched_event_count = if_else(.data$annual_status == "absent", 0L, 1L)
     )
   arrow::write_parquet(
     supported_sites,
@@ -246,6 +263,71 @@ write_prefix_fixture <- function(root, transaction_times) {
   )
 
   invisible(root)
+}
+
+# Exposure-evidence regression scope -------------------------------------------
+
+evidence_state_fixture <- tibble(
+  site_id = 10:15,
+  year = 2023L,
+  water_company = "Test Water",
+  annual_status = c(
+    "reported_zero", "reported_zero", "reported_positive",
+    "reported_positive", "reported_na", "absent"
+  ),
+  matched_event_count = c(0L, 1L, 1L, 0L, 1L, 1L)
+)
+evidence_messages <- capture.output(
+  evidence_state_result <- derive_site_group_prefix_missing_flags(
+    evidence_state_fixture,
+    base_year = 2023L,
+    cutoff_years = 2023L
+  ),
+  type = "message"
+)
+assert_identical(
+  evidence_state_result$has_unknown_event_evidence,
+  c(FALSE, FALSE, FALSE, TRUE, TRUE, TRUE),
+  "Annual Status and matched events must distinguish observed evidence from unknown evidence."
+)
+for (status in c("reported_zero", "reported_na", "absent")) {
+  assert_true(
+    any(grepl(status, evidence_messages, fixed = TRUE) &
+      grepl("1", evidence_messages, fixed = TRUE)),
+    paste("The evidence helper must log one event-bearing", status, "Site Group-year.")
+  )
+}
+
+cutoff_evidence_fixture <- tibble(
+  site_id = 20L,
+  year = 2022:2023,
+  water_company = "Test Water",
+  annual_status = "reported_positive",
+  matched_event_count = c(1L, 0L)
+)
+cutoff_evidence_result <- suppressMessages(derive_site_group_prefix_missing_flags(
+  cutoff_evidence_fixture,
+  base_year = 2022L,
+  cutoff_years = 2022:2023
+))
+assert_identical(
+  cutoff_evidence_result$has_unknown_event_evidence,
+  c(FALSE, TRUE),
+  "A positive year without matched events must affect its own and later cutoffs only."
+)
+
+for (invalid_count in list(NA_real_, -1, 1.5, "invalid")) {
+  invalid_evidence_fixture <- evidence_state_fixture
+  invalid_evidence_fixture$matched_event_count[1] <- invalid_count
+  assert_error_contains(
+    derive_site_group_prefix_missing_flags(
+      invalid_evidence_fixture,
+      base_year = 2023L,
+      cutoff_years = 2023L
+    ),
+    "matched_event_count",
+    "Invalid matched_event_count values must fail before evidence classification."
+  )
 }
 
 producer_specs <- list(
