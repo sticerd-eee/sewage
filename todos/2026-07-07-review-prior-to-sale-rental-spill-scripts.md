@@ -12,11 +12,11 @@
 
 | # | Finding | Status on 2026-08-12 | Priority |
 |---:|---|---|---|
-| 1 | Date/POSIXct comparison depends on lubridate | Still current; mechanism re-verified | P1 |
+| 1 | Date/POSIXct comparison depends on lubridate | Resolved 2026-08-13 | P1 |
 | 2 | Zero-day windows produce `NaN` | Still current in the August outputs | P2 decision |
 | 3 | Broken empty-chunk schema | Still current; also promotes `site_id` to character | P2 |
-| 4 | Global rather than transaction-specific missingness | Still current; re-quantified after Site Group migration | P1 decision |
-| 5 | Future year can void the sample | Still current through crosswalk expansion | P1 |
+| 4 | Global rather than transaction-specific missingness | Resolved 2026-08-13 | P1 decision |
+| 5 | Future year can void the sample | Resolved 2026-08-13 | P1 |
 | 6 | Stale Arrow partitions | Still current and broader: publication is also non-atomic | P1 |
 | 7 | Missing output-contract test | Still current | P1 |
 | 8 | Hand-maintained twin scripts | Still current and part of four parallel implementations | P2 |
@@ -28,7 +28,9 @@
 
 ## High
 
-### 1. `[ ]` Rental time comparisons rely on attached lubridate methods
+### 1. `[x]` Rental time comparisons rely on attached lubridate methods
+
+- **Resolution (2026-08-13):** both rental builders now normalize `rented_est` to UTC `POSIXct` immediately after collection. The focused producer contract passed in a clean isolated environment, and both full rental producers regenerated successfully with plain `Rscript`.
 
 - **Where:** `rental_spill_prior_to_rental.R:20-28`, `:165`, and `:173`.
 - **Problem:** `rented_est` is Arrow `date32[day]` and collects as R `Date`, while `start_time` and `end_time` are `POSIXct`. Base R reports incompatible methods, makes `start_time < rented_est` false for valid overlaps, and gives the wrong `pmin()` clamp. The script works only because `initialise_environment()` attaches lubridate, whose methods repair both operations as a namespace side effect.
@@ -37,7 +39,9 @@
 - **Suggested fix:** convert `rented_est` explicitly after collection with `as.POSIXct(rented_est, tz = "UTC")`, assert compatible UTC timestamp types, and add a clean-namespace regression test. Prefer namespaced package calls and fail-fast dependency checks over runtime installation/attachment.
 - **Validation:** correctness, adversarial, and the independent validator confirmed the mechanism.
 
-### 4. `[ ]` Global missingness invalidates transaction windows that ended before a later monitoring gap
+### 4. `[x]` Global missingness invalidates transaction windows that ended before a later monitoring gap
+
+- **Resolution (2026-08-13):** all four builders now join Site Group prefix completeness at each transaction's exclusive cutoff year. Full-output reconciliation unmasked 70,709 sale and 33,064 rental site-radius rows (46,094 sale and 16,937 rental radius rows); every site-row change had complete coverage through its cutoff and an `absent` year only afterward, with zero newly masked rows and zero independent cutoff-flag mismatches.
 
 - **Where:** both `load_data()` functions at lines `81-92`, calling `derive_site_group_missing_flags()` in `site_group_utils.R:51-116` with `seq(min_transaction_year, max_transaction_year)`.
 - **Problem:** one Site Group flag is computed over the full sample range and copied to every transaction-site pair. A 2021 transaction is therefore set to missing when its site is absent only in 2022 or 2023, even though those years are outside that transaction's exposure window.
@@ -46,7 +50,9 @@
 - **Decision required:** confirm whether the intended estimand deliberately uses a balanced full-sample monitoring panel. If not, derive prefix completeness by `(site_id, transaction cutoff year)` from `CONFIG$base_year`. For a transaction exactly at January 1 midnight, the current exposure interval ends in the preceding year.
 - **Validation:** correctness, adversarial, and the independent validator confirmed the execution path; the orchestrator quantified the current impact.
 
-### 5. `[ ]` An unsupported future transaction year converts every exposure to missing
+### 5. `[x]` An unsupported future transaction year converts every exposure to missing
+
+- **Resolution (2026-08-13):** the shared prefix helper now validates requested years against crosswalk coverage and stops with the unsupported year list before Site Group-year expansion or publication. The focused sale/rental unsupported-year fixtures passed, and all four supported-year production runs completed successfully.
 
 - **Where:** both `load_data()` functions at lines `81-92`; `site_group_utils.R:101-114` expands every Site Group over all requested years and replaces missing group-years with `"absent"`.
 - **Problem:** one legitimate future transaction or one mis-dated row widens `sample_years`. If that year is beyond the crosswalk horizon, it is manufactured as `absent` for every Site Group, so every output metric becomes `NA` while the run can still complete successfully.
