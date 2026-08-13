@@ -171,7 +171,12 @@ create_joined_events <- function(rental_ids, data) {
     rental_sites,
     "Rental transaction attachment to lookup pairs"
   )
-  rental_sites_with_missing <- data$site_missing_dt[
+  # Join evidence separately so the raw-event aggregation keeps its historical
+  # input shape; otherwise unused columns can perturb floating sum order.
+  site_missing_for_events <- data$site_missing_dt[, .(
+    site_id, cutoff_year, site_missing
+  )]
+  rental_sites_with_missing <- site_missing_for_events[
     rental_sites,
     on = .(site_id, cutoff_year)
   ]
@@ -180,14 +185,23 @@ create_joined_events <- function(rental_ids, data) {
     rental_sites_with_missing,
     "Rental Site Group prefix missingness join"
   )
-  rental_sites_with_missing[, `:=`(
-    site_missing = fifelse(is.na(site_missing), TRUE, site_missing),
-    has_unknown_event_evidence = fifelse(
-      is.na(has_unknown_event_evidence), TRUE, has_unknown_event_evidence
-    )
+  rental_sites_with_missing[, site_missing := fifelse(
+    is.na(site_missing), TRUE, site_missing
+  )]
+  rental_sites_with_evidence <- data$site_missing_dt[, .(
+    site_id, cutoff_year, has_unknown_event_evidence
+  )][rental_sites_with_missing, on = .(site_id, cutoff_year)]
+  assert_left_row_count(
+    rental_sites_with_missing,
+    rental_sites_with_evidence,
+    "Rental Site Group event-evidence join"
+  )
+  rental_sites_with_evidence[, has_unknown_event_evidence := fifelse(
+    is.na(has_unknown_event_evidence), TRUE, has_unknown_event_evidence
   )]
   rental_sites_with_missing[, cutoff_year := NULL]
-  lookup_chunk <- rental_sites_with_missing[, .(
+  rental_sites_with_evidence[, cutoff_year := NULL]
+  lookup_chunk <- rental_sites_with_evidence[, .(
     rental_id, site_id, distance_m, site_missing,
     has_unknown_event_evidence
   )]
@@ -195,7 +209,7 @@ create_joined_events <- function(rental_ids, data) {
   if (nrow(lookup_chunk) == 0) {
     return(list(events_dt = NULL, lookup_chunk = lookup_chunk))
   }
-  
+
   # Join: rental_sites -> raw_events
   joined <- data$raw_events_dt[
     rental_sites_with_missing,
