@@ -65,16 +65,9 @@ record_expected_contract_failure <- function(label, expression) {
 }
 
 source_prior_exposure_producer <- function(path) {
+  parse(file = here::here(path))
   producer_env <- new.env(parent = globalenv())
   sys.source(here::here(path), envir = producer_env)
-  sys.source(
-    here::here("scripts", "R", "utils", "site_group_utils.R"),
-    envir = producer_env
-  )
-  sys.source(
-    here::here("scripts", "R", "utils", "spill_aggregation_utils.R"),
-    envir = producer_env
-  )
   producer_env
 }
 
@@ -200,6 +193,174 @@ assert_true(
   "The clean-namespace fixture must run without lubridate attached"
 )
 source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
+
+# Standard entrypoint contracts -----------------------------------------------
+
+entrypoint_specs <- list(
+  sale_site = list(
+    path = file.path(
+      "scripts", "R", "06_analysis_datasets", "house_spill_prior_to_sale.R"
+    ),
+    market = "sale", grain = "site",
+    input = "house_price.parquet", lookup = "spill_house_lookup.parquet",
+    output = file.path(
+      "data", "processed", "cross_section", "sales",
+      "prior_to_sale_house_site"
+    ),
+    log = file.path("output", "log", "house_site_prior_to_sale.log"),
+    chunk_size = 10000, create = "create_prior_to_sale_db"
+  ),
+  rental_site = list(
+    path = file.path(
+      "scripts", "R", "06_analysis_datasets", "rental_spill_prior_to_rental.R"
+    ),
+    market = "rental", grain = "site",
+    input = file.path("zoopla", "zoopla_rentals.parquet"),
+    lookup = file.path("zoopla", "spill_rental_lookup.parquet"),
+    output = file.path(
+      "data", "processed", "cross_section", "rentals",
+      "prior_to_rental_rental_site"
+    ),
+    log = file.path("output", "log", "rental_spill_prior_to_rental.log"),
+    chunk_size = 10000, create = "create_prior_to_rental_db"
+  ),
+  sale_radius = list(
+    path = file.path(
+      "scripts", "R", "06_analysis_datasets", "cross_section_prior_to_sale.R"
+    ),
+    market = "sale", grain = "radius",
+    input = "house_price.parquet", lookup = "spill_house_lookup.parquet",
+    output = file.path(
+      "data", "processed", "cross_section", "sales", "prior_to_sale"
+    ),
+    log = file.path("output", "log", "cross_section_prior_to_sale.log"),
+    chunk_size = 100000, create = "create_prior_to_sale_db"
+  ),
+  rental_radius = list(
+    path = file.path(
+      "scripts", "R", "06_analysis_datasets", "cross_section_prior_to_rental.R"
+    ),
+    market = "rental", grain = "radius",
+    input = file.path("zoopla", "zoopla_rentals.parquet"),
+    lookup = file.path("zoopla", "spill_rental_lookup.parquet"),
+    output = file.path(
+      "data", "processed", "cross_section", "rentals", "prior_to_rental"
+    ),
+    log = file.path("output", "log", "cross_section_prior_to_rental.log"),
+    chunk_size = 100000, create = "create_prior_to_rental_db"
+  )
+)
+
+for (label in names(entrypoint_specs)) {
+  spec <- entrypoint_specs[[label]]
+  producer_env <- source_prior_exposure_producer(spec$path)
+  contract <- producer_env$prior_exposure_variant(
+    producer_env$CONFIG$market,
+    producer_env$CONFIG$grain
+  )
+
+  assert_identical(
+    producer_env$CONFIG$market, spec$market,
+    paste(label, "must configure the correct market")
+  )
+  assert_identical(
+    producer_env$CONFIG$grain, spec$grain,
+    paste(label, "must configure the correct output grain")
+  )
+  assert_identical(
+    contract$input, spec$input,
+    paste(label, "must resolve the established transaction input")
+  )
+  assert_identical(
+    contract$lookup, spec$lookup,
+    paste(label, "must resolve the established lookup input")
+  )
+  assert_identical(
+    producer_env$CONFIG$output_path, here::here(spec$output),
+    paste(label, "must preserve the canonical output path")
+  )
+  assert_identical(
+    producer_env$LOG_FILE, here::here(spec$log),
+    paste(label, "must preserve its log identity")
+  )
+  assert_identical(
+    producer_env$CONFIG$log_file, producer_env$LOG_FILE,
+    paste(label, "must expose its log path through CONFIG")
+  )
+  assert_identical(
+    producer_env$CONFIG$radius_thresholds, c(250, 500, 1000),
+    paste(label, "must preserve the configured radii")
+  )
+  assert_identical(
+    producer_env$CONFIG$chunk_size, spec$chunk_size,
+    paste(label, "must preserve the configured chunk size")
+  )
+  assert_error_contains(
+    producer_env$check_required_packages("definitely_not_a_real_r_package"),
+    "`rv sync`",
+    paste(label, "missing dependencies must use shared rv sync guidance")
+  )
+
+  load_call <- NULL
+  producer_env$prior_exposure_load_data <- function(config, market, grain) {
+    load_call <<- list(config = config, market = market, grain = grain)
+    "loaded"
+  }
+  assert_identical(
+    producer_env$load_data(), "loaded",
+    paste(label, "load wrapper must return the shared loader result")
+  )
+  assert_identical(
+    load_call$market, spec$market,
+    paste(label, "load wrapper must delegate the configured market")
+  )
+  assert_identical(
+    load_call$grain, spec$grain,
+    paste(label, "load wrapper must delegate the configured grain")
+  )
+
+  stream_call <- NULL
+  producer_env$prior_exposure_stream <- function(data, output_path) {
+    stream_call <<- list(data = data, output_path = output_path)
+    invisible(output_path)
+  }
+  fixture_token <- structure(list(label = label), class = "fixture_token")
+  stream_result <- producer_env[[spec$create]](fixture_token)
+  assert_identical(
+    stream_call$data, fixture_token,
+    paste(label, "publication wrapper must pass the loaded fixture unchanged")
+  )
+  assert_identical(
+    stream_call$output_path, here::here(spec$output),
+    paste(label, "publication wrapper must delegate the canonical output")
+  )
+  assert_identical(
+    stream_result, here::here(spec$output),
+    paste(label, "publication wrapper must return the shared stream result")
+  )
+}
+
+scoped_entrypoint_text <- paste(vapply(
+  entrypoint_specs,
+  function(spec) paste(readLines(here::here(spec$path), warn = FALSE), collapse = "\n"),
+  character(1)
+), collapse = "\n")
+spill_utility_text <- paste(readLines(
+  here::here("scripts", "R", "utils", "spill_aggregation_utils.R"),
+  warn = FALSE
+), collapse = "\n")
+assert_true(
+  !grepl("install.packages\\(", paste(scoped_entrypoint_text, spill_utility_text)),
+  "Prior-exposure entrypoints and spill utilities must never install packages at runtime"
+)
+assert_true(
+  !grepl('"fs"|library\\(fs\\)', scoped_entrypoint_text),
+  "Prior-exposure entrypoints must not retain the unused fs dependency"
+)
+assert_true(
+  grepl("`rv sync`", spill_utility_text, fixed = TRUE),
+  "The spill utility must direct missing dependencies to rv sync"
+)
 
 fixture_root <- tempfile("prior-exposure-contract-")
 dir.create(fixture_root, recursive = TRUE)

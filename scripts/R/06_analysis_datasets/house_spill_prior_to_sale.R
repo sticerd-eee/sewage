@@ -1,35 +1,72 @@
-############################################################
-# Create Prior-to-Sale Cross-sectional Database: House-Site Level
-# Project: Sewage
-# Date: 22/01/2026
+# ==============================================================================
+# Prior-to-Sale House-Site Exposure Builder
+# ==============================================================================
+#
+# Purpose: Build and publish spill exposure before sale at house-site-radius
+#          grain through the shared prior-exposure engine.
+#
 # Author: Alina Zeltikova
-############################################################
+# Date: 2026-01-22
+# Date Modified: 2026-08-13
+#
+# Inputs:
+#   - data/processed/house_price.parquet
+#   - data/processed/spill_house_lookup.parquet
+#   - data/processed/matched_events_annual_data/matched_events_annual_data.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
+#
+# Outputs:
+#   - data/processed/cross_section/sales/prior_to_sale_house_site/
+#   - output/log/house_site_prior_to_sale.log
+#
+# ==============================================================================
 
-initialise_environment <- function() {
-  required_packages <- c(
-    "here", "logger", "glue", "fs",
-    "lubridate", "arrow", "data.table", "dplyr"
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first with `rv sync`.",
+    call. = FALSE
   )
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg)
-    library(pkg, character.only = TRUE)
-  }))
-  source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
-  source(here::here("scripts", "R", "utils", "site_group_utils.R"))
-  source(here::here("scripts", "R", "utils", "prior_exposure_utils.R"))
 }
 
-setup_logging <- function() {
-  log_path <- here::here("output", "log", "house_site_prior_to_sale.log")
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
-  logger::log_info("Script started at {Sys.time()}")
-}
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "data.table",
+  "dplyr",
+  "here",
+  "logger",
+  "lubridate",
+  "tibble",
+  "tidyr"
+)
+
+LOG_FILE <- here::here("output", "log", "house_site_prior_to_sale.log")
+
+check_required_packages(REQUIRED_PACKAGES)
+
+source(
+  here::here("scripts", "R", "utils", "spill_aggregation_utils.R"),
+  local = TRUE
+)
+source(
+  here::here("scripts", "R", "utils", "site_group_utils.R"),
+  local = TRUE
+)
+source(
+  here::here("scripts", "R", "utils", "prior_exposure_utils.R"),
+  local = TRUE
+)
 
 CONFIG <- list(
+  market = "sale",
+  grain = "site",
   processed_dir = here::here("data", "processed"),
+  output_path = here::here(
+    "data", "processed", "cross_section", "sales",
+    "prior_to_sale_house_site"
+  ),
   radius_thresholds = c(250, 500, 1000),
   base_year = 2021,
   window_start = as.POSIXct("2021-01-01 00:00:00", tz = "UTC"),
@@ -37,11 +74,18 @@ CONFIG <- list(
   site_group_crosswalk_path = here::here(
     "data", "processed", "matched_events_annual_data",
     "site_group_crosswalk.parquet"
-  )
+  ),
+  log_file = LOG_FILE
 )
 
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
+  logger::log_info("Logging to {LOG_FILE}")
+  logger::log_info("Script started at {Sys.time()}")
+}
+
 load_data <- function() {
-  prior_exposure_load_data(CONFIG, "sale", "site")
+  prior_exposure_load_data(CONFIG, CONFIG$market, CONFIG$grain)
 }
 
 create_joined_events <- function(house_ids, data) {
@@ -50,7 +94,8 @@ create_joined_events <- function(house_ids, data) {
 
 calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
   prior_exposure_calculate_metrics(
-    lookup_dt, events_dt, "sale", "site", CONFIG$radius_thresholds
+    lookup_dt, events_dt, CONFIG$market, CONFIG$grain,
+    CONFIG$radius_thresholds
   )
 }
 
@@ -63,31 +108,14 @@ process_chunk <- function(house_ids, data) {
 }
 
 create_prior_to_sale_db <- function(data) {
-  logger::log_info("Creating prior-to-sale cross-sectional database")
-  output_path <- here::here(
-    "data", "processed", "cross_section", "sales",
-    "prior_to_sale_house_site"
-  )
-  prior_exposure_stream(data, output_path)
-  logger::log_info("Prior-to-sale database created and published")
-  invisible(output_path)
-}
-
-export_data <- function(data) {
-  tryCatch({
-    output_path <- create_prior_to_sale_db(data)
-    logger::log_info("Data saved to: {output_path}")
-  }, error = function(e) {
-    logger::log_error("Data export failed: {e$message}")
-    stop(glue::glue("Failed to export data: {e$message}"))
-  })
+  prior_exposure_stream(data, CONFIG$output_path)
 }
 
 main <- function() {
-  initialise_environment()
-  setup_logging()
-  export_data(load_data())
-  logger::log_info("Script completed successfully")
+  initialise_logging()
+  data <- load_data()
+  create_prior_to_sale_db(data)
+  logger::log_info("Script completed successfully: {CONFIG$output_path}")
 }
 
 if (sys.nframe() == 0) main()
