@@ -1356,6 +1356,65 @@ for (label in c("sale_radius", "rental_radius")) {
   )
 }
 
+# Radius reducers must preserve the legacy distance-ordered accumulation. This
+# is observably different from summing an expanded radius table for large and
+# small floating-point values, despite being mathematically equivalent.
+accumulation_fixture <- data.table(
+  transaction_id = rep(1L, 3L),
+  site_id = 1:3,
+  distance_m = c(300, 100, 200),
+  site_missing = FALSE,
+  has_unknown_event_evidence = FALSE,
+  spill_hrs = c(1e16, 1, 1),
+  spill_count = c(1, 1, 1)
+)
+accumulation_result <- prior_exposure_reduce_radius(
+  accumulation_fixture, 1L, 500
+)
+assert_identical(
+  accumulation_result$spill_hrs,
+  c(1e16 + 2),
+  "Radius reduction must accumulate spill hours in ascending distance order"
+)
+
+stable_contract <- prior_exposure_variant("sale", "radius")
+stable_lookup <- data.table(
+  transaction_id = c(1L, 2L), site_id = c(10L, 10L), distance_m = 100,
+  site_missing = FALSE, has_unknown_event_evidence = FALSE
+)
+stable_events <- data.table(
+  house_id = c(2L, 1L, 1L), site_id = 10L,
+  start_time = as.POSIXct(c(
+    "2021-01-01 03:00:00", "2021-01-01 02:00:00", "2021-01-01 01:00:00"
+  ), tz = "UTC"),
+  end_time = as.POSIXct(c(
+    "2021-01-01 04:00:00", "2021-01-01 03:00:00", "2021-01-01 02:00:00"
+  ), tz = "UTC"),
+  clamped_start = as.POSIXct(c(
+    "2021-01-01 03:00:00", "2021-01-01 02:00:00", "2021-01-01 01:00:00"
+  ), tz = "UTC"),
+  clamped_end = as.POSIXct(c(
+    "2021-01-01 04:00:00", "2021-01-01 03:00:00", "2021-01-01 02:00:00"
+  ), tz = "UTC"),
+  event_hours = c(1e16, 1, 1)
+)
+stable_full <- prior_exposure_transaction_site_metrics(
+  list(internal_lookup = stable_lookup, events_dt = stable_events),
+  stable_contract
+)[transaction_id == 1L]
+stable_isolated <- prior_exposure_transaction_site_metrics(
+  list(
+    internal_lookup = stable_lookup[transaction_id == 1L],
+    events_dt = stable_events[house_id == 1L][2:1]
+  ),
+  stable_contract
+)
+assert_identical(
+  stable_full$spill_hrs,
+  stable_isolated$spill_hrs,
+  "Event-hour accumulation must be independent of row and cohort composition"
+)
+
 # Public candidates must reopen with the literal schemas and reject drift.
 public_contract_candidate <- function(label) {
   radii <- c(250L, 500L, 1000L)

@@ -10,6 +10,17 @@ prior_exposure_schema_signature <- function(schema) {
   )
 }
 
+# data.table may replace grouped sum/cumsum calls with optimizer-specific
+# implementations. These wrappers, combined with explicit row ordering at each
+# aggregation boundary, make published floating values reproducible.
+prior_exposure_stable_sum <- function(value, na.rm = FALSE) {
+  base::sum(value, na.rm = na.rm)
+}
+
+prior_exposure_stable_cumsum <- function(value) {
+  base::cumsum(value)
+}
+
 #' Resolve one authoritative reopened prior-exposure schema.
 #'
 #' The public matrix is intentionally closed to the four established outputs.
@@ -341,43 +352,67 @@ prior_exposure_join_events <- function(transaction_ids, data) {
   }
 
   # Keep the historical event-join shape separate from the evidence attachment.
-  event_sources <- transaction_sites_with_missing[, cutoff_year := NULL]
+  # data.table's grouped floating reducer is sensitive to the joined table's
+  # otherwise-unused columns, so project the exact established public shape.
+  event_sources <- data.table::copy(transaction_sites_with_missing)
+  event_sources[, c("cutoff_year", "n_days_in_window") := NULL]
+  data.table::setnames(
+    event_sources,
+    c("transaction_id", "transaction_value", "transaction_endpoint"),
+    c(contract$id, contract$value, contract$endpoint)
+  )
+  data.table::setcolorder(event_sources, c(
+    "site_id", "site_missing", contract$id, contract$value,
+    contract$endpoint, "distance_m"
+  ))
   joined <- data$raw_events_dt[
     event_sources, on = "site_id", nomatch = NULL, allow.cartesian = TRUE
   ]
+  endpoint <- joined[[contract$endpoint]]
   joined <- joined[
-    start_time < transaction_endpoint & end_time >= data$config$window_start
+    start_time < endpoint & end_time >= data$config$window_start
   ]
   if (nrow(joined) == 0L) {
     return(list(events_dt = NULL, lookup_chunk = public_lookup, internal_lookup = lookup_chunk))
   }
+  endpoint <- joined[[contract$endpoint]]
   joined[, `:=`(
     clamped_start = pmax(start_time, data$config$window_start),
-    clamped_end = pmin(end_time, transaction_endpoint)
+    clamped_end = pmin(end_time, endpoint)
   )]
   joined[, event_hours := as.numeric(difftime(
     clamped_end, clamped_start, units = "hours"
   ))]
   joined <- joined[event_hours > 0]
-  data.table::setnames(joined, "transaction_id", contract$id)
   list(events_dt = joined, lookup_chunk = public_lookup, internal_lookup = lookup_chunk)
 }
 
 prior_exposure_transaction_site_metrics <- function(joined, contract) {
   lookup <- data.table::copy(joined$internal_lookup)
   if (nrow(lookup) == 0L) return(NULL)
-  site_lookup <- lookup[, .(
-    distance_m = min(distance_m),
-    site_missing = any(site_missing),
-    has_unknown_event_evidence = any(has_unknown_event_evidence)
-  ), by = .(transaction_id, site_id)]
+  site_lookup <- if (contract$include_event_evidence) {
+    lookup[, .(
+      distance_m = min(distance_m),
+      site_missing = any(site_missing),
+      has_unknown_event_evidence = any(has_unknown_event_evidence)
+    ), by = .(transaction_id, site_id)]
+  } else {
+    lookup[, .(
+      distance_m = min(distance_m),
+      site_missing = any(site_missing)
+    ), by = .(transaction_id, site_id)]
+  }
 
   events <- joined$events_dt
   if (!is.null(events) && nrow(events) > 0L) {
     events <- data.table::copy(events)
     data.table::setnames(events, contract$id, "transaction_id")
+    data.table::setorderv(events, c(
+      "transaction_id", "site_id", "clamped_start", "clamped_end",
+      "start_time", "end_time"
+    ))
     event_agg <- events[, .(
-      spill_hrs = sum(event_hours, na.rm = TRUE),
+      spill_hrs = prior_exposure_stable_sum(event_hours, na.rm = TRUE),
       spill_count = count_spills(clamped_start, clamped_end)
     ), by = .(transaction_id, site_id)]
     site_lookup <- merge(
@@ -417,21 +452,64 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
     )]
     return(grid)
   }
-  expanded <- site_metrics[
-    rep(seq_len(nrow(site_metrics)), each = length(radii))
+  # Preserve the historical accumulation order exactly: collapse distance ties,
+  # sort by distance, then take cumulative sums for rolling radius thresholds.
+  # Summing an expanded transaction/radius table changes low-order floating-point
+  # bits in production even though the mathematical result is equivalent.
+  data.table::setorder(site_metrics, transaction_id, distance_m, site_id)
+  site_agg <- site_metrics[, .(
+    spill_hrs = prior_exposure_stable_sum(spill_hrs),
+    spill_count = prior_exposure_stable_sum(spill_count),
+    n_spill_sites = .N,
+    distance_sum = prior_exposure_stable_sum(distance_m),
+    missing_sites = prior_exposure_stable_sum(site_missing)
+  ), by = .(transaction_id, distance_m)]
+  data.table::setorder(site_agg, transaction_id, distance_m)
+  site_agg[, `:=`(
+    cum_spill_hrs = prior_exposure_stable_cumsum(spill_hrs),
+    cum_spill_count = prior_exposure_stable_cumsum(spill_count),
+    cum_distance_sum = prior_exposure_stable_cumsum(distance_sum),
+    n_spill_sites = prior_exposure_stable_cumsum(n_spill_sites),
+    cum_missing_sites = prior_exposure_stable_cumsum(missing_sites),
+    min_distance = distance_m[1L]
+  ), by = transaction_id]
+  data.table::setkey(site_agg, transaction_id, distance_m)
+
+  radius_grid <- data.table::CJ(
+    transaction_id = unique(site_agg$transaction_id),
+    radius = sort(radii), unique = TRUE
+  )
+  radius_grid[, radius_join := radius]
+  data.table::setkey(radius_grid, transaction_id, radius_join)
+  metrics <- site_agg[
+    radius_grid,
+    roll = Inf,
+    on = .(transaction_id, distance_m = radius_join)
   ]
-  expanded[, radius := rep(sort(radii), times = nrow(site_metrics))]
-  expanded <- expanded[distance_m <= radius]
-  metrics <- expanded[, .(
-    spill_hrs = sum(spill_hrs),
-    n_spill_sites = as.integer(.N),
-    spill_count = sum(spill_count),
-    mean_distance = mean(distance_m),
-    min_distance = min(distance_m),
-    has_missing_site = any(site_missing)
-  ), by = .(transaction_id, radius)]
+  metrics[, `:=`(
+    spill_hrs = data.table::fifelse(is.na(cum_spill_hrs), 0, cum_spill_hrs),
+    spill_count = data.table::fifelse(
+      is.na(cum_spill_count), 0, cum_spill_count
+    ),
+    n_spill_sites = data.table::fifelse(
+      is.na(n_spill_sites), 0L, n_spill_sites
+    ),
+    mean_distance = data.table::fifelse(
+      n_spill_sites > 0L, cum_distance_sum / n_spill_sites, NA_real_
+    ),
+    min_distance = data.table::fifelse(
+      n_spill_sites > 0L, min_distance, NA_real_
+    ),
+    has_missing_site = data.table::fifelse(
+      is.na(cum_missing_sites), FALSE, cum_missing_sites > 0
+    )
+  )]
   metrics[has_missing_site == TRUE, `:=`(
     spill_hrs = NA_real_, spill_count = NA_real_
+  )]
+  metrics <- metrics[, .(
+    transaction_id, radius, spill_hrs, n_spill_sites, spill_count,
+    mean_distance, min_distance, has_missing_site
   )]
   result <- metrics[grid, on = .(transaction_id, radius)]
   result[is.na(has_missing_site), has_missing_site := FALSE]
