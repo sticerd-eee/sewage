@@ -105,6 +105,9 @@ load_data <- function() {
   logger::log_info(
     "Site-cutoff prefixes flagged as missing: {site_missing_dt[site_missing == TRUE, .N]}"
   )
+  logger::log_info(
+    "Site-cutoff prefixes with unknown event evidence: {site_missing_dt[has_unknown_event_evidence == TRUE, .N]}"
+  )
   
   # Load spill lookup - filter to max radius threshold to reduce join size
   max_radius <- max(CONFIG$radius_thresholds)
@@ -173,9 +176,13 @@ create_joined_events <- function(house_ids, data) {
   house_sites_with_missing[, site_missing := fifelse(
     is.na(site_missing), TRUE, site_missing
   )]
+  house_sites_with_missing[, has_unknown_event_evidence := fifelse(
+    is.na(has_unknown_event_evidence), TRUE, has_unknown_event_evidence
+  )]
   house_sites_with_missing[, cutoff_year := NULL]
   lookup_chunk <- house_sites_with_missing[, .(
-    house_id, site_id, distance_m, site_missing
+    house_id, site_id, distance_m, site_missing,
+    has_unknown_event_evidence
   )]
   
   if (nrow(lookup_chunk) == 0) {
@@ -221,7 +228,8 @@ calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
 
   site_lookup <- lookup_dt[, .(
     distance_m = min(distance_m),
-    site_missing = any(site_missing)
+    site_missing = any(site_missing),
+    has_unknown_event_evidence = any(has_unknown_event_evidence)
   ), by = .(house_id, site_id)]
 
   if (!is.null(events_dt) && nrow(events_dt) > 0) {
@@ -276,7 +284,8 @@ calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
   )]
 
   return(metrics[, .(house_id, site_id, radius, distance_m,
-                     spill_hrs, spill_count, site_missing)])
+                     spill_hrs, spill_count, site_missing,
+                     has_unknown_event_evidence)])
 }
 
 
@@ -320,6 +329,7 @@ process_chunk <- function(house_ids, data) {
       spill_hrs = numeric(),
       spill_count = numeric(),
       site_missing = logical(),
+      has_unknown_event_evidence = logical(),
       price = numeric(),
       n_days_in_window = integer()
     ))
@@ -375,6 +385,11 @@ create_prior_to_sale_db <- function(data) {
       result[is.na(get(col)) & !site_missing, (col) := 0]
     }
   }
+
+  result[has_unknown_event_evidence == TRUE, `:=`(
+    spill_count = NA_real_,
+    spill_hrs = NA_real_
+  )]
   
   # Compute daily averages per site-house
   result[, `:=`(
@@ -385,6 +400,10 @@ create_prior_to_sale_db <- function(data) {
   )]
   
   logger::log_info("Rows with missing sites (spill metrics set to NA): {result[site_missing == TRUE, .N]}")
+  logger::log_info(
+    "Rows with unknown event evidence (spill metrics set to NA): {result[has_unknown_event_evidence == TRUE, .N]}"
+  )
+  result[, has_unknown_event_evidence := NULL]
   
   # Order by house_id, site_id, radius
   setorder(result, house_id, site_id, radius)

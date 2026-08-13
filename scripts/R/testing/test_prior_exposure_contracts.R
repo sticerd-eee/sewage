@@ -54,6 +54,10 @@ source_prior_exposure_producer <- function(path) {
     here::here("scripts", "R", "utils", "site_group_utils.R"),
     envir = producer_env
   )
+  sys.source(
+    here::here("scripts", "R", "utils", "spill_aggregation_utils.R"),
+    envir = producer_env
+  )
   producer_env
 }
 
@@ -329,6 +333,153 @@ for (invalid_count in list(NA_real_, -1, 1.5, "invalid")) {
     "Invalid matched_event_count values must fail before evidence classification."
   )
 }
+
+write_evidence_output_fixture <- function(root) {
+  zoopla_dir <- file.path(root, "zoopla")
+  event_dir <- file.path(root, "matched_events_annual_data")
+  dir.create(zoopla_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(event_dir, recursive = TRUE, showWarnings = FALSE)
+
+  transaction_times <- as.POSIXct(
+    c("2023-01-01 00:00:00", "2024-01-01 00:00:00"),
+    tz = "UTC"
+  )
+  arrow::write_parquet(
+    tibble(
+      house_id = 1:2,
+      price = c(100000L, 200000L),
+      date_of_transfer = transaction_times
+    ),
+    file.path(root, "house_price.parquet")
+  )
+  arrow::write_parquet(
+    tibble(
+      rental_id = 1:2,
+      listing_price = c(1000, 2000),
+      rented_est = as.Date(transaction_times)
+    ),
+    file.path(zoopla_dir, "zoopla_rentals.parquet")
+  )
+
+  lookup <- tidyr::expand_grid(transaction_id = 1:2, site_id = 10:15) |>
+    mutate(distance_m = 100)
+  arrow::write_parquet(
+    transmute(
+      lookup,
+      house_id = as.integer(.data$transaction_id),
+      site_id = as.integer(.data$site_id),
+      distance_m = as.double(.data$distance_m)
+    ),
+    file.path(root, "spill_house_lookup.parquet")
+  )
+  arrow::write_parquet(
+    transmute(
+      lookup,
+      rental_id = as.integer(.data$transaction_id),
+      site_id = as.integer(.data$site_id),
+      distance_m = as.double(.data$distance_m)
+    ),
+    file.path(zoopla_dir, "spill_rental_lookup.parquet")
+  )
+
+  crosswalk <- tidyr::expand_grid(site_id = 10:15, year = 2021:2024) |>
+    mutate(
+      water_company = "Test Water",
+      annual_status = case_when(
+        .data$year < 2023L ~ "reported_zero",
+        .data$site_id %in% c(10L, 11L) ~ "reported_zero",
+        .data$site_id %in% c(12L, 13L) ~ "reported_positive",
+        .data$site_id == 14L ~ "reported_na",
+        TRUE ~ "absent"
+      ),
+      matched_event_count = case_when(
+        .data$year < 2023L ~ 0L,
+        .data$site_id %in% c(11L, 12L, 14L, 15L) ~ 1L,
+        TRUE ~ 0L
+      )
+    )
+  arrow::write_parquet(
+    crosswalk,
+    file.path(event_dir, "site_group_crosswalk.parquet")
+  )
+
+  event_sites <- c(11L, 12L, 14L, 15L)
+  arrow::write_parquet(
+    tibble(
+      site_id = event_sites,
+      start_time = as.POSIXct("2023-01-10 00:00:00", tz = "UTC"),
+      end_time = as.POSIXct("2023-01-10 02:00:00", tz = "UTC"),
+      year = 2023L
+    ),
+    file.path(event_dir, "matched_events_annual_data.parquet")
+  )
+
+  invisible(root)
+}
+
+evidence_output_root <- tempfile("prior-exposure-evidence-output-")
+dir.create(evidence_output_root, recursive = TRUE)
+write_evidence_output_fixture(evidence_output_root)
+evidence_output_results <- list()
+for (label in c("sale_site", "rental_site")) {
+  spec <- list(
+    sale_site = list(
+      path = file.path("scripts", "R", "06_analysis_datasets", "house_spill_prior_to_sale.R"),
+      id = "house_id", transaction = "house_dt", result = "create_prior_to_sale_db"
+    ),
+    rental_site = list(
+      path = file.path("scripts", "R", "06_analysis_datasets", "rental_spill_prior_to_rental.R"),
+      id = "rental_id", transaction = "rental_dt", result = "create_prior_to_rental_db"
+    )
+  )[[label]]
+  producer_env <- source_prior_exposure_producer(spec$path)
+  producer_env$CONFIG$processed_dir <- evidence_output_root
+  producer_env$CONFIG$site_group_crosswalk_path <- file.path(
+    evidence_output_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+  )
+  producer_env$CONFIG$radius_thresholds <- 250L
+  data <- producer_env$load_data()
+  result <- producer_env[[spec$result]](data)
+  evidence_output_results[[label]] <- result
+
+  raw_metrics <- c("spill_count", "spill_hrs")
+  rate_metrics <- c(
+    "spill_count_daily_avg", "spill_hrs_daily_avg",
+    "spill_count_weekly_avg", "spill_hrs_weekly_avg"
+  )
+  all_metrics <- c(raw_metrics, rate_metrics)
+  assert_true(
+    all(result[get(spec$id) == 1L, !is.na(spill_count)]),
+    paste(label, "must not let a future 2023 evidence gap mask a 2022 cutoff")
+  )
+  assert_true(
+    all(result[get(spec$id) == 2L & site_id == 10L, spill_count] == 0),
+    paste(label, "must retain reported_zero without events as observed zero")
+  )
+  assert_true(
+    all(result[get(spec$id) == 2L & site_id %in% c(11L, 12L), spill_count] == 1),
+    paste(label, "must use detailed events for event-bearing zero and positive years")
+  )
+  unknown_rows <- result[get(spec$id) == 2L & site_id %in% c(13L, 14L, 15L)]
+  assert_true(
+    all(vapply(unknown_rows[, ..all_metrics], function(column) all(is.na(column)), logical(1))),
+    paste(label, "must keep all six final metrics unknown after zero-fill and rate calculation")
+  )
+  assert_true(
+    all(!unknown_rows[site_id %in% c(13L, 14L), site_missing]) &&
+      all(unknown_rows[site_id == 15L, site_missing]),
+    paste(label, "must keep site_missing independent from evidence completeness")
+  )
+  assert_true(
+    !"has_unknown_event_evidence" %in% names(result) && ncol(result) == 13L,
+    paste(label, "must keep the internal evidence flag out of the public schema")
+  )
+}
+assert_identical(
+  evidence_output_results$sale_site$spill_count,
+  evidence_output_results$rental_site$spill_count,
+  "The isomorphic sale and rental evidence fixtures must have spill-count parity."
+)
 
 producer_specs <- list(
   sale_site = list(
