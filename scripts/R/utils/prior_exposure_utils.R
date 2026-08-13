@@ -309,34 +309,26 @@ prior_exposure_join_events <- function(transaction_ids, data) {
     paste(if (contract$market == "sale") "House" else "Rental", "transaction attachment to lookup pairs")
   )
 
-  missing_fields <- c("site_id", "cutoff_year", "site_missing")
-  transaction_sites_with_missing <- data$site_missing_dt[, ..missing_fields][
+  prefix_fields <- c("site_id", "cutoff_year", "site_missing")
+  if (contract$include_event_evidence) {
+    prefix_fields <- c(prefix_fields, "has_unknown_event_evidence")
+  }
+  attached <- data$site_missing_dt[, ..prefix_fields][
     transaction_sites, on = .(site_id, cutoff_year)
   ]
   assert_left_row_count(
-    transaction_sites, transaction_sites_with_missing,
+    transaction_sites, attached,
     paste(if (contract$market == "sale") "House" else "Rental", "Site Group prefix missingness join")
   )
-  transaction_sites_with_missing[, site_missing := data.table::fifelse(
+  attached[, site_missing := data.table::fifelse(
     is.na(site_missing), TRUE, site_missing
   )]
 
   if (contract$include_event_evidence) {
-    evidence <- data$site_missing_dt[, .(
-      site_id, cutoff_year, has_unknown_event_evidence
-    )]
-    attached <- evidence[
-      transaction_sites_with_missing, on = .(site_id, cutoff_year)
-    ]
-    assert_left_row_count(
-      transaction_sites_with_missing, attached,
-      paste(if (contract$market == "sale") "House" else "Rental", "Site Group event-evidence join")
-    )
     attached[, has_unknown_event_evidence := data.table::fifelse(
       is.na(has_unknown_event_evidence), TRUE, has_unknown_event_evidence
     )]
   } else {
-    attached <- data.table::copy(transaction_sites_with_missing)
     attached[, has_unknown_event_evidence := FALSE]
   }
 
@@ -354,8 +346,10 @@ prior_exposure_join_events <- function(transaction_ids, data) {
   # Keep the historical event-join shape separate from the evidence attachment.
   # data.table's grouped floating reducer is sensitive to the joined table's
   # otherwise-unused columns, so project the exact established public shape.
-  event_sources <- data.table::copy(transaction_sites_with_missing)
-  event_sources[, c("cutoff_year", "n_days_in_window") := NULL]
+  event_sources <- data.table::copy(attached)
+  event_sources[, c(
+    "cutoff_year", "n_days_in_window", "has_unknown_event_evidence"
+  ) := NULL]
   data.table::setnames(
     event_sources,
     c("transaction_id", "transaction_value", "transaction_endpoint"),
@@ -732,7 +726,7 @@ prior_exposure_public_key_columns <- function(contract) {
   }
 }
 
-prior_exposure_expected_chunk_keys <- function(transaction_ids, data) {
+prior_exposure_expected_chunk_keys <- function(transaction_ids, data, lookup = NULL) {
   contract <- data$contract
   radii <- sort(as.integer(data$config$radius_thresholds))
   if (contract$grain == "radius") {
@@ -742,10 +736,12 @@ prior_exposure_expected_chunk_keys <- function(transaction_ids, data) {
       unique = TRUE
     )
   } else {
-    lookup <- data$internal_lookup_dt[
-      data.table::data.table(transaction_id = transaction_ids),
-      on = "transaction_id", nomatch = 0L
-    ]
+    if (is.null(lookup)) {
+      lookup <- data$internal_lookup_dt[
+        data.table::data.table(transaction_id = transaction_ids),
+        on = "transaction_id", nomatch = 0L
+      ]
+    }
     if (nrow(lookup) == 0L) {
       keys <- data.table::data.table(
         transaction_id = integer(), site_id = integer(), radius = integer()
@@ -1007,7 +1003,9 @@ prior_exposure_stream <- function(
     joined_event_rows <- if (is.null(joined$events_dt)) 0L else nrow(joined$events_dt)
     chunk <- process_joined(chunk_ids, data, joined)
     chunk <- prior_exposure_prepare_public(chunk, contract$market, contract$grain)
-    expected_keys <- prior_exposure_expected_chunk_keys(chunk_ids, data)
+    expected_keys <- prior_exposure_expected_chunk_keys(
+      chunk_ids, data, lookup = joined$internal_lookup
+    )
     prior_exposure_validate_chunk_keys(chunk, expected_keys, contract)
 
     chunk_expected_rows <- nrow(expected_keys)
