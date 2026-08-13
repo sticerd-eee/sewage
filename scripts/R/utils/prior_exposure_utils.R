@@ -3,7 +3,7 @@
 # Project: Sewage
 ############################################################
 
-schema_signature <- function(schema) {
+prior_exposure_schema_signature <- function(schema) {
   stats::setNames(
     vapply(schema$fields, function(field) field$type$ToString(), character(1)),
     schema$names
@@ -71,8 +71,8 @@ publish_prior_exposure_dataset <- function(
       )
     }
   )
-  actual_signature <- schema_signature(staged$schema)
-  expected_signature <- schema_signature(expected_schema)
+  actual_signature <- prior_exposure_schema_signature(staged$schema)
+  expected_signature <- prior_exposure_schema_signature(expected_schema)
   if (!identical(actual_signature, expected_signature)) {
     stop(
       "Staged prior-exposure schema mismatch. Expected ",
@@ -84,10 +84,11 @@ publish_prior_exposure_dataset <- function(
     )
   }
 
-  staged_rows <- staged |>
+  staged_summary <- staged |>
+    dplyr::group_by(.data$radius) |>
     dplyr::summarise(n = dplyr::n()) |>
-    dplyr::collect() |>
-    dplyr::pull(.data$n)
+    dplyr::collect()
+  staged_rows <- sum(staged_summary$n)
   if (!identical(as.numeric(staged_rows), as.numeric(expected_rows))) {
     stop(
       "Staged prior-exposure row count mismatch: expected ", expected_rows,
@@ -96,9 +97,7 @@ publish_prior_exposure_dataset <- function(
     )
   }
 
-  staged_radii <- staged |>
-    dplyr::distinct(.data$radius) |>
-    dplyr::collect() |>
+  staged_radii <- staged_summary |>
     dplyr::pull(.data$radius) |>
     as.integer() |>
     sort()

@@ -422,17 +422,18 @@ evidence_output_root <- tempfile("prior-exposure-evidence-output-")
 dir.create(evidence_output_root, recursive = TRUE)
 write_evidence_output_fixture(evidence_output_root)
 evidence_output_results <- list()
+evidence_producer_specs <- list(
+  sale_site = list(
+    path = file.path("scripts", "R", "06_analysis_datasets", "house_spill_prior_to_sale.R"),
+    id = "house_id", result = "create_prior_to_sale_db"
+  ),
+  rental_site = list(
+    path = file.path("scripts", "R", "06_analysis_datasets", "rental_spill_prior_to_rental.R"),
+    id = "rental_id", result = "create_prior_to_rental_db"
+  )
+)
 for (label in c("sale_site", "rental_site")) {
-  spec <- list(
-    sale_site = list(
-      path = file.path("scripts", "R", "06_analysis_datasets", "house_spill_prior_to_sale.R"),
-      id = "house_id", transaction = "house_dt", result = "create_prior_to_sale_db"
-    ),
-    rental_site = list(
-      path = file.path("scripts", "R", "06_analysis_datasets", "rental_spill_prior_to_rental.R"),
-      id = "rental_id", transaction = "rental_dt", result = "create_prior_to_rental_db"
-    )
-  )[[label]]
+  spec <- evidence_producer_specs[[label]]
   producer_env <- source_prior_exposure_producer(spec$path)
   producer_env$CONFIG$processed_dir <- evidence_output_root
   producer_env$CONFIG$site_group_crosswalk_path <- file.path(

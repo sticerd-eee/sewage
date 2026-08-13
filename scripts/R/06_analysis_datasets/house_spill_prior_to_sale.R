@@ -27,7 +27,7 @@ initialise_environment <- function() {
     library(pkg, character.only = TRUE)
   }))
   
-  # Source shared utilities for count_spills function
+  # Source shared processing and publication utilities
   source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
   source(here::here("scripts", "R", "utils", "site_group_utils.R"))
   source(here::here("scripts", "R", "utils", "prior_exposure_utils.R"))
@@ -91,7 +91,13 @@ load_data <- function() {
     "Sale exposure completeness prefixes: {CONFIG$base_year}-{max_cutoff_year}; keyed by site_id and cutoff_year"
   )
   
-  site_group_crosswalk_dt <- arrow::read_parquet(CONFIG$site_group_crosswalk_path) |>
+  site_group_crosswalk_dt <- arrow::read_parquet(
+    CONFIG$site_group_crosswalk_path,
+    col_select = c(
+      "site_id", "year", "water_company", "annual_status",
+      "matched_event_count"
+    )
+  ) |>
     as.data.table()
   site_missing_dt <- derive_site_group_prefix_missing_flags(
     site_group_crosswalk_dt,
@@ -174,11 +180,11 @@ create_joined_events <- function(house_ids, data) {
     house_sites_with_missing,
     "House Site Group prefix missingness join"
   )
-  house_sites_with_missing[, site_missing := fifelse(
-    is.na(site_missing), TRUE, site_missing
-  )]
-  house_sites_with_missing[, has_unknown_event_evidence := fifelse(
-    is.na(has_unknown_event_evidence), TRUE, has_unknown_event_evidence
+  house_sites_with_missing[, `:=`(
+    site_missing = fifelse(is.na(site_missing), TRUE, site_missing),
+    has_unknown_event_evidence = fifelse(
+      is.na(has_unknown_event_evidence), TRUE, has_unknown_event_evidence
+    )
   )]
   house_sites_with_missing[, cutoff_year := NULL]
   lookup_chunk <- house_sites_with_missing[, .(
@@ -191,8 +197,11 @@ create_joined_events <- function(house_ids, data) {
   }
   
   # Join: house_sites -> raw_events
+  event_pairs <- house_sites_with_missing[, .(
+    house_id, site_id, date_of_transfer
+  )]
   joined <- data$raw_events_dt[
-    house_sites_with_missing,
+    event_pairs,
     on = "site_id",
     nomatch = NULL,
     allow.cartesian = TRUE

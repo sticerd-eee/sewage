@@ -233,7 +233,7 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
     count <- contradiction_counts |>
       dplyr::filter(.data$annual_status == status) |>
       dplyr::pull(.data$n)
-    if (length(count) == 0L) count <- 0L
+    count <- dplyr::first(count, default = 0L)
     message(
       "Event-bearing Annual Status contradiction: ", status, " = ", count,
       " Site Group-year(s)."
