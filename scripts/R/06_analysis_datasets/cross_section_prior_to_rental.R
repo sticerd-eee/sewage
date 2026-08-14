@@ -91,13 +91,6 @@ create_joined_events <- function(rental_ids, data) {
   prior_exposure_join_events(rental_ids, data)
 }
 
-calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
-  prior_exposure_calculate_metrics(
-    lookup_dt, events_dt, CONFIG$market, CONFIG$grain,
-    CONFIG$radius_thresholds
-  )
-}
-
 get_rental_metadata <- function(rental_dt) {
   rental_dt[, .(rental_id, listing_price, n_days_in_window)]
 }

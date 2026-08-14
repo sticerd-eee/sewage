@@ -91,13 +91,6 @@ create_joined_events <- function(house_ids, data) {
   prior_exposure_join_events(house_ids, data)
 }
 
-calculate_metrics_by_radius <- function(lookup_dt, events_dt) {
-  prior_exposure_calculate_metrics(
-    lookup_dt, events_dt, CONFIG$market, CONFIG$grain,
-    CONFIG$radius_thresholds
-  )
-}
-
 get_house_metadata <- function(house_dt) {
   house_dt[, .(house_id, price, n_days_in_window)]
 }
