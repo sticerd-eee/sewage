@@ -399,6 +399,33 @@ assert_error_contains(
   "Negative lookup distances must fail."
 )
 
+negative_site_count <- copy(reduced_two)
+negative_site_count[radius == 250L, n_spill_sites := -1L]
+assert_error_contains(
+  study_period_validate_and_cast_public(negative_site_count, sales_contract),
+  "nonnegative site count",
+  "A negative published site count must fail."
+)
+
+negative_min_distance <- copy(reduced_two)
+negative_min_distance[radius == 250L, min_distance := -1]
+assert_error_contains(
+  study_period_validate_and_cast_public(negative_min_distance, sales_contract),
+  "distance semantics",
+  "A negative published minimum distance must fail."
+)
+
+negative_mean_distance <- copy(reduced_two)
+negative_mean_distance[
+  radius == 250L,
+  `:=`(mean_distance = -1, min_distance = -2)
+]
+assert_error_contains(
+  study_period_validate_and_cast_public(negative_mean_distance, sales_contract),
+  "distance semantics",
+  "A negative published mean distance must fail."
+)
+
 write_lookup_fixture <- function(path, groups, contract) {
   schema <- arrow::schema(
     house_id = arrow::int32(),

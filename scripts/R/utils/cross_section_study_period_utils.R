@@ -459,6 +459,11 @@ study_period_validate_and_cast_public <- function(
     stop("Spatially ineligible rows must have unknown geography and exposure.", call. = FALSE)
   }
 
+  eligible_counts <- data$n_spill_sites[data$spatially_eligible]
+  if (anyNA(eligible_counts) || any(eligible_counts < 0L)) {
+    stop("Eligible rows require a nonnegative site count.", call. = FALSE)
+  }
+
   eligible_zero <- data$spatially_eligible & data$n_spill_sites == 0L
   if (any(data$has_missing_site[eligible_zero]) ||
       any(!is.na(data$mean_distance[eligible_zero])) ||
@@ -468,9 +473,10 @@ study_period_validate_and_cast_public <- function(
     stop("Eligible no-site rows must retain true-zero exposure.", call. = FALSE)
   }
   eligible_sites <- data$spatially_eligible & data$n_spill_sites > 0L
-  if (any(is.na(data$n_spill_sites[data$spatially_eligible])) ||
-      any(is.na(data$mean_distance[eligible_sites])) ||
+  if (any(is.na(data$mean_distance[eligible_sites])) ||
       any(is.na(data$min_distance[eligible_sites])) ||
+      any(data$mean_distance[eligible_sites] < 0) ||
+      any(data$min_distance[eligible_sites] < 0) ||
       any(data$min_distance[eligible_sites] > data$mean_distance[eligible_sites]) ||
       any(data$mean_distance[eligible_sites] > data$radius[eligible_sites])) {
     stop("Eligible site rows contain invalid count or distance semantics.", call. = FALSE)
