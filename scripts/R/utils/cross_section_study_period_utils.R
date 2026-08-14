@@ -543,6 +543,12 @@ study_period_reduce_validated_lookup_row_group <- function(
       is.na(has_missing_evidence) | has_missing_evidence |
         is.na(spill_count) | is.na(spill_hrs)]
     aggregate <- expanded[, {
+      if (.N < 1L || anyNA(distance_m)) {
+        stop(
+          "Matched Site Group aggregation requires nonmissing distances.",
+          call. = FALSE
+        )
+      }
       unknown <- any(evidence_unknown)
       list(
         n_spill_sites = as.integer(.N),
@@ -734,6 +740,37 @@ study_period_write_fragment <- function(chunk, stage_path, fragment_index) {
   invisible(stage_path)
 }
 
+study_period_buffered_writer <- function(stage_path, batch_size = 20L) {
+  if (!is.numeric(batch_size) || length(batch_size) != 1L || is.na(batch_size) ||
+      !is.finite(batch_size) || batch_size < 1 || batch_size != floor(batch_size)) {
+    stop("batch_size must be one positive integer.", call. = FALSE)
+  }
+  state <- new.env(parent = emptyenv())
+  state$chunks <- list()
+  state$fragments <- 0L
+
+  flush <- function() {
+    if (length(state$chunks) == 0L) return(invisible(stage_path))
+    state$fragments <- state$fragments + 1L
+    chunk <- data.table::rbindlist(state$chunks, use.names = TRUE)
+    study_period_write_fragment(chunk, stage_path, state$fragments)
+    state$chunks <- list()
+    invisible(stage_path)
+  }
+
+  write <- function(chunk, fragment_index) {
+    state$chunks[[length(state$chunks) + 1L]] <- data.table::copy(chunk)
+    if (length(state$chunks) >= as.integer(batch_size)) flush()
+    invisible(fragment_index)
+  }
+
+  list(
+    write = write,
+    flush = flush,
+    fragments = function() state$fragments
+  )
+}
+
 study_period_partition_radius <- function(fragment_path) {
   match <- regexec(
     paste0("(?:^|", .Platform$file.sep, ")radius=([0-9]+)(?:", .Platform$file.sep, "|$)"),
@@ -808,6 +845,7 @@ study_period_validate_dataset <- function(
   )
   checked_rows <- 0
   checked_bytes <- 0
+  checked_row_groups <- 0L
   for (fragment_index in seq_along(fragment_paths)) {
     fragment_path <- fragment_paths[[fragment_index]]
     radius <- fragment_radii[[fragment_index]]
@@ -853,11 +891,13 @@ study_period_validate_dataset <- function(
       )
       radius_positions <- match(batch$radius, radii)
       cells <- source_positions + (radius_positions - 1L) * n_sources
-      occurrence_increment <- tabulate(cells, nbins = length(occurrences))
-      occurrences[] <- occurrences[] + occurrence_increment
+      occurrences[cells] <- occurrences[cells] + 1L
       checked_rows <- checked_rows + nrow(batch)
       rm(batch)
-      gc(verbose = FALSE)
+      checked_row_groups <- checked_row_groups + 1L
+      if (checked_row_groups %% 100L == 0L) {
+        gc(verbose = FALSE)
+      }
     }
     log_validation(
       fragment_index = fragment_index,
@@ -867,6 +907,7 @@ study_period_validate_dataset <- function(
       elapsed_seconds = proc.time()[["elapsed"]] - started
     )
   }
+  gc(verbose = FALSE)
 
   if (any(occurrences > 1L)) {
     stop("Study-period dataset contains duplicate public keys.", call. = FALSE)
@@ -917,12 +958,20 @@ study_period_validate_config <- function(config) {
   }
   ineligible_chunk_size <- config$ineligible_chunk_size
   if (is.null(ineligible_chunk_size)) ineligible_chunk_size <- 100000L
+  output_batch_size <- config$output_batch_size
+  if (is.null(output_batch_size)) output_batch_size <- 20L
+  if (!is.numeric(output_batch_size) || length(output_batch_size) != 1L ||
+      is.na(output_batch_size) || !is.finite(output_batch_size) ||
+      output_batch_size < 1 || output_batch_size != floor(output_batch_size)) {
+    stop("output_batch_size must be one positive integer.", call. = FALSE)
+  }
   list(
     config = config,
     contract = contract,
     window = window,
     radii = radii,
-    ineligible_chunk_size = ineligible_chunk_size
+    ineligible_chunk_size = ineligible_chunk_size,
+    output_batch_size = as.integer(output_batch_size)
   )
 }
 
@@ -1005,6 +1054,9 @@ build_study_period_cross_section <- function(config) {
       "stage={basename(stage_path)}"
     ))
   }
+  buffered_writer <- study_period_buffered_writer(
+    stage_path, resolved$output_batch_size
+  )
   stream_result <- study_period_stream_lookup(
     lookup_path = config$lookup_path,
     ledger = ledger,
@@ -1013,11 +1065,12 @@ build_study_period_cross_section <- function(config) {
     radii = radii,
     n_days_in_window = window$n_days_in_window,
     ineligible_chunk_size = resolved$ineligible_chunk_size,
-    write_fragment = function(chunk, fragment_index) {
-      study_period_write_fragment(chunk, stage_path, fragment_index)
-    },
+    write_fragment = buffered_writer$write,
     log_progress = log_progress
   )
+  buffered_writer$flush()
+  stream_result$logical_fragments <- stream_result$fragments
+  stream_result$fragments <- buffered_writer$fragments()
 
   validator <- function(path) {
     result <- study_period_validate_dataset(

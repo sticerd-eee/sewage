@@ -38,7 +38,8 @@ CONFIG <- list(
   start_date = as.Date("2021-01-01"),
   end_date = as.Date("2024-12-31"),
   radii = c(250L, 500L, 1000L),
-  ineligible_chunk_size = 100000L
+  ineligible_chunk_size = 100000L,
+  output_batch_size = 20L
 )
 
 initialise_logging <- function() {

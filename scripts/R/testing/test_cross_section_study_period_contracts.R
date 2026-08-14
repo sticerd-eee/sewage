@@ -457,6 +457,42 @@ assert_true(
   "Streamed fragments must have collision-free public keys."
 )
 
+buffered_stage_path <- tempfile("study-period-buffered-stage-")
+buffered_writer <- study_period_buffered_writer(
+  buffered_stage_path,
+  batch_size = 2L
+)
+buffered_writer$write(captured_chunks[[1L]], 1L)
+assert_true(
+  !dir.exists(buffered_stage_path),
+  "The buffered writer must keep a bounded partial batch in memory."
+)
+buffered_writer$write(captured_chunks[[2L]], 2L)
+assert_identical(
+  buffered_writer$fragments(),
+  1L,
+  "A full output batch must produce one physical fragment namespace."
+)
+buffered_writer$write(captured_chunks[[3L]], 3L)
+buffered_writer$flush()
+assert_identical(
+  buffered_writer$fragments(),
+  2L,
+  "The final partial output batch must flush exactly once."
+)
+buffered_validation <- study_period_validate_dataset(
+  buffered_stage_path,
+  ledger,
+  sales_contract,
+  radii = c(250L, 500L, 1000L),
+  n_days_in_window = 1461L
+)
+assert_identical(
+  buffered_validation$rows,
+  12,
+  "Output batching must preserve every source ID-radius row."
+)
+
 split_lookup_path <- tempfile(fileext = ".parquet")
 write_lookup_fixture(
   split_lookup_path,
@@ -544,6 +580,20 @@ assert_error_contains(
   ),
   "duplicate public keys",
   "A duplicate staged public key must be rejected."
+)
+
+cross_fragment_duplicate_path <- tempfile(
+  "study-period-cross-fragment-duplicate-"
+)
+study_period_write_fragment(streamed, cross_fragment_duplicate_path, 1L)
+study_period_write_fragment(streamed[1L], cross_fragment_duplicate_path, 2L)
+assert_error_contains(
+  study_period_validate_dataset(
+    cross_fragment_duplicate_path, ledger, sales_contract,
+    c(250L, 500L, 1000L), 1461L
+  ),
+  "duplicate public keys",
+  "A public key repeated across physical fragments must be rejected."
 )
 
 # U3: shared staged publication lifecycle -------------------------------------
