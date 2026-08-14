@@ -852,4 +852,127 @@ assert_error_contains(
   "Adapters must not accept a radius outside the supported contract."
 )
 
-cat("Study-period cross-section contract tests passed (U1-U4).\n")
+# U5: direct consumer and supported documentation -----------------------------
+
+plot_script_path <- here::here(
+  "scripts", "R", "09_analysis", "01_descriptive", "cross_sectional_plots.R"
+)
+plot_script_text <- paste(readLines(plot_script_path, warn = FALSE), collapse = "\n")
+assert_true(
+  grepl("prepare_cross_section_sales <- function", plot_script_text, fixed = TRUE) &&
+    grepl("prepare_cross_section_rentals <- function", plot_script_text, fixed = TRUE),
+  "The plot consumer must expose exactly the two local preparation seams."
+)
+assert_true(
+  grepl("study_period", plot_script_text, fixed = TRUE) &&
+    !grepl("all_years", plot_script_text, fixed = TRUE) &&
+    !grepl("listing_price = rent", plot_script_text, fixed = TRUE) &&
+    !grepl("install.packages", plot_script_text, fixed = TRUE),
+  "The live plot consumer must use study_period/listing_price without runtime installs."
+)
+assert_true(
+  grepl("if (sys.nframe() == 0L) main()", plot_script_text, fixed = TRUE),
+  "The plot consumer must guard its production entry point."
+)
+
+figure_root <- here::here("output", "figures")
+figure_snapshot <- if (dir.exists(figure_root)) {
+  file.info(list.files(figure_root, recursive = TRUE, full.names = TRUE))$mtime
+} else {
+  structure(numeric(), names = character())
+}
+plot_environment <- new.env(parent = globalenv())
+sys.source(plot_script_path, envir = plot_environment)
+figure_snapshot_after <- if (dir.exists(figure_root)) {
+  file.info(list.files(figure_root, recursive = TRUE, full.names = TRUE))$mtime
+} else {
+  structure(numeric(), names = character())
+}
+assert_identical(
+  figure_snapshot_after,
+  figure_snapshot,
+  "Sourcing the plot consumer must not create or rewrite figures."
+)
+
+consumer_fixture <- CJ(
+  transaction_id = 1:4,
+  radius = c(250L, 500L, 1000L),
+  unique = TRUE
+)
+consumer_fixture[, `:=`(
+  price = as.integer(c(100L, 200L, 300L, 400L)[transaction_id]),
+  ppd_category = c("A", "B", "A", "B")[transaction_id],
+  listing_price = as.double(c(500, 1000, 1500, 2000)[transaction_id]),
+  spill_count = ifelse(transaction_id == 2L, 0, ifelse(transaction_id == 3L, NA, 2)),
+  spill_hrs = ifelse(transaction_id == 2L, 0, ifelse(transaction_id == 3L, NA, 4)),
+  min_distance = ifelse(transaction_id %in% c(2L, 3L), NA, 100),
+  spatially_eligible = transaction_id != 3L,
+  has_missing_site = transaction_id == 3L
+)]
+
+sales_consumer <- plot_environment$prepare_cross_section_sales(
+  consumer_fixture[, .(
+    house_id = transaction_id, price, ppd_category, spill_count, spill_hrs,
+    min_distance, spatially_eligible, has_missing_site, radius
+  )],
+  radii = c(250L, 500L, 1000L),
+  sample_size = NULL
+)
+assert_identical(
+  sort(unique(as.character(sales_consumer$ppd_category))),
+  c("A", "B"),
+  "Both Land Registry categories must survive primary plot preparation."
+)
+assert_true(
+  all(sales_consumer$spill_count[sales_consumer$house_id == 2L] == 0) &&
+    all(is.na(sales_consumer$inverse_spill_count[sales_consumer$house_id == 2L])) &&
+    all(is.na(sales_consumer$spill_count[sales_consumer$house_id == 3L])) &&
+    all(is.na(sales_consumer$inverse_spill_count[sales_consumer$house_id == 3L])),
+  "Plot preparation must preserve eligible zeros and unknown exposure distinctly."
+)
+
+rental_consumer <- plot_environment$prepare_cross_section_rentals(
+  consumer_fixture[, .(
+    rental_id = transaction_id, listing_price, spill_count, spill_hrs,
+    min_distance, spatially_eligible, has_missing_site, radius
+  )],
+  radii = c(250L, 500L, 1000L),
+  sample_size = NULL
+)
+assert_true(
+  "listing_price" %in% names(rental_consumer) &&
+    all(rental_consumer$log_price == log(rental_consumer$listing_price)),
+  "Rental preparation must trim and transform listing_price directly."
+)
+
+quarto_text <- paste(
+  readLines(here::here("book", "_quarto.yml"), warn = FALSE),
+  collapse = "\n"
+)
+assert_true(
+  !grepl("house_data_exploration.qmd", quarto_text, fixed = TRUE) &&
+    !grepl("zoopla_data_exploration.qmd", quarto_text, fixed = TRUE),
+  "The supported book render must exclude both archival exploration chapters."
+)
+assert_true(
+  file.exists(here::here("book", "house_data_exploration.qmd")) &&
+    file.exists(here::here("book", "zoopla_data_exploration.qmd")),
+  "The excluded exploration chapters must remain as archival source files."
+)
+
+documentation_text <- paste(
+  readLines(here::here("docs", "pipeline_documentation.md"), warn = FALSE),
+  readLines(
+    here::here("book", "data_clean_documentation", "01_pipeline.qmd"),
+    warn = FALSE
+  ),
+  collapse = "\n"
+)
+assert_true(
+  grepl("study_period", documentation_text, fixed = TRUE) &&
+    grepl("annual-return", documentation_text, fixed = TRUE) &&
+    grepl("prior-to-transaction", documentation_text, fixed = TRUE),
+  "Supported documentation must distinguish fixed-period and prior exposure."
+)
+
+cat("Study-period cross-section contract tests passed (U1-U5).\n")
