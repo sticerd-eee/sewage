@@ -887,3 +887,169 @@ study_period_validate_dataset <- function(
     elapsed_seconds = proc.time()[["elapsed"]] - started
   )
 }
+
+study_period_validate_config <- function(config) {
+  required <- c(
+    "market", "source_path", "lookup_path", "crosswalk_path", "output_path",
+    "start_date", "end_date", "radii"
+  )
+  missing_fields <- setdiff(required, names(config))
+  if (length(missing_fields) > 0L) {
+    stop(
+      "Study-period configuration is missing field(s): ",
+      paste(missing_fields, collapse = ", "), ".",
+      call. = FALSE
+    )
+  }
+  contract <- study_period_market_contract(config$market)
+  window <- study_period_window(config$start_date, config$end_date)
+  radii <- study_period_validate_radii(config$radii)
+  for (path_field in c("source_path", "lookup_path", "crosswalk_path")) {
+    path <- config[[path_field]]
+    if (!is.character(path) || length(path) != 1L || is.na(path) ||
+        !file.exists(path)) {
+      stop(path_field, " does not name an existing input: ", path, call. = FALSE)
+    }
+  }
+  if (!is.character(config$output_path) || length(config$output_path) != 1L ||
+      is.na(config$output_path) || !nzchar(config$output_path)) {
+    stop("output_path must be one nonempty path.", call. = FALSE)
+  }
+  ineligible_chunk_size <- config$ineligible_chunk_size
+  if (is.null(ineligible_chunk_size)) ineligible_chunk_size <- 100000L
+  list(
+    config = config,
+    contract = contract,
+    window = window,
+    radii = radii,
+    ineligible_chunk_size = ineligible_chunk_size
+  )
+}
+
+study_period_read_parquet_columns <- function(path, columns, context) {
+  dataset <- tryCatch(
+    arrow::open_dataset(path),
+    error = function(error) {
+      stop(context, " could not be opened: ", conditionMessage(error), call. = FALSE)
+    }
+  )
+  missing_columns <- setdiff(columns, dataset$schema$names)
+  if (length(missing_columns) > 0L) {
+    stop(
+      context, " is missing required column(s): ",
+      paste(missing_columns, collapse = ", "), ".",
+      call. = FALSE
+    )
+  }
+  dataset |>
+    dplyr::select(dplyr::all_of(columns)) |>
+    dplyr::collect() |>
+    data.table::as.data.table()
+}
+
+study_period_create_stage <- function(output_path) {
+  parent <- dirname(output_path)
+  dir.create(parent, recursive = TRUE, showWarnings = FALSE)
+  tempfile(
+    pattern = paste0(".", basename(output_path), ".stage-"),
+    tmpdir = parent
+  )
+}
+
+build_study_period_cross_section <- function(config) {
+  resolved <- study_period_validate_config(config)
+  config <- resolved$config
+  contract <- resolved$contract
+  window <- resolved$window
+  radii <- resolved$radii
+  if (!exists("dataset_publication_check_state", mode = "function", inherits = TRUE) ||
+      !exists("publish_validated_dataset", mode = "function", inherits = TRUE)) {
+    stop(
+      "dataset_publication_utils.R must be sourced before the study-period utility.",
+      call. = FALSE
+    )
+  }
+  dataset_publication_check_state(config$output_path)
+
+  ledger <- study_period_source_ledger(
+    study_period_read_parquet_columns(
+      config$source_path,
+      contract$source_columns,
+      paste(tools::toTitleCase(contract$market), "source")
+    ),
+    contract
+  )
+  annual_returns <- study_period_read_parquet_columns(
+    config$crosswalk_path,
+    c("site_id", "year", "annual_status", "spill_count_ea", "spill_hrs_ea"),
+    "Annual-return crosswalk"
+  )
+  site_totals <- collapse_study_period_annual_returns(annual_returns, window)
+
+  stage_path <- study_period_create_stage(config$output_path)
+  on.exit({
+    if (dir.exists(stage_path)) {
+      cleanup_status <- unlink(stage_path, recursive = TRUE)
+      if (cleanup_status != 0L && dir.exists(stage_path)) {
+        warning("Could not remove study-period stage: ", stage_path, call. = FALSE)
+      }
+    }
+  }, add = TRUE)
+
+  log_progress <- function(row_group_index, row_groups, transactions,
+                           lookup_pairs, output_rows, elapsed_seconds) {
+    logger::log_info(paste0(
+      "Study-period row group {row_group_index}/{row_groups}: ",
+      "transactions={transactions}, lookup_pairs={lookup_pairs}, ",
+      "output_rows={output_rows}, elapsed_seconds={round(elapsed_seconds, 3)}, ",
+      "stage={basename(stage_path)}"
+    ))
+  }
+  stream_result <- study_period_stream_lookup(
+    lookup_path = config$lookup_path,
+    ledger = ledger,
+    site_totals = site_totals,
+    contract = contract,
+    radii = radii,
+    n_days_in_window = window$n_days_in_window,
+    ineligible_chunk_size = resolved$ineligible_chunk_size,
+    write_fragment = function(chunk, fragment_index) {
+      study_period_write_fragment(chunk, stage_path, fragment_index)
+    },
+    log_progress = log_progress
+  )
+
+  validator <- function(path) {
+    result <- study_period_validate_dataset(
+      path,
+      ledger,
+      contract,
+      radii,
+      window$n_days_in_window,
+      log_validation = function(fragment_index, fragments, rows, bytes,
+                                elapsed_seconds) {
+        logger::log_info(paste0(
+          "Study-period validation {fragment_index}/{fragments}: ",
+          "rows={rows}, bytes={bytes}, ",
+          "elapsed_seconds={round(elapsed_seconds, 3)}, path={path}"
+        ))
+      }
+    )
+    logger::log_info(paste0(
+      "Validated study-period dataset: rows={result$rows}, ",
+      "transactions={result$transactions}, fragments={result$fragments}, ",
+      "bytes={result$bytes}, elapsed_seconds={round(result$elapsed_seconds, 3)}, ",
+      "path={path}"
+    ))
+    invisible(result)
+  }
+  publish_validated_dataset(stage_path, config$output_path, validator)
+  invisible(list(
+    output_path = config$output_path,
+    market = contract$market,
+    years = window$years,
+    n_days_in_window = window$n_days_in_window,
+    source_transactions = nrow(ledger),
+    stream = stream_result
+  ))
+}

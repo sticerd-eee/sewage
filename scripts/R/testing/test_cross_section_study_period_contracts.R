@@ -712,4 +712,144 @@ assert_identical(
   "Cleanup failure must retain the readable temporary backup."
 )
 
-cat("Study-period cross-section contract tests passed (U1-U3).\n")
+# U4: thin production adapters -------------------------------------------------
+
+source_adapter <- function(path) {
+  environment <- new.env(parent = globalenv())
+  sys.source(here::here(path), envir = environment)
+  environment
+}
+
+adapter_specs <- list(
+  sale = list(
+    path = file.path(
+      "scripts", "R", "06_analysis_datasets", "cross_section_sales.R"
+    ),
+    id = "house_id",
+    value = "price",
+    provenance = "ppd_category",
+    source_suffix = "house_price.parquet",
+    lookup_suffix = "spill_house_lookup.parquet",
+    output_suffix = file.path("cross_section", "sales", "study_period")
+  ),
+  rental = list(
+    path = file.path(
+      "scripts", "R", "06_analysis_datasets", "cross_section_rental.R"
+    ),
+    id = "rental_id",
+    value = "listing_price",
+    provenance = NULL,
+    source_suffix = file.path("zoopla", "zoopla_rentals.parquet"),
+    lookup_suffix = file.path("zoopla", "spill_rental_lookup.parquet"),
+    output_suffix = file.path("cross_section", "rentals", "study_period")
+  )
+)
+
+for (market in names(adapter_specs)) {
+  spec <- adapter_specs[[market]]
+  adapter <- source_adapter(spec$path)
+  assert_true(
+    exists("run_study_period_cross_section", envir = adapter, mode = "function"),
+    paste(market, "adapter must expose the shared orchestration seam.")
+  )
+  assert_identical(adapter$CONFIG$market, market, paste(market, "market must match."))
+  assert_identical(
+    adapter$CONFIG$start_date,
+    as.Date("2021-01-01"),
+    paste(market, "must configure the settled start date.")
+  )
+  assert_identical(
+    adapter$CONFIG$end_date,
+    as.Date("2024-12-31"),
+    paste(market, "must configure the settled end date.")
+  )
+  assert_identical(
+    adapter$CONFIG$radii,
+    c(250L, 500L, 1000L),
+    paste(market, "must configure only supported radii.")
+  )
+  assert_true(
+    endsWith(adapter$CONFIG$source_path, spec$source_suffix) &&
+      endsWith(adapter$CONFIG$lookup_path, spec$lookup_suffix) &&
+      endsWith(adapter$CONFIG$output_path, spec$output_suffix),
+    paste(market, "must pass its exact source, lookup, and study_period paths.")
+  )
+  resolved_contract <- study_period_market_contract(market)
+  assert_identical(resolved_contract$id, spec$id, paste(market, "ID must match."))
+  assert_identical(resolved_contract$value, spec$value, paste(market, "value must match."))
+  assert_identical(
+    resolved_contract$provenance,
+    spec$provenance,
+    paste(market, "provenance must match.")
+  )
+
+  injected_error <- tryCatch(
+    adapter$run_study_period_cross_section(
+      build = function(config) stop("injected shared-engine failure", call. = FALSE)
+    ),
+    error = identity
+  )
+  assert_true(
+    inherits(injected_error, "error") &&
+      grepl("injected shared-engine failure", conditionMessage(injected_error), fixed = TRUE),
+    paste(market, "must rethrow a fatal shared-engine failure.")
+  )
+
+  adapter_text <- paste(readLines(here::here(spec$path), warn = FALSE), collapse = "\n")
+  for (obsolete in c("duckdb", "dat_mo", "all_years", "prior_12mo", "install.packages")) {
+    assert_true(
+      !grepl(obsolete, adapter_text, fixed = TRUE),
+      paste(market, "adapter must not retain obsolete execution text:", obsolete)
+    )
+  }
+}
+
+build_root <- tempfile("study-period-build-")
+dir.create(build_root, recursive = TRUE)
+build_source_path <- file.path(build_root, "source.parquet")
+build_lookup_path <- file.path(build_root, "lookup.parquet")
+build_crosswalk_path <- file.path(build_root, "crosswalk.parquet")
+build_output_path <- file.path(build_root, "study_period")
+arrow::write_parquet(source_fixture, build_source_path)
+write_lookup_fixture(
+  build_lookup_path,
+  list(lookup_group_one, lookup_group_two),
+  sales_contract
+)
+arrow::write_parquet(annual_fixture, build_crosswalk_path)
+build_config <- list(
+  market = "sale",
+  source_path = build_source_path,
+  lookup_path = build_lookup_path,
+  crosswalk_path = build_crosswalk_path,
+  output_path = build_output_path,
+  start_date = as.Date("2021-01-01"),
+  end_date = as.Date("2024-12-31"),
+  radii = c(250L, 500L, 1000L),
+  ineligible_chunk_size = 1L
+)
+first_build <- build_study_period_cross_section(build_config)
+assert_identical(
+  first_build$source_transactions,
+  4L,
+  "The shared build must use the source ledger as its cardinality authority."
+)
+assert_true(dir.exists(build_output_path), "The shared build must publish canonical output.")
+second_build <- build_study_period_cross_section(build_config)
+assert_identical(
+  second_build$stream$output_rows,
+  12,
+  "A replacement build must conserve the exact source-by-radius row total."
+)
+assert_true(
+  !dir.exists(paste0(build_output_path, ".prev")),
+  "A successful replacement build must clean its temporary backup."
+)
+
+assert_error_contains(
+  study_period_validate_radii(c(250L, 500L, 2000L)),
+  "exactly 250, 500, and 1000",
+  "Adapters must not accept a radius outside the supported contract."
+)
+
+cat("Study-period cross-section contract tests passed (U1-U4).\n")

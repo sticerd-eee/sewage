@@ -44,6 +44,31 @@ dataset_publication_validate <- function(validate, path, context) {
   )
 }
 
+dataset_publication_check_state <- function(output_path) {
+  previous_path <- paste0(output_path, ".prev")
+  canonical_exists <- dir.exists(output_path)
+  previous_exists <- dir.exists(previous_path)
+  if (!canonical_exists && previous_exists) {
+    stop(
+      "Interrupted publication state: canonical is absent; recoverable prior generation: ",
+      previous_path,
+      call. = FALSE
+    )
+  }
+  if (canonical_exists && previous_exists) {
+    stop(
+      "Publication state is ambiguous: both canonical and .prev are present: ",
+      output_path, " and ", previous_path,
+      call. = FALSE
+    )
+  }
+  list(
+    canonical_exists = canonical_exists,
+    previous_exists = previous_exists,
+    previous_path = previous_path
+  )
+}
+
 #' Publish one fully validated sibling dataset generation.
 #'
 #' The product owns `validate`; this utility owns only the four-state path
@@ -62,23 +87,9 @@ publish_validated_dataset <- function(
   }
   dataset_publication_assert_sibling_stage(stage_path, output_path)
 
-  previous_path <- paste0(output_path, ".prev")
-  canonical_exists <- dir.exists(output_path)
-  previous_exists <- dir.exists(previous_path)
-  if (!canonical_exists && previous_exists) {
-    stop(
-      "Interrupted publication state: canonical is absent; recoverable prior generation: ",
-      previous_path,
-      call. = FALSE
-    )
-  }
-  if (canonical_exists && previous_exists) {
-    stop(
-      "Publication state is ambiguous: both canonical and .prev are present: ",
-      output_path, " and ", previous_path,
-      call. = FALSE
-    )
-  }
+  state <- dataset_publication_check_state(output_path)
+  previous_path <- state$previous_path
+  canonical_exists <- state$canonical_exists
 
   dataset_publication_validate(
     validate,
