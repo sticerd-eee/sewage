@@ -1,6 +1,26 @@
 # ==============================================================================
 # Study-Period Sales Cross-Section Builder
 # ==============================================================================
+#
+# Purpose: Build the sales cross-section at the property-transaction level. For
+#          each property transaction and radius, sum spill counts and hours
+#          across all sites within that radius over the full 2021–2024 study
+#          period.
+#
+# Author: Jacopo Olivieri
+# Date: 2025-04-05
+# Date Modified: 2026-08-14
+#
+# Inputs:
+#   - data/processed/house_price.parquet
+#   - data/processed/spill_house_lookup.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
+#
+# Outputs:
+#   - data/processed/cross_section/sales/study_period/
+#   - output/log/cross_section_sales.log
+#
+# ==============================================================================
 
 if (!requireNamespace("here", quietly = TRUE)) {
   stop(
