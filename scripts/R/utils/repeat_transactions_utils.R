@@ -95,9 +95,11 @@ validate_repeat_input <- function(data, config) {
   }
 
   duplicate_cols <- config$duplicate_check_cols %||% character()
-  if (length(duplicate_cols) > 0L &&
-      anyDuplicated(as.data.frame(data)[duplicate_cols])) {
-    stop("Repeat input contains exact duplicates after cleaning.", call. = FALSE)
+  if (length(duplicate_cols) > 0L) {
+    duplicate_input <- data.table::as.data.table(data)[, ..duplicate_cols]
+    if (any(duplicated(duplicate_input, by = duplicate_cols))) {
+      stop("Repeat input contains exact duplicates after cleaning.", call. = FALSE)
+    }
   }
   invisible(data)
 }
@@ -112,7 +114,7 @@ build_price_ratio_review <- function(keyed, config) {
   dt[, holding_days := as.numeric(get(config$date_col) - previous_date)]
   dt[, annualized_price_ratio := {
     ratio <- get(config$price_col) / previous_price
-    fifelse(
+    data.table::fifelse(
       !is.na(ratio) & ratio > 0 & holding_days > 0,
       ratio^(365.25 / holding_days),
       NA_real_

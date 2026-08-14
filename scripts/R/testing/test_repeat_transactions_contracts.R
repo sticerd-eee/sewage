@@ -152,6 +152,15 @@ assert_error_matching(
   "unique",
   "Duplicate input ids must abort."
 )
+duplicate_rows <- rbind(fixture, fixture[1])
+duplicate_rows[.N, house_id := "04jkl"]
+duplicate_config <- make_config("duplicate-rows")
+duplicate_config$duplicate_check_cols <- setdiff(names(fixture), "house_id")
+assert_error_matching(
+  build_repeat_mapping(duplicate_rows, duplicate_config),
+  "exact duplicates",
+  "Full-field duplicate checks must abort even when transaction ids differ."
+)
 assert_error_matching(
   build_repeat_mapping(missing_fixture, make_config("coverage", coverage_floor = 0.9)),
   "coverage",
