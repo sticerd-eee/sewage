@@ -52,6 +52,7 @@ crosswalk_fixture <- tibble(
     "reported_zero", "reported_positive", "reported_na", "absent",
     "absent", "reported_zero", "reported_positive", "reported_na"
   ),
+  matched_event_count = c(0L, 1L, 0L, 0L, 0L, 0L, 1L, 0L),
   ngr = c(
     "SU1000010000", "SU1000010000", "NOT AN NGR", "NOT AN NGR",
     NA, "SU2000020000", "SU2000020000", "SU2000020000"
@@ -118,6 +119,154 @@ assert_identical(
   incomplete_missingness_fixture$site_missing,
   c(TRUE, TRUE),
   "A Site Group missing a requested year must be flagged without changing unaffected groups."
+)
+
+# Prefix completeness retains the current Annual Status contract while making
+# the completeness horizon explicit for each transaction cutoff.
+prefix_crosswalk_fixture <- crosswalk_fixture |>
+  mutate(
+    annual_status = case_when(
+      site_id == 10L & year == 2023L ~ "absent",
+      site_id == 10L & year == 2024L ~ "reported_positive",
+      TRUE ~ annual_status
+    )
+  )
+prefix_missingness_fixture <- derive_site_group_prefix_missing_flags(
+  prefix_crosswalk_fixture,
+  base_year = 2021L,
+  cutoff_years = 2020:2024
+)
+assert_identical(
+  prefix_missingness_fixture |>
+    filter(site_id == 10L) |>
+    pull(site_missing),
+  c(FALSE, FALSE, FALSE, TRUE, TRUE),
+  paste0(
+    "An empty prefix and reported statuses must remain non-missing; an absent ",
+    "year must make its current and later prefixes missing."
+  )
+)
+assert_identical(
+  prefix_missingness_fixture |>
+    filter(site_id == 10L) |>
+    pull(cutoff_year),
+  2020:2024,
+  "Prefix completeness must preserve every explicitly requested cutoff year."
+)
+
+missing_prefix_row_fixture <- derive_site_group_prefix_missing_flags(
+  prefix_crosswalk_fixture |>
+    filter(!(site_id == 10L & year == 2023L)),
+  base_year = 2021L,
+  cutoff_years = c(2022L, 2023L, 2024L)
+)
+assert_identical(
+  missing_prefix_row_fixture |>
+    filter(site_id == 10L) |>
+    pull(site_missing),
+  c(FALSE, TRUE, TRUE),
+  paste0(
+    "A missing Site Group row inside a globally supported year must be absent ",
+    "for the current and later prefixes without stopping the helper."
+  )
+)
+
+assert_error_contains(
+  derive_site_group_prefix_missing_flags(
+    prefix_crosswalk_fixture,
+    base_year = 2021L,
+    cutoff_years = 2025L
+  ),
+  "2025",
+  "A requested cutoff beyond global crosswalk support must name the unsupported year."
+)
+assert_error_contains(
+  derive_site_group_prefix_missing_flags(
+    prefix_crosswalk_fixture |>
+      filter(!year %in% c(2022L, 2023L)),
+    base_year = 2021L,
+    cutoff_years = 2024L
+  ),
+  "2022, 2023",
+  "A non-contiguous support gap must name every unsupported required year."
+)
+
+empty_prefix_fixture <- derive_site_group_prefix_missing_flags(
+  prefix_crosswalk_fixture,
+  base_year = 2021L,
+  cutoff_years = 2020L
+)
+assert_identical(
+  empty_prefix_fixture,
+  tibble(
+    site_id = c(10L, 20L),
+    cutoff_year = c(2020L, 2020L),
+    site_missing = c(FALSE, FALSE)
+  ),
+  paste0(
+    "The explicit pre-base cutoff must be a non-missing empty prefix for known ",
+    "Site Groups without requesting a pre-base crosswalk year."
+  )
+)
+assert_true(
+  !anyDuplicated(prefix_missingness_fixture[c("site_id", "cutoff_year")]),
+  "Prefix completeness must be unique on site_id and cutoff_year."
+)
+assert_identical(
+  vapply(prefix_missingness_fixture, typeof, character(1)),
+  c(
+    site_id = "integer", cutoff_year = "integer",
+    site_missing = "logical"
+  ),
+  "Default prefix completeness must preserve its historical public columns and types."
+)
+
+invalid_prefix_status_fixture <- prefix_crosswalk_fixture
+invalid_prefix_status_fixture$annual_status[1] <- "invalid"
+assert_error_contains(
+  derive_site_group_prefix_missing_flags(
+    invalid_prefix_status_fixture,
+    base_year = 2021L,
+    cutoff_years = 2024L
+  ),
+  "valid annual_status values",
+  "Prefix completeness must retain the existing Annual Status validation."
+)
+
+assert_error_contains(
+  derive_site_group_prefix_missing_flags(
+    select(prefix_crosswalk_fixture, -annual_status),
+    base_year = 2021L,
+    cutoff_years = 2024L
+  ),
+  "missing required column(s): annual_status",
+  "Prefix completeness must retain the existing required-column validation."
+)
+
+duplicate_prefix_fixture <- bind_rows(
+  prefix_crosswalk_fixture,
+  slice(prefix_crosswalk_fixture, 1L)
+)
+assert_error_contains(
+  derive_site_group_prefix_missing_flags(
+    duplicate_prefix_fixture,
+    base_year = 2021L,
+    cutoff_years = 2024L
+  ),
+  "unique on site_id, year, water_company",
+  "Prefix completeness must retain the existing duplicate-key validation."
+)
+
+company_conflict_prefix_fixture <- prefix_crosswalk_fixture
+company_conflict_prefix_fixture$water_company[4] <- "Changed Water"
+assert_error_contains(
+  derive_site_group_prefix_missing_flags(
+    company_conflict_prefix_fixture,
+    base_year = 2021L,
+    cutoff_years = 2024L
+  ),
+  "exactly one water_company",
+  "Prefix completeness must retain the existing company-membership validation."
 )
 
 duplicate_fixture <- bind_rows(crosswalk_fixture, slice(crosswalk_fixture, 1L))

@@ -10,10 +10,8 @@
 # Date: 2025-11-22
 #
 # Inputs:
-#   - data/processed/house_price.parquet - House sales transactions
-#   - data/processed/zoopla/zoopla_rentals.parquet - Rental transactions
-#   - data/processed/cross_section/sales/all_years/ - Cross-sectional sales
-#   - data/processed/cross_section/rentals/all_years/ - Cross-sectional rentals
+#   - data/processed/cross_section/sales/study_period/ - Cross-sectional sales
+#   - data/processed/cross_section/rentals/study_period/ - Cross-sectional rentals
 #
 # Outputs:
 #   - output/figures/sales_{variable}_{method}.pdf - Sales bivariate plots
@@ -52,9 +50,16 @@ SMOOTHING_METHODS <- c("lm")
 # 2. Package Management
 # ==============================================================================
 
-required_packages <- c(
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required. Install project dependencies with `rv sync`.",
+    call. = FALSE
+  )
+}
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
   "arrow",
-  "rio",
   "tidyverse",
   "purrr",
   "here",
@@ -65,23 +70,11 @@ required_packages <- c(
   "sysfonts"
 )
 
-install_if_missing <- function(packages) {
-  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
-  if (length(new_packages) > 0) {
-    install.packages(new_packages)
-  }
-  invisible(sapply(packages, library, character.only = TRUE))
-}
-install_if_missing(required_packages)
-
 # ==============================================================================
 # 3. Setup
 # ==============================================================================
 
 # 3.1 Font Setup ---------------------------------------------------------------
-showtext::showtext_auto()
-showtext::showtext_opts(dpi = 300)
-
 add_libertinus_font <- function() {
   local_font_files <- c(
     regular = path.expand("~/Library/Fonts/LibertinusSerif-Regular.ttf"),
@@ -112,13 +105,10 @@ add_libertinus_font <- function() {
   )
 }
 
-FONT_FAMILY <- add_libertinus_font()
+FONT_FAMILY <- "serif"
 
 # 3.2 Output Directory ---------------------------------------------------------
-output_dir <- here::here("output", "figures")
-if (!dir.exists(output_dir)) {
-  dir.create(output_dir, recursive = TRUE)
-}
+OUTPUT_DIR <- here::here("output", "figures")
 
 # 3.3 Publication-Quality Plot Theme ------------------------------------------
 plot_variant_style <- function(variant = c("paper", "slides")) {
@@ -266,123 +256,73 @@ create_cs_plot <- function(
 # 4. Data Loading and Preparation
 # ==============================================================================
 
-# 4.1 Process Sales Data -------------------------------------------------------
-cat("Processing sales data...\n")
-
-# House price data
-house_price_data <- import(
-  here::here("data", "processed", "house_price.parquet"),
-  trust = TRUE
-)
-
-# Trim to 5th-95th percentiles
-sale_price_bounds <- quantile(
-  house_price_data$price,
-  probs = c(0.05, 0.95),
-  na.rm = TRUE
-)
-house_price_data_trimmed <- house_price_data %>%
-  filter(dplyr::between(
-    price,
-    sale_price_bounds[[1]],
-    sale_price_bounds[[2]]
-  ))
-trimmed_house_ids <- unique(house_price_data_trimmed$house_id)
-
-# Cross-sectional aggregated data (all years)
-dat_agg_sales <- open_dataset(
-  here::here("data", "processed", "cross_section", "sales", "all_years")
-) %>%
-  collect()
-
-# Filter to trimmed house IDs
-dat_agg_sales_trimmed <- dat_agg_sales %>%
-  filter(house_id %in% trimmed_house_ids)
-
-# Sample houses (or use all if SAMPLE_SIZE is NULL)
-if (is.null(SAMPLE_SIZE)) {
-  sample_houses <- unique(dat_agg_sales_trimmed$house_id)
-} else {
-  set.seed(123)
-  sample_houses <- unique(dat_agg_sales_trimmed$house_id) %>%
-    sample(size = SAMPLE_SIZE)
+prepare_cross_section_sales <- function(
+    data, radii = RADII_TO_INCLUDE, sample_size = SAMPLE_SIZE) {
+  required <- c(
+    "house_id", "price", "ppd_category", "spill_count", "spill_hrs",
+    "min_distance", "spatially_eligible", "has_missing_site", "radius"
+  )
+  missing <- setdiff(required, names(data))
+  if (length(missing) > 0L) {
+    stop("Sales cross-section is missing: ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  source_values <- data |>
+    dplyr::distinct(.data$house_id, .data$price, .data$ppd_category)
+  price_bounds <- stats::quantile(
+    source_values$price, probs = c(0.05, 0.95), na.rm = TRUE
+  )
+  eligible_ids <- source_values |>
+    dplyr::filter(dplyr::between(
+      .data$price, price_bounds[[1L]], price_bounds[[2L]]
+    )) |>
+    dplyr::pull(.data$house_id)
+  if (!is.null(sample_size)) {
+    set.seed(123)
+    eligible_ids <- sample(eligible_ids, size = sample_size)
+  }
+  data |>
+    dplyr::filter(.data$house_id %in% eligible_ids, .data$radius %in% radii) |>
+    dplyr::mutate(
+      radius = factor(.data$radius, levels = radii, labels = paste0(radii, "m")),
+      inverse_spill_count = .data$spill_count / .data$min_distance,
+      inverse_spill_hrs = .data$spill_hrs / .data$min_distance,
+      log_price = log(.data$price)
+    )
 }
 
-# Filter and prepare data
-plot_data_sales <- dat_agg_sales_trimmed %>%
-  filter(house_id %in% sample_houses) %>%
-  filter(radius %in% RADII_TO_INCLUDE) %>%
-  mutate(
-    radius = factor(
-      radius,
-      levels = RADII_TO_INCLUDE,
-      labels = paste0(RADII_TO_INCLUDE, "m")
-    ),
-    inverse_spill_count = spill_count / min_distance,
-    inverse_spill_hrs = spill_hrs / min_distance,
-    log_price = log(price)
+prepare_cross_section_rentals <- function(
+    data, radii = RADII_TO_INCLUDE, sample_size = SAMPLE_SIZE) {
+  required <- c(
+    "rental_id", "listing_price", "spill_count", "spill_hrs",
+    "min_distance", "spatially_eligible", "has_missing_site", "radius"
   )
-
-# 4.2 Process Rentals Data -----------------------------------------------------
-cat("Processing rentals data...\n")
-
-# Zoopla rental data
-zoopla_rentals <- import(
-  here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
-  trust = TRUE
-)
-
-# Trim to 5th-95th percentiles
-rental_price_bounds <- quantile(
-  zoopla_rentals$listing_price,
-  probs = c(0.05, 0.95),
-  na.rm = TRUE
-)
-zoopla_rentals_trimmed <- zoopla_rentals %>%
-  filter(dplyr::between(
-    listing_price,
-    rental_price_bounds[[1]],
-    rental_price_bounds[[2]]
-  ))
-trimmed_rental_ids <- unique(zoopla_rentals_trimmed$rental_id)
-
-# Cross-sectional aggregated data (all years)
-dat_agg_rentals <- open_dataset(
-  here::here("data", "processed", "cross_section", "rentals", "all_years")
-) %>%
-  collect()
-
-# Filter to trimmed rental IDs
-dat_agg_rentals_trimmed <- dat_agg_rentals %>%
-  filter(
-    rental_id %in% trimmed_rental_ids,
-    dplyr::between(rent, rental_price_bounds[[1]], rental_price_bounds[[2]])
+  missing <- setdiff(required, names(data))
+  if (length(missing) > 0L) {
+    stop("Rental cross-section is missing: ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  source_values <- data |>
+    dplyr::distinct(.data$rental_id, .data$listing_price)
+  price_bounds <- stats::quantile(
+    source_values$listing_price, probs = c(0.05, 0.95), na.rm = TRUE
   )
-
-# Sample rentals (or use all if SAMPLE_SIZE is NULL)
-if (is.null(SAMPLE_SIZE)) {
-  sample_rentals <- unique(dat_agg_rentals_trimmed$rental_id)
-} else {
-  set.seed(123)
-  sample_rentals <- unique(dat_agg_rentals_trimmed$rental_id) %>%
-    sample(size = SAMPLE_SIZE)
+  eligible_ids <- source_values |>
+    dplyr::filter(dplyr::between(
+      .data$listing_price, price_bounds[[1L]], price_bounds[[2L]]
+    )) |>
+    dplyr::pull(.data$rental_id)
+  if (!is.null(sample_size)) {
+    set.seed(123)
+    eligible_ids <- sample(eligible_ids, size = sample_size)
+  }
+  data |>
+    dplyr::filter(.data$rental_id %in% eligible_ids, .data$radius %in% radii) |>
+    dplyr::mutate(
+      radius = factor(.data$radius, levels = radii, labels = paste0(radii, "m")),
+      inverse_spill_count = .data$spill_count / .data$min_distance,
+      inverse_spill_hrs = .data$spill_hrs / .data$min_distance,
+      log_price = log(.data$listing_price)
+    )
 }
-
-# Filter and prepare data
-plot_data_rentals <- dat_agg_rentals_trimmed %>%
-  filter(rental_id %in% sample_rentals) %>%
-  filter(radius %in% RADII_TO_INCLUDE) %>%
-  mutate(
-    radius = factor(
-      radius,
-      levels = RADII_TO_INCLUDE,
-      labels = paste0(RADII_TO_INCLUDE, "m")
-    ),
-    listing_price = rent,
-    inverse_spill_count = spill_count / min_distance,
-    inverse_spill_hrs = spill_hrs / min_distance,
-    log_price = log(listing_price)
-  )
 
 # ==============================================================================
 # 5. Generate and Save Plots
@@ -421,7 +361,7 @@ method_suffix <- if (length(SMOOTHING_METHODS) == 2) {
 
 save_plot_pdf <- function(plot, file_name, width, height, dpi = PLOT_DPI) {
   ggsave(
-    filename = file.path(output_dir, file_name),
+    filename = file.path(OUTPUT_DIR, file_name),
     plot = plot,
     width = width,
     height = height,
@@ -484,7 +424,7 @@ save_radius_legend_pdf <- function(file_name, variant, width, height) {
   legend_style <- radius_legend_style(variant)
   legend_colors <- radius_legend_colors()
   legend_labels <- names(legend_colors)
-  output_path <- file.path(output_dir, file_name)
+  output_path <- file.path(OUTPUT_DIR, file_name)
 
   cairo_pdf(
     filename = output_path,
@@ -561,8 +501,30 @@ save_radius_legend_pdf <- function(file_name, variant, width, height) {
 }
 
 # Generate Sales Plots
-cat("Generating sales plots...\n")
-for (var_name in names(plot_specs)) {
+main <- function() {
+  check_required_packages(REQUIRED_PACKAGES)
+  invisible(lapply(REQUIRED_PACKAGES, library, character.only = TRUE))
+  showtext::showtext_auto()
+  showtext::showtext_opts(dpi = PLOT_DPI)
+  FONT_FAMILY <<- add_libertinus_font()
+  dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+  cat("Processing sales data...\n")
+  plot_data_sales <- arrow::open_dataset(here::here(
+    "data", "processed", "cross_section", "sales", "study_period"
+  )) |>
+    dplyr::collect() |>
+    prepare_cross_section_sales()
+
+  cat("Processing rentals data...\n")
+  plot_data_rentals <- arrow::open_dataset(here::here(
+    "data", "processed", "cross_section", "rentals", "study_period"
+  )) |>
+    dplyr::collect() |>
+    prepare_cross_section_rentals()
+
+  cat("Generating sales plots...\n")
+  for (var_name in names(plot_specs)) {
   spec <- plot_specs[[var_name]]
 
   # Create paper plot
@@ -645,11 +607,11 @@ for (var_name in names(plot_specs)) {
       dpi = SLIDE_PLOT_DPI
     )
   }
-}
+  }
 
 # Generate Rental Plots
-cat("Generating rental plots...\n")
-for (var_name in names(plot_specs)) {
+  cat("Generating rental plots...\n")
+  for (var_name in names(plot_specs)) {
   spec <- plot_specs[[var_name]]
 
   # Create paper plot
@@ -732,20 +694,24 @@ for (var_name in names(plot_specs)) {
       dpi = SLIDE_PLOT_DPI
     )
   }
+  }
+
+  save_radius_legend_pdf(
+    "cross_section_radius_legend.pdf",
+    variant = "paper",
+    width = 9.0,
+    height = 0.8
+  )
+
+  save_radius_legend_pdf(
+    "cross_section_radius_legend_slides.pdf",
+    variant = "slides",
+    width = 6.0,
+    height = 0.45
+  )
+
+  cat("\nAll plots generated\n")
+  invisible(TRUE)
 }
 
-save_radius_legend_pdf(
-  "cross_section_radius_legend.pdf",
-  variant = "paper",
-  width = 9.0,
-  height = 0.8
-)
-
-save_radius_legend_pdf(
-  "cross_section_radius_legend_slides.pdf",
-  variant = "slides",
-  width = 6.0,
-  height = 0.45
-)
-
-cat("\nAll plots generated\n")
+if (sys.nframe() == 0L) main()

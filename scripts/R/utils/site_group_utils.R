@@ -125,6 +125,211 @@ read_site_group_missing_flags <- function(file_path, years) {
   derive_site_group_missing_flags(arrow::read_parquet(file_path), years)
 }
 
+#' Derive cumulative Site Group missingness and event evidence for transaction cutoffs.
+#'
+#' Each cutoff covers the prefix from `base_year` through `cutoff_year`. The
+#' cutoff immediately before `base_year` represents an explicit empty prefix
+#' for known Site Groups. Required exposure years must exist in the crosswalk's
+#' global year coverage; a missing Site Group row within a supported year is
+#' still interpreted as `annual_status == "absent"`.
+#'
+#' @inheritParams derive_site_group_missing_flags
+#' @param base_year First year in the exposure window.
+#' @param cutoff_years Exclusive transaction cutoff years to return. Values may
+#'   include `base_year - 1L` for the explicit empty prefix.
+#' @param include_event_evidence Whether to include cumulative unknown-event
+#'   evidence alongside the historical prefix-missingness contract.
+#' @return A tibble unique on `site_id` and `cutoff_year`, with logical
+#'   `site_missing` and, when requested, `has_unknown_event_evidence`.
+derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
+                                                   cutoff_years,
+                                                   include_event_evidence = FALSE) {
+  required_columns <- c(
+    "site_id", "year", "water_company", "annual_status",
+    "matched_event_count"
+  )
+  missing_columns <- setdiff(required_columns, names(crosswalk))
+  if (length(missing_columns) > 0L) {
+    stop(
+      "Site Group crosswalk is missing required column(s): ",
+      paste(missing_columns, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  base_year <- as.integer(base_year)
+  cutoff_years <- as.integer(cutoff_years)
+  if (length(base_year) != 1L || is.na(base_year)) {
+    stop("base_year must be one integer.", call. = FALSE)
+  }
+  if (length(cutoff_years) == 0L || anyNA(cutoff_years) ||
+      anyDuplicated(cutoff_years)) {
+    stop(
+      "cutoff_years must be a non-empty vector of unique integers.",
+      call. = FALSE
+    )
+  }
+  if (any(cutoff_years < base_year - 1L)) {
+    stop(
+      "cutoff_years must not precede the explicit empty-prefix year.",
+      call. = FALSE
+    )
+  }
+  cutoff_years <- sort(cutoff_years)
+
+  crosswalk <- tibble::as_tibble(crosswalk)
+  matched_event_count <- crosswalk$matched_event_count
+  if (!is.numeric(matched_event_count) || anyNA(matched_event_count) ||
+      any(!is.finite(matched_event_count)) ||
+      any(matched_event_count < 0) ||
+      any(matched_event_count != floor(matched_event_count)) ||
+      any(matched_event_count > .Machine$integer.max)) {
+    stop(
+      "matched_event_count must contain non-missing, nonnegative, integer-like values.",
+      call. = FALSE
+    )
+  }
+
+  crosswalk <- crosswalk |>
+    dplyr::transmute(
+      site_id = as.integer(.data$site_id),
+      year = as.integer(.data$year),
+      water_company = as.character(.data$water_company),
+      annual_status = as.character(.data$annual_status),
+      matched_event_count = as.integer(.data$matched_event_count)
+    )
+
+  if (nrow(crosswalk) == 0L ||
+      anyNA(crosswalk[c("site_id", "year", "water_company")])) {
+    stop("Site Group crosswalk keys must be non-empty and non-missing.", call. = FALSE)
+  }
+  if (anyDuplicated(crosswalk[c("site_id", "year", "water_company")])) {
+    stop(
+      "Site Group crosswalk must be unique on site_id, year, water_company.",
+      call. = FALSE
+    )
+  }
+
+  company_counts <- crosswalk |>
+    dplyr::summarise(
+      n_water_company = dplyr::n_distinct(.data$water_company),
+      .by = "site_id"
+    )
+  if (any(company_counts$n_water_company != 1L)) {
+    stop("Each Site Group must have exactly one water_company.", call. = FALSE)
+  }
+
+  valid_statuses <- c("absent", "reported_zero", "reported_positive", "reported_na")
+  if (anyNA(crosswalk$annual_status) ||
+      any(!crosswalk$annual_status %in% valid_statuses)) {
+    stop("Requested Site Group years must have valid annual_status values.", call. = FALSE)
+  }
+
+  contradiction_statuses <- c("reported_zero", "reported_na", "absent")
+  contradiction_counts <- crosswalk |>
+    dplyr::filter(
+      .data$annual_status %in% contradiction_statuses,
+      .data$matched_event_count > 0L
+    ) |>
+    dplyr::count(.data$annual_status, name = "n")
+  for (status in contradiction_statuses) {
+    count <- contradiction_counts |>
+      dplyr::filter(.data$annual_status == status) |>
+      dplyr::pull(.data$n)
+    count <- dplyr::first(count, default = 0L)
+    message(
+      "Event-bearing Annual Status contradiction: ", status, " = ", count,
+      " Site Group-year(s)."
+    )
+  }
+
+  non_empty_cutoffs <- cutoff_years[cutoff_years >= base_year]
+  required_years <- if (length(non_empty_cutoffs) == 0L) {
+    integer()
+  } else {
+    seq.int(base_year, max(non_empty_cutoffs))
+  }
+  unsupported_years <- setdiff(required_years, sort(unique(crosswalk$year)))
+  if (length(unsupported_years) > 0L) {
+    stop(
+      "Unsupported Site Group crosswalk year(s): ",
+      paste(unsupported_years, collapse = ", "),
+      ".",
+      call. = FALSE
+    )
+  }
+
+  observed <- crosswalk |>
+    dplyr::filter(.data$year %in% required_years)
+
+  all_site_ids <- sort(unique(crosswalk$site_id))
+  non_empty_prefixes <- if (length(required_years) == 0L) {
+    tibble::tibble(
+      site_id = integer(),
+      cutoff_year = integer(),
+      site_missing = logical(),
+      has_unknown_event_evidence = logical()
+    )
+  } else {
+    tidyr::expand_grid(
+      site_id = all_site_ids,
+      cutoff_year = required_years
+    ) |>
+      dplyr::left_join(
+        dplyr::select(
+          observed,
+          "site_id",
+          cutoff_year = "year",
+          "annual_status",
+          "matched_event_count"
+        ),
+        by = c("site_id", "cutoff_year")
+      ) |>
+      dplyr::arrange(.data$site_id, .data$cutoff_year) |>
+      dplyr::mutate(
+        annual_status = tidyr::replace_na(.data$annual_status, "absent"),
+        matched_event_count = tidyr::replace_na(.data$matched_event_count, 0L),
+        event_evidence_unknown =
+          .data$annual_status %in% c("reported_na", "absent") |
+          (.data$annual_status == "reported_positive" &
+            .data$matched_event_count == 0L),
+        site_missing = dplyr::cumany(.data$annual_status == "absent"),
+        has_unknown_event_evidence = dplyr::cumany(.data$event_evidence_unknown),
+        .by = "site_id"
+      ) |>
+      dplyr::filter(.data$cutoff_year %in% cutoff_years) |>
+      dplyr::select(
+        "site_id", "cutoff_year", "site_missing",
+        "has_unknown_event_evidence"
+      )
+  }
+
+  empty_prefixes <- if ((base_year - 1L) %in% cutoff_years) {
+    tibble::tibble(
+      site_id = all_site_ids,
+      cutoff_year = base_year - 1L,
+      site_missing = FALSE,
+      has_unknown_event_evidence = FALSE
+    )
+  } else {
+    tibble::tibble(
+      site_id = integer(),
+      cutoff_year = integer(),
+      site_missing = logical(),
+      has_unknown_event_evidence = logical()
+    )
+  }
+
+  prefixes <- dplyr::bind_rows(empty_prefixes, non_empty_prefixes) |>
+    dplyr::arrange(.data$site_id, .data$cutoff_year)
+  if (!isTRUE(include_event_evidence)) {
+    prefixes <- dplyr::select(
+      prefixes, "site_id", "cutoff_year", "site_missing"
+    )
+  }
+  prefixes
+}
+
 #' Derive one explicit metadata row per Site Group.
 #'
 #' Location follows the crosswalk's representative-location contract: among

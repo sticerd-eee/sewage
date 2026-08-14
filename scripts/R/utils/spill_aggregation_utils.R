@@ -17,12 +17,25 @@ required_packages <- c(
   "data.table", "lubridate", "dplyr", "tidyr"
 )
 
-# Load required packages if not already loaded
-for(pkg in required_packages) {
-  if(!requireNamespace(pkg, quietly = TRUE)) {
-    install.packages(pkg)
-  }
-  if(!paste0("package:", pkg) %in% search()) {
+# Fail before attaching anything when the project environment is incomplete
+missing_packages <- required_packages[!vapply(
+  required_packages,
+  requireNamespace,
+  quietly = TRUE,
+  FUN.VALUE = logical(1)
+)]
+if (length(missing_packages) > 0L) {
+  stop(
+    "Missing required packages: ",
+    paste(missing_packages, collapse = ", "),
+    ". Install project dependencies first with `rv sync`.",
+    call. = FALSE
+  )
+}
+
+# Preserve the utility's established package-attachment behavior
+for (pkg in required_packages) {
+  if (!paste0("package:", pkg) %in% search()) {
     library(pkg, character.only = TRUE)
   }
 }

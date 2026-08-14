@@ -393,26 +393,24 @@ digraph DataPipeline {
 **Cross-Sectional Database Creation (Sales)**
 
 - **script_name**: `cross_section_sales.R`
-- **purpose**: Creates cross-sectional databases aggregating spill data: one for all years and one for 12 months prior to house sales, partitioned by radius thresholds.
+- **purpose**: Publishes the fixed 2021–2024 Study-Period Spill Exposure sales cross-section from EA annual-return evidence at 250, 500, and 1,000 m. This fixed-period product is distinct from the prior-to-transaction exposure builders.
 - **inputs**: 
   - `"data/processed/house_price.parquet"`
   - `"data/processed/spill_house_lookup.parquet"`
-  - `"data/processed/agg_spill_stats/agg_spill_mo.parquet"`
+  - `"data/processed/matched_events_annual_data/site_group_crosswalk.parquet"`
 - **outputs**: 
-  - `"data/processed/cross_section/sales/all_years/"`
-  - `"data/processed/cross_section/sales/prior_12mo/"`
+  - `"data/processed/cross_section/sales/study_period/"`
 
 **Cross-Sectional Database Creation (Rentals)**
 
 - **script_name**: `cross_section_rental.R`
-- **purpose**: Creates cross-sectional rental datasets: all years and 12 months prior to `rented_est`, partitioned by radius thresholds.
+- **purpose**: Publishes the fixed 2021–2024 Study-Period Spill Exposure rental cross-section from EA annual-return evidence at 250, 500, and 1,000 m. Prior-to-transaction rental exposure remains a separate product.
 - **inputs**: 
   - `"data/processed/zoopla/zoopla_rentals.parquet"`
   - `"data/processed/zoopla/spill_rental_lookup.parquet"`
-  - `"data/processed/agg_spill_stats/agg_spill_mo.parquet"`
+  - `"data/processed/matched_events_annual_data/site_group_crosswalk.parquet"`
 - **outputs**: 
-  - `"data/processed/cross_section/rentals/all_years/"`
-  - `"data/processed/cross_section/rentals/prior_12mo/"`
+  - `"data/processed/cross_section/rentals/study_period/"`
 
 **Site-Level Panel Data (Sales)**
 

@@ -66,8 +66,8 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 
 ### 06_analysis_datasets
 
-- `cross_section_sales.R` and `cross_section_prior_to_sale.R`: build sales cross-sections.
-- `cross_section_rental.R` and `cross_section_prior_to_rental.R`: build rental cross-sections.
+- `cross_section_sales.R` and `cross_section_rental.R`: publish the fixed 2021–2024 `study_period` sales and rental cross-sections from EA annual-return evidence at 250, 500, and 1,000 m. They retain every source transaction and distinguish eligible zero exposure, unknown annual evidence, and spatial ineligibility.
+- `cross_section_prior_to_sale.R` and `cross_section_prior_to_rental.R`: build prior-to-transaction exposure at property-radius grain. This remains a separate estimand from the fixed-period annual-return product.
 - `house_spill_prior_to_sale.R` and `rental_spill_prior_to_rental.R`: build sale- and rental-spill prior-exposure datasets from raw matched events.
 - `site_panel_sales.R` and `site_panel_rental.R`: build site-level panels.
 - `house_panel_within_radius.R` and `rental_panel_within_radius.R`: build within-radius property panels.
@@ -123,8 +123,8 @@ Integration scripts are executed earlier for dependency reasons; see steps 12 an
 
 ### Layer 06: Analysis Datasets
 
-25. `cross_section_sales.R` — build sales cross-sections.
-26. `cross_section_rental.R` — build rental cross-sections.
+25. `cross_section_sales.R` — build the fixed 2021–2024 sales `study_period` cross-section from EA annual-return evidence.
+26. `cross_section_rental.R` — build the fixed 2021–2024 rental `study_period` cross-section from EA annual-return evidence.
 27. `cross_section_prior_to_sale.R` — build prior-to-sale sales cross-sections.
 28. `cross_section_prior_to_rental.R` — build prior-to-rental rental cross-sections.
 29. `house_spill_prior_to_sale.R` — build the sale-spill prior-exposure dataset.
