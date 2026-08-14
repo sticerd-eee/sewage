@@ -18,6 +18,7 @@ suppressPackageStartupMessages({
 })
 
 source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+source(here::here("scripts", "R", "utils", "dataset_publication_utils.R"))
 source(here::here("scripts", "R", "utils", "prior_exposure_utils.R"))
 
 assert_streaming_seam_exists <- exists("prior_exposure_stream", mode = "function")
@@ -716,10 +717,9 @@ assert_identical(
   "radius=250",
   "The canonical dataset must contain only the configured Hive radius partition."
 )
-assert_identical(
-  read_publication(paste0(canonical_path, ".prev")),
-  first_generation,
-  "Successful replacement must preserve the prior generation as .prev."
+assert_true(
+  !dir.exists(paste0(canonical_path, ".prev")),
+  "Successful replacement must remove the temporary .prev backup."
 )
 
 restored_path <- file.path(publication_root, "restored")

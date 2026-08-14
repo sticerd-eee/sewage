@@ -55,6 +55,10 @@ source(
   local = TRUE
 )
 source(
+  here::here("scripts", "R", "utils", "dataset_publication_utils.R"),
+  local = TRUE
+)
+source(
   here::here("scripts", "R", "utils", "prior_exposure_utils.R"),
   local = TRUE
 )

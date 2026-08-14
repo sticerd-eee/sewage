@@ -881,65 +881,6 @@ prior_exposure_validate_stage <- function(
   invisible(TRUE)
 }
 
-prior_exposure_promote_stage <- function(stage_path, output_path,
-                                         rename_path = file.rename) {
-  previous_path <- paste0(output_path, ".prev")
-  canonical_exists <- dir.exists(output_path)
-  previous_exists <- dir.exists(previous_path)
-  if (!canonical_exists && previous_exists) {
-    stop(
-      "Interrupted prior-exposure publication: canonical is absent; recoverable prior generation: ",
-      previous_path,
-      call. = FALSE
-    )
-  }
-
-  if (canonical_exists) {
-    if (previous_exists) {
-      remove_status <- unlink(previous_path, recursive = TRUE)
-      if (remove_status != 0L || dir.exists(previous_path)) {
-        stop(
-          "Failed to remove older prior-exposure backup: ", previous_path,
-          call. = FALSE
-        )
-      }
-    }
-    preserved <- isTRUE(rename_path(output_path, previous_path))
-    if (!preserved || dir.exists(output_path) || !dir.exists(previous_path)) {
-      recoverable <- if (dir.exists(previous_path)) {
-        paste0(" Recoverable prior generation: ", previous_path, ".")
-      } else {
-        ""
-      }
-      stop(
-        "Failed to preserve the canonical prior-exposure generation.",
-        recoverable,
-        call. = FALSE
-      )
-    }
-  }
-
-  promoted <- isTRUE(rename_path(stage_path, output_path))
-  if (promoted && dir.exists(output_path) && !dir.exists(stage_path)) {
-    return(invisible(output_path))
-  }
-  if (canonical_exists) {
-    restored <- isTRUE(rename_path(previous_path, output_path))
-    if (restored && dir.exists(output_path) && !dir.exists(previous_path)) {
-      stop(
-        "Failed to promote the staged prior-exposure dataset; the prior generation was restored.",
-        call. = FALSE
-      )
-    }
-    stop(
-      "Failed to promote the staged prior-exposure dataset and failed to restore the prior generation. Recoverable prior generation: ",
-      previous_path,
-      call. = FALSE
-    )
-  }
-  stop("Failed to promote the first prior-exposure generation.", call. = FALSE)
-}
-
 #' Stream prior-exposure chunks into one validated sibling stage.
 #'
 #' @param data Eagerly loaded prior-exposure inputs.
@@ -1063,7 +1004,8 @@ prior_exposure_stream <- function(
 #' @return `output_path`, invisibly.
 publish_prior_exposure_dataset <- function(
     data, output_path, expected_schema, expected_radii,
-    rename_path = file.rename, stage_path = NULL, expected_rows = NULL) {
+    rename_path = file.rename, stage_path = NULL, expected_rows = NULL,
+    remove_path = function(path) unlink(path, recursive = TRUE)) {
   supplied_stage <- !is.null(stage_path)
   if (supplied_stage && !is.null(data)) {
     stop("Supply either a complete candidate or an existing stage, not both.", call. = FALSE)
@@ -1098,8 +1040,22 @@ publish_prior_exposure_dataset <- function(
       partitioning = "radius"
     )
   }
-  prior_exposure_validate_stage(
-    stage_path, expected_schema, expected_radii, expected_rows
+  if (!exists("publish_validated_dataset", mode = "function", inherits = TRUE)) {
+    stop(
+      "dataset_publication_utils.R must be sourced before prior_exposure_utils.R.",
+      call. = FALSE
+    )
+  }
+  validator <- function(path) {
+    prior_exposure_validate_stage(
+      path, expected_schema, expected_radii, expected_rows
+    )
+  }
+  publish_validated_dataset(
+    stage_path = stage_path,
+    output_path = output_path,
+    validate = validator,
+    rename_path = rename_path,
+    remove_path = remove_path
   )
-  prior_exposure_promote_stage(stage_path, output_path, rename_path)
 }

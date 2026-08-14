@@ -10,6 +10,9 @@ suppressPackageStartupMessages({
 })
 
 source(here::here(
+  "scripts", "R", "utils", "dataset_publication_utils.R"
+))
+source(here::here(
   "scripts", "R", "utils", "cross_section_study_period_utils.R"
 ))
 
@@ -543,4 +546,170 @@ assert_error_contains(
   "A duplicate staged public key must be rejected."
 )
 
-cat("Study-period cross-section contract tests passed (U1-U2).\n")
+# U3: shared staged publication lifecycle -------------------------------------
+
+write_generation <- function(path, value) {
+  dir.create(path, recursive = TRUE, showWarnings = FALSE)
+  writeLines(value, file.path(path, "generation.txt"))
+  invisible(path)
+}
+read_generation <- function(path) {
+  readLines(file.path(path, "generation.txt"), warn = FALSE)
+}
+validate_generation <- function(path) {
+  if (!dir.exists(path) || !file.exists(file.path(path, "generation.txt"))) {
+    stop("invalid generation", call. = FALSE)
+  }
+  invisible(path)
+}
+
+publication_root <- tempfile("dataset-publication-")
+dir.create(publication_root)
+canonical <- file.path(publication_root, "canonical")
+stage_one <- file.path(publication_root, ".canonical.stage-one")
+write_generation(stage_one, "one")
+validation_paths <- character()
+publish_validated_dataset(
+  stage_one,
+  canonical,
+  validate = function(path) {
+    validation_paths <<- c(validation_paths, path)
+    validate_generation(path)
+  }
+)
+assert_identical(read_generation(canonical), "one", "First publication must promote.")
+assert_identical(
+  validation_paths,
+  c(stage_one, canonical),
+  "The same product validator must run before and after promotion."
+)
+
+stage_two <- file.path(publication_root, ".canonical.stage-two")
+write_generation(stage_two, "two")
+publish_validated_dataset(stage_two, canonical, validate_generation)
+assert_identical(read_generation(canonical), "two", "Replacement must promote.")
+assert_true(
+  !dir.exists(paste0(canonical, ".prev")),
+  "Successful replacement must remove only its temporary backup."
+)
+
+interrupted <- file.path(publication_root, "interrupted")
+write_generation(paste0(interrupted, ".prev"), "recoverable")
+interrupted_stage <- file.path(publication_root, ".interrupted.stage")
+write_generation(interrupted_stage, "candidate")
+assert_error_contains(
+  publish_validated_dataset(interrupted_stage, interrupted, validate_generation),
+  "recoverable",
+  "Absent canonical with present .prev must stop without mutation."
+)
+assert_identical(
+  read_generation(paste0(interrupted, ".prev")),
+  "recoverable",
+  "Interrupted-state preflight must preserve the recovery generation."
+)
+
+ambiguous <- file.path(publication_root, "ambiguous")
+write_generation(ambiguous, "canonical")
+write_generation(paste0(ambiguous, ".prev"), "previous")
+ambiguous_stage <- file.path(publication_root, ".ambiguous.stage")
+write_generation(ambiguous_stage, "candidate")
+assert_error_contains(
+  publish_validated_dataset(ambiguous_stage, ambiguous, validate_generation),
+  "ambiguous",
+  "Present canonical with present .prev must fail closed."
+)
+assert_identical(read_generation(ambiguous), "canonical", "Canonical must remain.")
+assert_identical(
+  read_generation(paste0(ambiguous, ".prev")),
+  "previous",
+  "Ambiguous .prev must remain."
+)
+
+restored <- file.path(publication_root, "restored")
+write_generation(restored, "old")
+restored_stage <- file.path(publication_root, ".restored.stage")
+write_generation(restored_stage, "new")
+promotion_failure <- function(from, to) {
+  if (identical(from, restored_stage) && identical(to, restored)) return(FALSE)
+  file.rename(from, to)
+}
+assert_error_contains(
+  publish_validated_dataset(
+    restored_stage, restored, validate_generation,
+    rename_path = promotion_failure
+  ),
+  "restored",
+  "A failed stage promotion must report restoration."
+)
+assert_identical(read_generation(restored), "old", "Promotion failure must restore old.")
+
+post_validation <- file.path(publication_root, "post-validation")
+write_generation(post_validation, "old")
+post_validation_stage <- file.path(publication_root, ".post-validation.stage")
+write_generation(post_validation_stage, "new")
+assert_error_contains(
+  publish_validated_dataset(
+    post_validation_stage,
+    post_validation,
+    validate = function(path) {
+      validate_generation(path)
+      if (identical(path, post_validation)) {
+        stop("injected final validation failure", call. = FALSE)
+      }
+    }
+  ),
+  "restored",
+  "Post-promotion validation failure must restore the prior generation."
+)
+assert_identical(
+  read_generation(post_validation),
+  "old",
+  "Final validation failure must restore the exact prior generation."
+)
+
+first_invalid <- file.path(publication_root, "first-invalid")
+first_invalid_stage <- file.path(publication_root, ".first-invalid.stage")
+write_generation(first_invalid_stage, "invalid")
+assert_error_contains(
+  publish_validated_dataset(
+    first_invalid_stage,
+    first_invalid,
+    validate = function(path) {
+      validate_generation(path)
+      if (identical(path, first_invalid)) stop("invalid final", call. = FALSE)
+    }
+  ),
+  "first generation",
+  "A first-generation final validation failure must stop."
+)
+assert_true(
+  !dir.exists(first_invalid),
+  "A rejected first generation must not remain canonical."
+)
+
+cleanup_incomplete <- file.path(publication_root, "cleanup-incomplete")
+write_generation(cleanup_incomplete, "old")
+cleanup_stage <- file.path(publication_root, ".cleanup-incomplete.stage")
+write_generation(cleanup_stage, "new")
+assert_error_contains(
+  publish_validated_dataset(
+    cleanup_stage,
+    cleanup_incomplete,
+    validate_generation,
+    remove_path = function(path) 1L
+  ),
+  "cleanup incomplete",
+  "Failed successful-backup cleanup must return nonzero context."
+)
+assert_identical(
+  read_generation(cleanup_incomplete),
+  "new",
+  "Cleanup failure must keep the validated replacement canonical."
+)
+assert_identical(
+  read_generation(paste0(cleanup_incomplete, ".prev")),
+  "old",
+  "Cleanup failure must retain the readable temporary backup."
+)
+
+cat("Study-period cross-section contract tests passed (U1-U3).\n")
