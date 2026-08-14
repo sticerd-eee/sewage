@@ -2,9 +2,10 @@
 # Study-Period Sales Cross-Section Builder
 # ==============================================================================
 #
-# Purpose: Build and publish the 2021-2024 spill-exposure cross-section for
-#          property sales at transaction-radius grain through the shared
-#          study-period engine.
+# Purpose: Build the sales cross-section at the property-transaction level. For
+#          each property transaction and radius, sum spill counts and hours
+#          across all sites within that radius over the full 2021–2024 study
+#          period.
 #
 # Author: Jacopo Olivieri
 # Date: 2025-04-05

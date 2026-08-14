@@ -2,9 +2,9 @@
 # Study-Period Rental Cross-Section Builder
 # ==============================================================================
 #
-# Purpose: Build and publish the 2021-2024 spill-exposure cross-section for
-#          rental listings at transaction-radius grain through the shared
-#          study-period engine.
+# Purpose: Build the rental cross-section at the rental listing level. For each
+#          rental listing and radius, sum spill counts and hours across all sites
+#          within that radius over the full 2021–2024 study period.
 #
 # Author: Jacopo Olivieri
 # Date: 2025-04-05
