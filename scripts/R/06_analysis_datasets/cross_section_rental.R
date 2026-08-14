@@ -1,6 +1,25 @@
 # ==============================================================================
 # Study-Period Rental Cross-Section Builder
 # ==============================================================================
+#
+# Purpose: Build and publish the 2021-2024 spill-exposure cross-section for
+#          rental listings at transaction-radius grain through the shared
+#          study-period engine.
+#
+# Author: Jacopo Olivieri
+# Date: 2025-04-05
+# Date Modified: 2026-08-14
+#
+# Inputs:
+#   - data/processed/zoopla/zoopla_rentals.parquet
+#   - data/processed/zoopla/spill_rental_lookup.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
+#
+# Outputs:
+#   - data/processed/cross_section/rentals/study_period/
+#   - output/log/cross_section_rental.log
+#
+# ==============================================================================
 
 if (!requireNamespace("here", quietly = TRUE)) {
   stop(
