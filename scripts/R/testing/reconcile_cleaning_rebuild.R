@@ -3,9 +3,8 @@
 # ==============================================================================
 #
 # Purpose: Produce non-mutating gate evidence for cleaning rebuild candidates.
-#          This U2 slice covers Land Registry old-versus-new allowed deltas,
-#          duplicate historical transaction IDs, paired-candidate metadata,
-#          and raw/input file checksums. U3 extends the same script for rentals.
+#          Covers Land Registry and Zoopla old-versus-new allowed deltas,
+#          paired-candidate metadata, and source/candidate checksums.
 #
 # This script never promotes, replaces, archives, or deletes canonical data.
 #
@@ -24,6 +23,7 @@ LR_STABLE_EXCLUDED_COLUMNS <- c(
   "qtr_id",
   "month_id"
 )
+ZOOPLA_STABLE_EXCLUDED_COLUMNS <- c("rental_id")
 
 empty_delta_table <- function() {
   tibble::tibble(
@@ -301,6 +301,238 @@ reconcile_lr_allowed_deltas <- function(
   )
 }
 
+zoopla_candidate_period_issues <- function(candidate_long, base_year = 2021L) {
+  expected_qtr <- (lubridate::year(candidate_long$rented_est) - base_year) * 4L +
+    lubridate::quarter(candidate_long$rented_est)
+  expected_month <- (lubridate::year(candidate_long$rented_est) - base_year) * 12L +
+    lubridate::month(candidate_long$rented_est)
+  bad <- is.na(candidate_long$rented_est) |
+    is.na(candidate_long$qtr_id) |
+    is.na(candidate_long$month_id) |
+    candidate_long$qtr_id != expected_qtr |
+    candidate_long$month_id != expected_month
+
+  tibble::tibble(
+    rental_id = candidate_long$rental_id[bad],
+    rented_est = candidate_long$rented_est[bad],
+    qtr_id = candidate_long$qtr_id[bad],
+    expected_qtr_id = expected_qtr[bad],
+    month_id = candidate_long$month_id[bad],
+    expected_month_id = expected_month[bad]
+  )
+}
+
+zoopla_candidate_pair_issues <- function(candidate_long, candidate_study, study_years) {
+  expected <- candidate_long[
+    lubridate::year(candidate_long$rented_est) %in% study_years,
+    ,
+    drop = FALSE
+  ]
+  expected <- expected[order(expected$rental_id), , drop = FALSE]
+  observed <- candidate_study[order(candidate_study$rental_id), , drop = FALSE]
+  same_schema <- identical(names(expected), names(observed))
+  same_rows <- same_schema && isTRUE(all.equal(
+    as.data.frame(expected),
+    as.data.frame(observed),
+    check.attributes = FALSE
+  ))
+
+  tibble::tibble(
+    check = c("study_schema_equals_filtered_long_run", "study_rows_equal_filtered_long_run"),
+    passed = c(same_schema, same_rows),
+    detail = c(
+      paste0("expected columns=", ncol(expected), "; observed columns=", ncol(observed)),
+      paste0("expected rows=", nrow(expected), "; observed rows=", nrow(observed))
+    )
+  ) |>
+    dplyr::filter(!.data$passed)
+}
+
+assert_zoopla_reconciliation_schema <- function(old, candidate_long, candidate_study) {
+  required_old <- c(
+    "rental_id", "postcode", "address_line_01", "address_line_02",
+    "address_line_03", "listing_price", "latest_to_rent", "rented", "rented_est"
+  )
+  missing_old <- setdiff(required_old, names(old))
+  if (length(missing_old) > 0L) {
+    stop(
+      "Historical Zoopla data is missing required column(s): ",
+      paste(missing_old, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  for (candidate in list(candidate_long, candidate_study)) {
+    if (!("rental_id" %in% names(candidate)) ||
+        anyNA(candidate$rental_id) || anyDuplicated(candidate$rental_id)) {
+      stop("Each Zoopla candidate must have unique, non-missing rental_id values.", call. = FALSE)
+    }
+  }
+  invisible(TRUE)
+}
+
+empty_zoopla_delta_table <- function() {
+  tibble::tibble(
+    rental_id = character(),
+    old_rental_id = character(),
+    column = character(),
+    old_value = character(),
+    new_value = character()
+  )
+}
+
+collect_zoopla_stable_value_deltas <- function(old_expected, candidate_study) {
+  stable_columns <- setdiff(
+    intersect(names(old_expected), names(candidate_study)),
+    c(ZOOPLA_STABLE_EXCLUDED_COLUMNS, ".stable_rental_id", ".old_rental_id")
+  )
+  if (length(stable_columns) == 0L) return(empty_zoopla_delta_table())
+
+  old_projection <- old_expected |>
+    dplyr::select(
+      ".stable_rental_id",
+      ".old_rental_id",
+      dplyr::all_of(stable_columns)
+    )
+  new_projection <- candidate_study |>
+    dplyr::rename(.stable_rental_id = "rental_id") |>
+    dplyr::select(".stable_rental_id", dplyr::all_of(stable_columns))
+  compared <- dplyr::inner_join(
+    old_projection,
+    new_projection,
+    by = ".stable_rental_id",
+    suffix = c("_old", "_new")
+  )
+
+  dplyr::bind_rows(lapply(stable_columns, function(column) {
+    old_value <- compared[[paste0(column, "_old")]]
+    new_value <- compared[[paste0(column, "_new")]]
+    changed <- !values_match(old_value, new_value)
+    changed[is.na(changed)] <- TRUE
+    tibble::tibble(
+      rental_id = compared$.stable_rental_id[changed],
+      old_rental_id = compared$.old_rental_id[changed],
+      column = column,
+      old_value = as.character(old_value[changed]),
+      new_value = as.character(new_value[changed])
+    )
+  }))
+}
+
+#' Enforce the rental R6a contract and quantify its two permitted sample shifts
+reconcile_zoopla_allowed_deltas <- function(
+    old,
+    candidate_long,
+    candidate_study,
+    study_years = 2021:2023,
+    long_run_years = 2014:2023,
+    base_year = 2021L) {
+  old <- tibble::as_tibble(old)
+  candidate_long <- tibble::as_tibble(candidate_long)
+  candidate_study <- tibble::as_tibble(candidate_study)
+  assert_zoopla_reconciliation_schema(old, candidate_long, candidate_study)
+
+  exact_columns <- setdiff(names(old), "rental_id")
+  exact_frame <- data.table::as.data.table(old[exact_columns])
+  duplicate_rows <- duplicated(exact_frame, by = exact_columns)
+  duplicate_members <- duplicate_rows |
+    duplicated(exact_frame, by = exact_columns, fromLast = TRUE)
+  duplicate_group_count <- if (any(duplicate_members)) {
+    data.table::uniqueN(exact_frame[duplicate_members], by = exact_columns)
+  } else {
+    0L
+  }
+  old_unique <- old[!duplicate_rows, , drop = FALSE] |>
+    dplyr::mutate(
+      .old_rental_id = as.character(.data$rental_id),
+      .stable_rental_id = hash_rental_identity(dplyr::pick(dplyr::everything()))
+    )
+
+  identity_conflicts <- old_unique |>
+    dplyr::count(.data$.stable_rental_id, name = "rows") |>
+    dplyr::filter(.data$rows > 1L) |>
+    dplyr::rename(rental_id = ".stable_rental_id")
+
+  old_unique <- old_unique |>
+    dplyr::mutate(
+      old_or_in_study = lubridate::year(.data$latest_to_rent) %in% study_years |
+        lubridate::year(.data$rented) %in% study_years,
+      rented_est_in_study = lubridate::year(.data$rented_est) %in% study_years
+    )
+  selection_removed <- old_unique |>
+    dplyr::filter(.data$old_or_in_study, !.data$rented_est_in_study) |>
+    dplyr::transmute(
+      rental_id = .data$.stable_rental_id,
+      old_rental_id = .data$.old_rental_id,
+      latest_to_rent = .data$latest_to_rent,
+      rented = .data$rented,
+      rented_est = .data$rented_est,
+      old_or_in_study = .data$old_or_in_study,
+      rented_est_in_study = .data$rented_est_in_study
+    )
+  expected_old <- old_unique |>
+    dplyr::filter(.data$rented_est_in_study)
+  expected_ids <- expected_old$.stable_rental_id
+  observed_ids <- candidate_study$rental_id
+
+  unexpected_membership_deltas <- dplyr::bind_rows(
+    tibble::tibble(
+      rental_id = setdiff(expected_ids, observed_ids),
+      issue = "rented_est_eligible_historical_row_missing_from_study_candidate"
+    ),
+    tibble::tibble(
+      rental_id = setdiff(observed_ids, expected_ids),
+      issue = "unexpected_study_candidate_row"
+    )
+  ) |>
+    dplyr::distinct()
+
+  value_deltas <- collect_zoopla_stable_value_deltas(expected_old, candidate_study)
+  period_issues <- zoopla_candidate_period_issues(candidate_long, base_year)
+  pair_issues <- zoopla_candidate_pair_issues(candidate_long, candidate_study, study_years)
+  long_window_issues <- candidate_long |>
+    dplyr::filter(
+      is.na(.data$rented_est) |
+        !lubridate::year(.data$rented_est) %in% long_run_years
+    ) |>
+    dplyr::select("rental_id", "rented_est")
+
+  dedupe_summary <- tibble::tibble(
+    old_rows = nrow(old),
+    deduplicated_rows = nrow(old_unique),
+    removed_rows = as.integer(sum(duplicate_rows)),
+    duplicate_groups = as.integer(duplicate_group_count)
+  )
+  summary <- tibble::tibble(
+    metric = c(
+      "old_rows", "old_rows_after_exact_dedupe", "dedupe_removed_rows",
+      "dedupe_groups", "or_to_rented_est_rows_removed", "candidate_long_rows",
+      "candidate_study_rows", "identity_conflicts", "unexpected_value_deltas",
+      "unexpected_membership_deltas", "candidate_period_issues",
+      "candidate_pair_issues", "long_window_issues"
+    ),
+    value = c(
+      nrow(old), nrow(old_unique), sum(duplicate_rows), duplicate_group_count,
+      nrow(selection_removed), nrow(candidate_long), nrow(candidate_study),
+      nrow(identity_conflicts), nrow(value_deltas),
+      nrow(unexpected_membership_deltas), nrow(period_issues),
+      nrow(pair_issues), nrow(long_window_issues)
+    )
+  )
+
+  list(
+    summary = summary,
+    dedupe_summary = dedupe_summary,
+    duplicate_records = old[duplicate_members, , drop = FALSE],
+    selection_removed = selection_removed,
+    identity_conflicts = identity_conflicts,
+    unexpected_value_deltas = value_deltas,
+    unexpected_membership_deltas = unexpected_membership_deltas,
+    candidate_period_issues = period_issues,
+    candidate_pair_issues = pair_issues,
+    long_window_issues = long_window_issues
+  )
+}
+
 #' Report immutable file facts for archived/current vintages and candidates
 build_file_vintage_report <- function(paths, vintage) {
   if (length(paths) == 0L || any(!file.exists(paths))) {
@@ -327,7 +559,10 @@ read_cleaning_candidate <- function(path) {
   list(data = tibble::as_tibble(table), metadata = table$metadata)
 }
 
-validate_shared_run_stamp <- function(long_metadata, study_metadata) {
+validate_shared_run_stamp <- function(
+    long_metadata,
+    study_metadata,
+    expected_market = "sales") {
   required <- c(
     "cleaning_manifest_version", "cleaning_run_stamp", "cleaning_market",
     "cleaning_artifact_role", "cleaning_year_min", "cleaning_year_max",
@@ -352,9 +587,9 @@ validate_shared_run_stamp <- function(long_metadata, study_metadata) {
     issues <- c(issues, "candidate manifest versions differ")
   }
   if (length(issues) == 0L &&
-      (!identical(long_metadata$cleaning_market, "sales") ||
-       !identical(study_metadata$cleaning_market, "sales"))) {
-    issues <- c(issues, "candidate market metadata is not sales")
+      (!identical(long_metadata$cleaning_market, expected_market) ||
+       !identical(study_metadata$cleaning_market, expected_market))) {
+    issues <- c(issues, paste0("candidate market metadata is not ", expected_market))
   }
   if (length(issues) == 0L && long_metadata$cleaning_artifact_role != "long_run") {
     issues <- c(issues, "long-run candidate role is not long_run")
@@ -502,6 +737,128 @@ run_lr_reconciliation <- function(config = default_reconciliation_config()) {
   ))
 }
 
+write_zoopla_reconciliation_tables <- function(result, output_dir) {
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  table_names <- c(
+    "summary", "dedupe_summary", "duplicate_records", "selection_removed",
+    "identity_conflicts", "unexpected_value_deltas",
+    "unexpected_membership_deltas", "candidate_period_issues",
+    "candidate_pair_issues", "long_window_issues"
+  )
+  for (name in table_names) {
+    utils::write.csv(
+      result[[name]],
+      file.path(output_dir, paste0("zoopla_", name, ".csv")),
+      row.names = FALSE,
+      na = ""
+    )
+  }
+  invisible(output_dir)
+}
+
+default_zoopla_reconciliation_config <- function() {
+  list(
+    old_study_path = here::here(
+      "data", "processed", "zoopla", "zoopla_rentals.parquet"
+    ),
+    candidate_long_path = here::here(
+      "data", "processed", "zoopla", "zoopla_rentals_long_run_candidate.parquet"
+    ),
+    candidate_study_path = here::here(
+      "data", "processed", "zoopla", "zoopla_rentals_candidate.parquet"
+    ),
+    raw_paths = c(
+      here::here("data", "raw", "zoopla", "rentals_safeguarded_2014-2022.csv"),
+      here::here("data", "raw", "zoopla", "rentals_safeguarded_2023.csv")
+    ),
+    output_dir = Sys.getenv(
+      "CLEANING_REBUILD_EVIDENCE_DIR",
+      unset = here::here("output", "cleaning_rebuild_reconciliation_2026-08-14")
+    ),
+    years = 2014:2023,
+    study_years = 2021:2023
+  )
+}
+
+run_zoopla_reconciliation <- function(
+    config = default_zoopla_reconciliation_config()) {
+  required_paths <- c(
+    config$old_study_path,
+    config$candidate_long_path,
+    config$candidate_study_path,
+    config$raw_paths
+  )
+  if (any(!file.exists(required_paths))) {
+    stop(
+      "Required Zoopla reconciliation artifact(s) missing: ",
+      paste(required_paths[!file.exists(required_paths)], collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  old <- arrow::read_parquet(config$old_study_path)
+  long_candidate <- read_cleaning_candidate(config$candidate_long_path)
+  study_candidate <- read_cleaning_candidate(config$candidate_study_path)
+  metadata_check <- validate_shared_run_stamp(
+    long_candidate$metadata,
+    study_candidate$metadata,
+    expected_market = "rentals"
+  )
+  result <- reconcile_zoopla_allowed_deltas(
+    old,
+    long_candidate$data,
+    study_candidate$data,
+    config$study_years,
+    config$years
+  )
+
+  dir.create(config$output_dir, recursive = TRUE, showWarnings = FALSE)
+  write_zoopla_reconciliation_tables(result, config$output_dir)
+  checksums <- build_file_vintage_report(
+    required_paths,
+    "zoopla_reconciliation_artifact"
+  )
+  utils::write.csv(
+    checksums,
+    file.path(config$output_dir, "zoopla_file_checksums.csv"),
+    row.names = FALSE,
+    na = ""
+  )
+  utils::write.csv(
+    metadata_check,
+    file.path(config$output_dir, "zoopla_candidate_metadata_check.csv"),
+    row.names = FALSE,
+    na = ""
+  )
+
+  blocking_count <- nrow(result$identity_conflicts) +
+    nrow(result$unexpected_value_deltas) +
+    nrow(result$unexpected_membership_deltas) +
+    nrow(result$candidate_period_issues) +
+    nrow(result$candidate_pair_issues) +
+    nrow(result$long_window_issues) +
+    sum(!metadata_check$passed)
+  if (blocking_count > 0L) {
+    stop(
+      "Zoopla cleaning reconciliation found ", blocking_count,
+      " contract violation(s). Review evidence in ", config$output_dir, ".",
+      call. = FALSE
+    )
+  }
+
+  invisible(list(
+    result = result,
+    metadata_check = metadata_check,
+    checksums = checksums,
+    output_dir = config$output_dir
+  ))
+}
+
 if (sys.nframe() == 0) {
-  run_lr_reconciliation()
+  args <- commandArgs(trailingOnly = TRUE)
+  if (length(args) > 0L && identical(args[[1]], "rentals")) {
+    run_zoopla_reconciliation()
+  } else {
+    run_lr_reconciliation()
+  }
 }

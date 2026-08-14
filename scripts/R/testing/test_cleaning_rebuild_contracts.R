@@ -45,6 +45,12 @@ sys.source(
   envir = cleaner_env
 )
 
+zoopla_env <- new.env(parent = globalenv())
+sys.source(
+  here::here("scripts", "R", "02_data_cleaning", "clean_zoopla_data.R"),
+  envir = zoopla_env
+)
+
 reconcile_env <- new.env(parent = globalenv())
 sys.source(
   here::here("scripts", "R", "testing", "reconcile_cleaning_rebuild.R"),
@@ -261,3 +267,186 @@ assert_true(all(c("vintage", "path", "basename", "size_bytes", "mtime", "sha256"
 assert_true(all(grepl("^[0-9a-f]{64}$", vintage_report$sha256)), "Vintage reports must carry SHA-256 checksums.")
 
 message("Cleaning rebuild contract tests passed (LR/U2 slice).")
+
+# Zoopla/U3: rented_est is the sole window field, exact duplicates disappear
+# before identity assignment, and the study candidate is a pure superset filter.
+zoopla_raw <- tibble(
+  zp.Address1 = c("1 HIGH STREET", "1 HIGH STREET", "2 LOW STREET", "3 OLD ROAD", "4 NEW ROAD"),
+  zp.Address2 = c(NA, NA, "FLAT A", NA, NA),
+  zp.Address3 = NA_character_,
+  zp.Postcode = c("AB1 2CD", "AB1 2CD", "XY9 8ZT", "ZZ1 1ZZ", "XY9 8ZT"),
+  zp.PropertyType = c("Terraced", "Terraced", "Flat", "Detached", "Flat"),
+  zp.Bedrooms = c(2, 2, 1, 3, 2),
+  zp.Bathrooms = 1,
+  zp.Receptions = 1,
+  zp.Floors = 1,
+  zp.ListingCreated = as.Date(c("2020-12-01", "2020-12-01", "2020-11-01", "2014-01-01", "2023-01-01")),
+  zp.ListingPageViews = c(10, 10, 20, 30, 40),
+  zp.ListingPrice = c(1000, 1000, 1100, 900, 1200),
+  zp.LatestToRent = as.Date(c("2020-12-31", "2020-12-31", "2021-01-05", "2014-02-01", NA)),
+  zp.Rented = as.Date(c("2021-01-02", "2021-01-02", "2020-12-30", NA, "2023-03-01")),
+  epc.EnergyEfficiency = c(70, 70, 65, 60, 75),
+  epc.EnergyRating = c("C", "C", "D", "D", "C")
+)
+
+zoopla_cleaned <- zoopla_env$clean_zoopla_data(
+  zoopla_raw,
+  years = 2014:2023,
+  track_raw_origin = TRUE
+)
+assert_identical(
+  lubridate::year(zoopla_cleaned$rented_est),
+  c(2021, 2021, 2020, 2014, 2023),
+  "Zoopla long-run selection must be based exclusively on coalesce(rented, latest_to_rent)."
+)
+assert_identical(
+  zoopla_cleaned$rented_est,
+  dplyr::coalesce(zoopla_cleaned$rented, zoopla_cleaned$latest_to_rent),
+  "rented_est must retain the existing coalesce(rented, latest_to_rent) rule exactly."
+)
+
+deduped <- zoopla_env$deduplicate_zoopla_transactions(zoopla_cleaned, zoopla_raw)
+assert_identical(deduped$removed_count, 1L, "Zoopla exact-duplicate removal must report removed rows.")
+assert_identical(deduped$duplicate_group_count, 1L, "Zoopla exact-duplicate removal must report duplicate groups.")
+assert_identical(nrow(deduped$data), 4L, "Zoopla exact duplicates must be removed before ID assignment.")
+assert_true(!(".raw_origin_row" %in% names(deduped$data)), "Raw-origin helper columns must not leak into outputs.")
+assert_true(
+  nrow(deduped$origin_spot_check) == 2L &&
+    identical(deduped$origin_spot_check$.raw_origin_row, c(1L, 2L)),
+  "The duplicate report must retain a raw-origin spot check for one duplicate group."
+)
+
+zoopla_lookup <- tibble(
+  postcode = c("AB12CD", "XY98ZT", "ZZ11ZZ"),
+  longitude = c(-1, -2, -3),
+  latitude = c(51, 52, 53)
+)
+assert_error_matching(
+  zoopla_env$enrich_zoopla_postcodes(
+    deduped$data,
+    bind_rows(zoopla_lookup, zoopla_lookup[1, ])
+  ),
+  "duplicate",
+  "Zoopla postcode enrichment must reject a non-unique lookup."
+)
+zoopla_enriched <- zoopla_env$enrich_zoopla_postcodes(deduped$data, zoopla_lookup)
+assert_identical(nrow(zoopla_enriched), nrow(deduped$data), "Zoopla postcode enrichment must preserve row count.")
+
+zoopla_pair <- zoopla_env$build_zoopla_output_pair(
+  zoopla_enriched,
+  long_run_years = 2014:2023,
+  study_years = 2021:2023
+)
+assert_identical(nrow(zoopla_pair$long_run), 4L, "The Zoopla superset must retain every valid deduplicated row.")
+assert_identical(nrow(zoopla_pair$study), 2L, "The Zoopla study output must use rented_est, not the old OR filter.")
+assert_true(all(grepl("^[0-9a-f]{16}$", zoopla_pair$long_run$rental_id)), "rental_id must be lowercase xxhash64 hex.")
+assert_true(!anyDuplicated(zoopla_pair$long_run$rental_id), "The long-run rental_id must be unique.")
+assert_true(all(zoopla_pair$study$qtr_id > 0), "The 2021-2023 study candidate cannot contain negative qtr_id values.")
+assert_identical(
+  zoopla_pair$study,
+  filter(zoopla_pair$long_run, lubridate::year(.data$rented_est) %in% 2021:2023),
+  "The Zoopla study output must equal a pure filter of the long-run output."
+)
+assert_identical(
+  zoopla_pair$long_run$rental_id,
+  zoopla_env$hash_rental_identity(zoopla_pair$long_run),
+  "rental_id must hash the locked seven-field post-cleaning composite."
+)
+assert_true(
+  any(is.na(zoopla_pair$long_run$rented)) && any(is.na(zoopla_pair$long_run$latest_to_rent)),
+  "The rental identity fixture must exercise both missing date fields."
+)
+second_pair <- zoopla_env$build_zoopla_output_pair(zoopla_enriched, 2014:2023, 2021:2023)
+assert_identical(
+  second_pair$long_run$rental_id,
+  zoopla_pair$long_run$rental_id,
+  "Two Zoopla builds must produce byte-identical rental_id vectors."
+)
+
+composite_collision <- bind_rows(
+  zoopla_enriched,
+  zoopla_enriched[1, ] |> mutate(property_type = "F")
+)
+assert_error_matching(
+  zoopla_env$build_zoopla_output_pair(composite_collision, 2014:2023, 2021:2023),
+  "composite",
+  "A non-unique seven-field rental identity composite must abort."
+)
+
+original_hash_function <- zoopla_env$hash_rental_identity
+zoopla_env$hash_rental_identity <- function(data) rep("0000000000000000", nrow(data))
+assert_error_matching(
+  zoopla_env$build_zoopla_output_pair(zoopla_enriched, 2014:2023, 2021:2023),
+  "hash",
+  "A rental_id hash collision must abort independently of composite uniqueness."
+)
+zoopla_env$hash_rental_identity <- original_hash_function
+
+zoopla_long_path <- file.path(test_dir, "zoopla_rentals_long_run_candidate.parquet")
+zoopla_study_path <- file.path(test_dir, "zoopla_rentals_candidate.parquet")
+zoopla_run_stamp <- "2026-08-14T12:35:57Z"
+zoopla_env$write_zoopla_candidates(
+  zoopla_pair,
+  zoopla_long_path,
+  zoopla_study_path,
+  run_stamp = zoopla_run_stamp,
+  source_row_count = nrow(zoopla_raw),
+  removed_duplicate_count = deduped$removed_count
+)
+zoopla_long_table <- arrow::read_parquet(zoopla_long_path, as_data_frame = FALSE)
+zoopla_study_table <- arrow::read_parquet(zoopla_study_path, as_data_frame = FALSE)
+assert_identical(zoopla_long_table$metadata$cleaning_run_stamp, zoopla_run_stamp, "The Zoopla superset run stamp must round-trip.")
+assert_identical(zoopla_study_table$metadata$cleaning_run_stamp, zoopla_run_stamp, "Zoopla outputs must share one run stamp.")
+assert_identical(zoopla_long_table$metadata$cleaning_market, "rentals", "Zoopla metadata must declare the rentals market.")
+assert_identical(zoopla_study_table$metadata$cleaning_parent_role, "long_run", "The Zoopla study candidate must declare derivation from the superset.")
+assert_identical(zoopla_long_table$metadata$cleaning_removed_duplicate_rows, "1", "Zoopla metadata must record the dedupe count.")
+
+# Reconstruct the historical OR-selected study file from the same cleaned raw
+# fixture. It contains one exact duplicate and one row selected solely because
+# latest_to_rent is in-window while rented_est (rented) is not.
+old_zoopla <- zoopla_cleaned |>
+  select(-".raw_origin_row") |>
+  filter(
+    lubridate::year(.data$latest_to_rent) %in% 2021:2023 |
+      lubridate::year(.data$rented) %in% 2021:2023
+  ) |>
+  left_join(zoopla_lookup, by = "postcode") |>
+  mutate(rental_id = row_number(), .before = 1)
+
+zoopla_reconciliation <- reconcile_env$reconcile_zoopla_allowed_deltas(
+  old_zoopla,
+  zoopla_pair$long_run,
+  zoopla_pair$study,
+  study_years = 2021:2023
+)
+assert_identical(zoopla_reconciliation$dedupe_summary$removed_rows[[1]], 1L, "Rental reconciliation must quantify exact-duplicate removal.")
+assert_identical(nrow(zoopla_reconciliation$selection_removed), 1L, "Rental reconciliation must quantify the OR-to-rented_est selection shift.")
+assert_identical(nrow(zoopla_reconciliation$unexpected_value_deltas), 0L, "Allowed rental rebuild changes must preserve stable columns.")
+assert_identical(nrow(zoopla_reconciliation$unexpected_membership_deltas), 0L, "Only dedupe and rented_est selection may change rental membership.")
+
+drifted_zoopla <- zoopla_pair$study
+drifted_zoopla$listing_page_views[1] <- drifted_zoopla$listing_page_views[1] + 1
+zoopla_value_drift <- reconcile_env$reconcile_zoopla_allowed_deltas(
+  old_zoopla,
+  zoopla_pair$long_run,
+  drifted_zoopla,
+  2021:2023
+)
+assert_true(
+  "listing_page_views" %in% zoopla_value_drift$unexpected_value_deltas$column,
+  "Rental reconciliation must name non-allowed stable-column drift."
+)
+
+missing_zoopla <- zoopla_pair$study[-1, ]
+zoopla_member_drift <- reconcile_env$reconcile_zoopla_allowed_deltas(
+  old_zoopla,
+  zoopla_pair$long_run,
+  missing_zoopla,
+  2021:2023
+)
+assert_true(
+  nrow(zoopla_member_drift$unexpected_membership_deltas) > 0L,
+  "Rental reconciliation must reject membership changes beyond dedupe and rented_est selection."
+)
+
+message("Cleaning rebuild contract tests passed (Zoopla/U3 slice).")
