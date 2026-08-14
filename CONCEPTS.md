@@ -40,9 +40,24 @@ A Record-Linkage Component containing more than one Annual-Return Site from the 
 The straight-line distance threshold within which a property is treated as exposed to a storm overflow, used to build the near-property cross-sections. The main analyses are run at several such thresholds, with the others serving as robustness checks. In regression specifications it is written generically as the radius buffer **B**, which takes the values 250, 500, and 1000 m across the sweep; each individual result table still reports its specific radius.
 
 ### Spill Exposure
-A property's continuous measure of nearby storm-overflow activity — spill count and spill hours at the overflows within its Near-Overflow Radius — expressed as a daily average over the exposure window.
+A property's continuous measure of nearby storm-overflow activity — spill count and spill hours at the overflows within its Near-Overflow Radius — measured over a stated exposure window.
 
-The daily average is the stored canonical form; headline coefficients are reported in per-week units (one extra spill, or spill-hour, per week), the reporting contrast chosen because it sits near one standard deviation and is interpretable. Directional Spill Exposure and Nearest-Site Exposure are variants that split or restrict which overflows contribute.
+Spill Exposure may be expressed as a Whole-Period Spill Exposure or an Average Daily Spill Exposure. Directional Spill Exposure and Nearest-Site Exposure are variants that split or restrict which overflows contribute.
+
+### Whole-Period Spill Exposure
+The total spill count or spill hours accumulated within a property's Near-Overflow Radius over the stated exposure window.
+
+### Study-Period Spill Exposure
+A Whole-Period Spill Exposure measured from the EA-revised annual-return totals over the fixed 2021–2024 study window. It is a time-invariant property-area measure and may include spill activity after an individual sale or rental transaction; it is published as a whole-period total and as equivalent daily and weekly averages.
+
+### Spatially Eligible Transaction
+A sale or rental transaction with usable property coordinates, for which nearby Site Groups can be evaluated. A spatially eligible transaction with no Site Group inside its Near-Overflow Radius has zero Spill Exposure; a transaction without usable coordinates has unknown, not zero, exposure.
+
+### Average Daily Spill Exposure
+Spill Exposure divided by the number of days in its stated exposure window. Headline coefficients may be reported in per-week units for interpretability.
+
+### Average Weekly Spill Exposure
+Average Daily Spill Exposure multiplied by seven, used as the principal reporting scale in the project's analyses.
 
 ### Directional Spill Exposure
 Spill exposure split by whether the contributing overflow lies upstream or downstream of the property along the river network — used to separate same-river pollution transport from generic proximity. Estimated unweighted and in an inverse-river-distance-weighted variant.
