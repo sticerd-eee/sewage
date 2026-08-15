@@ -2,9 +2,12 @@
 title: "refactor: Rebuild repeat_rentals and repeat_sales on content-stable IDs"
 type: refactor
 date: 2026-07-07
+superseded_by: docs/plans/2026-08-14-001-refactor-repeat-transactions-consolidated-rebuild-plan.md
 ---
 
 # refactor: Rebuild repeat_rentals and repeat_sales on content-stable IDs
+
+> **SUPERSEDED (2026-08-14).** Do not implement from this document. The consolidated plan `docs/plans/2026-08-14-001-refactor-repeat-transactions-consolidated-rebuild-plan.md` replaces it after a second grilling session: U4 (radius fix) and U6's doc reconciliation were completed independently in August 2026; the evidence base was re-verified (the staleness flipped to the sales side, and the rebuilt sales input contains 65 mixed-vintage duplicate `transaction_id` pairs); and new decisions were added (hashed `repeat_id`, long-run superset/subset windows, int32 contract flips, invariants-vs-manifest testing). Decisions here remain valid only as restated there.
 
 ## Summary
 
