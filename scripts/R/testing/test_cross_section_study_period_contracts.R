@@ -237,6 +237,14 @@ source_fixture <- data.table(
   easting = c(500000, 500100, NA, 500200),
   northing = c(200000, 200100, 200200, 200200)
 )
+assert_error_contains(
+  study_period_source_ledger(
+    copy(source_fixture)[, house_id := seq_len(.N)],
+    sales_contract
+  ),
+  "character transaction identifiers",
+  "Study-period source ledgers must reject stale positional integer IDs."
+)
 leading_zero_source <- copy(source_fixture[1:2])
 leading_zero_source[, house_id := c("01leadingzero", "02stablehash")]
 leading_zero_ledger <- study_period_source_ledger(

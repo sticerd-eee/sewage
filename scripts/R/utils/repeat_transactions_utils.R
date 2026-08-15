@@ -105,7 +105,10 @@ validate_repeat_input <- function(data, config) {
 }
 
 build_price_ratio_review <- function(keyed, config) {
-  dt <- data.table::copy(keyed)
+  audit_cols <- c(
+    "address_key", config$id_col, config$date_col, config$price_col
+  )
+  dt <- data.table::copy(keyed[, ..audit_cols])
   data.table::setorderv(dt, c("address_key", config$date_col, config$id_col))
   dt[, `:=`(
     previous_date = data.table::shift(get(config$date_col)),
@@ -169,11 +172,17 @@ build_repeat_mapping <- function(data, config) {
     stop("repeat_id values must be lowercase 16-character hex strings.", call. = FALSE)
   }
 
-  group_counts <- keyed[, .(repeat_count = as.integer(.N)), by = .(address_key, repeat_id)]
+  group_counts <- keyed[, .(
+    repeat_count = as.integer(.N),
+    declared_count_min = min(repeat_count),
+    declared_count_max = max(repeat_count)
+  ), by = .(address_key, repeat_id)]
   if (any(group_counts$repeat_count < 1L) ||
-      !identical(sort(keyed$repeat_count), sort(group_counts$repeat_count[rep(seq_len(nrow(group_counts)), group_counts$repeat_count)]))) {
+      any(group_counts$declared_count_min != group_counts$declared_count_max) ||
+      any(group_counts$repeat_count != group_counts$declared_count_min)) {
     stop("repeat_count reconciliation failed.", call. = FALSE)
   }
+  group_counts[, c("declared_count_min", "declared_count_max") := NULL]
 
   repeat_share <- if (keyed_count == 0L) 0 else mean(keyed$repeat_count > 1L)
   if (repeat_share < config$repeat_share_floor) {
@@ -246,9 +255,14 @@ read_repeat_manifest <- function(path) {
   if (!file.exists(path)) return(NULL)
   table <- tryCatch(
     arrow::read_parquet(path, as_data_frame = FALSE),
-    error = function(e) NULL
+    error = function(e) {
+      stop(
+        "Existing repeat mapping is unreadable: ", path, ". ",
+        conditionMessage(e),
+        call. = FALSE
+      )
+    }
   )
-  if (is.null(table)) return(NULL)
   metadata <- table$metadata
   if (is.null(metadata$repeat_manifest_version) ||
       metadata$repeat_manifest_version != "1") {

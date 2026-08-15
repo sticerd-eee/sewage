@@ -252,13 +252,12 @@ study_period_source_ledger <- function(source, contract) {
   source_columns <- contract$source_columns
   source <- source[, ..source_columns]
   id <- source[[contract$id]]
-  valid_type <- is.character(id) || is.numeric(id)
-  invalid_numeric <- is.numeric(id) && any(
-    !is.na(id) & (!is.finite(id) | id != floor(id))
-  )
-  invalid_character <- is.character(id) && any(!is.na(id) & !nzchar(id))
-  if (!valid_type || anyNA(id) || invalid_numeric || invalid_character) {
-    stop(contract$id, " must contain nonmissing transaction identifiers.", call. = FALSE)
+  if (!is.character(id) || anyNA(id) || any(!nzchar(id))) {
+    stop(
+      contract$id,
+      " must contain nonmissing, nonempty character transaction identifiers.",
+      call. = FALSE
+    )
   }
   if (anyDuplicated(source[[contract$id]])) {
     stop("Source metadata contains duplicate transaction identifiers.", call. = FALSE)
@@ -312,17 +311,12 @@ study_period_validate_lookup_row_group <- function(row_group, contract, ledger) 
   }
 
   transaction_id <- lookup[[contract$id]]
-  valid_type <- is.character(transaction_id) || is.numeric(transaction_id)
-  invalid_numeric <- is.numeric(transaction_id) && any(
-    !is.na(transaction_id) &
-      (!is.finite(transaction_id) | transaction_id != floor(transaction_id))
-  )
-  invalid_character <- is.character(transaction_id) && any(
-    !is.na(transaction_id) & !nzchar(transaction_id)
-  )
-  if (!valid_type || anyNA(transaction_id) ||
-      invalid_numeric || invalid_character) {
-    stop("Lookup transaction identifiers must be nonmissing.", call. = FALSE)
+  if (!is.character(transaction_id) || anyNA(transaction_id) ||
+      any(!nzchar(transaction_id))) {
+    stop(
+      "Lookup transaction identifiers must be nonmissing, nonempty strings.",
+      call. = FALSE
+    )
   }
   source_position <- match(lookup[[contract$id]], ledger[[contract$id]])
   if (anyNA(source_position)) {
@@ -430,10 +424,9 @@ study_period_validate_and_cast_public <- function(
         stop(column, " must contain nonmissing logical values.", call. = FALSE)
       }
     } else if (target == "string") {
-      if ((!is.character(value) && !is.numeric(value)) || anyNA(value)) {
+      if (!is.character(value) || anyNA(value) || any(!nzchar(value))) {
         stop(column, " must contain nonmissing strings.", call. = FALSE)
       }
-      data[[column]] <- as.character(value)
     }
   }
 

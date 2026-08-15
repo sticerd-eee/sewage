@@ -54,8 +54,9 @@ repeat_rentals_config <- function(output_dir = here::here(
     log_name = "repeat_rentals",
     year_min = 2014L,
     year_max = 2023L,
-    key_coverage_floor = 0,
-    repeat_share_floor = 0,
+    # Observed 2026-08-14 baselines: coverage 1.00000000, repeat share 0.74848970.
+    key_coverage_floor = 0.99,
+    repeat_share_floor = 0.70,
     large_group_size = 12L,
     extreme_annualized_price_ratio = 4
   )

@@ -47,8 +47,9 @@ repeat_sales_config <- function(output_dir = here::here(
     log_name = "repeat_sales",
     year_min = 2014L,
     year_max = 2024L,
-    key_coverage_floor = 0,
-    repeat_share_floor = 0,
+    # Observed 2026-08-14 baselines: coverage 0.99681926, repeat share 0.36939131.
+    key_coverage_floor = 0.99,
+    repeat_share_floor = 0.35,
     large_group_size = 12L,
     extreme_annualized_price_ratio = 4
   )

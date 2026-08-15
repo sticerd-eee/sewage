@@ -97,6 +97,26 @@ hash_input <- data.table(
 hashes <- hash_rental_identity(hash_input)
 assert_identical(hashes[[1]], hashes[[2]], "Equal rental composites must hash equally.")
 assert_true(all(grepl("^[0-9a-f]{16}$", hashes)), "Hashes must be lowercase 16-character hex.")
+expected_rental_serialization <- paste(
+  "AB12CD", "1 HIGH STREET", HASH_NA_TOKEN, "", "1200", "2022-01-03",
+  HASH_NA_TOKEN,
+  sep = HASH_FIELD_SEPARATOR
+)
+assert_identical(
+  serialize_hash_fields(hash_input[1], names(hash_input)),
+  expected_rental_serialization,
+  "Rental identity serialization is a locked public-ID preimage contract."
+)
+assert_identical(
+  hashes[[1]],
+  "61ec4f1ca85dfdb2",
+  "The locked rental identity fixture must retain its xxhash64 value."
+)
+assert_identical(
+  hash_transaction_id("{ABC}"),
+  "094a16add8cb5eb0",
+  "The locked Land Registry transaction fixture must retain its xxhash64 value."
+)
 assert_identical(
   hash_transaction_id(c("{ABC}", "{ABC}")),
   rep(hash_transaction_id("{ABC}"), 2L),
@@ -119,6 +139,16 @@ assert_identical(
   base_result$keyed_data$repeat_id,
   hash_serialized_values(base_result$keyed_data$address_key),
   "Each repeat id must equal the hash of its normalized address key."
+)
+assert_identical(
+  base_result$keyed_data$address_key[[1]],
+  "SW1A 1AA|10||ST JOHNS ROAD",
+  "The normalized repeat-address preimage is a locked contract."
+)
+assert_identical(
+  base_result$keyed_data$repeat_id[[1]],
+  "89f5f526a23b82ad",
+  "The locked repeat-address fixture must retain its xxhash64 value."
 )
 
 sorted_mapping <- function(x) setorder(copy(x), house_id)[]
@@ -165,6 +195,23 @@ assert_error_matching(
   build_repeat_mapping(missing_fixture, make_config("coverage", coverage_floor = 0.9)),
   "coverage",
   "Coverage below the configured floor must abort."
+)
+
+original_hash_serialized_values <- hash_serialized_values
+assign(
+  "hash_serialized_values",
+  function(x) rep("0000000000000000", length(x)),
+  envir = .GlobalEnv
+)
+assert_error_matching(
+  build_repeat_mapping(fixture, make_config("collision")),
+  "one-to-one",
+  "Distinct address keys that collide must abort."
+)
+assign(
+  "hash_serialized_values",
+  original_hash_serialized_values,
+  envir = .GlobalEnv
 )
 
 large_fixture <- fixture[rep(1, 15)]
@@ -230,6 +277,14 @@ run_repeat_transactions(
 )
 assert_true(any(grepl("manifest delta", rerun_logs, ignore.case = TRUE)), "A compatible prior manifest must produce a logged delta.")
 
+corrupt_manifest_path <- file.path(test_dir, "corrupt-previous.parquet")
+writeBin(charToRaw("not parquet"), corrupt_manifest_path)
+assert_error_matching(
+  read_repeat_manifest(corrupt_manifest_path),
+  "unreadable",
+  "An existing unreadable repeat mapping must fail closed."
+)
+
 # Both thin entry scripts must accept an in-memory fixture and isolated outputs.
 sales_env <- new.env(parent = globalenv())
 sys.source(
@@ -239,6 +294,11 @@ sys.source(
 sales_entry_config <- sales_env$repeat_sales_config(test_dir)
 sales_entry_config$input_path <- file.path(test_dir, "sales-entry-input.parquet")
 sales_entry_config$log_file <- file.path(test_dir, "sales-entry.log")
+assert_identical(
+  c(sales_entry_config$key_coverage_floor, sales_entry_config$repeat_share_floor),
+  c(0.99, 0.35),
+  "Sales production floors must remain locked below the accepted baseline."
+)
 sales_env$main(sales_entry_config, data = fixture)
 assert_true(
   file.exists(sales_entry_config$output_path),
@@ -265,6 +325,11 @@ sys.source(
 rentals_entry_config <- rentals_env$repeat_rentals_config(test_dir)
 rentals_entry_config$input_path <- file.path(test_dir, "rentals-entry-input.parquet")
 rentals_entry_config$log_file <- file.path(test_dir, "rentals-entry.log")
+assert_identical(
+  c(rentals_entry_config$key_coverage_floor, rentals_entry_config$repeat_share_floor),
+  c(0.99, 0.70),
+  "Rental production floors must remain locked below the accepted baseline."
+)
 rentals_env$main(rentals_entry_config, data = rentals_fixture)
 assert_true(
   file.exists(rentals_entry_config$output_path),

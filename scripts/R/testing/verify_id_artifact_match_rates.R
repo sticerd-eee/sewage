@@ -225,7 +225,9 @@ main <- function() {
     "artifact", "id_column", "id_type", "total_rows", "nonmissing_ids",
     "missing_ids", "matched_ids", "unmatched_ids", "match_rate"
   )])
-  message("All declared ID-keyed artifacts match their cleaned inputs at 100%.")
+  message(
+    "All nonmissing IDs in declared ID-keyed artifacts match their cleaned inputs at 100%."
+  )
   invisible(report)
 }
 

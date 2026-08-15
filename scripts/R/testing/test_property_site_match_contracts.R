@@ -107,7 +107,7 @@ site_fixture <- tibble(
 )
 
 property_fixture <- tibble(
-  property_id = 1:5,
+  property_id = c("001", "0abc", "deadbeef00000001", "004", "005"),
   easting = c(500001, 510000, 510100, 500000, 600000),
   northing = c(200000, 200000, 200000, 205000, 300000)
 )
@@ -199,19 +199,19 @@ for (producer_name in names(producer_specs)) {
   result <- run_match(spec)
 
   assert_true(
-    any(result[[id_column]] == 1L & result$site_id == 101L),
+    any(result[[id_column]] == "001" & result$site_id == 101L),
     paste(producer_name, "must match a property inside 10 km.")
   )
   assert_true(
-    any(result[[id_column]] == 2L & result$site_id == 101L),
+    any(result[[id_column]] == "0abc" & result$site_id == 101L),
     paste(producer_name, "must include a property exactly 10 km away.")
   )
   assert_true(
-    !any(result[[id_column]] == 3L & result$site_id == 101L, na.rm = TRUE),
+    !any(result[[id_column]] == "deadbeef00000001" & result$site_id == 101L, na.rm = TRUE),
     paste(producer_name, "must exclude a property beyond 10 km.")
   )
 
-  multi_match <- result |> filter(.data[[id_column]] == 4L)
+  multi_match <- result |> filter(.data[[id_column]] == "004")
   assert_identical(
     multi_match$site_id,
     c(101L, 202L),
@@ -227,7 +227,7 @@ for (producer_name in names(producer_specs)) {
     paste(producer_name, "must produce unique property-Site Group keys.")
   )
 
-  unmatched <- result |> filter(.data[[id_column]] == 5L)
+  unmatched <- result |> filter(.data[[id_column]] == "005")
   assert_identical(
     nrow(unmatched),
     1L,
@@ -241,7 +241,7 @@ for (producer_name in names(producer_specs)) {
   assert_identical(
     vapply(result, typeof, character(1)),
     setNames(
-      c("integer", "integer", "double", "double", "integer"),
+      c("character", "integer", "double", "double", "integer"),
       c(id_column, "site_id", "distance_m", "distance_km", "n_site_groups")
     ),
     paste(producer_name, "must preserve the five-column lookup types.")
@@ -482,7 +482,7 @@ audit_production_artifact <- function(producer_name, spec, expected_radius_km = 
     is.finite(properties$easting) &
     is.finite(properties$northing)
   eligible_properties <- properties[coordinate_eligible, , drop = FALSE]
-  eligible_ids <- as.integer(eligible_properties[[id_column]])
+  eligible_ids <- eligible_properties[[id_column]]
   assert_true(
     length(eligible_ids) > 0L,
     paste(producer_name, "production input must contain eligible properties.")

@@ -22,6 +22,20 @@ specs <- verifier_env$default_id_artifact_specs()
 spec_by_name <- stats::setNames(specs, vapply(specs, `[[`, character(1), "name"))
 
 assert_identical(
+  sort(names(spec_by_name)),
+  sort(c(
+    "spill_house_lookup", "spill_rental_lookup",
+    "repeated_sales", "repeated_rentals",
+    "study_period_sales", "study_period_rentals",
+    "prior_to_sale", "prior_to_rental",
+    "prior_to_sale_house_site", "prior_to_rental_rental_site",
+    "within_radius_sales", "within_radius_rentals",
+    "general_panel_sales", "general_panel_rentals"
+  )),
+  "The verifier inventory must contain the exact 14 declared ID-keyed artifacts."
+)
+
+assert_identical(
   normalizePath(spec_by_name$repeated_sales$source_path, mustWork = FALSE),
   normalizePath(
     here::here("data", "processed", "house_price_long_run.parquet"),

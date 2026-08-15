@@ -73,7 +73,7 @@ dat_mo <- dat$monthly
 ### Load House Price Data
 
 ```{r}
-house_price_data <- import(here("data", "processed", "house_price.parquet"),
+house_price_data <- import(here::here("data", "processed", "house_price.parquet"),
   trust = TRUE
 )
 spill_sites <- read_site_group_projection(
@@ -300,7 +300,7 @@ test_results <- test_chunk %>%
 ```{r}
 # --- Chunk Size Performance Test ---
 
-house_price_data <- import(here("data", "processed", "house_price.parquet"),
+house_price_data <- import(here::here("data", "processed", "house_price.parquet"),
   trust = TRUE
 )
 spill_sites <- read_site_group_projection(

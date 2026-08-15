@@ -162,17 +162,10 @@ prior_exposure_normalize_transactions <- function(
 
   pre_filter_rows <- nrow(transactions)
   identifier <- transactions[[contract$id]]
-  valid_type <- is.character(identifier) || is.numeric(identifier)
-  invalid_numeric <- is.numeric(identifier) && any(
-    !is.na(identifier) & (!is.finite(identifier) | identifier != floor(identifier))
-  )
-  invalid_character <- is.character(identifier) && any(
-    !is.na(identifier) & !nzchar(identifier)
-  )
-  if (!valid_type || invalid_numeric || invalid_character) {
+  if (!is.character(identifier) || any(!is.na(identifier) & !nzchar(identifier))) {
     stop(
       contract$id,
-      " must contain non-empty character or whole-number transaction identifiers.",
+      " must contain non-empty character transaction identifiers.",
       call. = FALSE
     )
   }
@@ -665,10 +658,9 @@ prior_exposure_validate_and_cast_public <- function(data, expected_schema) {
         stop(column, " must be logical for Arrow bool.", call. = FALSE)
       }
     } else if (target == "string") {
-      if ((!is.character(value) && !is.numeric(value)) || anyNA(value)) {
+      if (!is.character(value) || anyNA(value) || any(!nzchar(value))) {
         stop(column, " must contain nonmissing transaction identifiers.", call. = FALSE)
       }
-      result[[column]] <- as.character(value)
     }
   }
   id <- if ("house_id" %in% names(result)) "house_id" else if (
@@ -927,13 +919,8 @@ prior_exposure_stream <- function(
   }
 
   transaction_ids <- data$transaction_dt$transaction_id
-  valid_type <- is.character(transaction_ids) || is.numeric(transaction_ids)
-  invalid_character <- is.character(transaction_ids) && any(!nzchar(transaction_ids))
-  invalid_numeric <- is.numeric(transaction_ids) && any(
-    !is.finite(transaction_ids) | transaction_ids != floor(transaction_ids)
-  )
-  if (!valid_type || anyNA(transaction_ids) || invalid_character ||
-      invalid_numeric || anyDuplicated(transaction_ids)) {
+  if (!is.character(transaction_ids) || anyNA(transaction_ids) ||
+      any(!nzchar(transaction_ids)) || anyDuplicated(transaction_ids)) {
     stop(
       "Streaming requires unique, nonmissing transaction identifiers.",
       call. = FALSE

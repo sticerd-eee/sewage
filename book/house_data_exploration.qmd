@@ -134,11 +134,11 @@ set.seed(1)
 london_house_ids <- house_price_data %>%
   filter(
     region == "London",
-    transaction_id %in%
+    house_id %in%
       c(
-        "{1061746D-98D7-3C34-E063-4804A8C0F9E7}",
-        "{F5E8B081-90BE-3A13-E053-6C04A8C060B7}",
-        "{C18F412B-3F11-81A6-E053-6B04A8C0AD18}"
+        "0df4829d4e4c9b03",
+        "a48616c9efe00f38",
+        "75c9f976f797ab63"
       )
   )
 
