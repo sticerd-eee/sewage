@@ -51,6 +51,48 @@ assert_error_contains <- function(expression, expected, message) {
   }
 }
 
+# The standalone ID-artifact verifier must prove exact referential integrity in
+# bounded Arrow batches without loading a large artifact's full ID column.
+match_rate_env <- new.env(parent = globalenv())
+sys.source(
+  here::here("scripts", "R", "testing", "verify_id_artifact_match_rates.R"),
+  envir = match_rate_env
+)
+match_rate_root <- tempfile("id-match-rate-contract-")
+dir.create(match_rate_root, recursive = TRUE)
+match_source_path <- file.path(match_rate_root, "source.parquet")
+match_good_path <- file.path(match_rate_root, "good.parquet")
+match_bad_path <- file.path(match_rate_root, "bad.parquet")
+arrow::write_parquet(
+  tibble(house_id = c("01leadingzero", "02stablehash")),
+  match_source_path
+)
+arrow::write_parquet(
+  tibble(house_id = c("01leadingzero", "01leadingzero", "02stablehash")),
+  match_good_path
+)
+arrow::write_parquet(
+  tibble(house_id = c("01leadingzero", "stale-id")),
+  match_bad_path
+)
+match_good <- match_rate_env$verify_id_artifact(
+  "fixture-good", match_good_path, "house_id",
+  match_rate_env$read_unique_source_ids(match_source_path, "house_id")
+)
+assert_identical(match_good$match_rate, 1, "The match-rate verifier must report exact 100% integrity.")
+assert_identical(match_good$id_type, "string", "The verifier must enforce utf8 artifact IDs.")
+assert_error_contains(
+  match_rate_env$verify_id_artifacts(
+    list(list(
+      name = "fixture-bad", artifact_path = match_bad_path,
+      source_path = match_source_path, id = "house_id"
+    )),
+    required_match_rate = 1
+  ),
+  "below required 100%",
+  "The standalone verifier must fail on one stale artifact ID."
+)
+
 expected_contract_failures <- character()
 record_expected_contract_failure <- function(label, expression) {
   tryCatch(
@@ -993,7 +1035,7 @@ for (label in names(producer_specs)) {
 
 variant_schema_signatures <- list(
   sale_site = c(
-    house_id = "int32", price = "int32", n_days_in_window = "int32",
+    house_id = "string", price = "int32", n_days_in_window = "int32",
     site_id = "int32", distance_m = "double", spill_hrs = "double",
     spill_count = "double", site_missing = "bool",
     spill_count_daily_avg = "double", spill_hrs_daily_avg = "double",
@@ -1001,7 +1043,7 @@ variant_schema_signatures <- list(
     radius = "int32"
   ),
   rental_site = c(
-    rental_id = "int32", listing_price = "double",
+    rental_id = "string", listing_price = "double",
     n_days_in_window = "int32", site_id = "int32", distance_m = "double",
     spill_hrs = "double", spill_count = "double", site_missing = "bool",
     spill_count_daily_avg = "double", spill_hrs_daily_avg = "double",
@@ -1009,7 +1051,7 @@ variant_schema_signatures <- list(
     radius = "int32"
   ),
   sale_radius = c(
-    house_id = "int32", price = "int32", n_days_in_window = "int32",
+    house_id = "string", price = "int32", n_days_in_window = "int32",
     spill_hrs = "double", n_spill_sites = "int32", spill_count = "double",
     mean_distance = "double", min_distance = "double",
     has_missing_site = "bool", spill_count_daily_avg = "double",
@@ -1017,7 +1059,7 @@ variant_schema_signatures <- list(
     spill_hrs_weekly_avg = "double", radius = "int32"
   ),
   rental_radius = c(
-    rental_id = "int32", listing_price = "double",
+    rental_id = "string", listing_price = "double",
     n_days_in_window = "int32", spill_hrs = "double",
     n_spill_sites = "int32", spill_count = "double", mean_distance = "double",
     min_distance = "double", has_missing_site = "bool",
@@ -1232,7 +1274,7 @@ rewrite_transaction_ids <- function(root, market, ids, value_name = NULL) {
   }
 }
 
-for (id_case in c("missing", "duplicate", "character")) {
+for (id_case in c("missing", "duplicate")) {
   for (label in names(producer_specs)) {
     spec <- producer_specs[[label]]
     market <- if (identical(spec$id, "house_id")) "sale" else "rental"
@@ -1242,8 +1284,7 @@ for (id_case in c("missing", "duplicate", "character")) {
     ids <- switch(
       id_case,
       missing = c(1L, NA_integer_),
-      duplicate = c(1L, 1L),
-      character = c("1", "2")
+      duplicate = c(1L, 1L)
     )
     rewrite_transaction_ids(id_root, market, ids)
     producer_env <- source_prior_exposure_producer(spec$path)
@@ -1263,6 +1304,28 @@ for (id_case in c("missing", "duplicate", "character")) {
       }
     )
   }
+}
+
+# Content-stable string IDs, including leading zeros, must survive loading.
+for (label in names(producer_specs)) {
+  spec <- producer_specs[[label]]
+  market <- if (identical(spec$id, "house_id")) "sale" else "rental"
+  id_root <- tempfile("prior-exposure-character-id-")
+  dir.create(id_root, recursive = TRUE)
+  write_eligibility_fixture(id_root, rep("2021-03-01 00:00:00", 2L))
+  leading_ids <- c("01leadingzero", "02stablehash")
+  rewrite_transaction_ids(id_root, market, leading_ids)
+  producer_env <- source_prior_exposure_producer(spec$path)
+  producer_env$CONFIG$processed_dir <- id_root
+  producer_env$CONFIG$site_group_crosswalk_path <- file.path(
+    id_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+  )
+  data <- producer_env$load_data()
+  assert_identical(
+    data$transaction_dt$transaction_id,
+    leading_ids,
+    paste(label, "must preserve character transaction IDs including leading zeros")
+  )
 }
 
 # Rental inputs must use the established value name, never a phantom `price`.
@@ -1428,26 +1491,26 @@ public_contract_candidate <- function(label) {
   candidate <- switch(
     label,
     sale_site = c(list(
-      house_id = rep(1L, 3L), price = rep(100000L, 3L),
+      house_id = rep("01leadingzero", 3L), price = rep(100000L, 3L),
       n_days_in_window = rep(60L, 3L), site_id = rep(10L, 3L),
       distance_m = rep(100, 3L), spill_hrs = c(0, 60, 120),
       spill_count = c(0, 30, 60), site_missing = rep(FALSE, 3L)
     ), common_rates),
     rental_site = c(list(
-      rental_id = rep(1L, 3L), listing_price = rep(1200, 3L),
+      rental_id = rep("01leadingzero", 3L), listing_price = rep(1200, 3L),
       n_days_in_window = rep(60L, 3L), site_id = rep(10L, 3L),
       distance_m = rep(100, 3L), spill_hrs = c(0, 60, 120),
       spill_count = c(0, 30, 60), site_missing = rep(FALSE, 3L)
     ), common_rates),
     sale_radius = c(list(
-      house_id = rep(1L, 3L), price = rep(100000L, 3L),
+      house_id = rep("01leadingzero", 3L), price = rep(100000L, 3L),
       n_days_in_window = rep(60L, 3L), spill_hrs = c(0, 60, 120),
       n_spill_sites = c(0L, 1L, 2L), spill_count = c(0, 30, 60),
       mean_distance = c(NA_real_, 100, 200), min_distance = c(NA_real_, 100, 100),
       has_missing_site = rep(FALSE, 3L)
     ), common_rates),
     rental_radius = c(list(
-      rental_id = rep(1L, 3L), listing_price = rep(1200, 3L),
+      rental_id = rep("01leadingzero", 3L), listing_price = rep(1200, 3L),
       n_days_in_window = rep(60L, 3L), spill_hrs = c(0, 60, 120),
       n_spill_sites = c(0L, 1L, 2L), spill_count = c(0, 30, 60),
       mean_distance = c(NA_real_, 100, 200), min_distance = c(NA_real_, 100, 100),
@@ -1470,13 +1533,10 @@ for (label in names(variant_schema_signatures)) {
     paste(label, "must reopen with its exact schema")
   )
 
-  character_identifier <- data.table::copy(candidate)
-  character_identifier[[names(candidate)[1]]] <- rep("1", nrow(candidate))
   drift_cases <- list(
     missing_field = candidate[, setdiff(names(candidate), "spill_hrs"), with = FALSE],
     extra_field = data.table::copy(candidate)[, unexpected := 1],
-    reordered_fields = candidate[, rev(names(candidate)), with = FALSE],
-    character_identifier = character_identifier
+    reordered_fields = candidate[, rev(names(candidate)), with = FALSE]
   )
   if (grepl("^rental", label)) {
     wrong_value <- data.table::copy(candidate)
@@ -1521,7 +1581,7 @@ for (label in names(variant_schema_signatures)) {
   )
 
   missing_id_candidate <- data.table::copy(candidate)
-  missing_id_candidate[1, (names(candidate)[1]) := NA_integer_]
+  missing_id_candidate[1, (names(candidate)[1]) := NA_character_]
   missing_id_path <- tempfile(paste0("prior-exposure-missing-id-", label, "-"))
   missing_id_error <- tryCatch(
     publish_prior_exposure_dataset(
@@ -1594,12 +1654,12 @@ for (label in names(producer_specs)) {
   )
   if (grepl("site$", label)) {
     assert_identical(
-      unique(result[[spec$id]]), 2L,
+      unique(result[[spec$id]]), "2",
       paste(label, "must preserve the populated chunk after an empty first chunk")
     )
   } else {
     assert_identical(
-      sort(unique(result[[spec$id]])), c(1L, 2L),
+      sort(unique(result[[spec$id]])), c("1", "2"),
       paste(label, "must preserve two same-radius chunk key sets without overwrite")
     )
     zero_rows <- result[get(spec$id) == 1L]

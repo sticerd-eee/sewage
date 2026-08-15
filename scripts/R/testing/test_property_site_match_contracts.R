@@ -135,7 +135,9 @@ run_stream <- function(spec, properties = property_fixture, chunk_size = 2L,
                        output_path = tempfile(fileext = ".parquet"),
                        fail_at = NULL,
                        close_writer = function(writer) writer$Close(),
-                       promote_stage = function(from, to) file.rename(from, to)) {
+                       promote_stage = function(from, to) file.rename(from, to),
+                       settle_publication = function(verify, output_path,
+                                                     stage_path) verify()) {
   names(properties)[names(properties) == "property_id"] <- spec$id_column
   data <- setNames(list(properties), spec$data_key)
   data$spill <- site_fixture
@@ -146,7 +148,8 @@ run_stream <- function(spec, properties = property_fixture, chunk_size = 2L,
     chunk_size = chunk_size,
     fail_at = fail_at,
     close_writer = close_writer,
-    promote_stage = promote_stage
+    promote_stage = promote_stage,
+    settle_publication = settle_publication
   )
   output_path
 }
@@ -301,7 +304,8 @@ for (producer_name in names(producer_specs)) {
     }),
     validation = list(fail_at = "validation"),
     sample_oracle = list(fail_at = "sample_oracle"),
-    promotion = list(promote_stage = function(from, to) FALSE)
+    promotion = list(promote_stage = function(from, to) FALSE),
+    promotion_false_success = list(promote_stage = function(from, to) TRUE)
   )
   for (failure_point in names(failure_cases)) {
     failure <- tryCatch(
@@ -338,6 +342,42 @@ for (producer_name in names(producer_specs)) {
       paste(producer_name, "must clean its stage after", failure_point)
     )
   }
+
+  delayed_reversion_path <- tempfile(
+    paste0(producer_name, "-delayed-reversion-"),
+    fileext = ".parquet"
+  )
+  delayed_reversion <- tryCatch(
+    run_stream(
+      spec,
+      chunk_size = 2L,
+      output_path = delayed_reversion_path,
+      settle_publication = function(verify, output_path, stage_path) {
+        verify()
+        assert_true(
+          file.rename(output_path, stage_path),
+          "Delayed-reversion fixture must restore the stage path."
+        )
+        verify()
+      }
+    ),
+    error = identity
+  )
+  assert_true(
+    inherits(delayed_reversion, "error"),
+    paste(producer_name, "must reject a delayed post-promotion reversion.")
+  )
+  assert_true(
+    !file.exists(delayed_reversion_path),
+    paste(producer_name, "must not leave a canonical after delayed reversion.")
+  )
+  delayed_stages <- stage_siblings(delayed_reversion_path)
+  assert_identical(
+    length(delayed_stages),
+    1L,
+    paste(producer_name, "must preserve the validated stage after delayed reversion.")
+  )
+  unlink(delayed_stages)
 
   diagnostic_properties <- tibble(
     property_id = 1:4,

@@ -218,7 +218,7 @@ match_rental_chunk <- function(rentals_sf, spill_sites_sf, spill_lookup, radius_
 
 rental_lookup_schema <- function() {
   arrow::schema(
-    rental_id = arrow::int32(),
+    rental_id = arrow::utf8(),
     site_id = arrow::int32(),
     distance_m = arrow::float64(),
     distance_km = arrow::float64(),
@@ -228,7 +228,7 @@ rental_lookup_schema <- function() {
 
 normalise_rental_lookup <- function(data) {
   tibble::tibble(
-    rental_id = as.integer(data$rental_id),
+    rental_id = as.character(data$rental_id),
     site_id = as.integer(data$site_id),
     distance_m = as.double(data$distance_m),
     distance_km = as.double(data$distance_km),
@@ -318,11 +318,38 @@ validate_rental_stage <- function(stage_path, expected_schema,
   invisible(TRUE)
 }
 
+validate_rental_publication <- function(output_path, stage_path, expected_schema,
+                                        expected_rows, expected_row_groups) {
+  if (!file.exists(output_path) || file.exists(stage_path)) {
+    stop(
+      "Rental lookup promotion did not materialize at the canonical path.",
+      call. = FALSE
+    )
+  }
+  reader <- arrow::ParquetFileReader$create(output_path)
+  if (!identical(reader$GetSchema()$ToString(), expected_schema$ToString()) ||
+      reader$num_rows != expected_rows ||
+      reader$num_row_groups != expected_row_groups) {
+    stop("Published rental lookup failed canonical verification.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+settle_rental_publication <- function(verify, output_path, stage_path,
+                                      delays = c(10, 20, 30)) {
+  for (delay in delays) {
+    Sys.sleep(delay)
+    verify()
+  }
+  invisible(TRUE)
+}
+
 write_rental_lookup <- function(rentals_sf, spill_sites_sf, spill_lookup,
                                 output_path, radius_km, chunk_size,
                                 fail_at = NULL,
                                 close_writer = function(writer) writer$Close(),
-                                promote_stage = function(from, to) file.rename(from, to)) {
+                                promote_stage = function(from, to) file.rename(from, to),
+                                settle_publication = settle_rental_publication) {
   if (!is.numeric(radius_km) || length(radius_km) != 1L ||
       is.na(radius_km) || radius_km <= 0) {
     stop("radius_km must be one positive number.", call. = FALSE)
@@ -338,11 +365,12 @@ write_rental_lookup <- function(rentals_sf, spill_sites_sf, spill_lookup,
   output_stream <- NULL
   writer_open <- FALSE
   stream_open <- FALSE
+  preserve_stage <- FALSE
   on.exit(
     {
       if (writer_open) try(writer$Close(), silent = TRUE)
       if (stream_open) try(output_stream$close(), silent = TRUE)
-      unlink(stage_path)
+      if (!preserve_stage) unlink(stage_path)
     },
     add = TRUE
   )
@@ -422,6 +450,26 @@ write_rental_lookup <- function(rentals_sf, spill_sites_sf, spill_lookup,
   if (!promote_stage(stage_path, output_path)) {
     stop("Failed to promote the staged rental lookup.", call. = FALSE)
   }
+  validate_rental_publication(
+    output_path,
+    stage_path,
+    expected_schema = schema,
+    expected_rows = output_rows,
+    expected_row_groups = length(starts)
+  )
+  preserve_stage <- TRUE
+  settle_publication(
+    function() validate_rental_publication(
+      output_path,
+      stage_path,
+      expected_schema = schema,
+      expected_rows = output_rows,
+      expected_row_groups = length(starts)
+    ),
+    output_path,
+    stage_path
+  )
+  preserve_stage <- FALSE
   logger::log_info(
     "Published {output_rows} rental lookup rows across {length(starts)} row groups to {output_path}"
   )
@@ -436,7 +484,8 @@ write_rental_lookup <- function(rentals_sf, spill_sites_sf, spill_lookup,
 process_spatial_data <- function(data, output_path, radius_km, chunk_size,
                                  fail_at = NULL,
                                  close_writer = function(writer) writer$Close(),
-                                 promote_stage = function(from, to) file.rename(from, to)) {
+                                 promote_stage = function(from, to) file.rename(from, to),
+                                 settle_publication = settle_rental_publication) {
   rentals_sf <- prepare_rental_data(data$rentals)
   spill_data <- prepare_spill_sites(data$spill)
   write_rental_lookup(
@@ -448,7 +497,8 @@ process_spatial_data <- function(data, output_path, radius_km, chunk_size,
     chunk_size = chunk_size,
     fail_at = fail_at,
     close_writer = close_writer,
-    promote_stage = promote_stage
+    promote_stage = promote_stage,
+    settle_publication = settle_publication
   )
 }
 

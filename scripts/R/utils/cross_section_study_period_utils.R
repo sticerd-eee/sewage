@@ -44,7 +44,7 @@ study_period_public_schema <- function(market) {
 
   if (market == "sale") {
     return(arrow::schema(
-      house_id = arrow::int32(),
+      house_id = arrow::utf8(),
       price = arrow::int32(),
       ppd_category = arrow::utf8(),
       n_days_in_window = arrow::int32(),
@@ -64,7 +64,7 @@ study_period_public_schema <- function(market) {
   }
 
   arrow::schema(
-    rental_id = arrow::int32(),
+    rental_id = arrow::utf8(),
     listing_price = arrow::float64(),
     n_days_in_window = arrow::int32(),
     spill_hrs = arrow::float64(),
@@ -252,12 +252,14 @@ study_period_source_ledger <- function(source, contract) {
   source_columns <- contract$source_columns
   source <- source[, ..source_columns]
   id <- source[[contract$id]]
-  if (!is.numeric(id) || anyNA(id) || any(!is.finite(id)) ||
-      any(id != floor(id)) || any(id < -.Machine$integer.max - 1) ||
-      any(id > .Machine$integer.max)) {
-    stop(contract$id, " must contain nonmissing lossless int32 values.", call. = FALSE)
+  valid_type <- is.character(id) || is.numeric(id)
+  invalid_numeric <- is.numeric(id) && any(
+    !is.na(id) & (!is.finite(id) | id != floor(id))
+  )
+  invalid_character <- is.character(id) && any(!is.na(id) & !nzchar(id))
+  if (!valid_type || anyNA(id) || invalid_numeric || invalid_character) {
+    stop(contract$id, " must contain nonmissing transaction identifiers.", call. = FALSE)
   }
-  data.table::set(source, j = contract$id, value = as.integer(id))
   if (anyDuplicated(source[[contract$id]])) {
     stop("Source metadata contains duplicate transaction identifiers.", call. = FALSE)
   }
@@ -310,12 +312,18 @@ study_period_validate_lookup_row_group <- function(row_group, contract, ledger) 
   }
 
   transaction_id <- lookup[[contract$id]]
-  if (!is.numeric(transaction_id) || anyNA(transaction_id) ||
-      any(!is.finite(transaction_id)) ||
-      any(transaction_id != floor(transaction_id))) {
-    stop("Lookup transaction identifiers must be nonmissing integers.", call. = FALSE)
+  valid_type <- is.character(transaction_id) || is.numeric(transaction_id)
+  invalid_numeric <- is.numeric(transaction_id) && any(
+    !is.na(transaction_id) &
+      (!is.finite(transaction_id) | transaction_id != floor(transaction_id))
+  )
+  invalid_character <- is.character(transaction_id) && any(
+    !is.na(transaction_id) & !nzchar(transaction_id)
+  )
+  if (!valid_type || anyNA(transaction_id) ||
+      invalid_numeric || invalid_character) {
+    stop("Lookup transaction identifiers must be nonmissing.", call. = FALSE)
   }
-  data.table::set(lookup, j = contract$id, value = as.integer(transaction_id))
   source_position <- match(lookup[[contract$id]], ledger[[contract$id]])
   if (anyNA(source_position)) {
     stop("Lookup contains a transaction ID absent from the source ledger.", call. = FALSE)
@@ -422,9 +430,10 @@ study_period_validate_and_cast_public <- function(
         stop(column, " must contain nonmissing logical values.", call. = FALSE)
       }
     } else if (target == "string") {
-      if (!is.character(value) || anyNA(value)) {
+      if ((!is.character(value) && !is.numeric(value)) || anyNA(value)) {
         stop(column, " must contain nonmissing strings.", call. = FALSE)
       }
+      data[[column]] <- as.character(value)
     }
   }
 
@@ -537,35 +546,43 @@ study_period_reduce_validated_lookup_row_group <- function(
     expanded <- matched[rep(seq_len(matched_rows), each = length(radii))]
     expanded[, radius := rep(radii, times = matched_rows)]
     expanded <- expanded[distance_m <= radius]
-    totals <- data.table::as.data.table(data.table::copy(site_totals))
-    required_totals <- c(
-      "site_id", "spill_count", "spill_hrs", "has_missing_evidence"
-    )
-    if (!all(required_totals %in% names(totals)) || anyDuplicated(totals$site_id)) {
-      stop("Collapsed Site Group totals violate their unique schema.", call. = FALSE)
-    }
-    expanded <- totals[expanded, on = "site_id"]
-    expanded[, evidence_unknown :=
-      is.na(has_missing_evidence) | has_missing_evidence |
-        is.na(spill_count) | is.na(spill_hrs)]
-    aggregate <- expanded[, {
-      if (.N < 1L || anyNA(distance_m)) {
-        stop(
-          "Matched Site Group aggregation requires nonmissing distances.",
-          call. = FALSE
-        )
-      }
-      unknown <- any(evidence_unknown)
-      list(
-        n_spill_sites = as.integer(.N),
-        spill_count = if (unknown) NA_real_ else base::sum(spill_count),
-        spill_hrs = if (unknown) NA_real_ else base::sum(spill_hrs),
-        mean_distance = base::mean(distance_m),
-        min_distance = base::min(distance_m),
-        has_missing_site = unknown
+    if (nrow(expanded) > 0L) {
+      totals <- data.table::as.data.table(data.table::copy(site_totals))
+      required_totals <- c(
+        "site_id", "spill_count", "spill_hrs", "has_missing_evidence"
       )
-    }, by = c(id, "radius")]
-    base <- merge(base, aggregate, by = c(id, "radius"), all.x = TRUE, sort = FALSE)
+      if (!all(required_totals %in% names(totals)) || anyDuplicated(totals$site_id)) {
+        stop("Collapsed Site Group totals violate their unique schema.", call. = FALSE)
+      }
+      expanded <- totals[expanded, on = "site_id"]
+      expanded[, evidence_unknown :=
+        is.na(has_missing_evidence) | has_missing_evidence |
+          is.na(spill_count) | is.na(spill_hrs)]
+      aggregate <- expanded[, {
+        if (anyNA(distance_m)) {
+          stop(
+            "Matched Site Group aggregation requires nonmissing distances.",
+            call. = FALSE
+          )
+        }
+        unknown <- any(evidence_unknown)
+        list(
+          n_spill_sites = as.integer(.N),
+          spill_count = if (unknown) NA_real_ else base::sum(spill_count),
+          spill_hrs = if (unknown) NA_real_ else base::sum(spill_hrs),
+          mean_distance = base::mean(distance_m),
+          min_distance = base::min(distance_m),
+          has_missing_site = unknown
+        )
+      }, by = c(id, "radius")]
+      base <- merge(base, aggregate, by = c(id, "radius"), all.x = TRUE, sort = FALSE)
+    } else {
+      base[, `:=`(
+        n_spill_sites = NA_integer_, spill_count = NA_real_, spill_hrs = NA_real_,
+        mean_distance = NA_real_, min_distance = NA_real_,
+        has_missing_site = NA
+      )]
+    }
   } else {
     base[, `:=`(
       n_spill_sites = NA_integer_, spill_count = NA_real_, spill_hrs = NA_real_,
