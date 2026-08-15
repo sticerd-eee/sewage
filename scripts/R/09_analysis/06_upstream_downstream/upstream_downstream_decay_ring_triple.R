@@ -155,7 +155,7 @@ sales <- import(
   trust = TRUE
 ) |>
   select(
-    -transaction_id, -date_of_transfer, -quality, -paon, -saon, -street,
+    -date_of_transfer, -quality, -paon, -saon, -street,
     -locality, -town_city, -district, -county, -ppd_category, -record_status
   ) |>
   mutate(

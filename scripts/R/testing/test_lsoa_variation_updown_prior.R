@@ -12,8 +12,8 @@
 #
 # Samples:
 #   - Upstream/downstream prior sample:
-#       * sales: prior_to_sale/house_site + river-direction joins/filters
-#       * rentals: prior_to_rental/rental_site + river-direction joins/filters
+#       * sales: prior_to_sale_house_site + river-direction joins/filters
+#       * rentals: prior_to_rental_rental_site + river-direction joins/filters
 #       * exposure vars: upstream_count, downstream_count
 #   - Hedonic continuous prior sample:
 #       * sales: prior_to_sale
@@ -237,7 +237,7 @@ build_updown_prior_sales_sample <- function(area_var = "lsoa") {
   cat("Building upstream/downstream prior sales sample...\n")
 
   dat_cs_sales <- arrow::open_dataset(
-    here::here("data", "processed", "cross_section", "sales", "prior_to_sale", "house_site")
+    here::here("data", "processed", "cross_section", "sales", "prior_to_sale_house_site")
   ) |>
     filter(radius == RAD) |>
     collect()
@@ -247,7 +247,6 @@ build_updown_prior_sales_sample <- function(area_var = "lsoa") {
     trust = TRUE
   ) |>
     select(
-      -transaction_id,
       -date_of_transfer,
       -quality,
       -paon,
@@ -327,7 +326,7 @@ build_updown_prior_rentals_sample <- function(area_var = "lsoa") {
   cat("Building upstream/downstream prior rentals sample...\n")
 
   dat_cs_rentals <- arrow::open_dataset(
-    here::here("data", "processed", "cross_section", "rentals", "prior_to_rental", "rental_site")
+    here::here("data", "processed", "cross_section", "rentals", "prior_to_rental_rental_site")
   ) |>
     filter(radius == RAD) |>
     collect()
@@ -418,7 +417,6 @@ build_hedonic_prior_sales_sample <- function(area_var = "lsoa") {
     trust = TRUE
   ) |>
     select(
-      -transaction_id,
       -date_of_transfer,
       -quality,
       -paon,
