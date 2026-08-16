@@ -28,6 +28,9 @@ The authoritative record of Site Group membership and reporting-year status. It 
 ### Annual Status
 The per-Site-Group-year classification that disambiguates the absence of events in the positives-only event feed: `reported_zero` (return filed, both metrics zero), `reported_positive`, `reported_na` (return filed, metrics missing), or `absent` (no return that year).
 
+### Annual-Return NA-Then-Absent Indicator
+A radius-level transaction flag equal to true when the same nearby Site Group has `reported_na` before the transaction and is later `absent` within the full annual-return horizon. The later horizon uses all years currently available in the crosswalk, so the flag may change when new monitoring years are added; it does not describe missing individual EDM event data.
+
 ### Record-Linkage Component
 A connected group of Annual-Return Sites implied by pairwise matching evidence. A component is only valid as one canonical track when it satisfies the project's site-identity invariants.
 

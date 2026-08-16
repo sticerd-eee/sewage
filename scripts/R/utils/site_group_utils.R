@@ -139,11 +139,16 @@ read_site_group_missing_flags <- function(file_path, years) {
 #'   include `base_year - 1L` for the explicit empty prefix.
 #' @param include_event_evidence Whether to include cumulative unknown-event
 #'   evidence alongside the historical prefix-missingness contract.
+#' @param include_annual_return_sequence Whether to include the site-level
+#'   `annual_returns_na_then_absent` sequence flag. The full available
+#'   crosswalk horizon is used for the later `absent` test.
 #' @return A tibble unique on `site_id` and `cutoff_year`, with logical
-#'   `site_missing` and, when requested, `has_unknown_event_evidence`.
+#'   `site_missing` and, when requested, `has_unknown_event_evidence` and
+#'   `annual_returns_na_then_absent`.
 derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
                                                    cutoff_years,
-                                                   include_event_evidence = FALSE) {
+                                                   include_event_evidence = FALSE,
+                                                   include_annual_return_sequence = FALSE) {
   required_columns <- c(
     "site_id", "year", "water_company", "annual_status",
     "matched_event_count"
@@ -244,10 +249,21 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
   }
 
   non_empty_cutoffs <- cutoff_years[cutoff_years >= base_year]
-  required_years <- if (length(non_empty_cutoffs) == 0L) {
+  full_window_end_year <- if (isTRUE(include_annual_return_sequence)) {
+    max(crosswalk$year)
+  } else {
+    -Inf
+  }
+  required_end_year <- max(
+    c(
+      full_window_end_year,
+      if (length(non_empty_cutoffs) == 0L) -Inf else max(non_empty_cutoffs)
+    )
+  )
+  required_years <- if (!is.finite(required_end_year)) {
     integer()
   } else {
-    seq.int(base_year, max(non_empty_cutoffs))
+    seq.int(base_year, required_end_year)
   }
   unsupported_years <- setdiff(required_years, sort(unique(crosswalk$year)))
   if (length(unsupported_years) > 0L) {
@@ -268,7 +284,8 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
       site_id = integer(),
       cutoff_year = integer(),
       site_missing = logical(),
-      has_unknown_event_evidence = logical()
+      has_unknown_event_evidence = logical(),
+      has_reported_na_prefix = logical()
     )
   } else {
     tidyr::expand_grid(
@@ -294,14 +311,43 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
           (.data$annual_status == "reported_positive" &
             .data$matched_event_count == 0L),
         site_missing = dplyr::cumany(.data$annual_status == "absent"),
+        has_reported_na_prefix = dplyr::cumany(
+          .data$annual_status == "reported_na"
+        ),
         has_unknown_event_evidence = dplyr::cumany(.data$event_evidence_unknown),
         .by = "site_id"
       ) |>
       dplyr::filter(.data$cutoff_year %in% cutoff_years) |>
       dplyr::select(
         "site_id", "cutoff_year", "site_missing",
-        "has_unknown_event_evidence"
+        "has_unknown_event_evidence", "has_reported_na_prefix"
       )
+  }
+
+  if (isTRUE(include_annual_return_sequence) && nrow(non_empty_prefixes) > 0L) {
+    absent_rows <- observed |>
+      dplyr::filter(.data$annual_status == "absent")
+    last_absent_year <- if (nrow(absent_rows) == 0L) {
+      tibble::tibble(site_id = integer(), last_absent_year = integer())
+    } else {
+      absent_rows |>
+        dplyr::summarise(
+          last_absent_year = max(.data$year),
+          .by = "site_id"
+        )
+    }
+    non_empty_prefixes <- non_empty_prefixes |>
+      dplyr::left_join(last_absent_year, by = "site_id") |>
+      dplyr::mutate(
+        annual_returns_na_then_absent =
+          .data$has_reported_na_prefix &
+          !.data$site_missing &
+          !is.na(.data$last_absent_year) &
+          .data$last_absent_year > .data$cutoff_year
+      ) |>
+      dplyr::select(-"last_absent_year")
+  } else {
+    non_empty_prefixes$annual_returns_na_then_absent <- FALSE
   }
 
   empty_prefixes <- if ((base_year - 1L) %in% cutoff_years) {
@@ -309,24 +355,31 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
       site_id = all_site_ids,
       cutoff_year = base_year - 1L,
       site_missing = FALSE,
-      has_unknown_event_evidence = FALSE
+      has_unknown_event_evidence = FALSE,
+      has_reported_na_prefix = FALSE,
+      annual_returns_na_then_absent = FALSE
     )
   } else {
     tibble::tibble(
       site_id = integer(),
       cutoff_year = integer(),
       site_missing = logical(),
-      has_unknown_event_evidence = logical()
+      has_unknown_event_evidence = logical(),
+      has_reported_na_prefix = logical(),
+      annual_returns_na_then_absent = logical()
     )
   }
 
   prefixes <- dplyr::bind_rows(empty_prefixes, non_empty_prefixes) |>
     dplyr::arrange(.data$site_id, .data$cutoff_year)
-  if (!isTRUE(include_event_evidence)) {
-    prefixes <- dplyr::select(
-      prefixes, "site_id", "cutoff_year", "site_missing"
-    )
+  output_columns <- c("site_id", "cutoff_year", "site_missing")
+  if (isTRUE(include_event_evidence)) {
+    output_columns <- c(output_columns, "has_unknown_event_evidence")
   }
+  if (isTRUE(include_annual_return_sequence)) {
+    output_columns <- c(output_columns, "annual_returns_na_then_absent")
+  }
+  prefixes <- dplyr::select(prefixes, dplyr::all_of(output_columns))
   prefixes
 }
 
