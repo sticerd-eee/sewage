@@ -28,7 +28,9 @@ Inputs on disk are current (2024 sales already in cleaned data, panels, and cros
 
   Console diagnostics: Google Trends 84 months (2018-01--2024-12), max 100 at 2022-08; LexisNexis 75 months, max 54; scale factor 1.852. All dependent text claims were verified against these and left unchanged — `short_pres.tex` L251/L268/L698 ("2018--2024", "0--100"), L688 ("post-August 2022 peak"), and `02_background_context.tex` L90 ("maximum article count (54)", "for 2018--2024").
 
-  Note for anyone touching the year constants: `END_YEAR <- 2024.5` works as a filter (`Year <= END_YEAR`) but is also interpolated into the x-axis limits as `paste0(END_YEAR, "-12-31")`, which `as.Date` cannot parse, so the upper limit silently becomes `NA` and the axis falls back to the data extent. Also, the scattered zero months in the Google Trends series (2023-11, 2023-12, 2024-03, 2024-10--12) are genuine stored zeros, not missing data — normal for a low-volume term indexed against its peak.
+  **Axis-limit bug, since fixed.** `END_YEAR <- 2024.5` worked as a filter (`Year <= END_YEAR`) but was also interpolated into the x-axis limits as `paste0(END_YEAR, "-12-31")` → `"2024.5-12-31"`, which `as.Date` cannot parse. It returned `NA` rather than erroring, so the upper limit was silently dropped and the axis fell back to the data extent. Fixed 2026-08-16: `START_YEAR`/`END_YEAR` are now integers (`2018L`/`2024L`), the limits are built with `sprintf("%d-01-01", ...)`, and a `stopifnot` next to the constants rejects a fractional year with a clear message. Row selection is unchanged (still 84 months, maxima 100/54); the axis now genuinely ends 2024-12-31 instead of at the last data point (2024-12-01), which widens the right margin slightly. Both variants were re-exported and recopied to Overleaf.
+
+  Also note: the scattered zero months in the Google Trends series (2023-11, 2023-12, 2024-03, 2024-10--12) are genuine stored zeros, not missing data — normal for a low-volume term indexed against its peak.
 
 ## Category 2 — edit script in `09_analysis`, then run
 
