@@ -86,7 +86,6 @@ repeat_sales_config <- function(output_dir = here::here(
     price_ratio_review_path = file.path(output_dir, "repeated_sales_price_ratios_candidate.parquet"),
     same_day_review_path = file.path(output_dir, "repeated_sales_same_day_candidate.parquet"),
     market = "sales",
-    log_name = "repeat_sales",
     year_min = 2014L,
     year_max = 2024L,
     # Observed 2026-08-15 baselines: coverage 0.99681926, repeat share 0.36233545.

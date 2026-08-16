@@ -8,6 +8,14 @@
 HASH_NA_TOKEN <- "\u001e"
 HASH_FIELD_SEPARATOR <- "\u001f"
 
+# The locked seven-field Zoopla rental identity composite, in hash order. Every
+# consumer that hashes, deduplicates, or audits a rental identity reads this one
+# definition; the field set and its order are a public-ID contract.
+RENTAL_IDENTITY_FIELDS <- c(
+  "postcode", "address_line_01", "address_line_02", "address_line_03",
+  "listing_price", "latest_to_rent", "rented"
+)
+
 assert_hash_dependencies <- function() {
   if (!requireNamespace("digest", quietly = TRUE)) {
     stop(
@@ -23,7 +31,18 @@ format_hash_field <- function(x) {
   if (inherits(x, "Date") || inherits(x, "POSIXt")) {
     value <- format(x, "%Y-%m-%d")
   } else if (is.numeric(x)) {
-    value <- format(x, scientific = FALSE, trim = TRUE)
+    # format() derives one common format from the whole vector, so a value's
+    # text would otherwise depend on the other rows in the batch and a row's
+    # hash would not be recomputable on its own. Format each distinct value
+    # separately; mapping back is identical to formatting element by element,
+    # and costs far less on multi-million-row inputs.
+    uniques <- unique(x)
+    formatted <- vapply(
+      uniques,
+      function(v) format(v, scientific = FALSE, trim = TRUE),
+      character(1)
+    )
+    value <- formatted[match(x, uniques)]
   } else {
     value <- as.character(x)
   }
@@ -92,11 +111,5 @@ hash_transaction_id <- function(transaction_id) {
 
 #' Hash the locked seven-field Zoopla rental identity composite
 hash_rental_identity <- function(data) {
-  hash_fields(
-    data,
-    c(
-      "postcode", "address_line_01", "address_line_02", "address_line_03",
-      "listing_price", "latest_to_rent", "rented"
-    )
-  )
+  hash_fields(data, RENTAL_IDENTITY_FIELDS)
 }

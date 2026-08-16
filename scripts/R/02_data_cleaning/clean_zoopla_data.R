@@ -71,10 +71,6 @@ CLEANING_METADATA_REQUIRED_KEYS <- c(
   "cleaning_source_row_count",
   "cleaning_parent_role"
 )
-RENTAL_IDENTITY_FIELDS <- c(
-  "postcode", "address_line_01", "address_line_02", "address_line_03",
-  "listing_price", "latest_to_rent", "rented"
-)
 
 # Configuration
 ############################################################

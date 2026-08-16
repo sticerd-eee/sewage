@@ -79,10 +79,7 @@ repeat_rentals_config <- function(output_dir = here::here(
     ),
     primary_address_col = "address_line_01",
     property_type_col = "property_type",
-    duplicate_check_cols = c(
-      "postcode", "address_line_01", "address_line_02", "address_line_03",
-      "listing_price", "latest_to_rent", "rented"
-    ),
+    duplicate_check_cols = RENTAL_IDENTITY_FIELDS,
     input_path = here::here(
       "data", "processed", "zoopla", "zoopla_rentals_long_run.parquet"
     ),
@@ -93,7 +90,6 @@ repeat_rentals_config <- function(output_dir = here::here(
     price_ratio_review_path = file.path(output_dir, "repeated_rentals_price_ratios_candidate.parquet"),
     same_day_review_path = file.path(output_dir, "repeated_rentals_same_day_candidate.parquet"),
     market = "rentals",
-    log_name = "repeat_rentals",
     year_min = 2014L,
     year_max = 2023L,
     # Observed 2026-08-15 baselines: coverage 1.00000000, repeat share 0.74848970.

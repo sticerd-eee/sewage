@@ -75,7 +75,7 @@ make_config <- function(name = "base", coverage_floor = 0) {
     price_ratio_review_path = file.path(test_dir, paste0(name, "-ratios.parquet")),
     same_day_review_path = file.path(test_dir, paste0(name, "-same-day.parquet")),
     market = "sales",
-    log_name = paste0("repeat-contract-", name),
+    log_file = file.path(test_dir, paste0(name, ".log")),
     year_min = 2014L,
     year_max = 2024L,
     key_coverage_floor = coverage_floor,
@@ -128,6 +128,26 @@ assert_error_matching(
   serialize_hash_fields(reserved_input, "value"),
   "reserved",
   "Hash serialization must reject reserved tokens in source fields."
+)
+
+# Numeric serialization must depend on the row alone, never on its batch.
+mixed_batch <- serialize_hash_fields(data.frame(p = c(1200, 1300.5)), "p")
+assert_identical(
+  mixed_batch[[1]],
+  serialize_hash_fields(data.frame(p = 1200), "p"),
+  "A whole-valued numeric must serialize identically beside a fractional value."
+)
+assert_identical(
+  mixed_batch[[2]],
+  serialize_hash_fields(data.frame(p = 1300.5), "p"),
+  "A fractional numeric must serialize identically beside a whole value."
+)
+fractional_hash_input <- copy(hash_input)
+fractional_hash_input[2, listing_price := 1300.5]
+assert_identical(
+  hash_rental_identity(fractional_hash_input)[[1]],
+  hash_rental_identity(fractional_hash_input[1]),
+  "A rental identity hash must be recomputable from its own row alone."
 )
 
 # Happy path, punctuation normalization, missing-component handling, and singles.

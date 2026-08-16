@@ -23,7 +23,7 @@ assert_repeat_dependencies <- function() {
 validate_repeat_config <- function(config) {
   required <- c(
     "id_col", "date_col", "price_col", "postcode_col", "address_cols",
-    "primary_address_col", "input_path", "output_path",
+    "primary_address_col", "input_path", "output_path", "log_file",
     "large_group_review_path", "price_ratio_review_path", "same_day_review_path",
     "market",
     "year_min", "year_max", "key_coverage_floor", "repeat_share_floor",
