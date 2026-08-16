@@ -24,7 +24,8 @@ validate_repeat_config <- function(config) {
   required <- c(
     "id_col", "date_col", "price_col", "postcode_col", "address_cols",
     "primary_address_col", "input_path", "output_path",
-    "large_group_review_path", "price_ratio_review_path", "market",
+    "large_group_review_path", "price_ratio_review_path", "same_day_review_path",
+    "market",
     "year_min", "year_max", "key_coverage_floor", "repeat_share_floor",
     "large_group_size", "extreme_annualized_price_ratio"
   )
@@ -41,6 +42,18 @@ validate_repeat_config <- function(config) {
     stop("Coverage and repeat-share floors must lie in [0, 1].", call. = FALSE)
   }
   invisible(config)
+}
+
+#' Coerce a transaction date column to Date
+#'
+#' Sales dates arrive as POSIXct (Arrow timestamp) and rental dates as Date
+#' (Arrow date32). Date arithmetic on POSIXct yields a difftime whose unit is
+#' auto-selected from the smallest difference in the vector, so a single
+#' same-day pair silently reinterprets the whole column as seconds. Normalizing
+#' to Date removes that dependence on the data's own contents.
+as_transaction_date <- function(x) {
+  if (inherits(x, "Date")) return(x)
+  as.Date(x, tz = "UTC")
 }
 
 normalise_address_component <- function(x) {
@@ -109,12 +122,15 @@ build_price_ratio_review <- function(keyed, config) {
     "address_key", config$id_col, config$date_col, config$price_col
   )
   dt <- data.table::copy(keyed[, ..audit_cols])
+  dt[, (config$date_col) := as_transaction_date(get(config$date_col))]
   data.table::setorderv(dt, c("address_key", config$date_col, config$id_col))
   dt[, `:=`(
     previous_date = data.table::shift(get(config$date_col)),
     previous_price = data.table::shift(get(config$price_col))
   ), by = address_key]
-  dt[, holding_days := as.numeric(get(config$date_col) - previous_date)]
+  dt[, holding_days := as.numeric(
+    difftime(get(config$date_col), previous_date, units = "days")
+  )]
   dt[, annualized_price_ratio := {
     ratio <- get(config$price_col) / previous_price
     data.table::fifelse(
@@ -159,6 +175,30 @@ build_repeat_mapping <- function(data, config) {
     )
   }
 
+  # Two transactions at one address on one date contradict each other, so both
+  # sides are treated as data errors and routed to review. repeat_count is
+  # counted only over the survivors.
+  keyed[, (config$date_col) := as_transaction_date(get(config$date_col))]
+  keyed[, same_day_group_size := as.integer(.N), by = c("address_key", config$date_col)]
+  same_day_conflicts <- keyed[
+    same_day_group_size > 1L,
+    c(
+      config$id_col, "address_key", config$date_col, config$price_col,
+      "same_day_group_size"
+    ),
+    with = FALSE
+  ]
+  keyed <- keyed[same_day_group_size == 1L]
+  keyed[, same_day_group_size := NULL]
+  same_day_excluded_count <- nrow(same_day_conflicts)
+  mapped_count <- nrow(keyed)
+  if (mapped_count == 0L) {
+    stop(
+      "Every keyed row was excluded as a same-day conflict; mapping would be empty.",
+      call. = FALSE
+    )
+  }
+
   keyed[, repeat_id := hash_serialized_values(address_key)]
   keyed[, repeat_count := as.integer(.N), by = address_key]
 
@@ -184,7 +224,7 @@ build_repeat_mapping <- function(data, config) {
   }
   group_counts[, c("declared_count_min", "declared_count_max") := NULL]
 
-  repeat_share <- if (keyed_count == 0L) 0 else mean(keyed$repeat_count > 1L)
+  repeat_share <- if (mapped_count == 0L) 0 else mean(keyed$repeat_count > 1L)
   if (repeat_share < config$repeat_share_floor) {
     warning(
       sprintf(
@@ -211,6 +251,14 @@ build_repeat_mapping <- function(data, config) {
     }
   }
 
+  if (same_day_excluded_count > 0L) {
+    warning(
+      same_day_excluded_count,
+      " row(s) excluded as same-day repeat conflicts and routed to review.",
+      call. = FALSE
+    )
+  }
+
   large_groups <- group_counts[repeat_count > as.integer(config$large_group_size)]
   price_ratio_issues <- build_price_ratio_review(keyed, config)
   if (nrow(price_ratio_issues) > 0L) {
@@ -233,13 +281,16 @@ build_repeat_mapping <- function(data, config) {
       input_count = as.integer(input_count),
       keyed_count = as.integer(keyed_count),
       excluded_count = as.integer(excluded_count),
+      same_day_excluded_count = as.integer(same_day_excluded_count),
+      mapped_count = as.integer(mapped_count),
       key_coverage = key_coverage,
       repeat_share = repeat_share,
       largest_group_size = if (nrow(group_counts) == 0L) 0L else max(group_counts$repeat_count)
     ),
     large_groups = large_groups[],
     property_type_issues = property_type_issues[],
-    price_ratio_issues = price_ratio_issues[]
+    price_ratio_issues = price_ratio_issues[],
+    same_day_conflicts = same_day_conflicts[]
   )
 }
 
@@ -286,6 +337,8 @@ build_repeat_manifest <- function(config, metrics) {
     run_timestamp = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
     keyed_count = as.character(metrics$keyed_count),
     excluded_count = as.character(metrics$excluded_count),
+    same_day_excluded_count = as.character(metrics$same_day_excluded_count),
+    mapped_count = as.character(metrics$mapped_count),
     key_coverage = sprintf("%.8f", metrics$key_coverage),
     repeat_share = sprintf("%.8f", metrics$repeat_share),
     largest_group_size = as.character(metrics$largest_group_size),
@@ -314,11 +367,20 @@ log_manifest_delta <- function(previous, current, log_fn = NULL) {
     return(invisible(NULL))
   }
   fields <- c(
-    "input_row_count", "keyed_count", "excluded_count", "key_coverage",
-    "repeat_share", "largest_group_size"
+    "input_row_count", "keyed_count", "excluded_count", "same_day_excluded_count",
+    "mapped_count", "key_coverage", "repeat_share", "largest_group_size"
   )
+  # Index field by field: a manifest written before a field existed would
+  # otherwise drop a NULL and shift every remaining pair out of alignment.
+  manifest_values <- function(manifest) {
+    vapply(
+      fields,
+      function(field) as.character(manifest[[field]] %||% "absent"),
+      character(1)
+    )
+  }
   delta <- paste(
-    sprintf("%s=%s->%s", fields, unlist(previous[fields]), unlist(current[fields])),
+    sprintf("%s=%s->%s", fields, manifest_values(previous), manifest_values(current)),
     collapse = "; "
   )
   emit_repeat_log("INFO", paste("Manifest delta:", delta), log_fn)
@@ -344,6 +406,7 @@ write_repeat_outputs <- function(result, config, manifest) {
   write_arrow_table_atomic(table, config$output_path)
   write_arrow_table_atomic(as.data.frame(result$large_groups), config$large_group_review_path)
   write_arrow_table_atomic(as.data.frame(result$price_ratio_issues), config$price_ratio_review_path)
+  write_arrow_table_atomic(as.data.frame(result$same_day_conflicts), config$same_day_review_path)
   invisible(config$output_path)
 }
 
@@ -381,10 +444,14 @@ run_repeat_transactions <- function(config, data = NULL, log_fn = NULL) {
   emit_repeat_log(
     "INFO",
     sprintf(
-      "Mapped %d of %d rows; excluded %d (coverage %.4f; repeat share %.4f).",
-      result$metrics$keyed_count,
+      paste(
+        "Mapped %d of %d rows; excluded %d unkeyed and %d same-day",
+        "(coverage %.4f; repeat share %.4f)."
+      ),
+      result$metrics$mapped_count,
       result$metrics$input_count,
       result$metrics$excluded_count,
+      result$metrics$same_day_excluded_count,
       result$metrics$key_coverage,
       result$metrics$repeat_share
     ),

@@ -82,9 +82,15 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 - `repeat_sales.R` and `repeat_rentals.R`: thin market-specific entries over
   `scripts/R/utils/repeat_transactions_utils.R`. They build deterministic
   transaction-to-`repeat_id` mappings from the long-run cleaned supersets and
-  publish large-group and extreme-price-ratio review tables. Persisted
-  `repeat_count` is defined over the full long-run input; consumers that filter
-  the date window must regroup after filtering.
+  publish large-group, extreme-price-ratio, and same-day review tables. Two
+  transactions sharing an address and a date contradict each other, so every
+  conflicting row is excluded from the mapping and routed to the same-day
+  review; `repeat_count` is counted only over the survivors. The manifest
+  reports address-key completeness (`key_coverage`, `keyed_count`) separately
+  from same-day exclusion (`same_day_excluded_count`, `mapped_count`), because
+  the two measure different data-quality failures and carry different floors.
+  Persisted `repeat_count` is defined over the full long-run input; consumers
+  that filter the date window must regroup after filtering.
 
 ## Analysis Scripts
 

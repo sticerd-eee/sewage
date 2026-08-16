@@ -18,11 +18,15 @@
 #       repeated_rentals_large_groups_candidate.parquet
 #   - data/processed/repeated_transactions/
 #       repeated_rentals_price_ratios_candidate.parquet
+#   - data/processed/repeated_transactions/
+#       repeated_rentals_same_day_candidate.parquet
 #   - output/log/repeat_rentals.log
 #
 # Notes:
 #   - repeat_count describes the full 2014–2023 window.
 #   - Window-restricted consumers must regroup after filtering.
+#   - Rentals sharing an address and a date are data errors: every conflicting
+#     row is excluded from the mapping and routed to the same-day review.
 #   - Candidate outputs are promoted only after validation succeeds.
 # ==============================================================================
 
@@ -87,11 +91,14 @@ repeat_rentals_config <- function(output_dir = here::here(
     previous_manifest_path = file.path(output_dir, "repeated_rentals.parquet"),
     large_group_review_path = file.path(output_dir, "repeated_rentals_large_groups_candidate.parquet"),
     price_ratio_review_path = file.path(output_dir, "repeated_rentals_price_ratios_candidate.parquet"),
+    same_day_review_path = file.path(output_dir, "repeated_rentals_same_day_candidate.parquet"),
     market = "rentals",
     log_name = "repeat_rentals",
     year_min = 2014L,
     year_max = 2023L,
-    # Observed 2026-08-14 baselines: coverage 1.00000000, repeat share 0.74848970.
+    # Observed 2026-08-15 baselines: coverage 1.00000000, repeat share 0.74848970.
+    # Unchanged from 2026-08-14: this market contains no same-day conflicts, so
+    # the same-day exclusion removes nothing and its review file is empty.
     key_coverage_floor = 0.99,
     repeat_share_floor = 0.70,
     large_group_size = 12L,

@@ -18,11 +18,15 @@
 #       repeated_sales_large_groups_candidate.parquet
 #   - data/processed/repeated_transactions/
 #       repeated_sales_price_ratios_candidate.parquet
+#   - data/processed/repeated_transactions/
+#       repeated_sales_same_day_candidate.parquet
 #   - output/log/repeat_sales.log
 #
 # Notes:
 #   - repeat_count describes the full 2014–2024 window.
 #   - Window-restricted consumers must regroup after filtering.
+#   - Sales sharing an address and a date are data errors: every conflicting row
+#     is excluded from the mapping and routed to the same-day review.
 #   - Candidate outputs are promoted only after validation succeeds.
 # ==============================================================================
 
@@ -80,11 +84,15 @@ repeat_sales_config <- function(output_dir = here::here(
     previous_manifest_path = file.path(output_dir, "repeated_sales.parquet"),
     large_group_review_path = file.path(output_dir, "repeated_sales_large_groups_candidate.parquet"),
     price_ratio_review_path = file.path(output_dir, "repeated_sales_price_ratios_candidate.parquet"),
+    same_day_review_path = file.path(output_dir, "repeated_sales_same_day_candidate.parquet"),
     market = "sales",
     log_name = "repeat_sales",
     year_min = 2014L,
     year_max = 2024L,
-    # Observed 2026-08-14 baselines: coverage 0.99681926, repeat share 0.36939131.
+    # Observed 2026-08-15 baselines: coverage 0.99681926, repeat share 0.36233545.
+    # Coverage measures address-key completeness only and is unchanged from
+    # 2026-08-14. Repeat share fell from 0.36939131 because the 102699 rows in
+    # 50327 same-day conflicts now leave the mapping; largest group fell 20 -> 11.
     key_coverage_floor = 0.99,
     repeat_share_floor = 0.35,
     large_group_size = 12L,

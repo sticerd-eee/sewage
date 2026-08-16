@@ -73,6 +73,7 @@ make_config <- function(name = "base", coverage_floor = 0) {
     output_path = file.path(test_dir, paste0(name, "-mapping.parquet")),
     large_group_review_path = file.path(test_dir, paste0(name, "-large.parquet")),
     price_ratio_review_path = file.path(test_dir, paste0(name, "-ratios.parquet")),
+    same_day_review_path = file.path(test_dir, paste0(name, "-same-day.parquet")),
     market = "sales",
     log_name = paste0("repeat-contract-", name),
     year_min = 2014L,
@@ -239,6 +240,104 @@ mixed_result <- withCallingHandlers(
 assert_true(any(grepl("property type", warnings, ignore.case = TRUE)), "Mixed property types must warn rather than fail.")
 assert_identical(nrow(mixed_result$mapping), 3L, "Warn-only diagnostics must not remove mapped rows.")
 
+# Holding periods are measured in days for every supported date type. A same-day
+# pair drives difftime's auto-selected unit to seconds for the whole vector, which
+# silently collapsed every annualized ratio toward one on the POSIXct sales input.
+posix_keyed <- data.table(
+  address_key = c("K1", "K1", "K2", "K2"),
+  house_id = c("posix-01", "posix-02", "posix-03", "posix-04"),
+  date_of_transfer = as.POSIXct(
+    c("2022-01-01", "2022-06-01", "2023-01-01", "2023-01-01"),
+    tz = "UTC"
+  ),
+  price = c(100000, 200000, 300000, 300000)
+)
+posix_ratios <- build_price_ratio_review(posix_keyed, make_config("posix"))
+assert_identical(
+  nrow(posix_ratios), 1L,
+  "A doubling over 151 days must be flagged even when a same-day pair is present."
+)
+assert_identical(
+  posix_ratios$holding_days, 151,
+  "holding_days must be measured in days, never in difftime's auto-selected unit."
+)
+assert_true(
+  inherits(posix_ratios$date_of_transfer, "Date"),
+  "Review dates must normalize to Date so both markets share one review schema."
+)
+
+# Two transactions at one address on one date are data errors. Every conflicting
+# row leaves the mapping, and repeat_count is counted only over the survivors.
+same_day_fixture <- rbind(
+  fixture,
+  data.table(
+    house_id = "05mno", postcode = "SW1A 1AA", paon = "10",
+    saon = NA_character_, street = "ST JOHNS ROAD",
+    date_of_transfer = as.Date("2022-01-01"), price = 130000,
+    property_type = "T"
+  )
+)
+same_day_result <- build_repeat_mapping(same_day_fixture, make_config("same-day"))
+assert_identical(
+  nrow(same_day_result$mapping), 2L,
+  "Both rows of a same-day conflict must leave the mapping."
+)
+assert_true(
+  !any(c("02def", "05mno") %in% same_day_result$mapping$house_id),
+  "Neither side of a same-day conflict may survive; these are not deduplications."
+)
+assert_identical(
+  same_day_result$metrics$same_day_excluded_count, 2L,
+  "Same-day exclusions must be counted."
+)
+assert_identical(
+  same_day_result$metrics$mapped_count, 2L,
+  "mapped_count must report the rows that actually reach the mapping."
+)
+assert_identical(
+  same_day_result$metrics$keyed_count, 4L,
+  "keyed_count must keep meaning address-key completeness, before same-day exclusion."
+)
+assert_identical(
+  same_day_result$metrics$key_coverage, 1,
+  "Same-day exclusion must not be folded into address-key coverage."
+)
+assert_true(
+  all(same_day_result$mapping$repeat_count == 1L),
+  "repeat_count must be computed after exclusion, leaving the 2018 sale a single."
+)
+
+# The excluded rows are retained for audit rather than silently dropped.
+assert_identical(
+  nrow(same_day_result$same_day_conflicts), 2L,
+  "Every excluded row must be routed to the same-day review table."
+)
+assert_identical(
+  sort(same_day_result$same_day_conflicts$house_id), c("02def", "05mno"),
+  "The same-day review must name both conflicting transactions."
+)
+assert_identical(
+  names(same_day_result$same_day_conflicts),
+  c("house_id", "address_key", "date_of_transfer", "price", "same_day_group_size"),
+  "The same-day review must carry enough context to adjudicate the conflict."
+)
+assert_true(
+  all(same_day_result$same_day_conflicts$same_day_group_size == 2L),
+  "The same-day review must record how many transactions shared the date."
+)
+same_day_warnings <- character()
+invisible(withCallingHandlers(
+  build_repeat_mapping(same_day_fixture, make_config("same-day-warn")),
+  warning = function(w) {
+    same_day_warnings <<- c(same_day_warnings, conditionMessage(w))
+    invokeRestart("muffleWarning")
+  }
+))
+assert_true(
+  any(grepl("same-day", same_day_warnings, ignore.case = TRUE)),
+  "Same-day exclusions must warn so the run log records them."
+)
+
 # Arrow integration: literal schema, review files, manifest round-trip, and first-generation log.
 logs <- character()
 integration_config <- make_config("integration")
@@ -251,6 +350,7 @@ assert_true(any(grepl("first generation", logs, ignore.case = TRUE)), "The first
 assert_true(file.exists(integration_config$output_path), "The mapping parquet must be written.")
 assert_true(file.exists(integration_config$large_group_review_path), "The large-group review parquet must be written even when empty.")
 assert_true(file.exists(integration_config$price_ratio_review_path), "The price-ratio review parquet must be written even when empty.")
+assert_true(file.exists(integration_config$same_day_review_path), "The same-day review parquet must be written even when empty.")
 
 written <- arrow::read_parquet(integration_config$output_path, as_data_frame = FALSE)
 assert_identical(names(written), c("house_id", "repeat_id", "repeat_count"), "The mapping must have exactly the declared three columns.")
@@ -262,13 +362,16 @@ manifest <- written$metadata
 expected_manifest_keys <- c(
   "repeat_manifest_version", "input_path", "input_row_count", "input_mtime",
   "run_timestamp", "keyed_count", "excluded_count", "key_coverage",
-  "repeat_share", "largest_group_size", "market", "repeat_count_semantics"
+  "repeat_share", "largest_group_size", "market", "repeat_count_semantics",
+  "mapped_count", "same_day_excluded_count"
 )
 assert_true(all(expected_manifest_keys %in% names(manifest)), "Every required manifest key must round-trip through Arrow metadata.")
 assert_identical(manifest$input_path, normalizePath(integration_config$input_path), "Manifest input_path must identify the production-read source.")
 assert_identical(manifest$input_row_count, "3", "Manifest input row count must round-trip as text.")
 assert_identical(manifest$keyed_count, "3", "Manifest keyed count must round-trip as text.")
 assert_identical(manifest$excluded_count, "0", "Manifest excluded count must round-trip as text.")
+assert_identical(manifest$mapped_count, "3", "Manifest mapped count must round-trip as text.")
+assert_identical(manifest$same_day_excluded_count, "0", "Manifest same-day exclusion count must round-trip as text.")
 
 rerun_logs <- character()
 run_repeat_transactions(
@@ -276,6 +379,28 @@ run_repeat_transactions(
   log_fn = function(level, message) rerun_logs <<- c(rerun_logs, paste(level, message))
 )
 assert_true(any(grepl("manifest delta", rerun_logs, ignore.case = TRUE)), "A compatible prior manifest must produce a logged delta.")
+
+# A manifest written before a metric existed must still diff, without shifting
+# the remaining field pairs out of alignment.
+legacy_fields <- list(
+  market = "sales", input_row_count = "10", keyed_count = "9",
+  excluded_count = "1", key_coverage = "0.90000000",
+  repeat_share = "0.50000000", largest_group_size = "3"
+)
+legacy_delta_logs <- character()
+log_manifest_delta(
+  previous = legacy_fields,
+  current = c(legacy_fields, list(mapped_count = "8", same_day_excluded_count = "1")),
+  log_fn = function(level, message) legacy_delta_logs <<- c(legacy_delta_logs, message)
+)
+assert_true(
+  any(grepl("largest_group_size=3->3", legacy_delta_logs, fixed = TRUE)),
+  "Fields absent from an older manifest must not shift the remaining delta pairs."
+)
+assert_true(
+  any(grepl("same_day_excluded_count=", legacy_delta_logs, fixed = TRUE)),
+  "New metrics must appear in the delta even when the previous manifest lacks them."
+)
 
 corrupt_manifest_path <- file.path(test_dir, "corrupt-previous.parquet")
 writeBin(charToRaw("not parquet"), corrupt_manifest_path)
