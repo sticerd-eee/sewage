@@ -25,8 +25,14 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 ### 02_data_cleaning
 
 - `clean_consented_discharges_database.R`: cleans the consented discharges database.
-- `clean_lr_house_price_data.R`: cleans Land Registry price-paid data using local ONS postcode data.
-- `clean_zoopla_data.R`: cleans safeguarded Zoopla rental data.
+- `clean_lr_house_price_data.R`: cleans one same-vintage 2014–2024 Land Registry
+  download, assigns content-stable string `house_id` values, and writes paired
+  long-run and 2021–2024 study-window candidates. The study window is always a
+  pure filter of the long-run table from the same run.
+- `clean_zoopla_data.R`: cleans safeguarded 2014–2023 Zoopla rental data,
+  removes exact duplicates, assigns content-stable string `rental_id` values,
+  and writes paired long-run and 2021–2023 study-window candidates. The study
+  window is always a pure filter of the long-run table from the same run.
 - `combine_annual_return_data.R`: combines annual return workbooks.
 - `convert_individ_raw_data_to_rdata.R`: converts historical EDM files into parquet outputs.
 - `process_edm_api_json_to_parquet_2024_onwards.R`: processes raw API snapshots into parquet outputs.
@@ -73,7 +79,18 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 - `house_panel_within_radius.R` and `rental_panel_within_radius.R`: build within-radius property panels.
 - `sale_panel_exp.R` and `rental_panel_exp.R`: export the general panel datasets.
 - `grid_long_difference_sales.R` and `grid_long_difference_rentals.R`: build grid-level long-difference datasets.
-- `repeat_sales.R` and `repeat_rentals.R`: build repeated-sales and repeated-rentals identifiers and summaries.
+- `repeat_sales.R` and `repeat_rentals.R`: thin market-specific entries over
+  `scripts/R/utils/repeat_transactions_utils.R`. They build deterministic
+  transaction-to-`repeat_id` mappings from the long-run cleaned supersets and
+  publish large-group, extreme-price-ratio, and same-day review tables. Two
+  transactions sharing an address and a date contradict each other, so every
+  conflicting row is excluded from the mapping and routed to the same-day
+  review; `repeat_count` is counted only over the survivors. The manifest
+  reports address-key completeness (`key_coverage`, `keyed_count`) separately
+  from same-day exclusion (`same_day_excluded_count`, `mapped_count`), because
+  the two measure different data-quality failures and carry different floors.
+  Persisted `repeat_count` is defined over the full long-run input; consumers
+  that filter the date window must regroup after filtering.
 
 ## Analysis Scripts
 
@@ -89,8 +106,13 @@ The `scripts/R/09_analysis/` folder contains the main descriptive, hedonic, repe
 ### Layer 02: Data Cleaning
 
 3. `clean_consented_discharges_database.R` — clean the consented discharges database.
-4. `clean_lr_house_price_data.R` — clean Land Registry house prices with local ONS postcode data.
-5. `clean_zoopla_data.R` — clean safeguarded Zoopla rentals with local ONS postcode data.
+4. `clean_lr_house_price_data.R` — create paired 2014–2024 long-run and
+   2021–2024 study-window Land Registry candidates in one run; promote the
+   validated candidates to `house_price_long_run.parquet` and
+   `house_price.parquet` together.
+5. `clean_zoopla_data.R` — create paired 2014–2023 long-run and 2021–2023
+   study-window Zoopla candidates in one run; promote the validated candidates
+   to `zoopla_rentals_long_run.parquet` and `zoopla_rentals.parquet` together.
 6. `combine_annual_return_data.R` — combine annual return workbooks.
 7. `convert_individ_raw_data_to_rdata.R` — convert standardised historical EDM files to parquet.
 8. `process_edm_api_json_to_parquet_2024_onwards.R` — process raw API JSON snapshots into parquet.
@@ -137,8 +159,8 @@ Integration scripts are executed earlier for dependency reasons; see steps 12 an
 36. `rental_panel_exp.R` — export the general rental panel.
 37. `grid_long_difference_sales.R` — build the sales long-difference grid dataset.
 38. `grid_long_difference_rentals.R` — build the rental long-difference grid dataset.
-39. `repeat_sales.R` — build repeated-sales identifiers and summaries.
-40. `repeat_rentals.R` — build repeated-rentals identifiers and summaries.
+39. `repeat_sales.R` — build the long-run sales repeat mapping and review tables.
+40. `repeat_rentals.R` — build the long-run rental repeat mapping and review tables.
 
 ## Dependency Notes
 
@@ -148,3 +170,6 @@ Integration scripts are executed earlier for dependency reasons; see steps 12 an
 - Step 11 is independent and only required for the `05_news` analysis.
 - Steps 17 to 21 form the rainfall and dry-spill sub-pipeline.
 - The layer-06 scripts build on spill aggregations and spatial matching outputs.
+- The cleaned long-run/study pairs are one atomic data generation: never rebuild
+  or promote one member independently. All ID-keyed artifacts must regenerate
+  after either pair changes.

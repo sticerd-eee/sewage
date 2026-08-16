@@ -83,6 +83,26 @@ CONFIG <- list(
 # Data Loading Functions
 ############################################################
 
+#' Load the house-site lookup within a radius without materialising all rows
+#' @param path Path to the spill lookup parquet dataset
+#' @param radius_m Maximum house-site distance in metres
+#' @param open_dataset_fn Injectable Arrow dataset opener for contract tests
+#' @param collect_fn Injectable collector for contract tests
+#' @return data.table with house_id, site_id, and distance_m
+load_spill_lookup_within_radius <- function(
+  path,
+  radius_m,
+  open_dataset_fn = arrow::open_dataset,
+  collect_fn = dplyr::collect
+) {
+  lookup_query <- open_dataset_fn(path) |>
+    dplyr::select(house_id, site_id, distance_m) |>
+    dplyr::filter(distance_m <= radius_m)
+
+  collect_fn(lookup_query) |>
+    as.data.table()
+}
+
 #' Load all required datasets
 #' @return List containing house_dt, spill_lookup_dt, agg_spill_dt
 load_data <- function() {
@@ -114,9 +134,10 @@ load_data <- function() {
 
   spill_lookup_dt <- tryCatch(
     {
-      dt <- arrow::read_parquet(CONFIG$spill_lookup_path)
-      dt <- as.data.table(dt)
-      dt[distance_m <= CONFIG$spill_radius, .(house_id, site_id, distance_m)]
+      load_spill_lookup_within_radius(
+        CONFIG$spill_lookup_path,
+        CONFIG$spill_radius
+      )
     },
     error = function(e) {
       log_error("Failed to load spill lookup: {e$message}")

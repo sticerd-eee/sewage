@@ -74,6 +74,26 @@ The effect of sewage-spill *intensity* — a continuous exposure measure such as
 ### Extensive Margin
 The effect of *proximity itself* — being near versus far from an overflow — on property values, and how the near-versus-far price gap responds to public attention. Contrasts with the Intensive Margin, which varies realized spill intensity rather than proximity.
 
+## Repeat-Transactions Area
+
+### Content-Stable Transaction ID
+The identity of one cleaned sale or rental transaction, derived from the transaction's own recorded values rather than from its position in the file. Regenerating an input cannot silently re-label transactions: identifiers across artifact generations either match exactly or fail loudly.
+
+### Address Key
+The normalised composite of postcode and address components that identifies one property unit for repeat matching. A transaction missing its postcode or its primary address component carries no Address Key and cannot participate in repeat identification.
+
+### Keyable Transaction
+A transaction that carries an Address Key. Only keyable transactions can be assigned to a Repeat Group.
+
+### Repeat Group
+All Keyable Transactions in one dataset that share an Address Key — the project's operational notion of "the same property transacting repeatedly". A group of size one is a single; singles still belong to a Repeat Group. Group identity derives from the Address Key itself, so it is stable across runs; distinct Address Keys are asserted to map to distinct group identifiers at build time, and a group identifier is meaningful only within its own market's mapping.
+
+### Repeat-Transactions Mapping
+The transaction-grain artifact assigning every Keyable Transaction to its Repeat Group, singles included, with the group size recorded. It is a census of keyable transactions — exclusions are auditable by subtraction — and the sole bridge between cleaned transactions and repeat-based analyses. Group membership and group size are defined over the Long-Run Transaction History; a consumer restricting to a narrower window must regroup rather than trust the recorded size.
+
+### Long-Run Transaction History
+The maximal retained span of cleaned transactions (from 2014, the earliest rental coverage), wider than the spill study window. Repeat identification runs over the long-run history; the study-window transaction tables are derived from it by filtering, never built independently, so both views agree row-for-row where they overlap.
+
 ## Public Attention Area
 
 ### Public Attention

@@ -92,7 +92,7 @@ house_prices <- import(
   here::here("data", "processed", "house_price.parquet"),
   trust = TRUE
 ) |>
-  select(house_id, transaction_id, price, qtr_id, latitude, longitude)
+  select(house_id, price, qtr_id, latitude, longitude)
 
 # Join and filter to repeat sales only (repeat_id appears 2+ times)
 repeat_sales <- repeat_ids |>
@@ -195,7 +195,7 @@ cat(sprintf("  %d repeat-sale transactions are within %dm of spill sites\n",
 dat_panel <- houses_near_sites |>
   inner_join(spill_lookup, by = "house_id", relationship = "many-to-many") |>
   inner_join(agg_spill_clean, by = c("site_id", "qtr_id")) |>
-  group_by(house_id, transaction_id, repeat_id, qtr_id, price, latitude, longitude) |>
+  group_by(house_id, repeat_id, qtr_id, price, latitude, longitude) |>
   summarise(
     spill_count_roll = sum(spill_count_roll, na.rm = TRUE),
     spill_hrs_roll = sum(spill_hrs_roll, na.rm = TRUE),

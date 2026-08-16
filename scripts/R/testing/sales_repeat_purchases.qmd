@@ -75,7 +75,7 @@ sales_dt[grepl("^(NA\\|)*NA$", simple_key), simple_key := NA_character_]
 ## Exact Repeat Transactions
 
 ```{r}
-setorder(sales_dt, simple_key, date_of_transfer, transaction_id)
+setorder(sales_dt, simple_key, date_of_transfer, house_id)
 
 sales_dt[
   !is.na(simple_key),
@@ -105,40 +105,21 @@ repeat_sales_exact <- sales_dt[!is.na(simple_key) & sale_count > 1]
 repeat_sales_exact <- as_tibble(repeat_sales_exact)
 ```
 
-## Export Sales Data (Repeated and Single)
+## Load the Canonical Mapping for the Study Window
 
 ```{r}
-# Prepare repeated sales (sale_count > 1)
-repeated_sales_output <- repeat_sales_exact %>%
-  group_by(simple_key) %>%
-  mutate(repeat_id = cur_group_id()) %>%
-  ungroup() %>%
-  select(house_id, repeat_id)
-
-# Prepare single sales (sale_count == 1)
-max_repeat_id <- max(repeated_sales_output$repeat_id)
-single_sales_output <- sales_dt[!is.na(simple_key) & sale_count == 1] %>%
-  as_tibble() %>%
-  mutate(repeat_id = max_repeat_id + row_number()) %>%
-  select(house_id, repeat_id)
-
-# Combine both into single output
-all_sales_output <- bind_rows(repeated_sales_output, single_sales_output)
-
-# Create output directory if it doesn't exist
-output_dir <- here::here("data", "processed", "repeated_transactions")
-if (!dir.exists(output_dir)) {
-  dir.create(output_dir, recursive = TRUE)
-}
-
-# Export to parquet
-output_path <- here::here(
-  "data",
-  "processed",
-  "repeated_transactions",
-  "repeated_sales.parquet"
-)
-arrow::write_parquet(all_sales_output, output_path)
+# The persisted repeat_count covers the 2014-2024 long-run input. Recompute it
+# after joining to this notebook's 2021-2024 study-window data.
+all_sales_output <- import(
+  here::here(
+    "data", "processed", "repeated_transactions", "repeated_sales.parquet"
+  ),
+  trust = TRUE
+) %>%
+  inner_join(sales_og %>% select(house_id), by = "house_id") %>%
+  group_by(repeat_id) %>%
+  mutate(repeat_count = n()) %>%
+  ungroup()
 ```
 
 ## Summary Table
@@ -204,12 +185,6 @@ repeat_purchase_summary <- sales_dt[
 ] %>%
   as_tibble()
 
-# Export to parquet
-output_path_sum <- here::here(
-  "data",
-  "processed",
-  "repeated_transactions",
-  "repeated_sales_summary.parquet"
-)
-arrow::write_parquet(repeat_purchase_summary, output_path_sum)
+# Diagnostic only: the retired summary artifact is no longer recreated.
+repeat_purchase_summary
 ```

@@ -253,7 +253,7 @@ compute_rental_spill_exposure <- function(rental_dt, spill_lookup_dt, agg_spill_
     log_info("Computed spill exposure for {nrow(rental_spill_near)} rental-year pairs with nearby sites")
   } else {
     rental_spill_near <- data.table(
-      rental_id = integer(),
+      rental_id = character(),
       year = integer(),
       spill_count = numeric(),
       spill_hrs = numeric(),

@@ -114,7 +114,6 @@ gen_panel_sales <- arrow::open_dataset(path_general_panel_sales) |>
 sales <- import(path_sales, trust = TRUE) |>
   mutate(year = (qtr_id - 1) %/% 4 + 1) |>
   select(
-    -transaction_id,
     -date_of_transfer,
     -quality,
     -paon,

@@ -99,7 +99,7 @@ rental_schema <- study_period_public_schema("rental")
 assert_identical(
   schema_signature(sales_schema),
   c(
-    house_id = "int32", price = "int32", ppd_category = "string",
+    house_id = "string", price = "int32", ppd_category = "string",
     n_days_in_window = "int32", spill_hrs = "double",
     n_spill_sites = "int32", spill_count = "double",
     mean_distance = "double", min_distance = "double",
@@ -113,7 +113,7 @@ assert_identical(
 assert_identical(
   schema_signature(rental_schema),
   c(
-    rental_id = "int32", listing_price = "double",
+    rental_id = "string", listing_price = "double",
     n_days_in_window = "int32", spill_hrs = "double",
     n_spill_sites = "int32", spill_count = "double",
     mean_distance = "double", min_distance = "double",
@@ -231,11 +231,30 @@ for (case in invalid_cases) {
 
 sales_contract <- study_period_market_contract("sale")
 source_fixture <- data.table(
-  house_id = 1:4,
+  house_id = as.character(1:4),
   price = c(100000L, 200000L, 300000L, 400000L),
   ppd_category = c("A", "B", "A", "B"),
   easting = c(500000, 500100, NA, 500200),
   northing = c(200000, 200100, 200200, 200200)
+)
+assert_error_contains(
+  study_period_source_ledger(
+    copy(source_fixture)[, house_id := seq_len(.N)],
+    sales_contract
+  ),
+  "character transaction identifiers",
+  "Study-period source ledgers must reject stale positional integer IDs."
+)
+leading_zero_source <- copy(source_fixture[1:2])
+leading_zero_source[, house_id := c("01leadingzero", "02stablehash")]
+leading_zero_ledger <- study_period_source_ledger(
+  leading_zero_source,
+  sales_contract
+)
+assert_identical(
+  leading_zero_ledger$house_id,
+  c("01leadingzero", "02stablehash"),
+  "The source ledger must preserve character IDs including a leading zero."
 )
 ledger <- study_period_source_ledger(source_fixture, sales_contract)
 assert_identical(
@@ -252,14 +271,14 @@ site_totals <- data.table(
 )
 
 lookup_group_one <- data.table(
-  house_id = c(1L, 2L, 2L),
+  house_id = c("1", "2", "2"),
   site_id = c(NA_integer_, 10L, 20L),
   distance_m = c(NA, 300, 750),
   distance_km = c(NA, 0.3, 0.75),
   n_site_groups = c(0L, 2L, 2L)
 )
 lookup_group_two <- data.table(
-  house_id = c(4L, 4L, 4L),
+  house_id = c("4", "4", "4"),
   site_id = c(30L, 40L, 50L),
   distance_m = c(250, 500, 1000),
   distance_km = c(0.25, 0.5, 1),
@@ -277,30 +296,30 @@ reduced_one <- study_period_reduce_lookup_row_group(
 setkey(reduced_one, house_id, radius)
 
 assert_true(
-  reduced_one[.(1L, 250L),
+  reduced_one[.("1", 250L),
     n_spill_sites == 0L && spatially_eligible && !has_missing_site &&
       spill_count == 0 && spill_hrs == 0 && is.na(min_distance)],
   "An eligible sentinel must produce a known true zero at every radius."
 )
 assert_true(
-  reduced_one[.(2L, 250L),
+  reduced_one[.("2", 250L),
     n_spill_sites == 0L && spill_count == 0 && is.na(mean_distance)],
   "A site outside 250 m must not destroy the nested-radius zero."
 )
 assert_true(
-  reduced_one[.(2L, 500L),
+  reduced_one[.("2", 500L),
     n_spill_sites == 1L && spill_count == 3 && spill_hrs == 7 &&
       min_distance == 300 && !has_missing_site],
   "The 500 m row must include only the 300 m complete-evidence site."
 )
 assert_true(
-  reduced_one[.(2L, 1000L),
+  reduced_one[.("2", 1000L),
     n_spill_sites == 2L && min_distance == 300 && mean_distance == 525 &&
       has_missing_site && is.na(spill_count) && is.na(spill_hrs)],
   "Unknown evidence must preserve known geography while masking exposure."
 )
 assert_true(
-  reduced_one[.(2L, 500L),
+  reduced_one[.("2", 500L),
     spill_count_daily_avg == 3 / 1461 &&
       spill_count_weekly_avg == 3 / 1461 * 7],
   "Daily and weekly rates must derive from the validated inclusive day count."
@@ -316,9 +335,38 @@ reduced_two <- study_period_reduce_lookup_row_group(
 )
 setkey(reduced_two, house_id, radius)
 assert_identical(
-  reduced_two[.(4L, c(250L, 500L, 1000L)), n_spill_sites],
+  reduced_two[.("4", c(250L, 500L, 1000L)), n_spill_sites],
   c(1L, 2L, 3L),
   "Sites exactly on each boundary must enter that radius and every larger one."
+)
+
+lookup_group_all_outside <- data.table(
+  house_id = "4",
+  site_id = 30L,
+  distance_m = 1000.01,
+  distance_km = 1000.01 / 1000,
+  n_site_groups = 1L
+)
+reduced_all_outside <- study_period_reduce_lookup_row_group(
+  lookup_group_all_outside,
+  ledger,
+  site_totals,
+  sales_contract,
+  radii = c(250L, 500L, 1000L),
+  n_days_in_window = 1461L
+)
+assert_true(
+  nrow(reduced_all_outside) == 3L &&
+    all(reduced_all_outside$n_spill_sites == 0L) &&
+    all(reduced_all_outside$spill_count == 0) &&
+    all(reduced_all_outside$spill_hrs == 0) &&
+    all(is.na(reduced_all_outside$mean_distance)) &&
+    all(is.na(reduced_all_outside$min_distance)) &&
+    all(!reduced_all_outside$has_missing_site),
+  paste0(
+    "A row group whose valid matches all exceed the maximum radius must ",
+    "produce known true-zero exposure at every radius."
+  )
 )
 
 rental_contract <- study_period_market_contract("rental")
@@ -428,7 +476,7 @@ assert_error_contains(
 
 write_lookup_fixture <- function(path, groups, contract) {
   schema <- arrow::schema(
-    house_id = arrow::int32(),
+    house_id = arrow::utf8(),
     site_id = arrow::int32(),
     distance_m = arrow::float64(),
     distance_km = arrow::float64(),
@@ -438,6 +486,8 @@ write_lookup_fixture <- function(path, groups, contract) {
   properties <- arrow::ParquetWriterProperties$create(names(schema))
   writer <- arrow::ParquetFileWriter$create(schema, stream, properties = properties)
   for (group in groups) {
+    group <- copy(group)
+    group[[contract$id]] <- as.character(group[[contract$id]])
     batch <- arrow::RecordBatch$create(group, schema = schema)
     writer$WriteBatch(batch, chunk_size = batch$num_rows)
   }

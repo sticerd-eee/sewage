@@ -214,7 +214,7 @@ match_house_chunk <- function(houses_sf, spill_sites_sf, spill_lookup, radius_km
 
 house_lookup_schema <- function() {
   arrow::schema(
-    house_id = arrow::int32(),
+    house_id = arrow::utf8(),
     site_id = arrow::int32(),
     distance_m = arrow::float64(),
     distance_km = arrow::float64(),
@@ -224,7 +224,7 @@ house_lookup_schema <- function() {
 
 normalise_house_lookup <- function(data) {
   tibble::tibble(
-    house_id = as.integer(data$house_id),
+    house_id = as.character(data$house_id),
     site_id = as.integer(data$site_id),
     distance_m = as.double(data$distance_m),
     distance_km = as.double(data$distance_km),
@@ -314,11 +314,38 @@ validate_house_stage <- function(stage_path, expected_schema,
   invisible(TRUE)
 }
 
+validate_house_publication <- function(output_path, stage_path, expected_schema,
+                                       expected_rows, expected_row_groups) {
+  if (!file.exists(output_path) || file.exists(stage_path)) {
+    stop(
+      "House lookup promotion did not materialize at the canonical path.",
+      call. = FALSE
+    )
+  }
+  reader <- arrow::ParquetFileReader$create(output_path)
+  if (!identical(reader$GetSchema()$ToString(), expected_schema$ToString()) ||
+      reader$num_rows != expected_rows ||
+      reader$num_row_groups != expected_row_groups) {
+    stop("Published house lookup failed canonical verification.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+settle_house_publication <- function(verify, output_path, stage_path,
+                                     delays = c(10, 20, 30)) {
+  for (delay in delays) {
+    Sys.sleep(delay)
+    verify()
+  }
+  invisible(TRUE)
+}
+
 write_house_lookup <- function(houses_sf, spill_sites_sf, spill_lookup,
                                output_path, radius_km, chunk_size,
                                fail_at = NULL,
                                close_writer = function(writer) writer$Close(),
-                               promote_stage = function(from, to) file.rename(from, to)) {
+                               promote_stage = function(from, to) file.rename(from, to),
+                               settle_publication = settle_house_publication) {
   if (!is.numeric(radius_km) || length(radius_km) != 1L ||
       is.na(radius_km) || radius_km <= 0) {
     stop("radius_km must be one positive number.", call. = FALSE)
@@ -334,11 +361,12 @@ write_house_lookup <- function(houses_sf, spill_sites_sf, spill_lookup,
   output_stream <- NULL
   writer_open <- FALSE
   stream_open <- FALSE
+  preserve_stage <- FALSE
   on.exit(
     {
       if (writer_open) try(writer$Close(), silent = TRUE)
       if (stream_open) try(output_stream$close(), silent = TRUE)
-      unlink(stage_path)
+      if (!preserve_stage) unlink(stage_path)
     },
     add = TRUE
   )
@@ -418,6 +446,26 @@ write_house_lookup <- function(houses_sf, spill_sites_sf, spill_lookup,
   if (!promote_stage(stage_path, output_path)) {
     stop("Failed to promote the staged house lookup.", call. = FALSE)
   }
+  validate_house_publication(
+    output_path,
+    stage_path,
+    expected_schema = schema,
+    expected_rows = output_rows,
+    expected_row_groups = length(starts)
+  )
+  preserve_stage <- TRUE
+  settle_publication(
+    function() validate_house_publication(
+      output_path,
+      stage_path,
+      expected_schema = schema,
+      expected_rows = output_rows,
+      expected_row_groups = length(starts)
+    ),
+    output_path,
+    stage_path
+  )
+  preserve_stage <- FALSE
   logger::log_info(
     "Published {output_rows} house lookup rows across {length(starts)} row groups to {output_path}"
   )
@@ -432,7 +480,8 @@ write_house_lookup <- function(houses_sf, spill_sites_sf, spill_lookup,
 process_spatial_data <- function(data, output_path, radius_km, chunk_size,
                                  fail_at = NULL,
                                  close_writer = function(writer) writer$Close(),
-                                 promote_stage = function(from, to) file.rename(from, to)) {
+                                 promote_stage = function(from, to) file.rename(from, to),
+                                 settle_publication = settle_house_publication) {
   houses_sf <- prepare_house_data(data$house)
   spill_data <- prepare_spill_sites(data$spill)
   write_house_lookup(
@@ -444,7 +493,8 @@ process_spatial_data <- function(data, output_path, radius_km, chunk_size,
     chunk_size = chunk_size,
     fail_at = fail_at,
     close_writer = close_writer,
-    promote_stage = promote_stage
+    promote_stage = promote_stage,
+    settle_publication = settle_publication
   )
 }
 

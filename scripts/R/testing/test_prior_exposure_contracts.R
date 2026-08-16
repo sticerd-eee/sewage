@@ -51,6 +51,48 @@ assert_error_contains <- function(expression, expected, message) {
   }
 }
 
+# The standalone ID-artifact verifier must prove exact referential integrity in
+# bounded Arrow batches without loading a large artifact's full ID column.
+match_rate_env <- new.env(parent = globalenv())
+sys.source(
+  here::here("scripts", "R", "testing", "verify_id_artifact_match_rates.R"),
+  envir = match_rate_env
+)
+match_rate_root <- tempfile("id-match-rate-contract-")
+dir.create(match_rate_root, recursive = TRUE)
+match_source_path <- file.path(match_rate_root, "source.parquet")
+match_good_path <- file.path(match_rate_root, "good.parquet")
+match_bad_path <- file.path(match_rate_root, "bad.parquet")
+arrow::write_parquet(
+  tibble(house_id = c("01leadingzero", "02stablehash")),
+  match_source_path
+)
+arrow::write_parquet(
+  tibble(house_id = c("01leadingzero", "01leadingzero", "02stablehash")),
+  match_good_path
+)
+arrow::write_parquet(
+  tibble(house_id = c("01leadingzero", "stale-id")),
+  match_bad_path
+)
+match_good <- match_rate_env$verify_id_artifact(
+  "fixture-good", match_good_path, "house_id",
+  match_rate_env$read_unique_source_ids(match_source_path, "house_id")
+)
+assert_identical(match_good$match_rate, 1, "The match-rate verifier must report exact 100% integrity.")
+assert_identical(match_good$id_type, "string", "The verifier must enforce utf8 artifact IDs.")
+assert_error_contains(
+  match_rate_env$verify_id_artifacts(
+    list(list(
+      name = "fixture-bad", artifact_path = match_bad_path,
+      source_path = match_source_path, id = "house_id"
+    )),
+    required_match_rate = 1
+  ),
+  "below required 100%",
+  "The standalone verifier must fail on one stale artifact ID."
+)
+
 expected_contract_failures <- character()
 record_expected_contract_failure <- function(label, expression) {
   tryCatch(
@@ -90,14 +132,14 @@ write_rental_fixture <- function(root) {
 
   arrow::write_parquet(
     tibble(
-      rental_id = 1L,
+      rental_id = "001",
       listing_price = 1200,
       rented_est = as.Date("2024-03-15")
     ),
     file.path(zoopla_dir, "zoopla_rentals.parquet")
   )
   arrow::write_parquet(
-    tibble(rental_id = 1L, site_id = 10L, distance_m = 100),
+    tibble(rental_id = "001", site_id = 10L, distance_m = 100),
     file.path(zoopla_dir, "spill_rental_lookup.parquet")
   )
   arrow::write_parquet(
@@ -155,7 +197,7 @@ assert_rental_time_contract <- function(producer_env, fixture_root, label) {
     paste(label, "must preserve rental Date as UTC midnight")
   )
 
-  joined <- producer_env$create_joined_events(1L, data)
+  joined <- producer_env$create_joined_events("001", data)
   assert_identical(
     nrow(joined$events_dt),
     1L,
@@ -389,34 +431,35 @@ write_prefix_fixture <- function(root, transaction_times) {
   dir.create(zoopla_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(event_dir, recursive = TRUE, showWarnings = FALSE)
 
-  transaction_ids <- seq_along(transaction_times)
+  transaction_positions <- seq_along(transaction_times)
+  transaction_ids <- sprintf("%03d", transaction_positions)
   transaction_times <- as.POSIXct(transaction_times, tz = "UTC")
   arrow::write_parquet(
     tibble(
-      house_id = as.integer(transaction_ids),
-      price = as.double(transaction_ids * 100000),
+      house_id = transaction_ids,
+      price = as.double(transaction_positions * 100000),
       date_of_transfer = transaction_times
     ),
     file.path(root, "house_price.parquet")
   )
   arrow::write_parquet(
     tibble(
-      rental_id = as.integer(transaction_ids),
-      listing_price = as.double(transaction_ids * 1000),
+      rental_id = transaction_ids,
+      listing_price = as.double(transaction_positions * 1000),
       rented_est = as.Date(transaction_times)
     ),
     file.path(zoopla_dir, "zoopla_rentals.parquet")
   )
 
   lookup_rows <- tibble(
-    transaction_id = c(transaction_ids, 2L, 2L),
+    transaction_id = c(transaction_ids, "002", "002"),
     site_id = c(rep(10L, length(transaction_ids)), 20L, 30L),
     distance_m = c(rep(100, length(transaction_ids)), 400, 700)
   )
   arrow::write_parquet(
     transmute(
       lookup_rows,
-      house_id = as.integer(.data$transaction_id),
+      house_id = .data$transaction_id,
       site_id = as.integer(.data$site_id),
       distance_m = as.double(.data$distance_m)
     ),
@@ -425,7 +468,7 @@ write_prefix_fixture <- function(root, transaction_times) {
   arrow::write_parquet(
     transmute(
       lookup_rows,
-      rental_id = as.integer(.data$transaction_id),
+      rental_id = .data$transaction_id,
       site_id = as.integer(.data$site_id),
       distance_m = as.double(.data$distance_m)
     ),
@@ -538,7 +581,7 @@ write_evidence_output_fixture <- function(root) {
   )
   arrow::write_parquet(
     tibble(
-      house_id = 1:2,
+      house_id = c("001", "002"),
       price = c(100000L, 200000L),
       date_of_transfer = transaction_times
     ),
@@ -546,19 +589,19 @@ write_evidence_output_fixture <- function(root) {
   )
   arrow::write_parquet(
     tibble(
-      rental_id = 1:2,
+      rental_id = c("001", "002"),
       listing_price = c(1000, 2000),
       rented_est = as.Date(transaction_times)
     ),
     file.path(zoopla_dir, "zoopla_rentals.parquet")
   )
 
-  lookup <- tidyr::expand_grid(transaction_id = 1:2, site_id = 10:15) |>
+  lookup <- tidyr::expand_grid(transaction_id = c("001", "002"), site_id = 10:15) |>
     mutate(distance_m = 100)
   arrow::write_parquet(
     transmute(
       lookup,
-      house_id = as.integer(.data$transaction_id),
+      house_id = .data$transaction_id,
       site_id = as.integer(.data$site_id),
       distance_m = as.double(.data$distance_m)
     ),
@@ -567,7 +610,7 @@ write_evidence_output_fixture <- function(root) {
   arrow::write_parquet(
     transmute(
       lookup,
-      rental_id = as.integer(.data$transaction_id),
+      rental_id = .data$transaction_id,
       site_id = as.integer(.data$site_id),
       distance_m = as.double(.data$distance_m)
     ),
@@ -642,18 +685,18 @@ for (label in c("sale_site", "rental_site")) {
   )
   all_metrics <- c(raw_metrics, rate_metrics)
   assert_true(
-    all(result[get(spec$id) == 1L, !is.na(spill_count)]),
+    all(result[get(spec$id) == "001", !is.na(spill_count)]),
     paste(label, "must not let a future 2023 evidence gap mask a 2022 cutoff")
   )
   assert_true(
-    all(result[get(spec$id) == 2L & site_id == 10L, spill_count] == 0),
+    all(result[get(spec$id) == "002" & site_id == 10L, spill_count] == 0),
     paste(label, "must retain reported_zero without events as observed zero")
   )
   assert_true(
-    all(result[get(spec$id) == 2L & site_id %in% c(11L, 12L), spill_count] == 1),
+    all(result[get(spec$id) == "002" & site_id %in% c(11L, 12L), spill_count] == 1),
     paste(label, "must use detailed events for event-bearing zero and positive years")
   )
-  unknown_rows <- result[get(spec$id) == 2L & site_id %in% c(13L, 14L, 15L)]
+  unknown_rows <- result[get(spec$id) == "002" & site_id %in% c(13L, 14L, 15L)]
   assert_true(
     all(vapply(unknown_rows[, ..all_metrics], function(column) all(is.na(column)), logical(1))),
     paste(label, "must keep all six final metrics unknown after zero-fill and rate calculation")
@@ -873,9 +916,9 @@ for (label in names(producer_specs)) {
     paste(label, "must keep early prefixes observed and propagate the later gap")
   )
 
-  joined <- producer_env$create_joined_events(1:4, data)
+  joined <- producer_env$create_joined_events(sprintf("%03d", 1:4), data)
   expected_pairs <- data$spill_lookup_dt[
-    get(spec$id) %in% 1:4,
+    get(spec$id) %in% sprintf("%03d", 1:4),
     c(spec$id, "site_id", "distance_m"),
     with = FALSE
   ]
@@ -914,12 +957,12 @@ for (label in names(producer_specs)) {
   }
   expected_types <- if (grepl("site$", label)) {
     c(
-      "integer", "double", "integer", "integer", "double", "double",
+      "character", "double", "integer", "integer", "double", "double",
       "double", "double", "logical", rep("double", 4L)
     )
   } else {
     c(
-      "integer", "double", "integer", "double", "double", "integer",
+      "character", "double", "integer", "double", "double", "integer",
       "double", "double", "double", "logical", rep("double", 4L)
     )
   }
@@ -939,25 +982,25 @@ for (label in names(producer_specs)) {
   )
   if (grepl("site$", label)) {
     assert_true(
-      all(!result[get(spec$id) == 2L & site_id == 10L, get(spec$missing)]),
+      all(!result[get(spec$id) == "002" & site_id == 10L, get(spec$missing)]),
       paste(label, "must not let the future 2023 gap mask a 2022 transaction")
     )
     assert_true(
-      all(result[get(spec$id) == 3L & site_id == 10L, get(spec$missing)]),
+      all(result[get(spec$id) == "003" & site_id == 10L, get(spec$missing)]),
       paste(label, "must mark a 2024 transaction after the 2023 gap")
     )
     assert_true(
-      all(result[get(spec$id) == 2L & site_id == 20L, get(spec$missing)]),
+      all(result[get(spec$id) == "002" & site_id == 20L, get(spec$missing)]),
       paste(label, "must conservatively mark an entirely absent Site Group")
     )
   } else {
     assert_true(
-      !result[get(spec$id) == 2L & radius == 250, get(spec$missing)],
+      !result[get(spec$id) == "002" & radius == 250, get(spec$missing)],
       paste(label, "must keep missingness outside 250m from invalidating 250m")
     )
     assert_true(
-      result[get(spec$id) == 2L & radius == 500, get(spec$missing)] &&
-        result[get(spec$id) == 2L & radius == 1000, get(spec$missing)],
+      result[get(spec$id) == "002" & radius == 500, get(spec$missing)] &&
+        result[get(spec$id) == "002" & radius == 1000, get(spec$missing)],
       paste(label, "must propagate missingness only through containing radii")
     )
   }
@@ -993,7 +1036,7 @@ for (label in names(producer_specs)) {
 
 variant_schema_signatures <- list(
   sale_site = c(
-    house_id = "int32", price = "int32", n_days_in_window = "int32",
+    house_id = "string", price = "int32", n_days_in_window = "int32",
     site_id = "int32", distance_m = "double", spill_hrs = "double",
     spill_count = "double", site_missing = "bool",
     spill_count_daily_avg = "double", spill_hrs_daily_avg = "double",
@@ -1001,7 +1044,7 @@ variant_schema_signatures <- list(
     radius = "int32"
   ),
   rental_site = c(
-    rental_id = "int32", listing_price = "double",
+    rental_id = "string", listing_price = "double",
     n_days_in_window = "int32", site_id = "int32", distance_m = "double",
     spill_hrs = "double", spill_count = "double", site_missing = "bool",
     spill_count_daily_avg = "double", spill_hrs_daily_avg = "double",
@@ -1009,7 +1052,7 @@ variant_schema_signatures <- list(
     radius = "int32"
   ),
   sale_radius = c(
-    house_id = "int32", price = "int32", n_days_in_window = "int32",
+    house_id = "string", price = "int32", n_days_in_window = "int32",
     spill_hrs = "double", n_spill_sites = "int32", spill_count = "double",
     mean_distance = "double", min_distance = "double",
     has_missing_site = "bool", spill_count_daily_avg = "double",
@@ -1017,7 +1060,7 @@ variant_schema_signatures <- list(
     spill_hrs_weekly_avg = "double", radius = "int32"
   ),
   rental_radius = c(
-    rental_id = "int32", listing_price = "double",
+    rental_id = "string", listing_price = "double",
     n_days_in_window = "int32", spill_hrs = "double",
     n_spill_sites = "int32", spill_count = "double", mean_distance = "double",
     min_distance = "double", has_missing_site = "bool",
@@ -1080,29 +1123,30 @@ write_eligibility_fixture <- function(root, transaction_times) {
   dir.create(event_dir, recursive = TRUE, showWarnings = FALSE)
 
   transaction_times <- as.POSIXct(transaction_times, tz = "UTC")
-  transaction_ids <- seq_along(transaction_times)
+  transaction_positions <- seq_along(transaction_times)
+  transaction_ids <- sprintf("%03d", transaction_positions)
   arrow::write_parquet(
     tibble(
-      house_id = as.integer(transaction_ids),
-      price = as.integer(transaction_ids * 100000),
+      house_id = transaction_ids,
+      price = as.integer(transaction_positions * 100000),
       date_of_transfer = transaction_times
     ),
     file.path(root, "house_price.parquet")
   )
   arrow::write_parquet(
     tibble(
-      rental_id = as.integer(transaction_ids),
-      listing_price = as.double(transaction_ids * 1000),
+      rental_id = transaction_ids,
+      listing_price = as.double(transaction_positions * 1000),
       rented_est = transaction_times
     ),
     file.path(zoopla_dir, "zoopla_rentals.parquet")
   )
   arrow::write_parquet(
-    tibble(house_id = integer(), site_id = integer(), distance_m = double()),
+    tibble(house_id = character(), site_id = integer(), distance_m = double()),
     file.path(root, "spill_house_lookup.parquet")
   )
   arrow::write_parquet(
-    tibble(rental_id = integer(), site_id = integer(), distance_m = double()),
+    tibble(rental_id = character(), site_id = integer(), distance_m = double()),
     file.path(zoopla_dir, "spill_rental_lookup.parquet")
   )
   arrow::write_parquet(
@@ -1153,7 +1197,7 @@ for (label in names(producer_specs)) {
     {
       assert_identical(
         metadata[[spec$id]],
-        2L,
+        "002",
         paste(label, "must exclude 29d23h59m and retain exactly 30 complete days")
       )
       assert_identical(
@@ -1232,7 +1276,7 @@ rewrite_transaction_ids <- function(root, market, ids, value_name = NULL) {
   }
 }
 
-for (id_case in c("missing", "duplicate", "character")) {
+for (id_case in c("missing", "duplicate", "numeric")) {
   for (label in names(producer_specs)) {
     spec <- producer_specs[[label]]
     market <- if (identical(spec$id, "house_id")) "sale" else "rental"
@@ -1241,9 +1285,9 @@ for (id_case in c("missing", "duplicate", "character")) {
     write_eligibility_fixture(id_root, rep("2021-03-01 00:00:00", 2L))
     ids <- switch(
       id_case,
-      missing = c(1L, NA_integer_),
-      duplicate = c(1L, 1L),
-      character = c("1", "2")
+      missing = c("001", NA_character_),
+      duplicate = c("001", "001"),
+      numeric = 1:2
     )
     rewrite_transaction_ids(id_root, market, ids)
     producer_env <- source_prior_exposure_producer(spec$path)
@@ -1265,11 +1309,33 @@ for (id_case in c("missing", "duplicate", "character")) {
   }
 }
 
+# Content-stable string IDs, including leading zeros, must survive loading.
+for (label in names(producer_specs)) {
+  spec <- producer_specs[[label]]
+  market <- if (identical(spec$id, "house_id")) "sale" else "rental"
+  id_root <- tempfile("prior-exposure-character-id-")
+  dir.create(id_root, recursive = TRUE)
+  write_eligibility_fixture(id_root, rep("2021-03-01 00:00:00", 2L))
+  leading_ids <- c("01leadingzero", "02stablehash")
+  rewrite_transaction_ids(id_root, market, leading_ids)
+  producer_env <- source_prior_exposure_producer(spec$path)
+  producer_env$CONFIG$processed_dir <- id_root
+  producer_env$CONFIG$site_group_crosswalk_path <- file.path(
+    id_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+  )
+  data <- producer_env$load_data()
+  assert_identical(
+    data$transaction_dt$transaction_id,
+    leading_ids,
+    paste(label, "must preserve character transaction IDs including leading zeros")
+  )
+}
+
 # Rental inputs must use the established value name, never a phantom `price`.
 wrong_rental_value_root <- tempfile("prior-exposure-rental-value-")
 dir.create(wrong_rental_value_root, recursive = TRUE)
 write_eligibility_fixture(wrong_rental_value_root, "2021-03-01 00:00:00")
-rewrite_transaction_ids(wrong_rental_value_root, "rental", 1L, value_name = "price")
+rewrite_transaction_ids(wrong_rental_value_root, "rental", "001", value_name = "price")
 for (label in c("rental_site", "rental_radius")) {
   spec <- producer_specs[[label]]
   producer_env <- source_prior_exposure_producer(spec$path)
@@ -1292,11 +1358,11 @@ write_eligibility_fixture(
   c("2021-03-01 00:00:00", "2021-03-02 00:00:00")
 )
 arrow::write_parquet(
-  tibble(house_id = 2L, site_id = 10L, distance_m = 100),
+  tibble(house_id = "002", site_id = 10L, distance_m = 100),
   file.path(empty_then_populated_root, "spill_house_lookup.parquet")
 )
 arrow::write_parquet(
-  tibble(rental_id = 2L, site_id = 10L, distance_m = 100),
+  tibble(rental_id = "002", site_id = 10L, distance_m = 100),
   file.path(empty_then_populated_root, "zoopla", "spill_rental_lookup.parquet")
 )
 for (label in c("sale_site", "rental_site")) {
@@ -1307,8 +1373,8 @@ for (label in c("sale_site", "rental_site")) {
     empty_then_populated_root, "matched_events_annual_data", "site_group_crosswalk.parquet"
   )
   data <- producer_env$load_data()
-  empty_chunk <- producer_env$process_chunk(1L, data)
-  populated_chunk <- producer_env$process_chunk(2L, data)
+  empty_chunk <- producer_env$process_chunk("001", data)
+  populated_chunk <- producer_env$process_chunk("002", data)
   record_expected_contract_failure(
     paste(label, "typed empty site chunk"),
     {
@@ -1338,7 +1404,7 @@ for (label in c("sale_radius", "rental_radius")) {
   producer_env$CONFIG$chunk_size <- 1L
   data <- producer_env$load_data()
   result <- collect_prior_exposure_fixture(producer_env, data)
-  empty_rows <- result[get(spec$id) == 1L]
+  empty_rows <- result[get(spec$id) == "001"]
   assert_identical(
     empty_rows$radius,
     c(250L, 500L, 1000L),
@@ -1360,7 +1426,7 @@ for (label in c("sale_radius", "rental_radius")) {
 # is observably different from summing an expanded radius table for large and
 # small floating-point values, despite being mathematically equivalent.
 accumulation_fixture <- data.table(
-  transaction_id = rep(1L, 3L),
+  transaction_id = rep("001", 3L),
   site_id = 1:3,
   distance_m = c(300, 100, 200),
   site_missing = FALSE,
@@ -1369,7 +1435,7 @@ accumulation_fixture <- data.table(
   spill_count = c(1, 1, 1)
 )
 accumulation_result <- prior_exposure_reduce_radius(
-  accumulation_fixture, 1L, 500
+  accumulation_fixture, "001", 500
 )
 assert_identical(
   accumulation_result$spill_hrs,
@@ -1379,11 +1445,11 @@ assert_identical(
 
 stable_contract <- prior_exposure_variant("sale", "radius")
 stable_lookup <- data.table(
-  transaction_id = c(1L, 2L), site_id = c(10L, 10L), distance_m = 100,
+  transaction_id = c("001", "002"), site_id = c(10L, 10L), distance_m = 100,
   site_missing = FALSE, has_unknown_event_evidence = FALSE
 )
 stable_events <- data.table(
-  house_id = c(2L, 1L, 1L), site_id = 10L,
+  house_id = c("002", "001", "001"), site_id = 10L,
   start_time = as.POSIXct(c(
     "2021-01-01 03:00:00", "2021-01-01 02:00:00", "2021-01-01 01:00:00"
   ), tz = "UTC"),
@@ -1401,11 +1467,11 @@ stable_events <- data.table(
 stable_full <- prior_exposure_transaction_site_metrics(
   list(internal_lookup = stable_lookup, events_dt = stable_events),
   stable_contract
-)[transaction_id == 1L]
+)[transaction_id == "001"]
 stable_isolated <- prior_exposure_transaction_site_metrics(
   list(
-    internal_lookup = stable_lookup[transaction_id == 1L],
-    events_dt = stable_events[house_id == 1L][2:1]
+    internal_lookup = stable_lookup[transaction_id == "001"],
+    events_dt = stable_events[house_id == "001"][2:1]
   ),
   stable_contract
 )
@@ -1428,26 +1494,26 @@ public_contract_candidate <- function(label) {
   candidate <- switch(
     label,
     sale_site = c(list(
-      house_id = rep(1L, 3L), price = rep(100000L, 3L),
+      house_id = rep("01leadingzero", 3L), price = rep(100000L, 3L),
       n_days_in_window = rep(60L, 3L), site_id = rep(10L, 3L),
       distance_m = rep(100, 3L), spill_hrs = c(0, 60, 120),
       spill_count = c(0, 30, 60), site_missing = rep(FALSE, 3L)
     ), common_rates),
     rental_site = c(list(
-      rental_id = rep(1L, 3L), listing_price = rep(1200, 3L),
+      rental_id = rep("01leadingzero", 3L), listing_price = rep(1200, 3L),
       n_days_in_window = rep(60L, 3L), site_id = rep(10L, 3L),
       distance_m = rep(100, 3L), spill_hrs = c(0, 60, 120),
       spill_count = c(0, 30, 60), site_missing = rep(FALSE, 3L)
     ), common_rates),
     sale_radius = c(list(
-      house_id = rep(1L, 3L), price = rep(100000L, 3L),
+      house_id = rep("01leadingzero", 3L), price = rep(100000L, 3L),
       n_days_in_window = rep(60L, 3L), spill_hrs = c(0, 60, 120),
       n_spill_sites = c(0L, 1L, 2L), spill_count = c(0, 30, 60),
       mean_distance = c(NA_real_, 100, 200), min_distance = c(NA_real_, 100, 100),
       has_missing_site = rep(FALSE, 3L)
     ), common_rates),
     rental_radius = c(list(
-      rental_id = rep(1L, 3L), listing_price = rep(1200, 3L),
+      rental_id = rep("01leadingzero", 3L), listing_price = rep(1200, 3L),
       n_days_in_window = rep(60L, 3L), spill_hrs = c(0, 60, 120),
       n_spill_sites = c(0L, 1L, 2L), spill_count = c(0, 30, 60),
       mean_distance = c(NA_real_, 100, 200), min_distance = c(NA_real_, 100, 100),
@@ -1470,13 +1536,10 @@ for (label in names(variant_schema_signatures)) {
     paste(label, "must reopen with its exact schema")
   )
 
-  character_identifier <- data.table::copy(candidate)
-  character_identifier[[names(candidate)[1]]] <- rep("1", nrow(candidate))
   drift_cases <- list(
     missing_field = candidate[, setdiff(names(candidate), "spill_hrs"), with = FALSE],
     extra_field = data.table::copy(candidate)[, unexpected := 1],
-    reordered_fields = candidate[, rev(names(candidate)), with = FALSE],
-    character_identifier = character_identifier
+    reordered_fields = candidate[, rev(names(candidate)), with = FALSE]
   )
   if (grepl("^rental", label)) {
     wrong_value <- data.table::copy(candidate)
@@ -1521,7 +1584,7 @@ for (label in names(variant_schema_signatures)) {
   )
 
   missing_id_candidate <- data.table::copy(candidate)
-  missing_id_candidate[1, (names(candidate)[1]) := NA_integer_]
+  missing_id_candidate[1, (names(candidate)[1]) := NA_character_]
   missing_id_path <- tempfile(paste0("prior-exposure-missing-id-", label, "-"))
   missing_id_error <- tryCatch(
     publish_prior_exposure_dataset(
@@ -1594,12 +1657,12 @@ for (label in names(producer_specs)) {
   )
   if (grepl("site$", label)) {
     assert_identical(
-      unique(result[[spec$id]]), 2L,
+      unique(result[[spec$id]]), "002",
       paste(label, "must preserve the populated chunk after an empty first chunk")
     )
   } else {
     assert_identical(
-      sort(unique(result[[spec$id]])), c(1L, 2L),
+      sort(unique(result[[spec$id]])), c("001", "002"),
       paste(label, "must preserve two same-radius chunk key sets without overwrite")
     )
     zero_rows <- result[get(spec$id) == 1L]
@@ -1678,7 +1741,7 @@ observing_first_write <- function(chunk, stage_path, chunk_index) {
   prior_exposure_write_chunk(chunk, stage_path, chunk_index)
 }
 fail_second_chunk <- function(transaction_ids, data, joined) {
-  if (identical(transaction_ids, 2L)) stop("injected second-chunk failure", call. = FALSE)
+  if (identical(transaction_ids, "002")) stop("injected second-chunk failure", call. = FALSE)
   prior_exposure_process_joined_chunk(transaction_ids, data, joined)
 }
 unreached_publisher <- function(...) {

@@ -44,7 +44,7 @@ prior_exposure_public_schema <- function(market, grain) {
   switch(
     variant,
     sale_site = arrow::schema(
-      house_id = arrow::int32(),
+      house_id = arrow::utf8(),
       price = arrow::int32(),
       n_days_in_window = arrow::int32(),
       site_id = arrow::int32(),
@@ -59,7 +59,7 @@ prior_exposure_public_schema <- function(market, grain) {
       radius = arrow::int32()
     ),
     rental_site = arrow::schema(
-      rental_id = arrow::int32(),
+      rental_id = arrow::utf8(),
       listing_price = arrow::float64(),
       n_days_in_window = arrow::int32(),
       site_id = arrow::int32(),
@@ -74,7 +74,7 @@ prior_exposure_public_schema <- function(market, grain) {
       radius = arrow::int32()
     ),
     sale_radius = arrow::schema(
-      house_id = arrow::int32(),
+      house_id = arrow::utf8(),
       price = arrow::int32(),
       n_days_in_window = arrow::int32(),
       spill_hrs = arrow::float64(),
@@ -90,7 +90,7 @@ prior_exposure_public_schema <- function(market, grain) {
       radius = arrow::int32()
     ),
     rental_radius = arrow::schema(
-      rental_id = arrow::int32(),
+      rental_id = arrow::utf8(),
       listing_price = arrow::float64(),
       n_days_in_window = arrow::int32(),
       spill_hrs = arrow::float64(),
@@ -162,8 +162,12 @@ prior_exposure_normalize_transactions <- function(
 
   pre_filter_rows <- nrow(transactions)
   identifier <- transactions[[contract$id]]
-  if (!is.integer(identifier)) {
-    stop(contract$id, " must be an integer transaction identifier.", call. = FALSE)
+  if (!is.character(identifier) || any(!is.na(identifier) & !nzchar(identifier))) {
+    stop(
+      contract$id,
+      " must contain non-empty character transaction identifiers.",
+      call. = FALSE
+    )
   }
   if (anyNA(identifier)) {
     stop(contract$id, " contains missing transaction identifiers.", call. = FALSE)
@@ -435,7 +439,7 @@ prior_exposure_reduce_site <- function(site_metrics, radii) {
 
 prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
   grid <- data.table::CJ(
-    transaction_id = as.integer(transaction_ids),
+    transaction_id = transaction_ids,
     radius = sort(radii), unique = TRUE
   )
   if (is.null(site_metrics) || nrow(site_metrics) == 0L) {
@@ -548,9 +552,9 @@ prior_exposure_project_public <- function(result, contract) {
   result[, ..columns]
 }
 
-prior_exposure_site_prototype <- function(contract) {
+prior_exposure_site_prototype <- function(contract, transaction_ids = character()) {
   result <- data.table::data.table(
-    transaction_id = integer(), transaction_value = double(),
+    transaction_id = transaction_ids[0], transaction_value = double(),
     n_days_in_window = integer(), site_id = integer(), radius = double(),
     distance_m = double(), spill_hrs = double(), spill_count = double(),
     site_missing = logical(), spill_count_daily_avg = double(),
@@ -568,7 +572,7 @@ prior_exposure_process_joined_chunk <- function(transaction_ids, data, joined) {
   if (contract$grain == "site") {
     metrics <- prior_exposure_reduce_site(site_metrics, data$config$radius_thresholds)
     if (is.null(metrics) || nrow(metrics) == 0L) {
-      return(prior_exposure_site_prototype(contract))
+      return(prior_exposure_site_prototype(contract, metadata$transaction_id))
     }
     result <- metadata[metrics, on = "transaction_id"]
     result[has_unknown_event_evidence == TRUE, `:=`(
@@ -653,6 +657,10 @@ prior_exposure_validate_and_cast_public <- function(data, expected_schema) {
       if (!is.logical(value)) {
         stop(column, " must be logical for Arrow bool.", call. = FALSE)
       }
+    } else if (target == "string") {
+      if (!is.character(value) || anyNA(value) || any(!nzchar(value))) {
+        stop(column, " must contain nonmissing transaction identifiers.", call. = FALSE)
+      }
     }
   }
   id <- if ("house_id" %in% names(result)) "house_id" else if (
@@ -731,7 +739,7 @@ prior_exposure_expected_chunk_keys <- function(transaction_ids, data, lookup = N
   radii <- sort(as.integer(data$config$radius_thresholds))
   if (contract$grain == "radius") {
     keys <- data.table::CJ(
-      transaction_id = as.integer(transaction_ids),
+      transaction_id = transaction_ids,
       radius = radii,
       unique = TRUE
     )
@@ -744,7 +752,9 @@ prior_exposure_expected_chunk_keys <- function(transaction_ids, data, lookup = N
     }
     if (nrow(lookup) == 0L) {
       keys <- data.table::data.table(
-        transaction_id = integer(), site_id = integer(), radius = integer()
+        transaction_id = transaction_ids[0],
+        site_id = integer(),
+        radius = integer()
       )
     } else {
       lookup <- lookup[
@@ -756,6 +766,7 @@ prior_exposure_expected_chunk_keys <- function(transaction_ids, data, lookup = N
     }
   }
   data.table::setnames(keys, "transaction_id", contract$id)
+  data.table::set(keys, j = contract$id, value = as.character(keys[[contract$id]]))
   data.table::setorderv(keys, prior_exposure_public_key_columns(contract))
   keys
 }
@@ -908,10 +919,10 @@ prior_exposure_stream <- function(
   }
 
   transaction_ids <- data$transaction_dt$transaction_id
-  if (!is.integer(transaction_ids) || anyNA(transaction_ids) ||
-      anyDuplicated(transaction_ids)) {
+  if (!is.character(transaction_ids) || anyNA(transaction_ids) ||
+      any(!nzchar(transaction_ids)) || anyDuplicated(transaction_ids)) {
     stop(
-      "Streaming requires unique, nonmissing integer transaction identifiers.",
+      "Streaming requires unique, nonmissing transaction identifiers.",
       call. = FALSE
     )
   }

@@ -107,7 +107,7 @@ site_fixture <- tibble(
 )
 
 property_fixture <- tibble(
-  property_id = 1:5,
+  property_id = c("001", "0abc", "deadbeef00000001", "004", "005"),
   easting = c(500001, 510000, 510100, 500000, 600000),
   northing = c(200000, 200000, 200000, 205000, 300000)
 )
@@ -135,7 +135,9 @@ run_stream <- function(spec, properties = property_fixture, chunk_size = 2L,
                        output_path = tempfile(fileext = ".parquet"),
                        fail_at = NULL,
                        close_writer = function(writer) writer$Close(),
-                       promote_stage = function(from, to) file.rename(from, to)) {
+                       promote_stage = function(from, to) file.rename(from, to),
+                       settle_publication = function(verify, output_path,
+                                                     stage_path) verify()) {
   names(properties)[names(properties) == "property_id"] <- spec$id_column
   data <- setNames(list(properties), spec$data_key)
   data$spill <- site_fixture
@@ -146,7 +148,8 @@ run_stream <- function(spec, properties = property_fixture, chunk_size = 2L,
     chunk_size = chunk_size,
     fail_at = fail_at,
     close_writer = close_writer,
-    promote_stage = promote_stage
+    promote_stage = promote_stage,
+    settle_publication = settle_publication
   )
   output_path
 }
@@ -196,19 +199,19 @@ for (producer_name in names(producer_specs)) {
   result <- run_match(spec)
 
   assert_true(
-    any(result[[id_column]] == 1L & result$site_id == 101L),
+    any(result[[id_column]] == "001" & result$site_id == 101L),
     paste(producer_name, "must match a property inside 10 km.")
   )
   assert_true(
-    any(result[[id_column]] == 2L & result$site_id == 101L),
+    any(result[[id_column]] == "0abc" & result$site_id == 101L),
     paste(producer_name, "must include a property exactly 10 km away.")
   )
   assert_true(
-    !any(result[[id_column]] == 3L & result$site_id == 101L, na.rm = TRUE),
+    !any(result[[id_column]] == "deadbeef00000001" & result$site_id == 101L, na.rm = TRUE),
     paste(producer_name, "must exclude a property beyond 10 km.")
   )
 
-  multi_match <- result |> filter(.data[[id_column]] == 4L)
+  multi_match <- result |> filter(.data[[id_column]] == "004")
   assert_identical(
     multi_match$site_id,
     c(101L, 202L),
@@ -224,7 +227,7 @@ for (producer_name in names(producer_specs)) {
     paste(producer_name, "must produce unique property-Site Group keys.")
   )
 
-  unmatched <- result |> filter(.data[[id_column]] == 5L)
+  unmatched <- result |> filter(.data[[id_column]] == "005")
   assert_identical(
     nrow(unmatched),
     1L,
@@ -238,7 +241,7 @@ for (producer_name in names(producer_specs)) {
   assert_identical(
     vapply(result, typeof, character(1)),
     setNames(
-      c("integer", "integer", "double", "double", "integer"),
+      c("character", "integer", "double", "double", "integer"),
       c(id_column, "site_id", "distance_m", "distance_km", "n_site_groups")
     ),
     paste(producer_name, "must preserve the five-column lookup types.")
@@ -301,7 +304,8 @@ for (producer_name in names(producer_specs)) {
     }),
     validation = list(fail_at = "validation"),
     sample_oracle = list(fail_at = "sample_oracle"),
-    promotion = list(promote_stage = function(from, to) FALSE)
+    promotion = list(promote_stage = function(from, to) FALSE),
+    promotion_false_success = list(promote_stage = function(from, to) TRUE)
   )
   for (failure_point in names(failure_cases)) {
     failure <- tryCatch(
@@ -338,6 +342,42 @@ for (producer_name in names(producer_specs)) {
       paste(producer_name, "must clean its stage after", failure_point)
     )
   }
+
+  delayed_reversion_path <- tempfile(
+    paste0(producer_name, "-delayed-reversion-"),
+    fileext = ".parquet"
+  )
+  delayed_reversion <- tryCatch(
+    run_stream(
+      spec,
+      chunk_size = 2L,
+      output_path = delayed_reversion_path,
+      settle_publication = function(verify, output_path, stage_path) {
+        verify()
+        assert_true(
+          file.rename(output_path, stage_path),
+          "Delayed-reversion fixture must restore the stage path."
+        )
+        verify()
+      }
+    ),
+    error = identity
+  )
+  assert_true(
+    inherits(delayed_reversion, "error"),
+    paste(producer_name, "must reject a delayed post-promotion reversion.")
+  )
+  assert_true(
+    !file.exists(delayed_reversion_path),
+    paste(producer_name, "must not leave a canonical after delayed reversion.")
+  )
+  delayed_stages <- stage_siblings(delayed_reversion_path)
+  assert_identical(
+    length(delayed_stages),
+    1L,
+    paste(producer_name, "must preserve the validated stage after delayed reversion.")
+  )
+  unlink(delayed_stages)
 
   diagnostic_properties <- tibble(
     property_id = 1:4,
@@ -442,7 +482,7 @@ audit_production_artifact <- function(producer_name, spec, expected_radius_km = 
     is.finite(properties$easting) &
     is.finite(properties$northing)
   eligible_properties <- properties[coordinate_eligible, , drop = FALSE]
-  eligible_ids <- as.integer(eligible_properties[[id_column]])
+  eligible_ids <- eligible_properties[[id_column]]
   assert_true(
     length(eligible_ids) > 0L,
     paste(producer_name, "production input must contain eligible properties.")
