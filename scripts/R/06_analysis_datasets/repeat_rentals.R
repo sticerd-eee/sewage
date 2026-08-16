@@ -13,13 +13,10 @@
 #   - data/processed/zoopla/zoopla_rentals_long_run.parquet (2014–2023)
 #
 # Outputs:
-#   - data/processed/repeated_transactions/repeated_rentals_candidate.parquet
-#   - data/processed/repeated_transactions/
-#       repeated_rentals_large_groups_candidate.parquet
-#   - data/processed/repeated_transactions/
-#       repeated_rentals_price_ratios_candidate.parquet
-#   - data/processed/repeated_transactions/
-#       repeated_rentals_same_day_candidate.parquet
+#   - data/processed/repeated_transactions/repeated_rentals.parquet
+#   - data/processed/repeated_transactions/repeated_rentals_large_groups.parquet
+#   - data/processed/repeated_transactions/repeated_rentals_price_ratios.parquet
+#   - data/processed/repeated_transactions/repeated_rentals_same_day.parquet
 #   - output/log/repeat_rentals.log
 #
 # Notes:
@@ -27,7 +24,9 @@
 #   - Window-restricted consumers must regroup after filtering.
 #   - Rentals sharing an address and a date are data errors: every conflicting
 #     row is excluded from the mapping and routed to the same-day review.
-#   - Candidate outputs are promoted only after validation succeeds.
+#   - Outputs are staged as `*_candidate.parquet` and promoted onto the paths
+#     above only once the run's checks pass; a failed run leaves the previous
+#     generation in place. Publication replaces it without keeping a backup.
 # ==============================================================================
 
 if (!requireNamespace("here", quietly = TRUE)) {
@@ -90,6 +89,7 @@ repeat_rentals_config <- function(output_dir = here::here(
     price_ratio_review_path = file.path(output_dir, "repeated_rentals_price_ratios_candidate.parquet"),
     same_day_review_path = file.path(output_dir, "repeated_rentals_same_day_candidate.parquet"),
     market = "rentals",
+    publish = TRUE,
     year_min = 2014L,
     year_max = 2023L,
     # Observed 2026-08-15 baselines: coverage 1.00000000, repeat share 0.74848970.

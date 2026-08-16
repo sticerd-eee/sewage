@@ -41,6 +41,11 @@ validate_repeat_config <- function(config) {
       config$repeat_share_floor < 0 || config$repeat_share_floor > 1) {
     stop("Coverage and repeat-share floors must lie in [0, 1].", call. = FALSE)
   }
+  # Reject an unpublishable path before the run does any work, rather than after
+  # the mappings have been built.
+  if (isTRUE(config$publish)) {
+    invisible(lapply(repeat_staged_output_paths(config), repeat_canonical_path))
+  }
   invisible(config)
 }
 
@@ -392,7 +397,7 @@ write_arrow_table_atomic <- function(table, path) {
   on.exit(unlink(tmp), add = TRUE)
   arrow::write_parquet(table, tmp)
   if (!file.rename(tmp, path)) {
-    stop("Failed to promote staged parquet to ", path, ".", call. = FALSE)
+    stop("Failed to write staged parquet to ", path, ".", call. = FALSE)
   }
   invisible(path)
 }
@@ -408,6 +413,98 @@ write_repeat_outputs <- function(result, config, manifest) {
   write_arrow_table_atomic(as.data.frame(result$price_ratio_issues), config$price_ratio_review_path)
   write_arrow_table_atomic(as.data.frame(result$same_day_conflicts), config$same_day_review_path)
   invisible(config$output_path)
+}
+
+#' The four staged outputs a run writes, in publication order
+repeat_staged_output_paths <- function(config) {
+  c(
+    config$output_path, config$large_group_review_path,
+    config$price_ratio_review_path, config$same_day_review_path
+  )
+}
+
+#' Canonical destination for a staged candidate path
+#'
+#' Fails closed on any path that is not a candidate, so a mistyped config cannot
+#' nominate an arbitrary file as a publication target.
+repeat_canonical_path <- function(path) {
+  canonical <- sub("_candidate\\.parquet$", ".parquet", path)
+  if (identical(canonical, path)) {
+    stop(
+      "Repeat output path is not a candidate path and cannot be published: ",
+      path,
+      call. = FALSE
+    )
+  }
+  canonical
+}
+
+#' Re-read a staged mapping and check it against the manifest it will carry
+#'
+#' Renaming cannot corrupt a file, so this runs before the swap rather than
+#' after it: a staged mapping that disagrees with its own run aborts while the
+#' canonical generation is still intact.
+assert_promotable_mapping <- function(path, manifest) {
+  table <- tryCatch(
+    arrow::read_parquet(path, as_data_frame = FALSE),
+    error = function(e) {
+      stop(
+        "Staged mapping is unreadable and cannot be published: ", path, ". ",
+        conditionMessage(e),
+        call. = FALSE
+      )
+    }
+  )
+  expected <- manifest$mapped_count
+  if (!is.null(expected) &&
+      !identical(as.character(table$num_rows), as.character(expected))) {
+    stop(
+      "Staged mapping row count ", table$num_rows,
+      " contradicts its manifest mapped_count ", expected, ".",
+      call. = FALSE
+    )
+  }
+  invisible(path)
+}
+
+#' Replace the canonical outputs with this run's staged candidates
+#'
+#' Every output is written before anything is promoted, so publication is four
+#' renames executed back to back. A failure partway still leaves some outputs at
+#' the new generation and some at the old, but the window is milliseconds rather
+#' than the minutes it takes to write the mappings; the filesystem offers no
+#' transaction that would close it entirely.
+promote_repeat_outputs <- function(config, manifest, log_fn = NULL) {
+  staged <- repeat_staged_output_paths(config)
+  targets <- vapply(staged, repeat_canonical_path, character(1), USE.NAMES = FALSE)
+
+  absent <- staged[!file.exists(staged)]
+  if (length(absent) > 0L) {
+    stop(
+      "Cannot publish; staged output(s) missing: ",
+      paste(absent, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  assert_promotable_mapping(staged[[1L]], manifest)
+
+  for (index in seq_along(staged)) {
+    if (!file.rename(staged[[index]], targets[[index]])) {
+      stop(
+        "Failed to publish ", staged[[index]], " to ", targets[[index]], ".",
+        call. = FALSE
+      )
+    }
+  }
+  emit_repeat_log(
+    "INFO",
+    sprintf(
+      "Promoted %d staged output(s) to canonical paths: %s",
+      length(targets), paste(basename(targets), collapse = ", ")
+    ),
+    log_fn
+  )
+  invisible(targets)
 }
 
 load_repeat_input <- function(config) {
@@ -458,6 +555,9 @@ run_repeat_transactions <- function(config, data = NULL, log_fn = NULL) {
     log_fn
   )
   write_repeat_outputs(result, config, manifest)
+  if (isTRUE(config$publish)) {
+    promote_repeat_outputs(config, manifest, log_fn)
+  }
   result$manifest <- manifest
   invisible(result)
 }

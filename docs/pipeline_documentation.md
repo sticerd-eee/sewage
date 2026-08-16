@@ -90,7 +90,12 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
   from same-day exclusion (`same_day_excluded_count`, `mapped_count`), because
   the two measure different data-quality failures and carry different floors.
   Persisted `repeat_count` is defined over the full long-run input; consumers
-  that filter the date window must regroup after filtering.
+  that filter the date window must regroup after filtering. Both entries publish
+  their own outputs: each run stages `*_candidate.parquet` files and, once its
+  checks pass, promotes all four onto the canonical paths, so a successful run
+  leaves the live datasets current with no manual move. A failed run promotes
+  nothing and leaves the previous generation in place, which is also the only
+  copy of it — publication keeps no backup.
 
 ## Analysis Scripts
 
