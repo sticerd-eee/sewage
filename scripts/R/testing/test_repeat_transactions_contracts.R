@@ -422,6 +422,116 @@ assert_true(
   "New metrics must appear in the delta even when the previous manifest lacks them."
 )
 
+# Publication: a successful run promotes its staged candidates onto the canonical
+# paths, so the live datasets never depend on a manual move.
+publish_config <- make_config("publish")
+publish_config$output_path <- file.path(test_dir, "publish_mapping_candidate.parquet")
+publish_config$large_group_review_path <- file.path(test_dir, "publish_large_candidate.parquet")
+publish_config$price_ratio_review_path <- file.path(test_dir, "publish_ratios_candidate.parquet")
+publish_config$same_day_review_path <- file.path(test_dir, "publish_same_day_candidate.parquet")
+publish_config$previous_manifest_path <- file.path(test_dir, "publish_mapping.parquet")
+publish_config$publish <- TRUE
+staged_paths <- c(
+  publish_config$output_path, publish_config$large_group_review_path,
+  publish_config$price_ratio_review_path, publish_config$same_day_review_path
+)
+canonical_paths <- sub("_candidate\\.parquet$", ".parquet", staged_paths)
+publish_logs <- character()
+run_repeat_transactions(
+  publish_config,
+  data = fixture,
+  log_fn = function(level, message) publish_logs <<- c(publish_logs, paste(level, message))
+)
+assert_true(
+  all(file.exists(canonical_paths)),
+  "A published run must leave every canonical output in place."
+)
+assert_true(
+  !any(file.exists(staged_paths)),
+  "A published run must consume its staged candidates rather than leaving them behind."
+)
+assert_true(
+  any(grepl("promot", publish_logs, ignore.case = TRUE)),
+  "Publication must be logged so a run records that it replaced the canonical outputs."
+)
+published <- arrow::read_parquet(canonical_paths[[1]], as_data_frame = FALSE)
+assert_identical(
+  names(published), c("house_id", "repeat_id", "repeat_count"),
+  "The promoted mapping must carry the declared public schema."
+)
+assert_identical(
+  published$metadata$mapped_count, "3",
+  "The promoted mapping must carry its run's manifest."
+)
+
+# Republishing over an existing canonical generation is the normal case.
+run_repeat_transactions(publish_config, data = fixture)
+assert_true(
+  all(file.exists(canonical_paths)) && !any(file.exists(staged_paths)),
+  "A second published run must replace the previous canonical generation."
+)
+
+# Publication is opt-in: without it, the canonical paths are untouched.
+unpublished_config <- make_config("unpublished")
+unpublished_config$output_path <- file.path(test_dir, "unpublished_mapping_candidate.parquet")
+unpublished_canonical <- file.path(test_dir, "unpublished_mapping.parquet")
+run_repeat_transactions(unpublished_config, data = fixture)
+assert_true(
+  file.exists(unpublished_config$output_path),
+  "Without publication the staged candidate must remain for inspection."
+)
+assert_true(
+  !file.exists(unpublished_canonical),
+  "Without publication no canonical output may be written."
+)
+
+# A publishing config must name candidate paths, so a mistyped path cannot
+# designate an arbitrary file as a promotion target.
+non_candidate_config <- make_config("non-candidate")
+non_candidate_config$publish <- TRUE
+assert_error_matching(
+  run_repeat_transactions(non_candidate_config, data = fixture),
+  "candidate",
+  "Publishing a non-candidate output path must abort."
+)
+assert_true(
+  !file.exists(non_candidate_config$output_path),
+  "A rejected publication target must abort before writing any output."
+)
+
+# A run that fails its own checks must not touch the canonical datasets.
+failing_config <- publish_config
+failing_config$key_coverage_floor <- 0.9
+assert_error_matching(
+  run_repeat_transactions(failing_config, data = missing_fixture),
+  "coverage",
+  "A failed check battery must abort before publication."
+)
+assert_identical(
+  arrow::read_parquet(canonical_paths[[1]], as_data_frame = FALSE)$metadata$input_row_count,
+  "3",
+  "A failed run must leave the previous canonical generation intact."
+)
+
+# Promotion re-reads what it wrote: a mapping that contradicts its manifest fails.
+corrupt_promotion_dir <- file.path(test_dir, "corrupt-promotion")
+dir.create(corrupt_promotion_dir, recursive = TRUE)
+corrupt_staged <- file.path(corrupt_promotion_dir, "corrupt_mapping_candidate.parquet")
+arrow::write_parquet(
+  data.frame(
+    house_id = "01abc", repeat_id = strrep("a", 16L), repeat_count = 1L
+  ),
+  corrupt_staged
+)
+assert_error_matching(
+  promote_repeat_outputs(
+    list(output_path = corrupt_staged),
+    manifest = list(mapped_count = "99")
+  ),
+  "row count|manifest",
+  "A promoted mapping whose row count contradicts its manifest must abort."
+)
+
 corrupt_manifest_path <- file.path(test_dir, "corrupt-previous.parquet")
 writeBin(charToRaw("not parquet"), corrupt_manifest_path)
 assert_error_matching(
@@ -444,10 +554,18 @@ assert_identical(
   c(0.99, 0.35),
   "Sales production floors must remain locked below the accepted baseline."
 )
+assert_true(
+  isTRUE(sales_entry_config$publish),
+  "The repeat-sales entry must publish its outputs rather than stage them for a manual move."
+)
 sales_env$main(sales_entry_config, data = fixture)
 assert_true(
-  file.exists(sales_entry_config$output_path),
-  "The repeat-sales entry script must run a fixture end-to-end."
+  file.exists(repeat_canonical_path(sales_entry_config$output_path)),
+  "The repeat-sales entry script must run a fixture end-to-end onto its canonical output."
+)
+assert_true(
+  !file.exists(sales_entry_config$output_path),
+  "The repeat-sales entry script must leave no staged candidate behind."
 )
 
 rentals_fixture <- data.table(
@@ -475,10 +593,18 @@ assert_identical(
   c(0.99, 0.70),
   "Rental production floors must remain locked below the accepted baseline."
 )
+assert_true(
+  isTRUE(rentals_entry_config$publish),
+  "The repeat-rentals entry must publish its outputs rather than stage them for a manual move."
+)
 rentals_env$main(rentals_entry_config, data = rentals_fixture)
 assert_true(
-  file.exists(rentals_entry_config$output_path),
-  "The repeat-rentals entry script must run a fixture end-to-end."
+  file.exists(repeat_canonical_path(rentals_entry_config$output_path)),
+  "The repeat-rentals entry script must run a fixture end-to-end onto its canonical output."
+)
+assert_true(
+  !file.exists(rentals_entry_config$output_path),
+  "The repeat-rentals entry script must leave no staged candidate behind."
 )
 
 cat("Repeat transaction contract tests passed.\n")

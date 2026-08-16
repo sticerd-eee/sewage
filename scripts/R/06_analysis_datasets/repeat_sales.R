@@ -13,13 +13,10 @@
 #   - data/processed/house_price_long_run.parquet (2014–2024)
 #
 # Outputs:
-#   - data/processed/repeated_transactions/repeated_sales_candidate.parquet
-#   - data/processed/repeated_transactions/
-#       repeated_sales_large_groups_candidate.parquet
-#   - data/processed/repeated_transactions/
-#       repeated_sales_price_ratios_candidate.parquet
-#   - data/processed/repeated_transactions/
-#       repeated_sales_same_day_candidate.parquet
+#   - data/processed/repeated_transactions/repeated_sales.parquet
+#   - data/processed/repeated_transactions/repeated_sales_large_groups.parquet
+#   - data/processed/repeated_transactions/repeated_sales_price_ratios.parquet
+#   - data/processed/repeated_transactions/repeated_sales_same_day.parquet
 #   - output/log/repeat_sales.log
 #
 # Notes:
@@ -27,7 +24,9 @@
 #   - Window-restricted consumers must regroup after filtering.
 #   - Sales sharing an address and a date are data errors: every conflicting row
 #     is excluded from the mapping and routed to the same-day review.
-#   - Candidate outputs are promoted only after validation succeeds.
+#   - Outputs are staged as `*_candidate.parquet` and promoted onto the paths
+#     above only once the run's checks pass; a failed run leaves the previous
+#     generation in place. Publication replaces it without keeping a backup.
 # ==============================================================================
 
 if (!requireNamespace("here", quietly = TRUE)) {
@@ -86,6 +85,7 @@ repeat_sales_config <- function(output_dir = here::here(
     price_ratio_review_path = file.path(output_dir, "repeated_sales_price_ratios_candidate.parquet"),
     same_day_review_path = file.path(output_dir, "repeated_sales_same_day_candidate.parquet"),
     market = "sales",
+    publish = TRUE,
     year_min = 2014L,
     year_max = 2024L,
     # Observed 2026-08-15 baselines: coverage 0.99681926, repeat share 0.36233545.
