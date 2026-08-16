@@ -555,6 +555,98 @@ assert_identical(
   "A positive year without matched events must affect its own and later cutoffs only."
 )
 
+# Annual-return sequence flags are site-specific and inspect the full available
+# crosswalk horizon, while the prefix side of the sequence remains transaction
+# specific.
+annual_return_sequence_fixture <- tidyr::expand_grid(
+  site_id = 10L + 0:3,
+  year = 2021:2024
+) |>
+  mutate(
+    water_company = "Test Water",
+    annual_status = case_when(
+      site_id == 10L & year == 2021L ~ "reported_na",
+      site_id == 10L & year >= 2022L ~ "absent",
+      site_id == 11L ~ "reported_positive",
+      site_id == 12L & year == 2021L ~ "absent",
+      site_id == 12L & year == 2022L ~ "reported_na",
+      site_id == 12L ~ "reported_positive",
+      site_id == 13L & year == 2021L ~ "reported_na",
+      site_id == 13L ~ "reported_positive",
+      TRUE ~ "reported_positive"
+    ),
+    matched_event_count = 0L
+  )
+annual_return_sequence_result <- suppressMessages(
+  derive_site_group_prefix_missing_flags(
+    annual_return_sequence_fixture,
+    base_year = 2021L,
+    cutoff_years = 2020:2023,
+    include_annual_return_sequence = TRUE
+  )
+)
+assert_true(
+  annual_return_sequence_result |>
+    filter(site_id == 10L, cutoff_year == 2021L) |>
+    pull(annual_returns_na_then_absent),
+  "A site with pre-transaction annual-return NA and a later absent year must be flagged."
+)
+assert_true(
+  !annual_return_sequence_result |>
+    filter(site_id == 10L, cutoff_year == 2022L) |>
+    pull(annual_returns_na_then_absent),
+  "A site already absent at the transaction cutoff must not be flagged."
+)
+assert_true(
+  !any(annual_return_sequence_result |>
+    filter(site_id == 11L) |>
+    pull(annual_returns_na_then_absent)),
+  "A site without annual-return NA must not be flagged."
+)
+assert_true(
+  !any(annual_return_sequence_result |>
+    filter(site_id == 12L) |>
+    pull(annual_returns_na_then_absent)),
+  "A site with absence before annual-return NA must not be flagged."
+)
+assert_true(
+  !any(annual_return_sequence_result |>
+    filter(site_id == 13L) |>
+    pull(annual_returns_na_then_absent)),
+  "A site without a later absent year must not be flagged."
+)
+sequence_same_site_metrics <- data.table(
+  transaction_id = "001",
+  site_id = c(10L, 11L),
+  distance_m = c(100, 200),
+  site_missing = FALSE,
+  annual_returns_na_then_absent = c(TRUE, FALSE),
+  spill_hrs = c(1, 2),
+  spill_count = c(1, 2)
+)
+sequence_radius_result <- prior_exposure_reduce_radius(
+  sequence_same_site_metrics, "001", c(100L, 250L)
+)
+assert_true(
+  all(sequence_radius_result$annual_returns_na_then_absent),
+  "A radius must retain a TRUE sequence flag once the same qualifying site enters it."
+)
+sequence_mixed_site_metrics <- data.table(
+  transaction_id = "001",
+  site_id = c(10L, 11L),
+  distance_m = c(100, 200),
+  site_missing = FALSE,
+  annual_returns_na_then_absent = c(FALSE, FALSE),
+  spill_hrs = c(1, 2),
+  spill_count = c(1, 2)
+)
+assert_true(
+  !any(prior_exposure_reduce_radius(
+    sequence_mixed_site_metrics, "001", c(100L, 250L)
+  )$annual_returns_na_then_absent),
+  "A radius must not combine annual-return NA and later absence from different sites."
+)
+
 for (invalid_count in list(NA_real_, -1, 1.5, "invalid")) {
   invalid_evidence_fixture <- evidence_state_fixture
   invalid_evidence_fixture$matched_event_count[1] <- invalid_count
@@ -951,7 +1043,8 @@ for (label in names(producer_specs)) {
     c(
       spec$id, price_column, "n_days_in_window", "radius", "spill_hrs",
       "n_spill_sites", "spill_count", "mean_distance", "min_distance",
-      "has_missing_site", "spill_count_daily_avg", "spill_hrs_daily_avg",
+      "has_missing_site", "annual_returns_na_then_absent",
+      "spill_count_daily_avg", "spill_hrs_daily_avg",
       "spill_count_weekly_avg", "spill_hrs_weekly_avg"
     )
   }
@@ -963,7 +1056,7 @@ for (label in names(producer_specs)) {
   } else {
     c(
       "character", "double", "integer", "double", "double", "integer",
-      "double", "double", "double", "logical", rep("double", 4L)
+      "double", "double", "double", "logical", "logical", rep("double", 4L)
     )
   }
   assert_identical(names(result), expected_columns, paste(label, "must preserve its exact schema"))
@@ -1055,7 +1148,9 @@ variant_schema_signatures <- list(
     house_id = "string", price = "int32", n_days_in_window = "int32",
     spill_hrs = "double", n_spill_sites = "int32", spill_count = "double",
     mean_distance = "double", min_distance = "double",
-    has_missing_site = "bool", spill_count_daily_avg = "double",
+    has_missing_site = "bool",
+    annual_returns_na_then_absent = "bool",
+    spill_count_daily_avg = "double",
     spill_hrs_daily_avg = "double", spill_count_weekly_avg = "double",
     spill_hrs_weekly_avg = "double", radius = "int32"
   ),
@@ -1064,6 +1159,7 @@ variant_schema_signatures <- list(
     n_days_in_window = "int32", spill_hrs = "double",
     n_spill_sites = "int32", spill_count = "double", mean_distance = "double",
     min_distance = "double", has_missing_site = "bool",
+    annual_returns_na_then_absent = "bool",
     spill_count_daily_avg = "double", spill_hrs_daily_avg = "double",
     spill_count_weekly_avg = "double", spill_hrs_weekly_avg = "double",
     radius = "int32"
@@ -1417,8 +1513,9 @@ for (label in c("sale_radius", "rental_radius")) {
   )
   assert_true(
     all(is.na(empty_rows$mean_distance)) && all(is.na(empty_rows$min_distance)) &&
-      all(!empty_rows$has_missing_site),
-    paste(label, "no-site radius rows must have missing distances and observed false missingness")
+      all(!empty_rows$has_missing_site) &&
+      all(!empty_rows$annual_returns_na_then_absent),
+    paste(label, "no-site radius rows must have missing distances and false indicators")
   )
 }
 
@@ -1510,14 +1607,16 @@ public_contract_candidate <- function(label) {
       n_days_in_window = rep(60L, 3L), spill_hrs = c(0, 60, 120),
       n_spill_sites = c(0L, 1L, 2L), spill_count = c(0, 30, 60),
       mean_distance = c(NA_real_, 100, 200), min_distance = c(NA_real_, 100, 100),
-      has_missing_site = rep(FALSE, 3L)
+      has_missing_site = rep(FALSE, 3L),
+      annual_returns_na_then_absent = rep(FALSE, 3L)
     ), common_rates),
     rental_radius = c(list(
       rental_id = rep("01leadingzero", 3L), listing_price = rep(1200, 3L),
       n_days_in_window = rep(60L, 3L), spill_hrs = c(0, 60, 120),
       n_spill_sites = c(0L, 1L, 2L), spill_count = c(0, 30, 60),
       mean_distance = c(NA_real_, 100, 200), min_distance = c(NA_real_, 100, 100),
-      has_missing_site = rep(FALSE, 3L)
+      has_missing_site = rep(FALSE, 3L),
+      annual_returns_na_then_absent = rep(FALSE, 3L)
     ), common_rates)
   )
   data.table::as.data.table(candidate)

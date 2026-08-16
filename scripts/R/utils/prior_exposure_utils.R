@@ -83,6 +83,7 @@ prior_exposure_public_schema <- function(market, grain) {
       mean_distance = arrow::float64(),
       min_distance = arrow::float64(),
       has_missing_site = arrow::bool(),
+      annual_returns_na_then_absent = arrow::bool(),
       spill_count_daily_avg = arrow::float64(),
       spill_hrs_daily_avg = arrow::float64(),
       spill_count_weekly_avg = arrow::float64(),
@@ -99,6 +100,7 @@ prior_exposure_public_schema <- function(market, grain) {
       mean_distance = arrow::float64(),
       min_distance = arrow::float64(),
       has_missing_site = arrow::bool(),
+      annual_returns_na_then_absent = arrow::bool(),
       spill_count_daily_avg = arrow::float64(),
       spill_hrs_daily_avg = arrow::float64(),
       spill_count_weekly_avg = arrow::float64(),
@@ -255,7 +257,8 @@ prior_exposure_load_data <- function(config, market, grain) {
     crosswalk,
     config$base_year,
     cutoff_years,
-    include_event_evidence = contract$include_event_evidence
+    include_event_evidence = contract$include_event_evidence,
+    include_annual_return_sequence = contract$grain == "radius"
   ) |>
     data.table::as.data.table()
   data.table::setkey(site_missing_dt, site_id, cutoff_year)
@@ -317,6 +320,9 @@ prior_exposure_join_events <- function(transaction_ids, data) {
   if (contract$include_event_evidence) {
     prefix_fields <- c(prefix_fields, "has_unknown_event_evidence")
   }
+  if (contract$grain == "radius") {
+    prefix_fields <- c(prefix_fields, "annual_returns_na_then_absent")
+  }
   attached <- data$site_missing_dt[, ..prefix_fields][
     transaction_sites, on = .(site_id, cutoff_year)
   ]
@@ -336,10 +342,22 @@ prior_exposure_join_events <- function(transaction_ids, data) {
     attached[, has_unknown_event_evidence := FALSE]
   }
 
-  lookup_chunk <- attached[, .(
-    transaction_id, site_id, distance_m, site_missing,
-    has_unknown_event_evidence
-  )]
+  if (contract$grain == "radius") {
+    attached[, annual_returns_na_then_absent := data.table::fifelse(
+      is.na(annual_returns_na_then_absent),
+      FALSE,
+      annual_returns_na_then_absent
+    )]
+  }
+
+  lookup_columns <- c(
+    "transaction_id", "site_id", "distance_m", "site_missing",
+    "has_unknown_event_evidence"
+  )
+  if (contract$grain == "radius") {
+    lookup_columns <- c(lookup_columns, "annual_returns_na_then_absent")
+  }
+  lookup_chunk <- attached[, ..lookup_columns]
   public_lookup <- data.table::copy(lookup_chunk)
   data.table::setnames(public_lookup, "transaction_id", contract$id)
 
@@ -351,9 +369,14 @@ prior_exposure_join_events <- function(transaction_ids, data) {
   # data.table's grouped floating reducer is sensitive to the joined table's
   # otherwise-unused columns, so project the exact established public shape.
   event_sources <- data.table::copy(attached)
-  event_sources[, c(
-    "cutoff_year", "n_days_in_window", "has_unknown_event_evidence"
-  ) := NULL]
+  event_metadata_fields <- intersect(
+    c(
+      "cutoff_year", "n_days_in_window", "has_unknown_event_evidence",
+      "annual_returns_na_then_absent"
+    ),
+    names(event_sources)
+  )
+  event_sources[, (event_metadata_fields) := NULL]
   data.table::setnames(
     event_sources,
     c("transaction_id", "transaction_value", "transaction_endpoint"),
@@ -388,17 +411,36 @@ prior_exposure_join_events <- function(transaction_ids, data) {
 prior_exposure_transaction_site_metrics <- function(joined, contract) {
   lookup <- data.table::copy(joined$internal_lookup)
   if (nrow(lookup) == 0L) return(NULL)
+  has_annual_return_sequence <-
+    "annual_returns_na_then_absent" %in% names(lookup)
   site_lookup <- if (contract$include_event_evidence) {
-    lookup[, .(
-      distance_m = min(distance_m),
-      site_missing = any(site_missing),
-      has_unknown_event_evidence = any(has_unknown_event_evidence)
-    ), by = .(transaction_id, site_id)]
+    if (has_annual_return_sequence) {
+      lookup[, .(
+        distance_m = min(distance_m),
+        site_missing = any(site_missing),
+        has_unknown_event_evidence = any(has_unknown_event_evidence),
+        annual_returns_na_then_absent = any(annual_returns_na_then_absent)
+      ), by = .(transaction_id, site_id)]
+    } else {
+      lookup[, .(
+        distance_m = min(distance_m),
+        site_missing = any(site_missing),
+        has_unknown_event_evidence = any(has_unknown_event_evidence)
+      ), by = .(transaction_id, site_id)]
+    }
   } else {
-    lookup[, .(
-      distance_m = min(distance_m),
-      site_missing = any(site_missing)
-    ), by = .(transaction_id, site_id)]
+    if (has_annual_return_sequence) {
+      lookup[, .(
+        distance_m = min(distance_m),
+        site_missing = any(site_missing),
+        annual_returns_na_then_absent = any(annual_returns_na_then_absent)
+      ), by = .(transaction_id, site_id)]
+    } else {
+      lookup[, .(
+        distance_m = min(distance_m),
+        site_missing = any(site_missing)
+      ), by = .(transaction_id, site_id)]
+    }
   }
 
   events <- joined$events_dt
@@ -446,9 +488,13 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
     grid[, `:=`(
       spill_hrs = 0, n_spill_sites = 0L, spill_count = 0,
       mean_distance = NA_real_, min_distance = NA_real_,
-      has_missing_site = FALSE
+      has_missing_site = FALSE,
+      annual_returns_na_then_absent = FALSE
     )]
     return(grid)
+  }
+  if (!"annual_returns_na_then_absent" %in% names(site_metrics)) {
+    site_metrics[, annual_returns_na_then_absent := FALSE]
   }
   # Preserve the historical accumulation order exactly: collapse distance ties,
   # sort by distance, then take cumulative sums for rolling radius thresholds.
@@ -460,7 +506,8 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
     spill_count = prior_exposure_stable_sum(spill_count),
     n_spill_sites = .N,
     distance_sum = prior_exposure_stable_sum(distance_m),
-    missing_sites = prior_exposure_stable_sum(site_missing)
+    missing_sites = prior_exposure_stable_sum(site_missing),
+    annual_returns_na_then_absent = any(annual_returns_na_then_absent)
   ), by = .(transaction_id, distance_m)]
   data.table::setorder(site_agg, transaction_id, distance_m)
   site_agg[, `:=`(
@@ -469,6 +516,9 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
     cum_distance_sum = prior_exposure_stable_cumsum(distance_sum),
     n_spill_sites = prior_exposure_stable_cumsum(n_spill_sites),
     cum_missing_sites = prior_exposure_stable_cumsum(missing_sites),
+    cum_annual_returns_na_then_absent = dplyr::cumany(
+      annual_returns_na_then_absent
+    ),
     min_distance = distance_m[1L]
   ), by = transaction_id]
   data.table::setkey(site_agg, transaction_id, distance_m)
@@ -500,6 +550,11 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
     ),
     has_missing_site = data.table::fifelse(
       is.na(cum_missing_sites), FALSE, cum_missing_sites > 0
+    ),
+    annual_returns_na_then_absent = data.table::fifelse(
+      is.na(cum_annual_returns_na_then_absent),
+      FALSE,
+      cum_annual_returns_na_then_absent
     )
   )]
   metrics[has_missing_site == TRUE, `:=`(
@@ -507,10 +562,12 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
   )]
   metrics <- metrics[, .(
     transaction_id, radius, spill_hrs, n_spill_sites, spill_count,
-    mean_distance, min_distance, has_missing_site
+    mean_distance, min_distance, has_missing_site,
+    annual_returns_na_then_absent
   )]
   result <- metrics[grid, on = .(transaction_id, radius)]
   result[is.na(has_missing_site), has_missing_site := FALSE]
+  result[is.na(annual_returns_na_then_absent), annual_returns_na_then_absent := FALSE]
   result[!has_missing_site & is.na(spill_hrs), spill_hrs := 0]
   result[!has_missing_site & is.na(spill_count), spill_count := 0]
   result[is.na(n_spill_sites), n_spill_sites := 0L]
@@ -545,7 +602,8 @@ prior_exposure_project_public <- function(result, contract) {
     columns <- c(
       contract$id, contract$value, "n_days_in_window", "radius", "spill_hrs",
       "n_spill_sites", "spill_count", "mean_distance", "min_distance",
-      "has_missing_site", "spill_count_daily_avg", "spill_hrs_daily_avg",
+      "has_missing_site", "annual_returns_na_then_absent",
+      "spill_count_daily_avg", "spill_hrs_daily_avg",
       "spill_count_weekly_avg", "spill_hrs_weekly_avg"
     )
   }
