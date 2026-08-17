@@ -134,6 +134,20 @@ locks the plan.
   deferred work splits into two named follow-ups (battery refresh, then
   NA-convention cleanup).
 
+- [Variant model: directional, nearest-site, and window variants on the layered architecture](tickets/08-variant-model.md) —
+  two kinds of variant: selection, direction, and weighting are named
+  derivation functions over `house_site_spills` (the directional one joins
+  the river-network pair table at derivation time), while window choice is
+  a re-run of the measurement layer through the core's window arguments;
+  the missing-evidence NA rule is baked into the shared reduction with no
+  per-variant opt-out; the directional derivation is the plan's fully
+  specified but unpublished worked example, inherited as the spec by the
+  follow-up that fixes the twelve `upstream_downstream_*` scripts; the
+  one-site restriction is a consuming-analysis sample filter; the
+  acceptance test is a slot table over all current and named future
+  variants with a published-versus-expressible status column; no Arrow
+  schema text for unpublished variants.
+
 ## Not yet specified
 
 Nothing remains in the fog: every open question on the route is now a live
