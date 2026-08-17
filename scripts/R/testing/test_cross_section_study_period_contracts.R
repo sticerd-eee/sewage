@@ -1028,36 +1028,79 @@ source_adapter <- function(path) {
   environment
 }
 
-adapter_specs <- list(
-  sale = list(
-    path = file.path(
-      "scripts", "R", "06_analysis_datasets", "cross_section_sales.R"
-    ),
-    id = "house_id",
-    value = "price",
-    provenance = "ppd_category",
-    source_suffix = "house_price.parquet",
-    lookup_suffix = "spill_house_lookup.parquet",
-    output_suffix = file.path("cross_section", "sales", "study_period"),
-    end_date = as.Date("2024-12-31")
-  ),
-  rental = list(
-    path = file.path(
-      "scripts", "R", "06_analysis_datasets", "cross_section_rental.R"
-    ),
-    id = "rental_id",
-    value = "listing_price",
-    provenance = NULL,
-    source_suffix = file.path("zoopla", "zoopla_rentals.parquet"),
-    lookup_suffix = file.path("zoopla", "spill_rental_lookup.parquet"),
-    output_suffix = file.path("cross_section", "rentals", "study_period"),
-    end_date = as.Date("2023-12-31")
-  )
+sale_spec <- list(
+  market = "sale",
+  id = "house_id",
+  value = "price",
+  provenance = "ppd_category",
+  source_suffix = "house_price.parquet",
+  lookup_suffix = "spill_house_lookup.parquet",
+  end_date = as.Date("2024-12-31"),
+  output_parent = file.path("cross_section", "sales")
+)
+rental_spec <- list(
+  market = "rental",
+  id = "rental_id",
+  value = "listing_price",
+  provenance = NULL,
+  source_suffix = file.path("zoopla", "zoopla_rentals.parquet"),
+  lookup_suffix = file.path("zoopla", "spill_rental_lookup.parquet"),
+  end_date = as.Date("2023-12-31"),
+  output_parent = file.path("cross_section", "rentals")
 )
 
-for (market in names(adapter_specs)) {
-  spec <- adapter_specs[[market]]
+# Every market now ships an event-based builder on the unsuffixed path and an
+# Annual-Returns builder on the _ea sibling.
+adapter_specs <- list(
+  modifyList(sale_spec, list(
+    script = "cross_section_sales.R",
+    exposure_source = "events",
+    output_suffix = file.path(sale_spec$output_parent, "study_period")
+  )),
+  modifyList(sale_spec, list(
+    script = "cross_section_sales_ea.R",
+    exposure_source = "annual_returns",
+    output_suffix = file.path(sale_spec$output_parent, "study_period_ea")
+  )),
+  modifyList(rental_spec, list(
+    script = "cross_section_rental.R",
+    exposure_source = "events",
+    output_suffix = file.path(rental_spec$output_parent, "study_period")
+  )),
+  modifyList(rental_spec, list(
+    script = "cross_section_rental_ea.R",
+    exposure_source = "annual_returns",
+    output_suffix = file.path(rental_spec$output_parent, "study_period_ea")
+  ))
+)
+
+for (spec in adapter_specs) {
+  market <- spec$market
+  spec$path <- file.path("scripts", "R", "06_analysis_datasets", spec$script)
   adapter <- source_adapter(spec$path)
+  assert_identical(
+    adapter$CONFIG$exposure_source,
+    spec$exposure_source,
+    paste(spec$script, "must declare its exposure source explicitly.")
+  )
+  assert_true(
+    endsWith(adapter$LOG_FILE, sub("[.]R$", ".log", spec$script)),
+    paste(spec$script, "must log to the file named after it.")
+  )
+  if (spec$exposure_source == "events") {
+    assert_true(
+      is.character(adapter$CONFIG$events_path) &&
+        endsWith(
+          adapter$CONFIG$events_path, "matched_events_annual_data.parquet"
+        ),
+      paste(spec$script, "must read the matched individual EDM event feed.")
+    )
+  } else {
+    assert_true(
+      is.null(adapter$CONFIG$events_path),
+      paste(spec$script, "must not configure an event feed.")
+    )
+  }
   assert_true(
     exists("run_study_period_cross_section", envir = adapter, mode = "function"),
     paste(market, "adapter must expose the shared orchestration seam.")
