@@ -4,7 +4,7 @@ title: "Assemble and lock the plan document"
 type: grilling
 status: open
 assignee:
-blocked-by: [02, 03, 04, 05, 08]
+blocked-by: [02, 03, 04, 05, 08, 09]
 ---
 
 ## Question

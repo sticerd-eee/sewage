@@ -102,12 +102,22 @@ locks the plan.
   `repeat_sales.R` carries a fifth windowing scheme; the panel and grid
   builders and the `*_prior*` analysis families are pure consumers. Full
   findings in the asset linked from the ticket.
+- [Design the shared measurement core](tickets/03-shared-measurement-core.md) —
+  the core is a named set of functions in the two existing utility files
+  (spill arithmetic in `spill_aggregation_utils.R`, evidence classification
+  in `site_group_utils.R`), never a third file: one shared clip
+  parameterized by scalar-or-vector window bounds, one atomic-flag evidence
+  truth table with a prefix reducer (prior family) and a window reducer
+  (study family), one shared per-site collapse parameterized by grouping
+  keys, and one shared rate helper; radius reductions stay per-engine as an
+  intentional documented difference while the stable-sum discipline goes
+  core-wide; validated pair uniqueness replaces the silent `min(distance_m)`
+  dedupe (empirically zero duplicates in both lookups); core functions carry
+  no validation — correctness lives in tests and Stage-1 reconciliation,
+  and the publication gate stays the single runtime check.
 
 ## Not yet specified
 
-- Whether the EA study-period variant needs any change beyond inheriting the
-  shared skeleton — sharpens once the shared-measurement-core ticket settles
-  what the skeleton owns.
 - How downstream analyses absorb the harmonized rule's extra NAs (which
   outputs must be regenerated, in what order, and whether any regression
   script needs a code change beyond re-running) — sharpens after the
