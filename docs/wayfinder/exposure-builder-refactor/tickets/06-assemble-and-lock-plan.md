@@ -32,3 +32,24 @@ of done), incorporating every decision on this map:
 
 Run /ce-doc-review on the draft, then walk Jacopo through it. The map is
 done when he signs the plan off as locked.
+
+## Progress (2026-08-17)
+
+The plan is drafted and reviewed; only Jacopo's sign-off remains.
+
+- Draft assembled from all nine closed tickets and both assets:
+  [docs/plans/2026-08-17-002-refactor-layered-exposure-builders-plan.md](../../../plans/2026-08-17-002-refactor-layered-exposure-builders-plan.md).
+- /ce-doc-review ran with coherence, feasibility, and scope-guardian
+  reviewers. Coherence and scope-guardian returned zero findings.
+  Feasibility surfaced five: two citation fixes applied automatically
+  (the `repeat_sales.R` offender path, the 2026-08-17-001 plan filename),
+  and two fixes Jacopo approved in the walk-through routing — the
+  `annual_returns_na_then_absent` definition in R3/A5 corrected to the
+  code's sequence semantics, and U5 extended so the study engine's
+  per-radius re-sum explicitly adopts the stable-sum wrappers. One FYI
+  (the "eligible-transaction ledger" is an in-memory table, not a
+  persisted artifact) and two deferred questions (memo template
+  provenance; the truth table's universe-expansion seam, to settle at U2
+  review) are recorded in the review report.
+- The ticket closes when Jacopo signs the plan off as locked; at that
+  point the sign-off is recorded here and on the map.

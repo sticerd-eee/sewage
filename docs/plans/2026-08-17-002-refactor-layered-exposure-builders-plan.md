@@ -113,12 +113,18 @@ Three defects motivate the refactor, all documented on the map:
   (2021-01-01 to the transaction endpoint) only. Transaction metadata
   (`price`/`listing_price`, `n_days_in_window`) is excluded; the derivations
   rejoin it from the transaction ledger.
-- R3. Evidence travels as four atomic flags, each true when its condition
-  holds in at least one year of the transaction's lookback window:
-  `annual_returns_absent` (today's `site_missing`, renamed internally),
-  `annual_returns_na`, `reported_positive_without_matched_events`, and
-  `annual_returns_na_then_absent`. No verdict column is stored; the event
-  and EA verdicts are ORs computed in the derivation layer.
+- R3. Evidence travels as four atomic flags. The first three are each true
+  when their condition holds in at least one year of the transaction's
+  lookback window: `annual_returns_absent` (today's `site_missing`,
+  renamed internally), `annual_returns_na`, and
+  `reported_positive_without_matched_events`. The fourth,
+  `annual_returns_na_then_absent`, is a sequence flag computed by the
+  prefix reducer over the full crosswalk horizon, unchanged from today's
+  definition: a `reported_na` year within the window, no `absent` year
+  within the window, and an `absent` year after it — its defining absent
+  year lies outside the lookback window by construction. No verdict column
+  is stored; the event and EA verdicts are ORs computed in the derivation
+  layer.
 - R4. Real pairs only: no sentinel rows and no NA keys. A transaction with
   zero nearby sites has no rows; the radius-grain derivation re-enumerates
   the transaction universe by rejoining the eligible-transaction ledger,
@@ -690,7 +696,7 @@ is a derivation from it.
   template.
 - `docs/plans/2026-08-13-1322-refactor-prior-exposure-shared-builders-plan.md`
   — R7/R8, amended by R21 of this plan.
-- `docs/plans/2026-08-17-001-event-based-study-period-cross-sections-plan.md`
+- `docs/plans/2026-08-17-001-feat-event-based-study-period-cross-sections-plan.md`
   and pull request #34 — the post-merge study-period baseline.
 - `scripts/R/utils/prior_exposure_utils.R` — the engine whose intermediate
   (`prior_exposure_transaction_site_metrics`, lines 411–468) becomes the
@@ -869,7 +875,13 @@ is a derivation from it.
      window reducer; in Stage 1 the verdict ORs only the first two flags,
      so output is unchanged while the crosswalk read gains
      `matched_event_count`.
-  3. Move the EA collapse's two `base::sum()` calls onto the stable-sum
+  3. Apply the R12 discipline to the per-radius re-sum inside the radius
+     reduction: route its two `base::sum()` calls through the stable
+     wrappers and fix the row order with an explicit `setorderv` before
+     the grouped reduction. The reduction's per-radius re-summing shape
+     is unchanged (R11); only its arithmetic adopts the wrappers, and the
+     resulting low-order float shifts stay within R23's tolerance.
+  4. Move the EA collapse's two `base::sum()` calls onto the stable-sum
      wrappers (row order already fixed by `order(site_id, year)`); route
      the rate arithmetic in both builders through the shared helper.
 - **Patterns to follow:** The existing U1–U4 contract sections pin the
@@ -1149,7 +1161,7 @@ execution (R29). Full evidence: `assets/02-drift-map.md`.
   `hedonic_continuous_full.R`, and `hedonic_bins_full.R` (the last now
   reads `study_period` post-merge, but its sibling summation path over
   `agg_spill_yr` remains in the family until follow-up 2 rules on it).
-- `scripts/R/09_analysis/02_hedonic/repeat_sales.R`, which carries an
+- `scripts/R/09_analysis/03_repeat_sales/repeat_sales.R`, which carries an
   independent quarterised windowing scheme with `na.rm = TRUE` cross-site
   sums.
 
@@ -1186,8 +1198,10 @@ entry at execution:
 
 `annual_returns_na_then_absent` is not part of any verdict; it remains a
 published descriptive flag at the radius grain, and under Stage 2 its
-being true implies NA exposure because its defining sequence fires the
-first two flags (the basis of the R27 redundancy assertion).
+being true implies NA exposure because its defining sequence fires
+`annual_returns_na` within the window (`annual_returns_absent` is false
+within the window by the flag's own definition), and that flag is in the
+Stage-2 verdict — the basis of the R27 redundancy assertion.
 
 ### A6. Current public schema baseline (unchanged by this plan)
 
