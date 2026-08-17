@@ -11,6 +11,8 @@ deepened: 2026-08-14
 
 # Study-Period Cross-Sections - Plan
 
+> **Partially superseded.** This plan's decision that the EA Annual Returns are the canonical complete-year evidence for the study-period cross-sections was reversed by [docs/plans/2026-08-17-001-feat-event-based-study-period-cross-sections-plan.md](2026-08-17-001-feat-event-based-study-period-cross-sections-plan.md), which rebuilds the unsuffixed `study_period/` datasets from individual EDM events and moves the Annual-Returns variant to `study_period_ea/`. Everything else here — the shared engine, the schema, the missingness rule, and the publication contract — still stands and is what both variants reuse.
+
 ## Goal Capsule
 
 - **Objective:** Replace the DuckDB-based sales and rental cross-section builders with one sequential `data.table` engine that publishes validated 2021–2024 Study-Period Spill Exposure datasets.
