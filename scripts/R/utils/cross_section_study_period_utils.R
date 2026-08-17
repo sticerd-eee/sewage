@@ -210,9 +210,9 @@ study_period_clip_events <- function(events, window) {
       !inherits(window$end_date, "Date")) {
     stop("window must come from study_period_window().", call. = FALSE)
   }
-  clipped <- data.table::as.data.table(data.table::copy(events))
+  events <- data.table::as.data.table(events)
   required <- c("site_id", "start_time", "end_time")
-  missing_columns <- setdiff(required, names(clipped))
+  missing_columns <- setdiff(required, names(events))
   if (length(missing_columns) > 0L) {
     stop(
       "Event feed is missing required column(s): ",
@@ -220,7 +220,9 @@ study_period_clip_events <- function(events, window) {
       call. = FALSE
     )
   }
-  clipped <- clipped[, ..required]
+  # The column projection already allocates a fresh table, so the caller's feed
+  # is safe from the updates below without a second copy of several million rows.
+  clipped <- events[, ..required]
   if (!is.numeric(clipped$site_id) || anyNA(clipped$site_id) ||
       any(!is.finite(clipped$site_id)) ||
       any(clipped$site_id != floor(clipped$site_id)) ||
@@ -294,8 +296,14 @@ collapse_study_period_events <- function(annual_returns, events, window) {
     by = site_id
   ]
 
+  # Right-join onto the evidence grid: a Site Group the positives-only feed never
+  # mentions is a true zero, not a gap. Keying that on the join rather than on
+  # is.na() keeps a genuinely unexpected NA from a collapsed total loud.
   collapsed <- totals[evidence, on = "site_id"]
-  collapsed[is.na(spill_count), `:=`(spill_count = 0, spill_hrs = 0)]
+  collapsed[!site_id %in% totals$site_id, `:=`(spill_count = 0, spill_hrs = 0)]
+  if (anyNA(collapsed$spill_count) || anyNA(collapsed$spill_hrs)) {
+    stop("Event collapse produced a missing total for a Site Group with events.", call. = FALSE)
+  }
   collapsed[
     has_missing_evidence == TRUE,
     `:=`(spill_count = NA_real_, spill_hrs = NA_real_)
@@ -1150,7 +1158,7 @@ study_period_read_parquet_columns <- function(path, columns, context) {
 # reporting year rather than a strict function of start_time, so it cannot serve
 # as a row filter without risking the loss of an event that straddles a window
 # boundary; study_period_clip_events() does the exact timestamp work instead.
-study_period_read_events <- function(events_path, window) {
+study_period_read_events <- function(events_path) {
   events <- study_period_read_parquet_columns(
     events_path,
     c("site_id", "start_time", "end_time", "year"),
@@ -1199,7 +1207,7 @@ build_study_period_cross_section <- function(config) {
   )
   exposure_source <- resolved$exposure_source
   site_totals <- if (exposure_source == "events") {
-    events <- study_period_read_events(config$events_path, window)
+    events <- study_period_read_events(config$events_path)
     logger::log_info(paste0(
       "Loaded {nrow(events)} individual EDM events for the study window from ",
       "{config$events_path}."
