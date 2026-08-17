@@ -227,6 +227,187 @@ for (case in invalid_cases) {
   )
 }
 
+# U1: the Annual-Returns collapse is unchanged by the source dispatch ----------
+
+assert_identical(
+  as.data.frame(collapse_study_period_annual_returns(
+    annual_fixture, window_2021_2024
+  )),
+  as.data.frame(data.table(
+    site_id = c(10L, 20L, 30L, 40L),
+    spill_count = c(3, NA, NA, 0),
+    spill_hrs = c(7, NA, NA, 0),
+    has_missing_evidence = c(FALSE, TRUE, TRUE, FALSE)
+  )),
+  "The Annual-Returns collapse must survive the pluggable-source refactor intact."
+)
+
+# U1: event-based collapse ------------------------------------------------------
+
+utc_time <- function(text) as.POSIXct(text, tz = "UTC")
+
+source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
+
+# Sites 10 and 40 carry complete Annual-Returns evidence, site 20 turns unknown
+# mid-window, and site 30 is missing its 2024 row from the crosswalk grid.
+events_fixture <- data.table(
+  site_id = c(10L, 20L, 30L),
+  start_time = utc_time(c(
+    "2021-06-01 00:00:00", "2021-06-01 00:00:00", "2021-06-01 00:00:00"
+  )),
+  end_time = utc_time(c(
+    "2021-06-02 01:00:00", "2021-06-01 05:00:00", "2021-06-01 05:00:00"
+  )),
+  year = 2021L
+)
+
+events_collapsed <- collapse_study_period_events(
+  annual_fixture, events_fixture, window_2021_2024
+)
+setkey(events_collapsed, site_id)
+
+assert_identical(
+  events_collapsed$site_id,
+  c(10L, 20L, 30L, 40L),
+  "The events collapse must cover exactly the Annual-Returns Site Group grid."
+)
+assert_identical(
+  events_collapsed[.(10L), .(spill_hrs, spill_count)],
+  data.table(spill_hrs = 25, spill_count = 2),
+  paste(
+    "A 25-hour in-window event must yield 25 spill hours and 2 spills under",
+    "the 12/24 rule."
+  )
+)
+assert_true(
+  events_collapsed[.(20L), has_missing_evidence] &&
+    is.na(events_collapsed[.(20L), spill_count]) &&
+    is.na(events_collapsed[.(20L), spill_hrs]),
+  "Events cannot override reported_na or absent Annual-Returns evidence."
+)
+assert_true(
+  events_collapsed[.(30L), has_missing_evidence] &&
+    is.na(events_collapsed[.(30L), spill_hrs]),
+  "A Site Group-year missing from the crosswalk grid must mask event exposure."
+)
+assert_identical(
+  events_collapsed[.(40L), .(spill_hrs, spill_count, has_missing_evidence)],
+  data.table(spill_hrs = 0, spill_count = 0, has_missing_evidence = FALSE),
+  "A fully reported Site Group with no events must retain a true zero."
+)
+assert_identical(
+  names(events_collapsed),
+  names(collapse_study_period_annual_returns(annual_fixture, window_2021_2024)),
+  "Both collapses must emit the same intermediate columns."
+)
+
+clipping_annual_fixture <- rbindlist(lapply(
+  c(51L, 52L, 53L, 54L),
+  function(site) data.table(
+    site_id = site,
+    year = 2021:2024,
+    annual_status = "reported_zero",
+    spill_count_ea = 0,
+    spill_hrs_ea = 0
+  )
+))
+clipping_events_fixture <- data.table(
+  site_id = c(51L, 52L, 53L, 54L, 54L),
+  start_time = utc_time(c(
+    "2020-12-31 18:00:00", "2024-12-31 20:00:00", "2020-01-01 00:00:00",
+    "2021-01-01 00:00:00", "2021-03-01 00:00:00"
+  )),
+  end_time = utc_time(c(
+    "2021-01-01 06:00:00", "2025-01-02 00:00:00", "2020-01-02 00:00:00",
+    "2021-01-01 02:00:00", "2021-03-01 03:00:00"
+  )),
+  year = c(2020L, 2024L, 2020L, 2021L, 2021L)
+)
+clipped <- collapse_study_period_events(
+  clipping_annual_fixture, clipping_events_fixture, window_2021_2024
+)
+setkey(clipped, site_id)
+
+assert_identical(
+  clipped[.(51L), .(spill_hrs, spill_count)],
+  data.table(spill_hrs = 6, spill_count = 1),
+  "An event straddling the window start must contribute only its in-window hours."
+)
+assert_identical(
+  clipped[.(52L), .(spill_hrs, spill_count)],
+  data.table(spill_hrs = 4, spill_count = 1),
+  "An event straddling the window end must contribute only its in-window hours."
+)
+assert_identical(
+  clipped[.(53L), .(spill_hrs, spill_count, has_missing_evidence)],
+  data.table(spill_hrs = 0, spill_count = 0, has_missing_evidence = FALSE),
+  "An event entirely outside the window must contribute nothing."
+)
+assert_identical(
+  clipped[.(54L), .(spill_hrs, spill_count)],
+  data.table(spill_hrs = 5, spill_count = 2),
+  "Separate events at one Site Group must sum hours and count independently."
+)
+
+events_missing_column <- copy(events_fixture)[, end_time := NULL]
+assert_error_contains(
+  collapse_study_period_events(
+    annual_fixture, events_missing_column, window_2021_2024
+  ),
+  "end_time",
+  "The events collapse must reject a feed without its required columns."
+)
+assert_error_contains(
+  collapse_study_period_events(
+    annual_fixture,
+    copy(events_fixture)[1L, end_time := utc_time("2021-05-01 00:00:00")],
+    window_2021_2024
+  ),
+  "start_time",
+  "The events collapse must reject an event ending before it starts."
+)
+
+# U1: event evidence flows through the shared radius aggregation ----------------
+
+events_reduced <- study_period_reduce_lookup_row_group(
+  data.table(
+    house_id = c("2", "2"),
+    site_id = c(10L, 20L),
+    distance_m = c(300, 750),
+    distance_km = c(0.3, 0.75),
+    n_site_groups = 2L
+  ),
+  study_period_source_ledger(
+    data.table(
+      house_id = as.character(1:4),
+      price = c(100000L, 200000L, 300000L, 400000L),
+      ppd_category = c("A", "B", "A", "B"),
+      easting = c(500000, 500100, NA, 500200),
+      northing = c(200000, 200100, 200200, 200200)
+    ),
+    study_period_market_contract("sale")
+  ),
+  events_collapsed,
+  study_period_market_contract("sale"),
+  radii = c(250L, 500L, 1000L),
+  n_days_in_window = 1461L
+)
+setkey(events_reduced, house_id, radius)
+assert_true(
+  events_reduced[.("2", 500L),
+    n_spill_sites == 1L && !has_missing_site && spill_hrs == 25 &&
+      spill_count == 2],
+  "Event exposure must aggregate to the transaction-radius grain unchanged."
+)
+assert_true(
+  events_reduced[.("2", 1000L),
+    has_missing_site && is.na(spill_count) && is.na(spill_hrs)],
+  paste(
+    "A radius containing a Site Group with events but unknown Annual-Returns",
+    "evidence must report NA exposure and has_missing_site."
+  )
+)
+
 # U2: row-group ownership and spatial status semantics -------------------------
 
 sales_contract <- study_period_market_contract("sale")
@@ -979,6 +1160,92 @@ assert_error_contains(
   study_period_validate_radii(c(250L, 500L, 2000L)),
   "exactly 250, 500, and 1000",
   "Adapters must not accept a radius outside the supported contract."
+)
+
+# U4: exposure-source configuration --------------------------------------------
+
+assert_identical(
+  study_period_validate_config(build_config)$exposure_source,
+  "annual_returns",
+  "A configuration without an exposure source must keep the Annual-Returns default."
+)
+assert_error_contains(
+  study_period_validate_config(
+    modifyList(build_config, list(exposure_source = "guesswork"))
+  ),
+  "exposure_source",
+  "An unknown exposure source must fail configuration validation."
+)
+assert_error_contains(
+  study_period_validate_config(
+    modifyList(build_config, list(exposure_source = "events"))
+  ),
+  "events_path",
+  "An events configuration without an events path must fail validation."
+)
+assert_error_contains(
+  study_period_validate_config(modifyList(build_config, list(
+    exposure_source = "events",
+    events_path = file.path(build_root, "absent-events.parquet")
+  ))),
+  "events_path",
+  "An events configuration pointing at a missing feed must fail validation."
+)
+
+build_events_path <- file.path(build_root, "events.parquet")
+arrow::write_parquet(
+  data.table(
+    site_id = c(10L, 30L, 40L, 50L),
+    start_time = as.POSIXct(rep("2021-06-01 00:00:00", 4L), tz = "UTC"),
+    end_time = as.POSIXct(
+      c(
+        "2021-06-02 01:00:00", "2021-06-01 04:00:00",
+        "2021-06-01 02:00:00", "2021-06-01 06:00:00"
+      ),
+      tz = "UTC"
+    ),
+    year = 2021L
+  ),
+  build_events_path
+)
+events_build_config <- modifyList(build_config, list(
+  exposure_source = "events",
+  events_path = build_events_path,
+  output_path = file.path(build_root, "study_period_events")
+))
+events_build <- build_study_period_cross_section(events_build_config)
+assert_identical(
+  events_build$source_transactions,
+  4L,
+  "The events build must use the same source ledger cardinality authority."
+)
+assert_identical(
+  events_build$exposure_source,
+  "events",
+  "The events build must report the exposure source it consumed."
+)
+
+events_published <- as.data.table(
+  arrow::open_dataset(events_build_config$output_path) |> dplyr::collect()
+)
+annual_published <- as.data.table(
+  arrow::open_dataset(build_output_path) |> dplyr::collect()
+)
+setkey(events_published, house_id, radius)
+setkey(annual_published, house_id, radius)
+assert_identical(
+  events_published[, .(house_id, radius)],
+  annual_published[, .(house_id, radius)],
+  "Both exposure sources must publish exactly the same public key set."
+)
+assert_identical(
+  is.na(events_published$spill_hrs),
+  is.na(annual_published$spill_hrs),
+  "Both exposure sources must share an identical missingness pattern."
+)
+assert_true(
+  events_published[.("2", 500L), spill_hrs == 25 && spill_count == 2],
+  "The published events dataset must carry the recomputed 12/24 exposure."
 )
 
 # U5: direct consumer and supported documentation -----------------------------
