@@ -3,7 +3,7 @@ id: 08
 title: "Variant model: directional, nearest-site, and window variants on the layered architecture"
 type: grilling
 status: open
-assignee:
+assignee: jacopo
 blocked-by: [02, 03]
 ---
 
