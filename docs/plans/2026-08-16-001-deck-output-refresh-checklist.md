@@ -1,0 +1,85 @@
+# Deck output refresh checklist — `short_pres.tex`
+
+**Date:** 2026-08-16
+**Scope:** outputs displayed in `slides/short_pres.tex` (Overleaf), plus hardcoded in-text numbers. Deck only.
+**Policy:** every output extends to 2024 where data allows. Rentals stay 2021–2023 (no 2024 Zoopla data), so pooled tables have asymmetric windows — note this in table notes.
+**Table pipeline reminder:** R script → `output/tables/*.tex` → `scripts/python/convert_paper_tables_to_beamer.py` → `slides/tables/*.tex` → recompile deck. Every table item below implies the converter + recompile steps.
+
+## Sequencing prerequisites (before any Category 1/2 run that uses the prior-exposure cross-sections)
+
+- [X] Wait for the in-flight `cross_section_prior_to_sale.R` run (started 2026-08-16 17:07) to finish.
+- [X] Rerun `cross_section_prior_to_rental.R` so the rentals cross-section carries the new `annual_returns_na_then_absent` column and matches the sales schema.
+
+## Category 1 — run today, no code edits
+
+Inputs on disk are current (2024 sales already in cleaned data, panels, and cross-sections; spill aggregates carry 2024).
+
+- [X] **Cross-section binscatter figures** (slide "Spill exposure is negatively correlated with property values": 4 panels + shared legend) — run `01_descriptive/cross_sectional_plots.R` → `sales/rental_{distance,spill_count}_lm_slides_nolegend.pdf`, `cross_section_radius_legend_slides.pdf`. Sales gain 2024 automatically via the study-period cross-section.
+  Done 2026-08-16. The paper variants (`..._lm_nolegend.pdf` + `cross_section_radius_legend.pdf`, used by `03_motivating_evidence.tex`) were refreshed and copied too. Figure notes in both the paper and the deck now state the asymmetric window. Signs and radius ordering are unchanged, so all existing text claims still hold.
+
+  **Exposure-measure change affecting every cross-section output.** The spill-count support fell from ~14,800 to ~4,400. Two distinct causes, neither of them the 2024 extension (site-record completeness is 80.4% over 2021--2023 vs 80.1% over 2021--2024):
+
+  1. *Input rebuild (the larger effect).* `spill_house_lookup.parquet` was rebuilt 2026-08-14 22:37, after the previous figures were written at 13:12, as part of the stable-ID/Site Group work (`0972ed9`, `093f063`, `16f8723`). Reconstructing the **old** partial-credit rule on the **current** inputs gives a maximum of 5,004 spills within 1km across all 1.85M properties, untrimmed. The old ~14,800 is therefore not reproducible from current data under any aggregation rule, and looks like a join fan-out in the previous lookup. The `dat_mo` join is now exactly 1:1 (671,520 site-months = 13,990 sites x 48 months).
+  2. *All-or-nothing NA rule (secondary).* `collapse_study_period_annual_returns()` in `scripts/R/utils/cross_section_study_period_utils.R:189` marks a Site Group unknown if **any** year in 2021--2024 is `reported_na` or `absent`, and a property with one such site inside the radius gets NA. The old DuckDB builder summed available site-months with `na.rm = TRUE` and dropped a property only when every site-month was missing. Effect at 1km: 36.4% of properties set to NA, p99 1,717 -> 1,241, max 5,004 -> 4,753. P(NA) rises with site density (21% at 1 nearby site, 87% at 11--20, 99.8% above 20), so the densest-exposure properties are removed: max sites among survivors is 22 vs 54 overall.
+
+  Consequence for downstream tables: per-spill slopes roughly doubled (sales: -159/-138/-114 GBP per spill at 250m/500m/1km) and attenuation across radii weakened from ~2.1x to ~1.4x. The 36% NA share is a real sample restriction worth a decision before the remaining reruns.
+- [X] **Public attention over time figure** (`google_trends_article_counts_combined_slides.pdf`) — run `01_descriptive/google_trends_article_counts_combined.R` (axis already ends 2024.5).
+  Done 2026-08-16. This output was already current: both inputs (`google_trends_uk.xlsx` 2025-11-24, `search1_monthly.parquet` 2026-01-09) and the script itself (last changed 2026-06-19, `03d5a38`) all predate the published PDFs, which were rendered 2026-06-19 and copied to Overleaf 2026-06-26. The rerun reproduced both variants **pixel-identically** (150 dpi PNG renders hash-equal; only the embedded PDF `CreationDate` differs), confirming the figure still reproduces under the current `rv`/R 4.6.0 environment. Both variants were recopied to the Overleaf `figures/` directory anyway.
+
+  Console diagnostics: Google Trends 84 months (2018-01--2024-12), max 100 at 2022-08; LexisNexis 75 months, max 54; scale factor 1.852. All dependent text claims were verified against these and left unchanged — `short_pres.tex` L251/L268/L698 ("2018--2024", "0--100"), L688 ("post-August 2022 peak"), and `02_background_context.tex` L90 ("maximum article count (54)", "for 2018--2024").
+
+  **Axis-limit bug, since fixed.** `END_YEAR <- 2024.5` worked as a filter (`Year <= END_YEAR`) but was also interpolated into the x-axis limits as `paste0(END_YEAR, "-12-31")` → `"2024.5-12-31"`, which `as.Date` cannot parse. It returned `NA` rather than erroring, so the upper limit was silently dropped and the axis fell back to the data extent. Fixed 2026-08-16: `START_YEAR`/`END_YEAR` are now integers (`2018L`/`2024L`), the limits are built with `sprintf("%d-01-01", ...)`, and a `stopifnot` next to the constants rejects a fractional year with a clear message. Row selection is unchanged (still 84 months, maxima 100/54); the axis now genuinely ends 2024-12-31 instead of at the last data point (2024-12-01), which widens the right margin slightly. Both variants were re-exported and recopied to Overleaf.
+
+  Also note: the scattered zero months in the Google Trends series (2023-11, 2023-12, 2024-03, 2024-10--12) are genuine stored zeros, not missing data — normal for a low-volume term indexed against its peak.
+
+## Category 2 — edit script in `09_analysis`, then run
+
+### Small edits (data extends automatically; fix year text / constants)
+
+- [X] **Main hedonic table + radius robustness** (`hedonic_count_continuous_prior_250m.tex`, `hedonic_count_continuous_prior_radius_robustness.tex`) — `02_hedonic/hedonic_continuous_prior.R`: update "2021--2023" note strings, rerun.
+  Done 2026-08-17. Note strings now state the asymmetric window (sales 2021--2024, rentals 2021--2023). All seven tables (count + hours x three radii, plus the count radius-robustness summary) were regenerated and copied to the Overleaf `tables/` directory; the two deck tables were converted and copied to `slides/tables/`. Deck notes on the `hedonic-results` and `app-radius-hedonic` frames and the results paragraph in `03_motivating_evidence.tex` were updated to match (0.6% sales / 1.9% rentals in the most conservative specification; exposure SD now ~0.88 so one spill per week is ~1.1 SD).
+
+  **New sample restriction (decision 2026-08-17).** The script now drops properties where `annual_returns_na_then_absent` is TRUE (a nearby overflow stopped reporting and later left the register, so measured exposure is understated). At 250m these are 1.66% of the sample but carry a perverse positive own-coefficient (+0.070, t = +2.41); excluding them moves the column-6 sales estimate from -0.004 (ns) to -0.006 (p<0.05). Immaterial at 500m/1000m. The exclusion is documented in the table notes.
+
+  **Sample-size decomposition (vs the June-published tables).** Estimation sample at 250m rose 125,209 -> ~205,500. Roughly 55% of the increase is the 2024 sales year; the rest is the works-register/Site Group rebuild, and within that the dominant channel (~81%) is recovered exposure, not new coverage: houses near an overflow within 250m rose only 4% (172,103 -> 179,119 in the 2021--2023 universe), while exposure-NA'd houses fell 46,892 -> 16,016 because annual returns previously unmatched at the `site_id` grain now match at Site Group grain (evidence: `output/merge_rebuild_downstream_migration_2026-07-06/ch10/ch10_radius_summary.csv`; old coverage minus old NA = 125,211, matching the published N to within 2). Coefficients: sales col 6 is ~25% smaller than published and significant at 5% rather than 1%; rentals col 12 roughly tripled to -0.019\*\*\* (the old "rents attenuate under location FE" pattern reversed — prose updated accordingly).
+- [ ] **Full-period hedonic bins table** (`hedonic_count_bins_full.tex`) — `02_hedonic/hedonic_bins_full.R`: fix hardcoded `year = (qtr_id - 1) %/% 4 + 2021` literal (L214, use `BASE_YEAR`), update note strings, rerun.
+- [ ] **Population exposure table** (`population_exposure.tex`) — `01_descriptive/population_exposure.R`: `TARGET_YEARS <- 2021:2024`, update caption; 2021 population raster stays.
+- [ ] **Spill maps** (`{spill,dry_spill}_avg_annual_count_2021_2023_london_inset_slides.pdf`) — `01_descriptive/spill_maps_inset.R`: `TARGET_YEARS <- 2021:2024`. Filenames change to `..._2021_2024_...` → update the two `\includegraphics` in the deck.
+- [ ] **Spill persistence figure** (`spill_count_persistence_slides.pdf`) — `01_descriptive/spill_phase_diagrams.R`: years are hardcoded in the transition-pair logic in the body (no named constant); extend to 2024.
+
+### News family (asymmetric window: sales month_id 1–48, rentals stay 1–36)
+
+Shared edit: `05_news/extensive_margin_news_utils.R` L245 `Year <= base_year + 2L` → sales-side horizon to 2024.
+
+- [ ] **Articles DiD (media_attention) + radius robustness** — `05_news/did_articles_prior.R` (`month_id <= 36` at L84). Note: deck's `slides/tables/media_attention.tex` is converted from `output/tables/did_articles_prior_250m.tex` — keep that mapping intact.
+- [ ] **Trends DiD + radius robustness** (`did_trends_prior_250m.tex`, `did_trends_prior_radius_robustness.tex`) — `05_news/did_trends_prior.R` (`Year <= 2023` filter L87, peak-month formula).
+- [ ] **Extensive-margin articles DiD + robustness** (`did_articles_prior_extensive.tex`, `did_articles_prior_extensive_radius_robustness.tex`) — `05_news/did_articles_prior_extensive.R` (`analysis_end_month_id = 36L`).
+- [ ] **Extensive-margin trends DiD + robustness** (`did_trends_prior_extensive.tex`, `did_trends_prior_extensive_radius_robustness.tex`) — `05_news/did_trends_prior_extensive.R` (`analysis_end_month_id = 36L`, `base_year = 2021L`).
+- [ ] **Extensive-margin coefficient figure** (`extensive_margin_news_coefficients_lsoa.pdf`) — `05_news/extensive_margin_coefficient_plots.R` (`END_DATE 2023-12-31`, `month_id <= 36` at L223/L281–282/L307–308, `Year <= 2023` L207).
+
+### Structural edit
+
+- [ ] **Repeat-sales table** (`repeat_sales.tex`) — `03_repeat_sales/repeat_sales.R`: migrate the exposure join from per-`site_id` grain to Site Group grain (decision 2026-08-16) so it matches every other table; then rerun (repeat mappings and lookups on disk are current, sales include 2024).
+
+## Category 3 — upstream code not yet fixed
+
+- [ ] **Long-difference table** (`longdiff_unweighted_exposed.tex`) — blocked: `06_analysis_datasets/grid_long_difference_{sales,rentals}.R` hardcode `years = c(2021L, 2022L, 2023L)`. Fix + rerun grids, then set `YEAR_END <- 2024L` in `04_long_difference/longdiff_unweighted_exposed.R` and rerun.
+- [ ] **Full-panel hedonic + trends tables** (`hedonic_count_continuous_full.tex` in the paper appendix `101_appendix_results.tex`; `hedonic_hrs_continuous_full.tex` and `did_trends_full.tex` currently unused by deck or paper) — blocked: `02_hedonic/hedonic_continuous_full.R` and `05_news/did_trends_full.R` read `data/processed/general_panel/`, which was last built 2025-09 and predates the 2026-08-14 `spill_house_lookup` rebuild (join fan-out fix, Site Group grain). Either rebuild the general panels via `06_analysis_datasets/{sale,rental}_panel_exp.R` or migrate the scripts to the study-period cross-sections (the route taken for the bins table, decision 2026-08-17). Added 2026-08-17.
+- [ ] **Upstream/downstream appendix tables** (8 tables: `..._nearest_site_distance_{500,1000}m`, `..._one_site_distance_{250,500,1000}m`, `..._direction_binned_{river,euclidean,site_lateral}`) — blocked: signed pair CSVs missing at referenced paths and pre-date the hashed-ID rebuild. Owned by colleague; leave for now.
+
+## In-text hardcoded numbers (update after the reruns above)
+
+- [ ] Sample-period prose: "from 2021--2023" claims, incl. "universe of ≈14,000 storm overflows in England from 2021--2023" (L208).
+- [ ] "More than 1.1 Mn spill events totalling ≈8 Mn spill-hours" (L162, L215) — recompute for 2021–2024.
+- [ ] "≈3.18 Mn sales, ≈1.4 Mn within 1 km" (L229) — study window now 2021–2024 (~4.15 Mn total sales).
+- [ ] "≈1.45 Mn rental listings, ≈0.62 Mn within 1 km" (L237) — verify unchanged (rentals window unchanged, but cleaning fixes may have shifted counts).
+- [ ] "5% (16%) of England's population within 250m (500m)" (L371–372) — from new `population_exposure.tex`.
+- [ ] "+35% in cumulative articles ... 0.07% larger rental discount" (L736) — from new `did_articles_prior_extensive.tex`.
+
+## No update needed (static graphics)
+
+Headline collages, SAS alerts screenshot, OS rivers map, combined-sewer diagram, upstream/downstream schematic.
+
+## Deck hygiene (optional, while editing)
+
+- [ ] Six appendix Back-buttons point at the commented-out `ud-results` frame (dead `\hyperlink` target).

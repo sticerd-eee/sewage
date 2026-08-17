@@ -127,7 +127,7 @@ study_period_validate_annual_states <- function(annual) {
   invisible(TRUE)
 }
 
-collapse_study_period_annual_returns <- function(annual_returns, window) {
+study_period_annual_evidence_grid <- function(annual_returns, window) {
   if (!is.list(window) || !is.integer(window$years) ||
       length(window$years) == 0L || !is.integer(window$n_days_in_window)) {
     stop("window must come from study_period_window().", call. = FALSE)
@@ -180,7 +180,11 @@ collapse_study_period_annual_returns <- function(annual_returns, window) {
   annual <- annual[complete_grid, on = .(site_id, year)]
   annual[, missing_evidence := is.na(annual_status) |
     annual_status %in% c("reported_na", "absent")]
+  annual
+}
 
+collapse_study_period_annual_returns <- function(annual_returns, window) {
+  annual <- study_period_annual_evidence_grid(annual_returns, window)
   collapsed <- annual[
     order(site_id, year),
     {
@@ -193,6 +197,120 @@ collapse_study_period_annual_returns <- function(annual_returns, window) {
     },
     by = site_id
   ]
+  data.table::setkey(collapsed, site_id)
+  collapsed
+}
+
+# Clip individual EDM events to the study window, mirroring the overlap filter
+# and clamping that prior_exposure_utils.R applies to per-transaction windows.
+# The window ends at midnight opening the day after end_date, so the final
+# calendar day is fully inside the window.
+study_period_clip_events <- function(events, window) {
+  if (!is.list(window) || !inherits(window$start_date, "Date") ||
+      !inherits(window$end_date, "Date")) {
+    stop("window must come from study_period_window().", call. = FALSE)
+  }
+  events <- data.table::as.data.table(events)
+  required <- c("site_id", "start_time", "end_time")
+  missing_columns <- setdiff(required, names(events))
+  if (length(missing_columns) > 0L) {
+    stop(
+      "Event feed is missing required column(s): ",
+      paste(missing_columns, collapse = ", "), ".",
+      call. = FALSE
+    )
+  }
+  # The column projection already allocates a fresh table, so the caller's feed
+  # is safe from the updates below without a second copy of several million rows.
+  clipped <- events[, ..required]
+  if (!is.numeric(clipped$site_id) || anyNA(clipped$site_id) ||
+      any(!is.finite(clipped$site_id)) ||
+      any(clipped$site_id != floor(clipped$site_id)) ||
+      any(clipped$site_id < -.Machine$integer.max - 1) ||
+      any(clipped$site_id > .Machine$integer.max)) {
+    stop("Event site_id must be a nonmissing lossless int32 value.", call. = FALSE)
+  }
+  clipped[, site_id := as.integer(site_id)]
+  if (!inherits(clipped$start_time, "POSIXct") ||
+      !inherits(clipped$end_time, "POSIXct")) {
+    stop("Event start_time and end_time must be POSIXct.", call. = FALSE)
+  }
+  if (anyNA(clipped$start_time) || anyNA(clipped$end_time)) {
+    stop("Event start_time and end_time must be nonmissing.", call. = FALSE)
+  }
+  if (any(clipped$end_time < clipped$start_time)) {
+    stop("Every event must end at or after its start_time.", call. = FALSE)
+  }
+
+  window_start <- as.POSIXct(
+    format(window$start_date, "%Y-%m-%d 00:00:00"), tz = "UTC"
+  )
+  window_end <- as.POSIXct(
+    format(window$end_date + 1L, "%Y-%m-%d 00:00:00"), tz = "UTC"
+  )
+  clipped <- clipped[start_time < window_end & end_time >= window_start]
+  if (nrow(clipped) == 0L) {
+    return(clipped[, .(
+      site_id = integer(0),
+      clipped_start = as.POSIXct(character(0), tz = "UTC"),
+      clipped_end = as.POSIXct(character(0), tz = "UTC"),
+      event_hours = numeric(0)
+    )])
+  }
+  clipped[, `:=`(
+    clipped_start = pmax(start_time, window_start),
+    clipped_end = pmin(end_time, window_end)
+  )]
+  clipped[, event_hours := as.numeric(difftime(
+    clipped_end, clipped_start, units = "hours"
+  ))]
+  clipped <- clipped[event_hours > 0]
+  clipped[, .(site_id, clipped_start, clipped_end, event_hours)]
+}
+
+# The Annual Returns stay the evidence oracle: the event feed carries positives
+# only, so it cannot tell a genuinely silent Site Group from an unmonitored one.
+# Building the totals on the Annual-Returns grid therefore makes the events and
+# EA outputs share a Site Group set and a missingness pattern by construction.
+collapse_study_period_events <- function(annual_returns, events, window) {
+  if (!exists("count_spills", mode = "function", inherits = TRUE)) {
+    stop(
+      "spill_aggregation_utils.R must be sourced before the events collapse.",
+      call. = FALSE
+    )
+  }
+  annual <- study_period_annual_evidence_grid(annual_returns, window)
+  evidence <- annual[
+    order(site_id),
+    .(has_missing_evidence = any(missing_evidence)),
+    by = site_id
+  ]
+
+  clipped <- study_period_clip_events(events, window)
+  totals <- clipped[
+    order(site_id, clipped_start),
+    .(
+      spill_count = as.numeric(count_spills(clipped_start, clipped_end)),
+      spill_hrs = base::sum(event_hours)
+    ),
+    by = site_id
+  ]
+
+  # Right-join onto the evidence grid: a Site Group the positives-only feed never
+  # mentions is a true zero, not a gap. Keying that on the join rather than on
+  # is.na() keeps a genuinely unexpected NA from a collapsed total loud.
+  collapsed <- totals[evidence, on = "site_id"]
+  collapsed[!site_id %in% totals$site_id, `:=`(spill_count = 0, spill_hrs = 0)]
+  if (anyNA(collapsed$spill_count) || anyNA(collapsed$spill_hrs)) {
+    stop("Event collapse produced a missing total for a Site Group with events.", call. = FALSE)
+  }
+  collapsed[
+    has_missing_evidence == TRUE,
+    `:=`(spill_count = NA_real_, spill_hrs = NA_real_)
+  ]
+  data.table::setcolorder(
+    collapsed, c("site_id", "spill_count", "spill_hrs", "has_missing_evidence")
+  )
   data.table::setkey(collapsed, site_id)
   collapsed
 }
@@ -972,6 +1090,28 @@ study_period_validate_config <- function(config) {
       is.na(config$output_path) || !nzchar(config$output_path)) {
     stop("output_path must be one nonempty path.", call. = FALSE)
   }
+  exposure_source <- config$exposure_source
+  if (is.null(exposure_source)) exposure_source <- "annual_returns"
+  if (!is.character(exposure_source) || length(exposure_source) != 1L ||
+      is.na(exposure_source) ||
+      !exposure_source %in% c("annual_returns", "events")) {
+    stop(
+      "exposure_source must be exactly one of: annual_returns, events.",
+      call. = FALSE
+    )
+  }
+  if (exposure_source == "events") {
+    events_path <- config$events_path
+    if (!is.character(events_path) || length(events_path) != 1L ||
+        is.na(events_path) || !file.exists(events_path)) {
+      stop(
+        "An events exposure_source requires an events_path naming an ",
+        "existing individual-EDM feed: ",
+        if (is.null(events_path)) "<missing>" else events_path,
+        call. = FALSE
+      )
+    }
+  }
   ineligible_chunk_size <- config$ineligible_chunk_size
   if (is.null(ineligible_chunk_size)) ineligible_chunk_size <- 100000L
   output_batch_size <- config$output_batch_size
@@ -986,6 +1126,7 @@ study_period_validate_config <- function(config) {
     contract = contract,
     window = window,
     radii = radii,
+    exposure_source = exposure_source,
     ineligible_chunk_size = ineligible_chunk_size,
     output_batch_size = as.integer(output_batch_size)
   )
@@ -1010,6 +1151,21 @@ study_period_read_parquet_columns <- function(path, columns, context) {
     dplyr::select(dplyr::all_of(columns)) |>
     dplyr::collect() |>
     data.table::as.data.table()
+}
+
+# Read the matched individual EDM feed with the same column projection
+# prior_exposure_utils.R uses. The feed's `year` column is an annual-returns
+# reporting year rather than a strict function of start_time, so it cannot serve
+# as a row filter without risking the loss of an event that straddles a window
+# boundary; study_period_clip_events() does the exact timestamp work instead.
+study_period_read_events <- function(events_path) {
+  events <- study_period_read_parquet_columns(
+    events_path,
+    c("site_id", "start_time", "end_time", "year"),
+    "Individual EDM event feed"
+  )
+  events[, year := NULL]
+  events
 }
 
 study_period_create_stage <- function(output_path) {
@@ -1049,7 +1205,17 @@ build_study_period_cross_section <- function(config) {
     c("site_id", "year", "annual_status", "spill_count_ea", "spill_hrs_ea"),
     "Annual-return crosswalk"
   )
-  site_totals <- collapse_study_period_annual_returns(annual_returns, window)
+  exposure_source <- resolved$exposure_source
+  site_totals <- if (exposure_source == "events") {
+    events <- study_period_read_events(config$events_path)
+    logger::log_info(paste0(
+      "Loaded {nrow(events)} individual EDM events for the study window from ",
+      "{config$events_path}."
+    ))
+    collapse_study_period_events(annual_returns, events, window)
+  } else {
+    collapse_study_period_annual_returns(annual_returns, window)
+  }
 
   stage_path <- study_period_create_stage(config$output_path)
   on.exit({
@@ -1116,6 +1282,7 @@ build_study_period_cross_section <- function(config) {
   invisible(list(
     output_path = config$output_path,
     market = contract$market,
+    exposure_source = exposure_source,
     years = window$years,
     n_days_in_window = window$n_days_in_window,
     source_transactions = nrow(ledger),

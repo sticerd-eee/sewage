@@ -72,8 +72,9 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 
 ### 06_analysis_datasets
 
-- `cross_section_sales.R` and `cross_section_rental.R`: publish the fixed 2021–2024 `study_period` sales and rental cross-sections from EA annual-return evidence at 250, 500, and 1,000 m. They retain every source transaction and distinguish eligible zero exposure, unknown annual evidence, and spatial ineligibility.
-- `cross_section_prior_to_sale.R` and `cross_section_prior_to_rental.R`: build prior-to-transaction exposure at property-radius grain. This remains a separate estimand from the fixed-period annual-return product.
+- `cross_section_sales.R` and `cross_section_rental.R`: publish the fixed-window `study_period` sales (2021–2024) and rental (2021–2023) cross-sections from matched individual EDM events at 250, 500, and 1,000 m. Events are clipped to the window and spill counts recomputed under the 12/24 rule, the same measurement the prior-to-transaction builders use. They retain every source transaction and distinguish eligible zero exposure, unknown annual evidence, and spatial ineligibility.
+- `cross_section_sales_ea.R` and `cross_section_rental_ea.R`: publish the same cross-sections to `study_period_ea` from EA annual-return evidence instead. Both families share one pipeline in `cross_section_study_period_utils.R` and one missingness rule, so their outputs differ only in the exposure numbers; `scripts/R/testing/verify_study_period_exposure_sources.R` reports the difference.
+- `cross_section_prior_to_sale.R` and `cross_section_prior_to_rental.R`: build prior-to-transaction exposure at property-radius grain. This remains a separate estimand from the fixed-period product, now differing from it only in window.
 - `house_spill_prior_to_sale.R` and `rental_spill_prior_to_rental.R`: build sale- and rental-spill prior-exposure datasets from raw matched events.
 - `site_panel_sales.R` and `site_panel_rental.R`: build site-level panels.
 - `house_panel_within_radius.R` and `rental_panel_within_radius.R`: build within-radius property panels.
@@ -150,22 +151,24 @@ Integration scripts are executed earlier for dependency reasons; see steps 12 an
 
 ### Layer 06: Analysis Datasets
 
-25. `cross_section_sales.R` — build the fixed 2021–2024 sales `study_period` cross-section from EA annual-return evidence.
-26. `cross_section_rental.R` — build the fixed 2021–2024 rental `study_period` cross-section from EA annual-return evidence.
-27. `cross_section_prior_to_sale.R` — build prior-to-sale sales cross-sections.
-28. `cross_section_prior_to_rental.R` — build prior-to-rental rental cross-sections.
-29. `house_spill_prior_to_sale.R` — build the sale-spill prior-exposure dataset.
-30. `rental_spill_prior_to_rental.R` — build the rental-spill prior-exposure dataset.
-31. `site_panel_sales.R` — build site-level sales panels.
-32. `site_panel_rental.R` — build site-level rental panels.
-33. `house_panel_within_radius.R` — build within-radius house panels.
-34. `rental_panel_within_radius.R` — build within-radius rental panels.
-35. `sale_panel_exp.R` — export the general sales panel.
-36. `rental_panel_exp.R` — export the general rental panel.
-37. `grid_long_difference_sales.R` — build the sales long-difference grid dataset.
-38. `grid_long_difference_rentals.R` — build the rental long-difference grid dataset.
-39. `repeat_sales.R` — build the long-run sales repeat mapping and review tables.
-40. `repeat_rentals.R` — build the long-run rental repeat mapping and review tables.
+25. `cross_section_sales.R` — build the fixed 2021–2024 sales `study_period` cross-section from matched individual EDM events.
+26. `cross_section_rental.R` — build the fixed 2021–2023 rental `study_period` cross-section from matched individual EDM events.
+27. `cross_section_sales_ea.R` — build the fixed 2021–2024 sales `study_period_ea` cross-section from EA annual-return evidence.
+28. `cross_section_rental_ea.R` — build the fixed 2021–2023 rental `study_period_ea` cross-section from EA annual-return evidence.
+29. `cross_section_prior_to_sale.R` — build prior-to-sale sales cross-sections.
+30. `cross_section_prior_to_rental.R` — build prior-to-rental rental cross-sections.
+31. `house_spill_prior_to_sale.R` — build the sale-spill prior-exposure dataset.
+32. `rental_spill_prior_to_rental.R` — build the rental-spill prior-exposure dataset.
+33. `site_panel_sales.R` — build site-level sales panels.
+34. `site_panel_rental.R` — build site-level rental panels.
+35. `house_panel_within_radius.R` — build within-radius house panels.
+36. `rental_panel_within_radius.R` — build within-radius rental panels.
+37. `sale_panel_exp.R` — export the general sales panel.
+38. `rental_panel_exp.R` — export the general rental panel.
+39. `grid_long_difference_sales.R` — build the sales long-difference grid dataset.
+40. `grid_long_difference_rentals.R` — build the rental long-difference grid dataset.
+41. `repeat_sales.R` — build the long-run sales repeat mapping and review tables.
+42. `repeat_rentals.R` — build the long-run rental repeat mapping and review tables.
 
 ## Dependency Notes
 

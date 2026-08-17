@@ -1,5 +1,5 @@
 # ==============================================================================
-# Study-Period Sales Cross-Section Builder (Individual EDM Events)
+# Study-Period Sales Cross-Section Builder (Annual Returns)
 # ==============================================================================
 #
 # Purpose: Build the sales cross-section at the property-transaction level. For
@@ -7,31 +7,24 @@
 #          across all sites within that radius over the sales 2021–2024 study
 #          period.
 #
-#          Exposure comes from the matched individual EDM events. Events are
-#          clipped to the study window, spill hours are the summed clipped
-#          durations, and spill counts are recomputed with the EA 12/24 rule
-#          (count_spills()) rather than taken from the companies' reported
-#          annual figures. This is the same measurement the prior-exposure
-#          datasets use, so the two families now differ only in window.
-#
-#          The Annual Returns remain the evidence oracle: the event feed carries
-#          positives only, so a Site Group whose window contains a reported_na or
-#          absent annual status still yields NA exposure. The Annual-Returns
-#          counterpart is cross_section_sales_ea.R.
+#          Exposure comes from the EA Annual Returns, the annual spill figures
+#          published by the Environment Agency and carried on the Site Group
+#          crosswalk as spill_count_ea and spill_hrs_ea. "EA" and "Annual
+#          Returns" name the same source throughout this project. The
+#          event-based counterpart is cross_section_sales.R.
 #
 # Author: Jacopo Olivieri
-# Date: 2026-08-17
+# Date: 2025-04-05
 # Date Modified: 2026-08-17
 #
 # Inputs:
 #   - data/processed/house_price.parquet
 #   - data/processed/spill_house_lookup.parquet
 #   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
-#   - data/processed/matched_events_annual_data/matched_events_annual_data.parquet
 #
 # Outputs:
-#   - data/processed/cross_section/sales/study_period/
-#   - output/log/cross_section_sales.log
+#   - data/processed/cross_section/sales/study_period_ea/
+#   - output/log/cross_section_sales_ea.log
 #
 # ==============================================================================
 
@@ -45,15 +38,11 @@ if (!requireNamespace("here", quietly = TRUE)) {
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 
 REQUIRED_PACKAGES <- c("arrow", "data.table", "dplyr", "here", "logger")
-LOG_FILE <- here::here("output", "log", "cross_section_sales.log")
+LOG_FILE <- here::here("output", "log", "cross_section_sales_ea.log")
 
 check_required_packages(REQUIRED_PACKAGES)
 source(
   here::here("scripts", "R", "utils", "dataset_publication_utils.R"),
-  local = TRUE
-)
-source(
-  here::here("scripts", "R", "utils", "spill_aggregation_utils.R"),
   local = TRUE
 )
 source(
@@ -63,19 +52,15 @@ source(
 
 CONFIG <- list(
   market = "sale",
-  exposure_source = "events",
+  exposure_source = "annual_returns",
   source_path = here::here("data", "processed", "house_price.parquet"),
   lookup_path = here::here("data", "processed", "spill_house_lookup.parquet"),
   crosswalk_path = here::here(
     "data", "processed", "matched_events_annual_data",
     "site_group_crosswalk.parquet"
   ),
-  events_path = here::here(
-    "data", "processed", "matched_events_annual_data",
-    "matched_events_annual_data.parquet"
-  ),
   output_path = here::here(
-    "data", "processed", "cross_section", "sales", "study_period"
+    "data", "processed", "cross_section", "sales", "study_period_ea"
   ),
   start_date = as.Date("2021-01-01"),
   end_date = as.Date("2024-12-31"),
@@ -86,7 +71,7 @@ CONFIG <- list(
 
 initialise_logging <- function() {
   setup_logging(LOG_FILE, console = interactive(), threshold = "DEBUG")
-  logger::log_info("Study-period sales event builder started at {Sys.time()}.")
+  logger::log_info("Study-period sales Annual-Returns builder started at {Sys.time()}.")
 }
 
 run_study_period_cross_section <- function(
@@ -100,13 +85,13 @@ main <- function(build = build_study_period_cross_section) {
     {
       result <- run_study_period_cross_section(CONFIG, build)
       logger::log_info(
-        "Study-period sales event builder completed: {result$output_path}."
+        "Study-period sales Annual-Returns builder completed: {result$output_path}."
       )
       invisible(result)
     },
     error = function(error) {
       logger::log_error(
-        "Study-period sales event builder failed: {conditionMessage(error)}"
+        "Study-period sales Annual-Returns builder failed: {conditionMessage(error)}"
       )
       stop(conditionMessage(error), call. = FALSE)
     }

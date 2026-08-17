@@ -51,7 +51,17 @@ Spill Exposure may be expressed as a Whole-Period Spill Exposure or an Average D
 The total spill count or spill hours accumulated within a property's Near-Overflow Radius over the stated exposure window.
 
 ### Study-Period Spill Exposure
-A Whole-Period Spill Exposure measured from the EA-revised annual-return totals over the fixed 2021–2024 study window. It is a time-invariant property-area measure and may include spill activity after an individual sale or rental transaction; it is published as a whole-period total and as equivalent daily and weekly averages.
+A Whole-Period Spill Exposure measured over a fixed study window rather than a per-transaction one — 2021–2024 for sales, 2021–2023 for rentals. It is a time-invariant property-area measure and may include spill activity after an individual sale or rental transaction; it is published as a whole-period total and as equivalent daily and weekly averages.
+
+It comes in two variants that share a schema, a grain, a window, and a missingness rule, and differ only in where the exposure numbers come from. Which variant is canonical for the paper is an open question; the comparison between them is reported by `scripts/R/testing/verify_study_period_exposure_sources.R`.
+
+### Event-Based Study-Period Spill Exposure
+The Study-Period Spill Exposure measured from matched individual EDM events clipped to the study window, with spill hours summed from the clipped durations and spill counts recomputed under the 12/24 counting rule. This is the same measurement the prior-to-transaction datasets use, so the two families differ only in window. It is what the unsuffixed `data/processed/cross_section/{sales,rentals}/study_period/` paths carry and what downstream analysis reads.
+
+### Annual-Returns (EA) Study-Period Spill Exposure
+The Study-Period Spill Exposure measured by summing the EA-revised annual-return totals (`spill_count_ea`, `spill_hrs_ea`) over the window years. "EA data" and "Annual Returns" name the same source throughout this project — the Environment Agency publishes the returns — and the `_ea` suffix marks it. It is published to the sibling `study_period_ea/` paths.
+
+Both variants take the Annual Status as their evidence oracle, because the event feed carries positives only and cannot distinguish a genuinely silent Site Group from an unmonitored one. A radius containing any Site Group with a `reported_na` or `absent` window year, or a window year missing from the crosswalk grid, therefore reports unknown exposure under both. The two outputs consequently share a missingness pattern row for row.
 
 ### Spatially Eligible Transaction
 A sale or rental transaction with usable property coordinates, for which nearby Site Groups can be evaluated. A spatially eligible transaction with no Site Group inside its Near-Overflow Radius has zero Spill Exposure; a transaction without usable coordinates has unknown, not zero, exposure.

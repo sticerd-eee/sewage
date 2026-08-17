@@ -155,6 +155,9 @@ run_for_radius <- function(RAD) {
     inner_join(sales, by = "house_id") |>
     mutate(log_price = log(price)) |>
     filter(
+      # Exposure is understated where a nearby overflow stopped reporting and
+      # was subsequently absent from the register, so these are excluded.
+      !annual_returns_na_then_absent,
       !is.na(spill_count_weekly_avg),
       !is.na(spill_hrs_weekly_avg),
       !is.na(lsoa),
@@ -195,6 +198,9 @@ run_for_radius <- function(RAD) {
     inner_join(rentals, by = "rental_id") |>
     mutate(log_price = log(listing_price)) |>
     filter(
+      # Exposure is understated where a nearby overflow stopped reporting and
+      # was subsequently absent from the register, so these are excluded.
+      !annual_returns_na_then_absent,
       !is.na(spill_count_weekly_avg),
       !is.na(spill_hrs_weekly_avg),
       !is.na(lsoa),
@@ -410,7 +416,7 @@ run_for_radius <- function(RAD) {
 
   # Notes
   custom_notes_count <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Properties are excluded where an overflow within the radius stopped reporting and was subsequently absent from the register, since spill exposure is understated for these properties. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Export table
@@ -470,7 +476,7 @@ run_for_radius <- function(RAD) {
   )
   # Notes
   custom_notes_hrs <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Properties are excluded where an overflow within the radius stopped reporting and was subsequently absent from the register, since spill exposure is understated for these properties. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Export table
@@ -528,7 +534,7 @@ cat("  Radii:", paste(RADII, collapse = ", "), "m\n")
 cat("\nBuilding cross-radius robustness summary...\n")
 
 custom_notes_summary <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the hedonic spill-count estimates to the house-to-site radius. Each column reports estimates for the sample of properties within the stated radius (250m, 500m, or 1000m) of a storm overflow in England, 2021--2023. Each cell is the coefficient on the weekly spill count from the fully-saturated specification including property controls and the stated fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the hedonic spill-count estimates to the house-to-site radius. Each column reports estimates for the sample of properties within the stated radius (250m, 500m, or 1000m) of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Properties are excluded where an overflow within the radius stopped reporting and was subsequently absent from the register, since spill exposure is understated for these properties. Each cell is the coefficient on the weekly spill count from the fully-saturated specification including property controls and the stated fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 write_radius_robustness_table(
