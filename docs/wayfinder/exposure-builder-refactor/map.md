@@ -28,8 +28,8 @@ locks the plan.
   scope: `prior_to_sale`, `prior_to_rental`, `prior_to_sale_house_site`,
   `prior_to_rental_rental_site` (engine: `scripts/R/utils/prior_exposure_utils.R`)
   and `study_period`, `study_period_ea`
-  (engine: `scripts/R/utils/cross_section_study_period_utils.R`, as revised on
-  branch `jo/cross-section-individual-edm`).
+  (engine: `scripts/R/utils/cross_section_study_period_utils.R`, now on main
+  since pull request #34 merged on 2026-08-17).
 - Key references: `docs/plans/2026-08-12-002-fix-prior-exposure-evidence-publication-plan.md`
   (the finding-11 fix this effort partially revisits),
   `todos/2026-07-07-review-prior-to-sale-rental-spill-scripts.md` (defect
@@ -115,6 +115,13 @@ locks the plan.
   dedupe (empirically zero duplicates in both lookups); core functions carry
   no validation — correctness lives in tests and Stage-1 reconciliation,
   and the publication gate stays the single runtime check.
+- [Land the event-based study-period branch](tickets/04-land-event-based-study-period-branch.md) —
+  merged to main as pull request #34 (merge commit `b9f8203`, 2026-08-17);
+  one review commit (`11c1687`) tightened the event collapse so unexpected
+  NA totals fail loudly instead of becoming zeros and dropped the unused
+  `window` parameter from `study_period_read_events()`; all four
+  study-period datasets regenerated from the merged code the same
+  afternoon.
 
 ## Not yet specified
 
@@ -122,11 +129,6 @@ locks the plan.
   outputs must be regenerated, in what order, and whether any regression
   script needs a code change beyond re-running) — sharpens after the
   consumer inventory and the harmonization-boundary ticket.
-- Whether identically-named average columns (`spill_count_weekly_avg` and
-  friends) across the prior-family and study-period datasets need renaming
-  or only documentation, given they differ in window and denominator —
-  sharpens once the event-based study-period branch lands (ticket 04),
-  which removes the measurement-basis half of the collision.
 
 ## Out of scope
 
