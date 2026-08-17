@@ -156,11 +156,18 @@ locks the plan.
   derivations so the two rulings cannot be misread as contradicting; the
   `study_period_ea` ID-verifier gap is closed inside the plan, before
   Stage 1 runs.
+- [Do the identically-named average columns need renaming or only documentation?](tickets/10-average-column-naming.md) —
+  no rename in either family: the four average columns are conceptually one
+  variable over the dataset's own stated window, with `n_days_in_window`
+  self-describing every row; the collision is documented in `CONCEPTS.md`
+  (locked wording in the ticket, including the rename-on-join instruction)
+  and in a named subsection of the plan document; Arrow field metadata was
+  rejected as a schema reopening.
 
 ## Not yet specified
 
-Nothing remains in the fog: the only open question on the route is the live
-ticket 10, and the plan assembly (06) waits only on it.
+Nothing remains in the fog: every decision ticket is closed, and the only
+open ticket is the plan assembly (06), now unblocked.
 
 ## Out of scope
 
