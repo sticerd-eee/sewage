@@ -3,7 +3,7 @@ id: 06
 title: "Assemble and lock the plan document"
 type: grilling
 status: open
-assignee:
+assignee: jacopo
 blocked-by: [02, 03, 04, 05, 08, 09, 10]
 ---
 
