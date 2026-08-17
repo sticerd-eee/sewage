@@ -64,6 +64,7 @@ Shared edit: `05_news/extensive_margin_news_utils.R` L245 `Year <= base_year + 2
 ## Category 3 — upstream code not yet fixed
 
 - [ ] **Long-difference table** (`longdiff_unweighted_exposed.tex`) — blocked: `06_analysis_datasets/grid_long_difference_{sales,rentals}.R` hardcode `years = c(2021L, 2022L, 2023L)`. Fix + rerun grids, then set `YEAR_END <- 2024L` in `04_long_difference/longdiff_unweighted_exposed.R` and rerun.
+- [ ] **Full-panel hedonic + trends tables** (`hedonic_count_continuous_full.tex` in the paper appendix `101_appendix_results.tex`; `hedonic_hrs_continuous_full.tex` and `did_trends_full.tex` currently unused by deck or paper) — blocked: `02_hedonic/hedonic_continuous_full.R` and `05_news/did_trends_full.R` read `data/processed/general_panel/`, which was last built 2025-09 and predates the 2026-08-14 `spill_house_lookup` rebuild (join fan-out fix, Site Group grain). Either rebuild the general panels via `06_analysis_datasets/{sale,rental}_panel_exp.R` or migrate the scripts to the study-period cross-sections (the route taken for the bins table, decision 2026-08-17). Added 2026-08-17.
 - [ ] **Upstream/downstream appendix tables** (8 tables: `..._nearest_site_distance_{500,1000}m`, `..._one_site_distance_{250,500,1000}m`, `..._direction_binned_{river,euclidean,site_lateral}`) — blocked: signed pair CSVs missing at referenced paths and pre-date the hashed-ID rebuild. Owned by colleague; leave for now.
 
 ## In-text hardcoded numbers (update after the reruns above)
