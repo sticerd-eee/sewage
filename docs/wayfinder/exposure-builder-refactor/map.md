@@ -122,13 +122,22 @@ locks the plan.
   `window` parameter from `study_period_read_events()`; all four
   study-period datasets regenerated from the merged code the same
   afternoon.
+- [Where does the plan's responsibility for downstream analyses end?](tickets/05-harmonization-downstream-boundary.md) —
+  the boundary is narrow: the plan ends at the rebuilt six datasets and a
+  passing contract suite; the only in-scope analysis code change is
+  removing the redundant manual `annual_returns_na_then_absent` exclusion
+  from `hedonic_continuous_prior.R` under a contract assertion; the
+  Stage-2 sign-off memo is a self-contained `.qmd` in `docs/reports/` with
+  sample accounting plus before-and-after estimates of the preferred
+  250-metre hedonic; the NA-propagation convention goes to `CONCEPTS.md`
+  with the named offender list in the plan and a `todos/` follow-up; the
+  deferred work splits into two named follow-ups (battery refresh, then
+  NA-convention cleanup).
 
 ## Not yet specified
 
-- How downstream analyses absorb the harmonized rule's extra NAs (which
-  outputs must be regenerated, in what order, and whether any regression
-  script needs a code change beyond re-running) — sharpens after the
-  consumer inventory and the harmonization-boundary ticket.
+Nothing remains in the fog: every open question on the route is now a live
+ticket (08, 09, 10), and the plan assembly (06) waits only on them.
 
 ## Out of scope
 
