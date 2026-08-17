@@ -147,11 +147,20 @@ locks the plan.
   acceptance test is a slot table over all current and named future
   variants with a published-versus-expressible status column; no Arrow
   schema text for unpublished variants.
+- [Does study_period_ea need anything beyond the shared classification?](tickets/09-ea-variant-inheritance.md) —
+  the EA builder calls the one shared truth table (ignoring the
+  event-matching flag) with the window reducer over the first two atomic
+  flags, and its sums adopt the stable-sum wrappers; the two-flag verdict
+  is locked permanently as a per-source verdict, with the plan stating
+  explicitly that ticket 08's no-opt-out rule governs event-based
+  derivations so the two rulings cannot be misread as contradicting; the
+  `study_period_ea` ID-verifier gap is closed inside the plan, before
+  Stage 1 runs.
 
 ## Not yet specified
 
-Nothing remains in the fog: every open question on the route is now a live
-ticket (08, 09, 10), and the plan assembly (06) waits only on them.
+Nothing remains in the fog: the only open question on the route is the live
+ticket 10, and the plan assembly (06) waits only on it.
 
 ## Out of scope
 
