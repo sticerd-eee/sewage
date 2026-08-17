@@ -4,11 +4,11 @@
 #
 # Purpose: Build the rental cross-section at the rental listing level. For each
 #          rental listing and radius, sum spill counts and hours across all sites
-#          within that radius over the full 2021–2024 study period.
+#          within that radius over the 2021–2023 rental study period.
 #
 # Author: Jacopo Olivieri
 # Date: 2025-04-05
-# Date Modified: 2026-08-14
+# Date Modified: 2026-08-17
 #
 # Inputs:
 #   - data/processed/zoopla/zoopla_rentals.parquet
@@ -59,7 +59,7 @@ CONFIG <- list(
     "data", "processed", "cross_section", "rentals", "study_period"
   ),
   start_date = as.Date("2021-01-01"),
-  end_date = as.Date("2024-12-31"),
+  end_date = as.Date("2023-12-31"),
   radii = c(250L, 500L, 1000L),
   ineligible_chunk_size = 100000L,
   output_batch_size = 20L

@@ -4,7 +4,7 @@
 #
 # Purpose: Build the sales cross-section at the property-transaction level. For
 #          each property transaction and radius, sum spill counts and hours
-#          across all sites within that radius over the full 2021–2024 study
+#          across all sites within that radius over the sales 2021–2024 study
 #          period.
 #
 # Author: Jacopo Olivieri

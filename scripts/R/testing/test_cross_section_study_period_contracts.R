@@ -857,7 +857,8 @@ adapter_specs <- list(
     provenance = "ppd_category",
     source_suffix = "house_price.parquet",
     lookup_suffix = "spill_house_lookup.parquet",
-    output_suffix = file.path("cross_section", "sales", "study_period")
+    output_suffix = file.path("cross_section", "sales", "study_period"),
+    end_date = as.Date("2024-12-31")
   ),
   rental = list(
     path = file.path(
@@ -868,7 +869,8 @@ adapter_specs <- list(
     provenance = NULL,
     source_suffix = file.path("zoopla", "zoopla_rentals.parquet"),
     lookup_suffix = file.path("zoopla", "spill_rental_lookup.parquet"),
-    output_suffix = file.path("cross_section", "rentals", "study_period")
+    output_suffix = file.path("cross_section", "rentals", "study_period"),
+    end_date = as.Date("2023-12-31")
   )
 )
 
@@ -887,7 +889,7 @@ for (market in names(adapter_specs)) {
   )
   assert_identical(
     adapter$CONFIG$end_date,
-    as.Date("2024-12-31"),
+    spec$end_date,
     paste(market, "must configure the settled end date.")
   )
   assert_identical(
