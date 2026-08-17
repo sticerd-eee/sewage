@@ -1291,6 +1291,122 @@ assert_true(
   "The published events dataset must carry the recomputed 12/24 exposure."
 )
 
+# U4: exposure-source comparison invariants ------------------------------------
+
+comparison <- new.env(parent = globalenv())
+sys.source(
+  here::here(
+    "scripts", "R", "testing", "verify_study_period_exposure_sources.R"
+  ),
+  envir = comparison
+)
+
+comparison_fixture <- function(spill_count, spill_hrs, has_missing_site = NULL) {
+  n <- length(spill_count)
+  if (is.null(has_missing_site)) has_missing_site <- is.na(spill_count)
+  fixture <- data.table(
+    transaction_id = rep(as.character(seq_len(n / 3L)), each = 3L),
+    radius = rep(c(250L, 500L, 1000L), times = n / 3L),
+    spatially_eligible = TRUE,
+    has_missing_site = has_missing_site,
+    spill_count = as.double(spill_count),
+    spill_hrs = as.double(spill_hrs)
+  )
+  setkey(fixture, transaction_id, radius)
+  fixture
+}
+
+paired_events <- comparison_fixture(
+  spill_count = c(1, 2, 3, NA, 0, 6),
+  spill_hrs = c(2, 4, 6, NA, 0, 12)
+)
+paired_annual <- comparison_fixture(
+  spill_count = c(2, 3, 4, NA, 0, 5),
+  spill_hrs = c(3, 5, 7, NA, 0, 11)
+)
+
+paired_report <- comparison$compare_study_period_sources(
+  paired_events, paired_annual, "sale"
+)
+assert_identical(
+  sort(unique(paired_report$radius)),
+  c(250L, 500L, 1000L),
+  "The comparison must report one section per supported radius."
+)
+assert_true(
+  all(paired_report[measure == "spill_count", n_rows] == 2L),
+  "The comparison must attribute every row to exactly one radius section."
+)
+assert_true(
+  paired_report[measure == "spill_count" & radius == 250L, n_comparable] == 1L &&
+    paired_report[measure == "spill_count" & radius == 250L,
+      n_missing_exposure] == 1L,
+  "A shared NA row must be excluded from the comparable subset and counted."
+)
+assert_true(
+  paired_report[measure == "spill_hrs" & radius == 500L, diff_mean] == -0.5,
+  "The comparison must report the mean events-minus-EA level difference."
+)
+
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    paired_events, paired_annual[-1L], "sale"
+  ),
+  "row count",
+  "A row-count mismatch between sources must fail loudly."
+)
+mismatched_key <- copy(paired_annual)
+mismatched_key[1L, transaction_id := "fabricated"]
+assert_error_contains(
+  comparison$compare_study_period_sources(paired_events, mismatched_key, "sale"),
+  "identical transaction-radius key set",
+  "A fabricated key mismatch between sources must fail loudly."
+)
+duplicate_key <- rbind(paired_annual, paired_annual[1L])
+setkey(duplicate_key, transaction_id, radius)
+assert_error_contains(
+  comparison$compare_study_period_sources(paired_events, duplicate_key, "sale"),
+  "duplicate transaction-radius key",
+  "A duplicated public key must fail loudly."
+)
+extra_na <- copy(paired_annual)
+extra_na[2L, `:=`(spill_count = NA_real_, spill_hrs = NA_real_)]
+assert_error_contains(
+  comparison$compare_study_period_sources(paired_events, extra_na, "sale"),
+  "missingness pattern",
+  "An NA present under one source but not the other must fail loudly."
+)
+divergent_flag <- copy(paired_annual)
+divergent_flag[3L, has_missing_site := TRUE]
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    paired_events, divergent_flag, "sale"
+  ),
+  "has_missing_site",
+  "A divergent missing-site flag must fail loudly."
+)
+
+all_na_events <- comparison_fixture(
+  spill_count = rep(NA_real_, 6L), spill_hrs = rep(NA_real_, 6L)
+)
+all_na_report <- comparison$compare_study_period_sources(
+  all_na_events, copy(all_na_events), "sale"
+)
+assert_true(
+  all(is.na(all_na_report$pearson)) && all(is.na(all_na_report$spearman)) &&
+    all(all_na_report$n_comparable == 0L),
+  "An all-NA radius subset must report undefined correlations without erroring."
+)
+constant_events <- comparison_fixture(
+  spill_count = rep(1, 6L), spill_hrs = rep(2, 6L)
+)
+assert_true(
+  all(is.na(comparison$compare_study_period_sources(
+    constant_events, copy(constant_events), "sale"
+  )$pearson)),
+  "A zero-variance subset must report an undefined correlation, not an error."
+)
+
 # U5: direct consumer and supported documentation -----------------------------
 
 plot_script_path <- here::here(
