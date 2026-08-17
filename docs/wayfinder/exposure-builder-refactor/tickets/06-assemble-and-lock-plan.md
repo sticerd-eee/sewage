@@ -2,7 +2,7 @@
 id: 06
 title: "Assemble and lock the plan document"
 type: grilling
-status: open
+status: closed
 assignee: jacopo
 blocked-by: [02, 03, 04, 05, 08, 09, 10]
 ---
@@ -53,3 +53,16 @@ The plan is drafted and reviewed; only Jacopo's sign-off remains.
   review) are recorded in the review report.
 - The ticket closes when Jacopo signs the plan off as locked; at that
   point the sign-off is recorded here and on the map.
+
+## Resolution (2026-08-17)
+
+Jacopo signed the plan off as locked. The locked plan is
+[docs/plans/2026-08-17-002-refactor-layered-exposure-builders-plan.md](../../../plans/2026-08-17-002-refactor-layered-exposure-builders-plan.md),
+assembled from every closed ticket on this map and revised through the
+doc review recorded in the Progress section above. The two deferred
+review questions (the Stage-2 memo template provenance, and the shared
+truth table's universe-expansion seam) travel with the plan and are
+settled during execution — the seam question at the U2 ticket review.
+With this ticket closed, every ticket on the map is resolved and the map
+is complete; execution rides the next real surgery on these builders,
+starting from /to-tickets over the plan's implementation units.

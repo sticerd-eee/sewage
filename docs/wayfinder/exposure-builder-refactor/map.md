@@ -164,10 +164,20 @@ locks the plan.
   and in a named subsection of the plan document; Arrow field metadata was
   rejected as a schema reopening.
 
+- [Assemble and lock the plan document](tickets/06-assemble-and-lock-plan.md) —
+  the locked plan is
+  `docs/plans/2026-08-17-002-refactor-layered-exposure-builders-plan.md`,
+  assembled from every closed ticket, run through /ce-doc-review (two
+  citation fixes, the `annual_returns_na_then_absent` definition corrected
+  to the code's sequence semantics, U5 extended so the study engine's
+  per-radius re-sum adopts the stable-sum wrappers), and signed off by
+  Jacopo on 2026-08-17.
+
 ## Not yet specified
 
-Nothing remains in the fog: every decision ticket is closed, and the only
-open ticket is the plan assembly (06), now unblocked.
+Nothing. The map is complete: every ticket is closed and the plan was
+locked on 2026-08-17. Execution begins, outside this map, with
+/to-tickets over the locked plan's implementation units.
 
 ## Out of scope
 

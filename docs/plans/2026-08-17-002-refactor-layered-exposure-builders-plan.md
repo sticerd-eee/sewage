@@ -10,10 +10,10 @@ execution: code
 
 # Layered Exposure Builders and Harmonized Evidence Policy - Plan
 
-Status: draft awaiting Jacopo's sign-off. The map
-(`docs/wayfinder/exposure-builder-refactor/map.md`) is done when this plan is
-signed off as locked. Execution rides the next real surgery on these
-builders, outside the map.
+Status: locked — signed off by Jacopo on 2026-08-17. This closes the
+exposure-builder-refactor wayfinder map
+(`docs/wayfinder/exposure-builder-refactor/map.md`). Execution rides the
+next real surgery on these builders, outside the map.
 
 ## Goal Capsule
 
