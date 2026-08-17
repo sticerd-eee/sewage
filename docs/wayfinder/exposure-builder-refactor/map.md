@@ -81,6 +81,19 @@ locks the plan.
   the literal schemas, the key grains, and the NA patterns pinned by the two
   contract tests and the fourteen-artifact ID verifier, which does not yet
   cover `study_period_ea`.
+- [Design house_site_spills / rental_site_spills](tickets/02-house-site-spills-design.md) —
+  one row per eligible transaction × nearby Site Group within the maximum
+  radius, no radius column and no transaction metadata; evidence travels as
+  four atomic flags (`annual_returns_absent`, `annual_returns_na`,
+  `reported_positive_without_matched_events`,
+  `annual_returns_na_then_absent`) with no stored verdict — the event and EA
+  masks are ORs computed in the derivations, and the site-grain derivation
+  renames `annual_returns_absent` back to `site_missing` for the frozen
+  public schema; real pairs only with the radius derivation rejoining the
+  transaction ledger; published through the full staged machinery to
+  `data/processed/cross_section/{sales,rentals}/` as unpartitioned chunked
+  parquet, off the public list but schema-pinned in the contract tests;
+  prior-family windows only.
 - [Drift map: independent exposure aggregations across the repo](tickets/07-drift-map.md) —
   beyond the two engines, four scripts re-implement study-period summation
   over `agg_spill_yr.parquet` with inconsistent NA conventions, the
