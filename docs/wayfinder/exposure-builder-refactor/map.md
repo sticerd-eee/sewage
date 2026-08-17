@@ -14,9 +14,13 @@ layered exposure refactor plus NA-rule harmonization: `house_site_spills` /
 `rental_site_spills` become the single unmasked measurement layer for the
 prior-exposure family, a shared measurement core serves both the prior and
 study-period engines, and every published exposure dataset is derived from
-those layers. Execution is specified as two gated stages (pure re-layering
-with frozen semantics, then the harmonized NA policy) with a sign-off
-checkpoint on sample impact. The map is done when Jacopo locks the plan.
+those layers. The layered architecture must also express the named future
+variants — Directional Spill Exposure, Nearest-Site Exposure, and window
+choice — as cheap derivations (ticket 08), without reopening the closed
+literal publication contracts. Execution is specified as two gated stages
+(pure re-layering with frozen semantics, then the harmonized NA policy)
+with a sign-off checkpoint on sample impact. The map is done when Jacopo
+locks the plan.
 
 ## Notes
 
@@ -43,6 +47,16 @@ checkpoint on sample impact. The map is done when Jacopo locks the plan.
   issues.
 - Plan, don't do: this map produces decisions and the locked plan document.
   The refactor itself executes later, outside this map.
+- Confirmed with Jacopo in a second charting session (2026-08-17 afternoon):
+  extensibility lives in the computation layer only, and every public output
+  keeps a hand-written Arrow schema plus an explicit entry in an enumerated
+  list — an amendment, not a repeal, of R7/R8 of
+  `docs/plans/2026-08-13-1322-refactor-prior-exposure-shared-builders-plan.md`.
+  Variant design covers the named axes only (directional, nearest-site,
+  window), not hypothetical markets beyond sale and rental. He also accepted
+  a looser 1e-6 float tolerance for outputs whose methodology deliberately
+  changes; the Stage-1 re-layering bar stays at the charter's order-1e-9
+  relative tolerance, which satisfies the looser figure.
 
 ## Decisions so far
 
@@ -67,6 +81,14 @@ checkpoint on sample impact. The map is done when Jacopo locks the plan.
   the literal schemas, the key grains, and the NA patterns pinned by the two
   contract tests and the fourteen-artifact ID verifier, which does not yet
   cover `study_period_ea`.
+- [Drift map: independent exposure aggregations across the repo](tickets/07-drift-map.md) —
+  beyond the two engines, four scripts re-implement study-period summation
+  over `agg_spill_yr.parquet` with inconsistent NA conventions, the
+  twelve-script `upstream_downstream_*` family re-reduces site-grain output
+  with `na.rm = TRUE` (inverting the engine's NA-poisoning), and
+  `repeat_sales.R` carries a fifth windowing scheme; the panel and grid
+  builders and the `*_prior*` analysis families are pure consumers. Full
+  findings in the asset linked from the ticket.
 
 ## Not yet specified
 
@@ -77,6 +99,11 @@ checkpoint on sample impact. The map is done when Jacopo locks the plan.
   outputs must be regenerated, in what order, and whether any regression
   script needs a code change beyond re-running) — sharpens after the
   consumer inventory and the harmonization-boundary ticket.
+- Whether identically-named average columns (`spill_count_weekly_avg` and
+  friends) across the prior-family and study-period datasets need renaming
+  or only documentation, given they differ in window and denominator —
+  sharpens once the event-based study-period branch lands (ticket 04),
+  which removes the measurement-basis half of the collision.
 
 ## Out of scope
 
@@ -90,3 +117,10 @@ checkpoint on sample impact. The map is done when Jacopo locks the plan.
 - Upstream semantics: Annual Status definitions, the crosswalk build, and
   event matching stay as they are; only the exposure builders' use of them is
   in scope.
+- Fixing the analysis-layer re-aggregations the drift map found
+  (`grid_long_difference_*`, `hedonic_*_full`, `did_trends_full`,
+  `repeat_sales.R`, and the twelve `upstream_downstream_*` scripts): ticket
+  05 rules on the canonical convention and on which of them the plan's
+  boundary names, but the code fixes are a separate effort. The
+  `hedonic_continuous_full.R` hard-coded 1095-day denominator is flagged as
+  an independent background task outside this map.

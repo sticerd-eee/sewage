@@ -22,3 +22,13 @@ decide the plan's deliverable boundary:
 3. How the Stage-2 sample-impact memo in `docs/reports/` relates to the
    paper's data section — what it must quantify so the sample change is
    citable.
+4. The drift map ([assets/02-drift-map.md](../assets/02-drift-map.md),
+   items 3 and 5) shows consumers that do not merely propagate the
+   engine's NAs but actively override them: the twelve
+   `upstream_downstream_*` scripts re-reduce site-grain output with
+   `na.rm = TRUE`, and `did_trends_full.R` coerces missing evidence to
+   zero exposure. The harmonized rule's extra NAs will be silently
+   swallowed by these paths. Decide whether the plan's boundary treats
+   them as scripts needing a code change, or only states the canonical
+   convention (NA-poisoning propagates; zero-coercion is forbidden) that a
+   follow-up effort applies.

@@ -29,3 +29,14 @@ To settle:
 4. **Boundaries.** What explicitly does *not* move (chunking, streaming,
    schemas, publication), so the core stays a measurement library rather
    than a third engine.
+5. **Divergence adjudication at the boundary.** The drift map
+   ([assets/02-drift-map.md](../assets/02-drift-map.md), item 1) records
+   machinery differences between the two engines beyond clipping and
+   classification: the study-period engine re-sums from scratch per radius
+   with plain `base::sum` while the prior engine uses distance-ordered
+   cumulative sums with stable-sum wrappers and explicit ordering; the two
+   differ on defensive `min(distance_m)` dedupe versus validated pair
+   uniqueness. For each, rule whether it moves into the core, stays
+   per-engine as an intentional difference, or is out of scope — and in
+   particular whether the stable-sum discipline becomes a core-wide
+   invariant.

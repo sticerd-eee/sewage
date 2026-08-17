@@ -4,7 +4,7 @@ title: "Assemble and lock the plan document"
 type: grilling
 status: open
 assignee:
-blocked-by: [02, 03, 04, 05]
+blocked-by: [02, 03, 04, 05, 08]
 ---
 
 ## Question
@@ -22,6 +22,11 @@ of done), incorporating every decision on this map:
 - the `house_site_spills` / `rental_site_spills` design from ticket 02;
 - the shared measurement core design from ticket 03;
 - the downstream boundary from ticket 05;
+- the variant model from ticket 08, including the closed-publication
+  principle (extensibility in computation only; every public output keeps a
+  hand-written schema and an enumerated entry) stated as an explicit
+  amendment of R7/R8 of
+  `docs/plans/2026-08-13-1322-refactor-prior-exposure-shared-builders-plan.md`;
 - the Stage-2 sample-impact checkpoint memo and sign-off;
 - CONCEPTS.md and documentation updates.
 
