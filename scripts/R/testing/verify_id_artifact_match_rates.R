@@ -4,8 +4,10 @@
 #
 # Purpose: Certify referential integrity after the positional-to-hash ID rebuild.
 #          Every nonmissing transaction ID in each declared regenerated artifact
-#          must match its declared cleaned source. Artifacts are scanned in
-#          bounded Arrow record batches; canonical data is read only.
+#          must match its declared cleaned source. Artifacts are streamed through
+#          DuckDB, which hashes the cleaned source once per artifact and scans
+#          the artifact past it; canonical data is read only and no artifact's
+#          full ID column is ever materialized in R.
 #
 # Output:
 #   - output/log/id_artifact_match_rates.csv
@@ -20,8 +22,21 @@ if (!requireNamespace("here", quietly = TRUE)) {
 }
 if (!requireNamespace("arrow", quietly = TRUE) ||
     !requireNamespace("dplyr", quietly = TRUE) ||
-    !requireNamespace("tibble", quietly = TRUE)) {
-  stop("Packages `arrow`, `dplyr`, and `tibble` are required.", call. = FALSE)
+    !requireNamespace("tibble", quietly = TRUE) ||
+    !requireNamespace("duckdb", quietly = TRUE) ||
+    !requireNamespace("DBI", quietly = TRUE)) {
+  stop(
+    "Packages `arrow`, `dplyr`, `tibble`, `duckdb`, and `DBI` are required.",
+    call. = FALSE
+  )
+}
+
+# The engine must scan exactly the fragments Arrow considers part of the
+# dataset. Globbing the directory instead would also pick up staging files and
+# sidecar metadata, which Arrow's own discovery skips by the leading `.` or `_`
+# convention, so a mid-rebuild directory would silently change the row counts.
+artifact_scan_files <- function(dataset) {
+  dataset$files
 }
 
 id_field_type <- function(schema, id) {
@@ -76,37 +91,61 @@ verify_id_artifact <- function(name, artifact_path, id, source_ids) {
     )
   }
 
-  reader <- dataset |>
-    dplyr::select(dplyr::all_of(id)) |>
-    arrow::as_record_batch_reader()
-  total_rows <- 0
-  nonmissing_ids <- 0
-  matched_ids <- 0
-  missing_ids <- 0
-  unmatched_examples <- character()
+  # The cleaned source is hashed once per artifact and the artifact streams past
+  # it inside the engine. Counting in R instead would rebuild that hash table
+  # once per record batch, which dominates the scan on large artifacts.
+  scan_files <- artifact_scan_files(dataset)
+  if (length(scan_files) == 0L) {
+    total_rows <- 0
+    missing_ids <- 0
+    nonmissing_ids <- 0
+    matched_ids <- 0
+    unmatched_examples <- character()
+  } else {
+    con <- DBI::dbConnect(duckdb::duckdb())
+    on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+    duckdb::duckdb_register(
+      con,
+      "cleaned_source",
+      data.frame(source_id = source_ids, stringsAsFactors = FALSE)
+    )
+    scan_sql <- sprintf(
+      "read_parquet([%s])",
+      paste(DBI::dbQuoteString(con, scan_files), collapse = ", ")
+    )
+    id_sql <- DBI::dbQuoteIdentifier(con, id)
+    present_sql <- sprintf("%s IS NOT NULL AND %s <> ''", id_sql, id_sql)
+    matched_sql <- sprintf(
+      "%s AND %s IN (SELECT source_id FROM cleaned_source)", present_sql, id_sql
+    )
 
-  repeat {
-    batch <- reader$read_next_batch()
-    if (is.null(batch)) break
-    values <- as.data.frame(batch)[[id]]
-    total_rows <- total_rows + length(values)
-    present <- !is.na(values) & nzchar(values)
-    missing_ids <- missing_ids + sum(!present)
-    if (any(present)) {
-      present_values <- values[present]
-      matched <- present_values %in% source_ids
-      nonmissing_ids <- nonmissing_ids + length(present_values)
-      matched_ids <- matched_ids + sum(matched)
-      if (any(!matched) && length(unmatched_examples) < 10L) {
-        unmatched_examples <- unique(c(
-          unmatched_examples,
-          present_values[!matched]
-        ))
-        unmatched_examples <- head(unmatched_examples, 10L)
-      }
+    counts <- DBI::dbGetQuery(con, sprintf(
+      "SELECT
+         COUNT(*) AS total_rows,
+         COUNT(*) FILTER (WHERE NOT (%s)) AS missing_ids,
+         COUNT(*) FILTER (WHERE %s) AS nonmissing_ids,
+         COUNT(*) FILTER (WHERE %s) AS matched_ids
+       FROM %s",
+      present_sql, present_sql, matched_sql, scan_sql
+    ))
+    total_rows <- as.double(counts$total_rows)
+    missing_ids <- as.double(counts$missing_ids)
+    nonmissing_ids <- as.double(counts$nonmissing_ids)
+    matched_ids <- as.double(counts$matched_ids)
+
+    # Ordered so the reported sample is reproducible across runs.
+    unmatched_examples <- character()
+    if (nonmissing_ids > matched_ids) {
+      unmatched_examples <- DBI::dbGetQuery(con, sprintf(
+        "SELECT DISTINCT %s AS unmatched_id
+         FROM %s
+         WHERE %s AND %s NOT IN (SELECT source_id FROM cleaned_source)
+         ORDER BY unmatched_id
+         LIMIT 10",
+        id_sql, scan_sql, present_sql, id_sql
+      ))$unmatched_id
     }
   }
-  reader$Close()
 
   match_rate <- if (nonmissing_ids == 0) NA_real_ else matched_ids / nonmissing_ids
   tibble::tibble(
@@ -114,11 +153,11 @@ verify_id_artifact <- function(name, artifact_path, id, source_ids) {
     artifact_path = normalizePath(artifact_path, mustWork = TRUE),
     id_column = id,
     id_type = id_type,
-    total_rows = as.double(total_rows),
-    nonmissing_ids = as.double(nonmissing_ids),
-    missing_ids = as.double(missing_ids),
-    matched_ids = as.double(matched_ids),
-    unmatched_ids = as.double(nonmissing_ids - matched_ids),
+    total_rows = total_rows,
+    nonmissing_ids = nonmissing_ids,
+    missing_ids = missing_ids,
+    matched_ids = matched_ids,
+    unmatched_ids = nonmissing_ids - matched_ids,
     match_rate = match_rate,
     unmatched_examples = paste(unmatched_examples, collapse = ";")
   )
@@ -203,6 +242,8 @@ default_id_artifact_specs <- function() {
     spec("repeated_rentals", file.path(processed, "repeated_transactions", "repeated_rentals.parquet"), rental_long_run_source, "rental_id"),
     spec("study_period_sales", file.path(processed, "cross_section", "sales", "study_period"), sale_source, "house_id"),
     spec("study_period_rentals", file.path(processed, "cross_section", "rentals", "study_period"), rental_source, "rental_id"),
+    spec("study_period_ea_sales", file.path(processed, "cross_section", "sales", "study_period_ea"), sale_source, "house_id"),
+    spec("study_period_ea_rentals", file.path(processed, "cross_section", "rentals", "study_period_ea"), rental_source, "rental_id"),
     spec("prior_to_sale", file.path(processed, "cross_section", "sales", "prior_to_sale"), sale_source, "house_id"),
     spec("prior_to_rental", file.path(processed, "cross_section", "rentals", "prior_to_rental"), rental_source, "rental_id"),
     spec("prior_to_sale_house_site", file.path(processed, "cross_section", "sales", "prior_to_sale_house_site"), sale_source, "house_id"),
