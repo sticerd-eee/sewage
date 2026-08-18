@@ -141,7 +141,86 @@ prior_exposure_variant <- function(market, grain) {
       include_event_evidence = FALSE
     )
   )
-  c(details, list(market = market, grain = grain, schema = schema))
+  c(details, list(
+    market = market, grain = grain, schema = schema,
+    include_annual_return_sequence = grain == "radius",
+    include_atomic_evidence_flags = FALSE
+  ))
+}
+
+#' Resolve the internal measurement table's authoritative schema.
+#'
+#' The unmasked pair grain: one row per eligible transaction by nearby Site
+#' Group. No `radius` column, because per-radius replication is a step inside
+#' the derivations rather than a property of this table (R1). No transaction
+#' metadata and no rates, because the derivations rejoin those from the ledger
+#' (R2). No verdict column: evidence travels as four atomic flags and each
+#' derivation ORs its own subset (R3).
+#'
+#' @param market One of `sale` or `rental`.
+#' @return An Arrow schema for the market's measurement table.
+prior_exposure_measurement_schema <- function(market) {
+  if (!is.character(market) || length(market) != 1L || is.na(market) ||
+      !market %in% c("sale", "rental")) {
+    stop("market must be exactly one of: sale, rental.", call. = FALSE)
+  }
+  switch(
+    market,
+    sale = arrow::schema(
+      house_id = arrow::utf8(),
+      site_id = arrow::int32(),
+      distance_m = arrow::float64(),
+      spill_hrs = arrow::float64(),
+      spill_count = arrow::float64(),
+      annual_returns_absent = arrow::bool(),
+      annual_returns_na = arrow::bool(),
+      reported_positive_without_matched_events = arrow::bool(),
+      annual_returns_na_then_absent = arrow::bool()
+    ),
+    rental = arrow::schema(
+      rental_id = arrow::utf8(),
+      site_id = arrow::int32(),
+      distance_m = arrow::float64(),
+      spill_hrs = arrow::float64(),
+      spill_count = arrow::float64(),
+      annual_returns_absent = arrow::bool(),
+      annual_returns_na = arrow::bool(),
+      reported_positive_without_matched_events = arrow::bool(),
+      annual_returns_na_then_absent = arrow::bool()
+    )
+  )
+}
+
+#' Resolve the measurement-table build contract for one market.
+#'
+#' Shaped like `prior_exposure_variant()` so the shared loader and event join
+#' serve both, but carrying the measurement schema and asking for all four
+#' atomic evidence flags rather than their pre-combined verdict.
+#'
+#' @param market One of `sale` or `rental`.
+#' @return A contract list with `grain` `"measurement"`.
+prior_exposure_measurement_contract <- function(market) {
+  schema <- prior_exposure_measurement_schema(market)
+  details <- switch(
+    market,
+    sale = list(
+      id = "house_id", value = "price", endpoint = "date_of_transfer",
+      transaction_name = "house_dt", input = "house_price.parquet",
+      lookup = "spill_house_lookup.parquet"
+    ),
+    rental = list(
+      id = "rental_id", value = "listing_price", endpoint = "rented_est",
+      transaction_name = "rental_dt",
+      input = file.path("zoopla", "zoopla_rentals.parquet"),
+      lookup = file.path("zoopla", "spill_rental_lookup.parquet")
+    )
+  )
+  c(details, list(
+    market = market, grain = "measurement", schema = schema,
+    include_event_evidence = TRUE,
+    include_annual_return_sequence = TRUE,
+    include_atomic_evidence_flags = TRUE
+  ))
 }
 
 prior_exposure_complete_days <- function(endpoint, window_start) {
@@ -225,8 +304,8 @@ prior_exposure_public_transactions <- function(transactions, contract) {
   result
 }
 
-prior_exposure_load_data <- function(config, market, grain) {
-  contract <- prior_exposure_variant(market, grain)
+prior_exposure_load_data <- function(config, market, grain,
+                                    contract = prior_exposure_variant(market, grain)) {
   input_path <- file.path(config$processed_dir, contract$input)
   logger::log_info("Loading datasets from parquet files")
 
@@ -258,7 +337,8 @@ prior_exposure_load_data <- function(config, market, grain) {
     config$base_year,
     cutoff_years,
     include_event_evidence = contract$include_event_evidence,
-    include_annual_return_sequence = contract$grain == "radius"
+    include_annual_return_sequence = isTRUE(contract$include_annual_return_sequence),
+    include_atomic_evidence_flags = isTRUE(contract$include_atomic_evidence_flags)
   ) |>
     data.table::as.data.table()
   data.table::setkey(site_missing_dt, site_id, cutoff_year)
@@ -316,12 +396,20 @@ prior_exposure_join_events <- function(transaction_ids, data) {
     paste(if (contract$market == "sale") "House" else "Rental", "transaction attachment to lookup pairs")
   )
 
+  atomic_flags <- c(
+    "annual_returns_absent", "annual_returns_na",
+    "reported_positive_without_matched_events"
+  )
+  wants_atomic <- isTRUE(contract$include_atomic_evidence_flags)
   prefix_fields <- c("site_id", "cutoff_year", "site_missing")
   if (contract$include_event_evidence) {
     prefix_fields <- c(prefix_fields, "has_unknown_event_evidence")
   }
-  if (contract$grain == "radius") {
+  if (isTRUE(contract$include_annual_return_sequence)) {
     prefix_fields <- c(prefix_fields, "annual_returns_na_then_absent")
+  }
+  if (wants_atomic) {
+    prefix_fields <- c(prefix_fields, atomic_flags)
   }
   attached <- data$site_missing_dt[, ..prefix_fields][
     transaction_sites, on = .(site_id, cutoff_year)
@@ -342,20 +430,36 @@ prior_exposure_join_events <- function(transaction_ids, data) {
     attached[, has_unknown_event_evidence := FALSE]
   }
 
-  if (contract$grain == "radius") {
+  if (isTRUE(contract$include_annual_return_sequence)) {
     attached[, annual_returns_na_then_absent := data.table::fifelse(
       is.na(annual_returns_na_then_absent),
       FALSE,
       annual_returns_na_then_absent
     )]
   }
+  if (wants_atomic) {
+    # A Site Group the crosswalk never mentions reads as absent, which is the
+    # same reading the gap fill applies inside the truth table's universe.
+    attached[, annual_returns_absent := data.table::fifelse(
+      is.na(annual_returns_absent), TRUE, annual_returns_absent
+    )]
+    for (flag in c("annual_returns_na",
+                   "reported_positive_without_matched_events")) {
+      data.table::set(attached, j = flag, value = data.table::fifelse(
+        is.na(attached[[flag]]), FALSE, attached[[flag]]
+      ))
+    }
+  }
 
   lookup_columns <- c(
     "transaction_id", "site_id", "distance_m", "site_missing",
     "has_unknown_event_evidence"
   )
-  if (contract$grain == "radius") {
+  if (isTRUE(contract$include_annual_return_sequence)) {
     lookup_columns <- c(lookup_columns, "annual_returns_na_then_absent")
+  }
+  if (wants_atomic) {
+    lookup_columns <- c(lookup_columns, atomic_flags)
   }
   lookup_chunk <- attached[, ..lookup_columns]
   public_lookup <- data.table::copy(lookup_chunk)
@@ -372,7 +476,7 @@ prior_exposure_join_events <- function(transaction_ids, data) {
   event_metadata_fields <- intersect(
     c(
       "cutoff_year", "n_days_in_window", "has_unknown_event_evidence",
-      "annual_returns_na_then_absent"
+      "annual_returns_na_then_absent", atomic_flags
     ),
     names(event_sources)
   )
@@ -389,23 +493,21 @@ prior_exposure_join_events <- function(transaction_ids, data) {
   joined <- data$raw_events_dt[
     event_sources, on = "site_id", nomatch = NULL, allow.cartesian = TRUE
   ]
-  endpoint <- joined[[contract$endpoint]]
-  joined <- joined[
-    start_time < endpoint & end_time >= data$config$window_start
-  ]
+  # Each transaction clips to its own endpoint, so the shared clip receives a
+  # per-row window_end rather than a constant.
+  joined <- clip_events_to_window(
+    joined, data$config$window_start, joined[[contract$endpoint]]
+  )
   if (nrow(joined) == 0L) {
     return(list(events_dt = NULL, lookup_chunk = public_lookup, internal_lookup = lookup_chunk))
   }
-  endpoint <- joined[[contract$endpoint]]
-  joined[, `:=`(
-    clamped_start = pmax(start_time, data$config$window_start),
-    clamped_end = pmin(end_time, endpoint)
-  )]
-  joined[, event_hours := as.numeric(difftime(
-    clamped_end, clamped_start, units = "hours"
-  ))]
-  joined <- joined[event_hours > 0]
   list(events_dt = joined, lookup_chunk = public_lookup, internal_lookup = lookup_chunk)
+}
+
+# The prior engine breaks ties on the unclipped endpoints as well, so events
+# clipped to the same instant still sort deterministically before summing.
+prior_exposure_event_order_key <- function() {
+  c("clipped_start", "clipped_end", "start_time", "end_time")
 }
 
 prior_exposure_transaction_site_metrics <- function(joined, contract) {
@@ -447,14 +549,12 @@ prior_exposure_transaction_site_metrics <- function(joined, contract) {
   if (!is.null(events) && nrow(events) > 0L) {
     events <- data.table::copy(events)
     data.table::setnames(events, contract$id, "transaction_id")
-    data.table::setorderv(events, c(
-      "transaction_id", "site_id", "clamped_start", "clamped_end",
-      "start_time", "end_time"
-    ))
-    event_agg <- events[, .(
-      spill_hrs = prior_exposure_stable_sum(event_hours, na.rm = TRUE),
-      spill_count = count_spills(clamped_start, clamped_end)
-    ), by = .(transaction_id, site_id)]
+    event_agg <- collapse_events_by_group(
+      events,
+      by = c("transaction_id", "site_id"),
+      order_by = prior_exposure_event_order_key(),
+      na.rm = TRUE
+    )
     site_lookup <- merge(
       site_lookup, event_agg,
       by = c("transaction_id", "site_id"), all.x = TRUE
@@ -680,6 +780,319 @@ prior_exposure_calculate_metrics <- function(
     data.table::setnames(result, "transaction_id", contract$id)
   }
   result
+}
+
+# Measurement layer
+############################################################
+
+#' Build one chunk of the unmasked measurement table.
+#'
+#' The pair rows the engine already computes, kept rather than immediately
+#' masked (KTD1). Real pairs only, per R4: a transaction with no nearby Site
+#' Group contributes nothing, and no sentinel row stands in for it. No
+#' `min(distance_m)` dedupe, per R13 — pair uniqueness is asserted in the gate
+#' instead, so a duplicated lookup pair fails loudly rather than collapsing.
+#'
+#' @param transaction_ids Transaction identifiers in this chunk.
+#' @param data Eagerly loaded prior-exposure inputs.
+#' @param joined Output of `prior_exposure_join_events()`.
+#' @return A data.table of measurement rows, keyed by transaction and site.
+prior_exposure_measurement_chunk <- function(transaction_ids, data, joined) {
+  contract <- data$contract
+  lookup <- data.table::copy(joined$internal_lookup)
+  measures <- c(
+    "transaction_id", "site_id", "distance_m", "spill_hrs", "spill_count",
+    "annual_returns_absent", "annual_returns_na",
+    "reported_positive_without_matched_events",
+    "annual_returns_na_then_absent"
+  )
+  if (nrow(lookup) == 0L) {
+    # A chunk whose transactions have no nearby Site Group contributes nothing,
+    # but it still has to carry the schema's exact shape so the stage stays
+    # bindable with every other chunk.
+    empty <- data.table::data.table(
+      transaction_id = character(), site_id = integer(),
+      distance_m = numeric(), spill_hrs = numeric(), spill_count = numeric(),
+      annual_returns_absent = logical(), annual_returns_na = logical(),
+      reported_positive_without_matched_events = logical(),
+      annual_returns_na_then_absent = logical()
+    )
+    data.table::setnames(empty, "transaction_id", contract$id)
+    return(empty)
+  }
+
+  events <- joined$events_dt
+  if (!is.null(events) && nrow(events) > 0L) {
+    events <- data.table::copy(events)
+    data.table::setnames(events, contract$id, "transaction_id")
+    totals <- collapse_events_by_group(
+      events,
+      by = c("transaction_id", "site_id"),
+      order_by = prior_exposure_event_order_key(),
+      na.rm = TRUE
+    )
+    lookup <- merge(
+      lookup, totals, by = c("transaction_id", "site_id"), all.x = TRUE
+    )
+  } else {
+    lookup[, `:=`(spill_hrs = 0, spill_count = 0)]
+  }
+  # A pair with no events in the window is a measured zero, not a gap: the
+  # event feed carries positives only.
+  lookup[is.na(spill_hrs), spill_hrs := 0]
+  lookup[is.na(spill_count), spill_count := 0]
+
+  data.table::setnames(lookup, "transaction_id", contract$id)
+  measures[measures == "transaction_id"] <- contract$id
+  lookup[, ..measures]
+}
+
+#' Project and cast a measurement chunk onto its authoritative schema.
+#'
+#' @param data Measurement rows.
+#' @param expected_schema The market's measurement schema.
+#' @return The chunk, cast, with the schema's exact fields in order.
+prior_exposure_prepare_measurement <- function(data, expected_schema) {
+  data <- data.table::as.data.table(data)
+  missing <- setdiff(expected_schema$names, names(data))
+  extra <- setdiff(names(data), expected_schema$names)
+  if (length(missing) > 0L || length(extra) > 0L) {
+    stop(
+      "Measurement result does not match its schema fields.",
+      call. = FALSE
+    )
+  }
+  result <- data[, expected_schema$names, with = FALSE]
+  types <- prior_exposure_schema_signature(expected_schema)
+  for (column in expected_schema$names) {
+    value <- result[[column]]
+    target <- unname(types[[column]])
+    if (target == "int32") {
+      if (!is.numeric(value) || any(!is.na(value) & (
+        !is.finite(value) | value != floor(value) |
+          value < -.Machine$integer.max - 1 |
+          value > .Machine$integer.max
+      ))) {
+        stop(column, " cannot be losslessly cast to int32.", call. = FALSE)
+      }
+      result[[column]] <- as.integer(value)
+    } else if (target == "double") {
+      if (!is.numeric(value)) {
+        stop(column, " must be numeric for Arrow double.", call. = FALSE)
+      }
+      result[[column]] <- as.double(value)
+    } else if (target == "bool") {
+      if (!is.logical(value) || anyNA(value)) {
+        stop(column, " must be nonmissing logical for Arrow bool.", call. = FALSE)
+      }
+    } else if (target == "string") {
+      if (!is.character(value) || anyNA(value) || any(!nzchar(value))) {
+        stop(column, " must contain nonmissing identifiers.", call. = FALSE)
+      }
+    }
+  }
+  if (anyNA(result$site_id) || anyNA(result$distance_m)) {
+    stop("Measurement keys and distances must be nonmissing.", call. = FALSE)
+  }
+  result
+}
+
+prior_exposure_measurement_key_columns <- function(contract) {
+  c(contract$id, "site_id")
+}
+
+#' Derive the exact pair keys a measurement chunk must contain.
+#'
+#' The lookup pairs themselves, unmodified. R13 replaces the engine's
+#' defensive `min(distance_m)` dedupe with this expectation plus the gate's
+#' uniqueness assertion, so a duplicated pair surfaces rather than collapsing.
+#'
+#' @param transaction_ids Transaction identifiers in this chunk.
+#' @param data Eagerly loaded prior-exposure inputs.
+#' @param lookup The chunk's internal lookup pairs.
+#' @return A data.table of expected keys, sorted.
+prior_exposure_expected_measurement_keys <- function(transaction_ids, data,
+                                                     lookup = NULL) {
+  contract <- data$contract
+  if (is.null(lookup)) {
+    lookup <- data$internal_lookup_dt[
+      data.table::data.table(transaction_id = transaction_ids),
+      on = "transaction_id", nomatch = 0L
+    ]
+  }
+  keys <- data.table::data.table(
+    transaction_id = as.character(lookup$transaction_id),
+    site_id = as.integer(lookup$site_id)
+  )
+  data.table::setnames(keys, "transaction_id", contract$id)
+  data.table::setorderv(keys, prior_exposure_measurement_key_columns(contract))
+  keys
+}
+
+prior_exposure_validate_measurement_keys <- function(chunk, expected_keys,
+                                                     contract) {
+  key_columns <- prior_exposure_measurement_key_columns(contract)
+  actual_keys <- data.table::copy(chunk[, ..key_columns])
+  duplicated_rows <- duplicated(actual_keys)
+  if (any(duplicated_rows)) {
+    offender <- actual_keys[which(duplicated_rows)[1L]]
+    stop(
+      "Measurement table contains a duplicate transaction-site pair: ",
+      contract$id, "=", offender[[contract$id]],
+      ", site_id=", offender$site_id, ".",
+      call. = FALSE
+    )
+  }
+  data.table::setorderv(actual_keys, key_columns)
+  expected_keys <- data.table::copy(expected_keys)
+  data.table::setorderv(expected_keys, key_columns)
+  data.table::setkeyv(actual_keys, NULL)
+  data.table::setkeyv(expected_keys, NULL)
+  if (!identical(actual_keys, expected_keys)) {
+    stop(
+      "Measurement chunk keys do not exactly match their expected keys.",
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
+}
+
+prior_exposure_write_measurement_chunk <- function(chunk, stage_path,
+                                                   chunk_index) {
+  # No Hive partitioning (R5): the measurement grain has no radius to
+  # partition on. The stage is unique per run and the chunk index is
+  # monotone, so each write gets a collision-proof name.
+  fragment_token <- sprintf("chunk-%010d", as.integer(chunk_index))
+  arrow::write_dataset(
+    chunk,
+    path = stage_path,
+    format = "parquet",
+    basename_template = paste0(fragment_token, "-{i}.parquet"),
+    existing_data_behavior = "overwrite"
+  )
+  invisible(stage_path)
+}
+
+#' Validate a staged measurement dataset before promotion.
+#'
+#' Reopens the stage, pins the schema, conserves rows through a bounded
+#' row-group scan, and asserts pair uniqueness across the whole stage rather
+#' than only within a chunk.
+#'
+#' The scan reads one row group at a time, so the stage is never materialized
+#' whole. Uniqueness across the stage does require remembering every key seen,
+#' which is the one allocation that necessarily grows with the table; only the
+#' two key columns are retained, and each row group is released before the next
+#' is read.
+#'
+#' @param stage_path Staged dataset directory.
+#' @param expected_schema The market's measurement schema.
+#' @param expected_rows Scalar expected row total.
+#' @param contract The measurement contract.
+#' @return `TRUE`, invisibly.
+prior_exposure_validate_measurement_stage <- function(stage_path,
+                                                      expected_schema,
+                                                      expected_rows,
+                                                      contract) {
+  if (!dir.exists(stage_path) || expected_rows == 0) {
+    stop("Cannot publish an empty measurement stage.", call. = FALSE)
+  }
+  staged <- tryCatch(
+    arrow::open_dataset(stage_path),
+    error = function(error) {
+      stop(
+        "Staged measurement dataset could not be reopened: ",
+        conditionMessage(error),
+        call. = FALSE
+      )
+    }
+  )
+  actual_signature <- prior_exposure_schema_signature(staged$schema)
+  expected_signature <- prior_exposure_schema_signature(expected_schema)
+  if (!identical(actual_signature, expected_signature)) {
+    stop(
+      "Staged measurement schema mismatch. Expected ",
+      paste(names(expected_signature), expected_signature, collapse = ", "),
+      "; found ",
+      paste(names(actual_signature), actual_signature, collapse = ", "), ".",
+      call. = FALSE
+    )
+  }
+
+  key_columns <- prior_exposure_measurement_key_columns(contract)
+  fragment_paths <- list.files(
+    stage_path, pattern = "[.]parquet$", recursive = TRUE, full.names = TRUE
+  )
+  key_batches <- vector("list", 0L)
+  scanned_rows <- 0
+  for (fragment_path in fragment_paths) {
+    reader <- arrow::ParquetFileReader$create(fragment_path)
+    for (row_group_index in seq_len(reader$num_row_groups)) {
+      batch <- reader$ReadRowGroup(row_group_index - 1L)$to_data_frame()
+      scanned_rows <- scanned_rows + nrow(batch)
+      key_batches[[length(key_batches) + 1L]] <-
+        data.table::as.data.table(batch[, key_columns, drop = FALSE])
+      rm(batch)
+      gc(verbose = FALSE)
+    }
+  }
+  if (!identical(as.numeric(scanned_rows), as.numeric(expected_rows))) {
+    stop(
+      "Staged measurement row count mismatch: expected ", expected_rows,
+      ", found ", scanned_rows, ".",
+      call. = FALSE
+    )
+  }
+  seen_keys <- data.table::rbindlist(key_batches)
+  rm(key_batches)
+  gc(verbose = FALSE)
+  duplicated_rows <- duplicated(seen_keys)
+  if (any(duplicated_rows)) {
+    offender <- seen_keys[which(duplicated_rows)[1L]]
+    stop(
+      "Measurement table contains a duplicate transaction-site pair: ",
+      contract$id, "=", offender[[contract$id]],
+      ", site_id=", offender$site_id, ".",
+      call. = FALSE
+    )
+  }
+  if (anyNA(seen_keys)) {
+    stop("Measurement keys must never be missing.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+#' Publish a staged measurement generation.
+#'
+#' @param stage_path Incrementally assembled sibling stage.
+#' @param output_path Canonical Arrow dataset directory.
+#' @param expected_schema The market's measurement schema.
+#' @param expected_rows Scalar expected row total.
+#' @param contract The measurement contract.
+#' @param rename_path Injectable directory-rename seam used by focused tests.
+#' @param remove_path Injectable removal seam used by focused tests.
+#' @return `output_path`, invisibly.
+publish_prior_exposure_measurement <- function(
+    stage_path, output_path, expected_schema, expected_rows, contract,
+    rename_path = file.rename,
+    remove_path = function(path) unlink(path, recursive = TRUE)) {
+  if (!exists("publish_validated_dataset", mode = "function", inherits = TRUE)) {
+    stop(
+      "dataset_publication_utils.R must be sourced before prior_exposure_utils.R.",
+      call. = FALSE
+    )
+  }
+  publish_validated_dataset(
+    stage_path = stage_path,
+    output_path = output_path,
+    validate = function(path) {
+      prior_exposure_validate_measurement_stage(
+        path, expected_schema, expected_rows, contract
+      )
+    },
+    rename_path = rename_path,
+    remove_path = remove_path
+  )
 }
 
 prior_exposure_validate_and_cast_public <- function(data, expected_schema) {
@@ -963,13 +1376,18 @@ prior_exposure_validate_stage <- function(
 prior_exposure_stream <- function(
     data, output_path,
     join_chunk = prior_exposure_join_events,
-    process_joined = prior_exposure_process_joined_chunk,
-    write_chunk = prior_exposure_write_chunk,
+    process_joined = NULL,
+    write_chunk = NULL,
     before_publish = function(stage_path) invisible(stage_path),
-    publish_dataset = publish_prior_exposure_dataset) {
+    publish_dataset = NULL,
+    profile = prior_exposure_public_stream_profile()) {
   contract <- data$contract
   expected_schema <- contract$schema
-  expected_radii <- prior_exposure_validate_radii(data$config$radius_thresholds)
+  # The named seams stay overridable one at a time for focused tests; the
+  # profile supplies whichever the caller leaves alone.
+  if (is.null(process_joined)) process_joined <- profile$process
+  if (is.null(write_chunk)) write_chunk <- profile$write
+  if (is.null(publish_dataset)) publish_dataset <- profile$publish
   chunk_size <- data$config$chunk_size
   if (!is.numeric(chunk_size) || length(chunk_size) != 1L || is.na(chunk_size) ||
       chunk_size < 1 || chunk_size != floor(chunk_size)) {
@@ -1012,11 +1430,11 @@ prior_exposure_stream <- function(
     lookup_rows <- nrow(joined$internal_lookup)
     joined_event_rows <- if (is.null(joined$events_dt)) 0L else nrow(joined$events_dt)
     chunk <- process_joined(chunk_ids, data, joined)
-    chunk <- prior_exposure_prepare_public(chunk, contract$market, contract$grain)
-    expected_keys <- prior_exposure_expected_chunk_keys(
+    chunk <- profile$prepare(chunk, data)
+    expected_keys <- profile$expected_keys(
       chunk_ids, data, lookup = joined$internal_lookup
     )
-    prior_exposure_validate_chunk_keys(chunk, expected_keys, contract)
+    profile$validate_keys(chunk, expected_keys, contract)
 
     chunk_expected_rows <- nrow(expected_keys)
     chunk_written_rows <- nrow(chunk)
@@ -1045,15 +1463,86 @@ prior_exposure_stream <- function(
   }
 
   before_publish(stage_path)
-  publish_dataset(
-    data = NULL,
-    output_path = output_path,
-    expected_schema = expected_schema,
-    expected_radii = expected_radii,
-    stage_path = stage_path,
-    expected_rows = written_rows
+  profile$publish_stage(
+    publish_dataset, stage_path, output_path, data, written_rows
   )
   invisible(output_path)
+}
+
+#' The four public prior-exposure datasets' streaming profile.
+#'
+#' Radius-partitioned, masked, with transaction metadata rejoined.
+#'
+#' @return A list of the stage-shaping steps `prior_exposure_stream()` varies.
+prior_exposure_public_stream_profile <- function() {
+  list(
+    process = prior_exposure_process_joined_chunk,
+    prepare = function(chunk, data) {
+      prior_exposure_prepare_public(
+        chunk, data$contract$market, data$contract$grain
+      )
+    },
+    expected_keys = prior_exposure_expected_chunk_keys,
+    validate_keys = prior_exposure_validate_chunk_keys,
+    write = prior_exposure_write_chunk,
+    publish = publish_prior_exposure_dataset,
+    publish_stage = function(publish_dataset, stage_path, output_path, data,
+                             written_rows) {
+      publish_dataset(
+        data = NULL,
+        output_path = output_path,
+        expected_schema = data$contract$schema,
+        expected_radii = prior_exposure_validate_radii(
+          data$config$radius_thresholds
+        ),
+        stage_path = stage_path,
+        expected_rows = written_rows
+      )
+    }
+  )
+}
+
+#' The internal measurement tables' streaming profile.
+#'
+#' Unpartitioned pair grain, unmasked, with pair uniqueness asserted in the
+#' gate rather than deduped away.
+#'
+#' @return A list of the stage-shaping steps `prior_exposure_stream()` varies.
+prior_exposure_measurement_stream_profile <- function() {
+  list(
+    process = prior_exposure_measurement_chunk,
+    prepare = function(chunk, data) {
+      prior_exposure_prepare_measurement(chunk, data$contract$schema)
+    },
+    expected_keys = prior_exposure_expected_measurement_keys,
+    validate_keys = prior_exposure_validate_measurement_keys,
+    write = prior_exposure_write_measurement_chunk,
+    publish = publish_prior_exposure_measurement,
+    publish_stage = function(publish_dataset, stage_path, output_path, data,
+                             written_rows) {
+      publish_dataset(
+        stage_path = stage_path,
+        output_path = output_path,
+        expected_schema = data$contract$schema,
+        expected_rows = written_rows,
+        contract = data$contract
+      )
+    }
+  )
+}
+
+#' Build and publish one market's measurement table end to end.
+#'
+#' @param config Builder configuration.
+#' @param market One of `sale` or `rental`.
+#' @return `config$output_path`, invisibly.
+prior_exposure_build_measurement <- function(config, market) {
+  contract <- prior_exposure_measurement_contract(market)
+  data <- prior_exposure_load_data(config, market, contract$grain, contract)
+  prior_exposure_stream(
+    data, config$output_path,
+    profile = prior_exposure_measurement_stream_profile()
+  )
 }
 
 #' Publish a complete radius-partitioned prior-exposure generation.

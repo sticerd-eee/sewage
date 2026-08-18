@@ -204,7 +204,7 @@ assert_rental_time_contract <- function(producer_env, fixture_root, label) {
     paste(label, "must retain only the event overlapping the exclusive cutoff")
   )
   assert_identical(
-    joined$events_dt$clamped_end,
+    joined$events_dt$clipped_end,
     expected_endpoint,
     paste(label, "must clamp the overlapping event to rental midnight UTC")
   )
@@ -1553,10 +1553,10 @@ stable_events <- data.table(
   end_time = as.POSIXct(c(
     "2021-01-01 04:00:00", "2021-01-01 03:00:00", "2021-01-01 02:00:00"
   ), tz = "UTC"),
-  clamped_start = as.POSIXct(c(
+  clipped_start = as.POSIXct(c(
     "2021-01-01 03:00:00", "2021-01-01 02:00:00", "2021-01-01 01:00:00"
   ), tz = "UTC"),
-  clamped_end = as.POSIXct(c(
+  clipped_end = as.POSIXct(c(
     "2021-01-01 04:00:00", "2021-01-01 03:00:00", "2021-01-01 02:00:00"
   ), tz = "UTC"),
   event_hours = c(1e16, 1, 1)
@@ -2263,10 +2263,14 @@ assert_identical(
 # Collapse equivalence: both sides start from the engine's own clipped events,
 # so this compares the collapses alone. The prior engine passes its fuller sort
 # key and na.rm = TRUE, matching what it does today.
+# The engine now consumes the core's column names; the replicated historical
+# clip above still uses the old ones, which is what makes it an independent
+# check rather than a restatement of the new code.
+core_engine_clipped <- copy(core_engine_clipped)[, `:=`(
+  clipped_start = clamped_start, clipped_end = clamped_end
+)]
 core_collapsed <- collapse_events_by_group(
-  copy(core_engine_clipped)[, `:=`(
-    clipped_start = clamped_start, clipped_end = clamped_end
-  )],
+  core_engine_clipped,
   by = c("transaction_id", "site_id"),
   order_by = c("clipped_start", "clipped_end", "start_time", "end_time"),
   na.rm = TRUE
@@ -2355,6 +2359,345 @@ assert_identical(
   spill_window_rates(c(10, 20), c(100L, 40L))$daily_avg,
   c(0.1, 0.5),
   "The rate helper must accept one window length per row."
+)
+
+# U3: the unmasked measurement tables ------------------------------------------
+
+# Schema pins. These tables stay off the public enumerated list, so the tests
+# are what catch field drift.
+measurement_schema_signatures <- list(
+  sale = c(
+    house_id = "string", site_id = "int32", distance_m = "double",
+    spill_hrs = "double", spill_count = "double",
+    annual_returns_absent = "bool", annual_returns_na = "bool",
+    reported_positive_without_matched_events = "bool",
+    annual_returns_na_then_absent = "bool"
+  ),
+  rental = c(
+    rental_id = "string", site_id = "int32", distance_m = "double",
+    spill_hrs = "double", spill_count = "double",
+    annual_returns_absent = "bool", annual_returns_na = "bool",
+    reported_positive_without_matched_events = "bool",
+    annual_returns_na_then_absent = "bool"
+  )
+)
+for (market in names(measurement_schema_signatures)) {
+  assert_identical(
+    prior_exposure_schema_signature(prior_exposure_measurement_schema(market)),
+    measurement_schema_signatures[[market]],
+    paste(market, "measurement schema must match its pin exactly")
+  )
+  assert_true(
+    !"radius" %in% prior_exposure_measurement_schema(market)$names,
+    paste(market, "measurement table must carry no radius column")
+  )
+  for (field in c("price", "listing_price", "n_days_in_window",
+                  "spill_count_daily_avg", "site_missing",
+                  "has_unknown_event_evidence")) {
+    assert_true(
+      !field %in% prior_exposure_measurement_schema(market)$names,
+      paste(market, "measurement table must not store", field)
+    )
+  }
+}
+assert_error_contains(
+  prior_exposure_measurement_schema("both"),
+  "market must be exactly one of",
+  "The measurement schema must reject an unsupported market."
+)
+
+# The measurement tables stay off the public surface: the only way to reach a
+# published prior-exposure schema is the four-variant switch, and "measurement"
+# is not one of its grains.
+assert_error_contains(
+  prior_exposure_public_schema("sale", "measurement"),
+  "grain must be exactly one of",
+  "The public schema switch must not resolve the measurement grain."
+)
+assert_error_contains(
+  prior_exposure_variant("rental", "measurement"),
+  "grain must be exactly one of",
+  "The public variant switch must not resolve the measurement grain."
+)
+for (market in c("sale", "rental")) {
+  assert_identical(
+    prior_exposure_measurement_contract(market)$grain,
+    "measurement",
+    paste(market, "measurement contract must declare its own grain")
+  )
+}
+
+# A fixture with three transactions: 001 has two nearby Site Groups, 002 has
+# one, and 003 has none at all. Site 20 is absent from the crosswalk entirely,
+# site 30 reports NA in 2022 and is absent in 2024.
+write_measurement_fixture <- function(root) {
+  zoopla_dir <- file.path(root, "zoopla")
+  event_dir <- file.path(root, "matched_events_annual_data")
+  dir.create(zoopla_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(event_dir, recursive = TRUE, showWarnings = FALSE)
+
+  ids <- c("001", "002", "003")
+  endpoints <- as.POSIXct(rep("2023-06-01 00:00:00", 3L), tz = "UTC")
+  arrow::write_parquet(
+    tibble(
+      house_id = ids, price = c(100000L, 200000L, 300000L),
+      date_of_transfer = endpoints
+    ),
+    file.path(root, "house_price.parquet")
+  )
+  arrow::write_parquet(
+    tibble(
+      rental_id = ids, listing_price = c(1000, 2000, 3000),
+      rented_est = endpoints
+    ),
+    file.path(zoopla_dir, "zoopla_rentals.parquet")
+  )
+
+  lookup <- tibble(
+    transaction_id = c("001", "001", "002"),
+    site_id = c(10L, 20L, 30L),
+    distance_m = c(100, 400, 900)
+  )
+  arrow::write_parquet(
+    transmute(
+      lookup, house_id = .data$transaction_id, site_id = .data$site_id,
+      distance_m = .data$distance_m
+    ),
+    file.path(root, "spill_house_lookup.parquet")
+  )
+  arrow::write_parquet(
+    transmute(
+      lookup, rental_id = .data$transaction_id, site_id = .data$site_id,
+      distance_m = .data$distance_m
+    ),
+    file.path(zoopla_dir, "spill_rental_lookup.parquet")
+  )
+
+  crosswalk <- tidyr::expand_grid(site_id = c(10L, 30L), year = 2021:2024) |>
+    mutate(
+      water_company = "Test Water",
+      annual_status = case_when(
+        .data$site_id == 30L & .data$year == 2022L ~ "reported_na",
+        .data$site_id == 30L & .data$year == 2024L ~ "absent",
+        TRUE ~ "reported_positive"
+      ),
+      matched_event_count = if_else(
+        .data$annual_status == "reported_positive", 1L, 0L
+      )
+    )
+  arrow::write_parquet(
+    crosswalk, file.path(event_dir, "site_group_crosswalk.parquet")
+  )
+  arrow::write_parquet(
+    tibble(
+      site_id = c(10L, 10L),
+      start_time = as.POSIXct(
+        c("2021-06-01 00:00:00", "2022-01-01 00:00:00"), tz = "UTC"
+      ),
+      end_time = as.POSIXct(
+        c("2021-06-02 00:00:00", "2022-01-01 06:00:00"), tz = "UTC"
+      ),
+      year = c(2021L, 2022L)
+    ),
+    file.path(event_dir, "matched_events_annual_data.parquet")
+  )
+  invisible(root)
+}
+
+measurement_config <- function(root, market, output_path) {
+  list(
+    market = market,
+    processed_dir = root,
+    output_path = output_path,
+    radius_thresholds = c(250, 500),
+    base_year = 2021,
+    window_start = as.POSIXct("2021-01-01 00:00:00", tz = "UTC"),
+    chunk_size = 1L,
+    site_group_crosswalk_path = file.path(
+      root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+    )
+  )
+}
+
+measurement_root <- tempfile("prior-exposure-measurement-")
+dir.create(measurement_root, recursive = TRUE)
+write_measurement_fixture(measurement_root)
+
+for (market in c("sale", "rental")) {
+  id_column <- if (market == "sale") "house_id" else "rental_id"
+  output_path <- tempfile(paste0("measurement-", market, "-"))
+  prior_exposure_build_measurement(
+    measurement_config(measurement_root, market, output_path), market
+  )
+
+  reopened <- arrow::open_dataset(output_path)
+  assert_identical(
+    prior_exposure_schema_signature(reopened$schema),
+    measurement_schema_signatures[[market]],
+    paste(market, "measurement table must reopen with its pinned schema")
+  )
+  published <- data.table::as.data.table(dplyr::collect(reopened))
+  data.table::setorderv(published, c(id_column, "site_id"))
+
+  # Site 30 sits at 900m, outside the 500m maximum threshold, so the pair never
+  # enters the table. Transaction 003 has no nearby Site Group at all.
+  assert_identical(
+    published[[id_column]],
+    c("001", "001"),
+    paste(
+      market,
+      "must carry only real pairs inside the maximum radius, and no row for a",
+      "transaction with no nearby Site Group"
+    )
+  )
+  assert_identical(
+    published$site_id, c(10L, 20L),
+    paste(market, "must key on the actual nearby Site Groups")
+  )
+  assert_identical(
+    published$distance_m, c(100, 400),
+    paste(market, "must carry each pair's own distance, not a radius")
+  )
+  assert_true(
+    !anyNA(published[[id_column]]) && !anyNA(published$site_id),
+    paste(market, "must contain no NA keys")
+  )
+
+  # Site 10 spills 24 hours in 2021 and 6 hours on 2022-01-01, both inside the
+  # window ending at the 2023-06-01 endpoint: 30 hours. The 24-hour event
+  # counts twice under the 12/24 rule, opening a 12-hour block and running one
+  # 24-hour block past it, and the 6-hour event opens a third block.
+  assert_identical(
+    published[site_id == 10L, .(spill_hrs, spill_count)],
+    data.table(spill_hrs = 30, spill_count = 3),
+    paste(market, "must store window-clipped hours and 12/24 spill counts")
+  )
+  # Site 20 is absent from the crosswalk, so it has no events and reads absent.
+  assert_identical(
+    published[site_id == 20L, .(spill_hrs, spill_count)],
+    data.table(spill_hrs = 0, spill_count = 0),
+    paste(market, "must record a measured zero for a pair with no events")
+  )
+  assert_identical(
+    published$annual_returns_absent, c(FALSE, TRUE),
+    paste(market, "must flag a Site Group missing from the crosswalk as absent")
+  )
+  assert_identical(
+    published$annual_returns_na, c(FALSE, FALSE),
+    paste(market, "must not flag reported_positive years as NA")
+  )
+  assert_identical(
+    published$reported_positive_without_matched_events, c(FALSE, FALSE),
+    paste(market, "must not flag matched reported_positive years")
+  )
+  assert_identical(
+    published$annual_returns_na_then_absent, c(FALSE, FALSE),
+    paste(market, "must carry the sequence flag without a verdict column")
+  )
+
+  # AE8: a duplicated lookup pair must stop publication by name, with no
+  # silent min(distance_m) collapse anywhere (R13).
+  duplicate_root <- tempfile("prior-exposure-measurement-duplicate-")
+  dir.create(duplicate_root, recursive = TRUE)
+  write_measurement_fixture(duplicate_root)
+  lookup_file <- if (market == "sale") {
+    file.path(duplicate_root, "spill_house_lookup.parquet")
+  } else {
+    file.path(duplicate_root, "zoopla", "spill_rental_lookup.parquet")
+  }
+  duplicated_lookup <- arrow::read_parquet(lookup_file)
+  arrow::write_parquet(
+    dplyr::bind_rows(duplicated_lookup, duplicated_lookup[1, ]), lookup_file
+  )
+  duplicate_output <- tempfile(paste0("measurement-duplicate-", market, "-"))
+  assert_error_contains(
+    prior_exposure_build_measurement(
+      measurement_config(duplicate_root, market, duplicate_output), market
+    ),
+    "duplicate transaction-site pair",
+    paste(market, "must reject a duplicated transaction-site pair")
+  )
+  duplicate_error <- tryCatch(
+    prior_exposure_build_measurement(
+      measurement_config(duplicate_root, market, duplicate_output), market
+    ),
+    error = conditionMessage
+  )
+  assert_true(
+    grepl("site_id=10", duplicate_error, fixed = TRUE) &&
+      grepl(paste0(id_column, "=001"), duplicate_error, fixed = TRUE),
+    paste(market, "must name the duplicate key it rejected")
+  )
+  assert_true(
+    !dir.exists(duplicate_output),
+    paste(market, "must publish nothing when the pair gate fails")
+  )
+}
+
+# The stage gate is what catches a duplicate pair split across two fragments,
+# which the chunk-local gate cannot see. It streams row groups rather than
+# collecting the stage, so it needs its own fixtures.
+measurement_stage_contract <- prior_exposure_measurement_contract("sale")
+write_measurement_stage <- function(fragments) {
+  stage <- tempfile("measurement-stage-")
+  dir.create(stage, recursive = TRUE)
+  for (index in seq_along(fragments)) {
+    arrow::write_parquet(
+      fragments[[index]],
+      file.path(stage, sprintf("chunk-%010d-0.parquet", index))
+    )
+  }
+  stage
+}
+measurement_stage_row <- function(id, site_id) {
+  tibble(
+    house_id = id, site_id = as.integer(site_id), distance_m = 100,
+    spill_hrs = 1, spill_count = 1,
+    annual_returns_absent = FALSE, annual_returns_na = FALSE,
+    reported_positive_without_matched_events = FALSE,
+    annual_returns_na_then_absent = FALSE
+  )
+}
+
+clean_stage <- write_measurement_stage(list(
+  measurement_stage_row("001", 10L), measurement_stage_row("002", 20L)
+))
+assert_true(
+  isTRUE(prior_exposure_validate_measurement_stage(
+    clean_stage, prior_exposure_measurement_schema("sale"), 2,
+    measurement_stage_contract
+  )),
+  "A clean measurement stage must validate across fragments."
+)
+
+split_duplicate_stage <- write_measurement_stage(list(
+  measurement_stage_row("001", 10L), measurement_stage_row("001", 10L)
+))
+assert_error_contains(
+  prior_exposure_validate_measurement_stage(
+    split_duplicate_stage, prior_exposure_measurement_schema("sale"), 2,
+    measurement_stage_contract
+  ),
+  "duplicate transaction-site pair",
+  "The stage gate must catch a duplicate pair split across two fragments."
+)
+assert_error_contains(
+  prior_exposure_validate_measurement_stage(
+    clean_stage, prior_exposure_measurement_schema("sale"), 3,
+    measurement_stage_contract
+  ),
+  "row count mismatch",
+  "The streaming scan must conserve rows against the expected total."
+)
+assert_error_contains(
+  prior_exposure_validate_measurement_stage(
+    write_measurement_stage(list(
+      dplyr::mutate(measurement_stage_row("001", 10L), spill_hrs = NULL)
+    )),
+    prior_exposure_measurement_schema("sale"), 1, measurement_stage_contract
+  ),
+  "schema mismatch",
+  "The stage gate must reject a staged fragment that drifts from the schema."
 )
 
 if (length(expected_contract_failures) > 0L) {
