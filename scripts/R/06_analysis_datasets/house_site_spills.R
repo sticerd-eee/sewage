@@ -72,6 +72,7 @@ source(
 
 CONFIG <- list(
   market = "sale",
+  grain = "measurement",
   processed_dir = here::here("data", "processed"),
   output_path = here::here(
     "data", "processed", "cross_section", "sales", "house_site_spills"
@@ -93,13 +94,24 @@ initialise_logging <- function() {
   logger::log_info("Script started at {Sys.time()}")
 }
 
-build_measurement_table <- function(config = CONFIG) {
-  prior_exposure_build_measurement(config, config$market)
+load_data <- function() {
+  prior_exposure_load_data(
+    CONFIG, CONFIG$market, CONFIG$grain,
+    prior_exposure_measurement_contract(CONFIG$market)
+  )
+}
+
+build_measurement_table <- function(data) {
+  prior_exposure_stream(
+    data, CONFIG$output_path,
+    profile = prior_exposure_measurement_stream_profile()
+  )
 }
 
 main <- function() {
   initialise_logging()
-  build_measurement_table()
+  data <- load_data()
+  build_measurement_table(data)
   logger::log_info("Script completed successfully: {CONFIG$output_path}")
 }
 

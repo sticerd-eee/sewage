@@ -1725,7 +1725,10 @@ for (label in names(producer_specs)) {
     written_chunks <<- c(written_chunks, as.integer(chunk_index))
     prior_exposure_write_chunk(chunk, stage_path, chunk_index)
   }
-  prior_exposure_stream(data, output_path, write_chunk = observing_writer)
+  prior_exposure_stream(
+    data, output_path,
+    profile = prior_exposure_public_stream_profile(write = observing_writer)
+  )
   reopened <- arrow::open_dataset(output_path)
   result <- reopened |>
     dplyr::collect() |>
@@ -1850,9 +1853,11 @@ unreached_publisher <- function(...) {
 after_write_error <- tryCatch(
   prior_exposure_stream(
     failure_data, failure_canonical,
-    process_joined = fail_second_chunk,
-    write_chunk = observing_first_write,
-    publish_dataset = unreached_publisher
+    profile = prior_exposure_public_stream_profile(
+      process = fail_second_chunk,
+      write = observing_first_write,
+      publish = unreached_publisher
+    )
   ),
   error = identity
 )
@@ -1892,7 +1897,7 @@ validation_error <- tryCatch(
   prior_exposure_stream(
     failure_data, failure_canonical,
     before_publish = corrupt_stage_days,
-    publish_dataset = validating_publisher
+    profile = prior_exposure_public_stream_profile(publish = validating_publisher)
   ),
   error = identity
 )
@@ -1916,11 +1921,13 @@ assert_stream_mutation_fails <- function(label, mutate_result, expected_message)
     prior_exposure_stream(
       failure_data,
       tempfile(paste0("prior-exposure-stream-invalid-", label, "-")),
-      process_joined = mutate_chunk,
-      publish_dataset = function(...) {
-        promotion_reached <<- TRUE
-        invisible(NULL)
-      }
+      profile = prior_exposure_public_stream_profile(
+        process = mutate_chunk,
+        publish = function(...) {
+          promotion_reached <<- TRUE
+          invisible(NULL)
+        }
+      )
     ),
     error = identity
   )
@@ -2428,8 +2435,11 @@ for (market in c("sale", "rental")) {
 }
 
 # A fixture with three transactions: 001 has two nearby Site Groups, 002 has
-# one, and 003 has none at all. Site 20 is absent from the crosswalk entirely,
-# site 30 reports NA in 2022 and is absent in 2024.
+# one, and 003 has none at all. Site 20 is absent from the crosswalk entirely.
+# Site 30 carries every positive evidence case inside the 2021-2023 lookback
+# window at once: a reported_positive year with no matched events (2021), a
+# reported_na year (2022), and an absent year (2024) that falls after the
+# window, which is what the na-then-absent sequence requires.
 write_measurement_fixture <- function(root) {
   zoopla_dir <- file.path(root, "zoopla")
   event_dir <- file.path(root, "matched_events_annual_data")
@@ -2456,7 +2466,7 @@ write_measurement_fixture <- function(root) {
   lookup <- tibble(
     transaction_id = c("001", "001", "002"),
     site_id = c(10L, 20L, 30L),
-    distance_m = c(100, 400, 900)
+    distance_m = c(100, 400, 300)
   )
   arrow::write_parquet(
     transmute(
@@ -2482,7 +2492,9 @@ write_measurement_fixture <- function(root) {
         TRUE ~ "reported_positive"
       ),
       matched_event_count = if_else(
-        .data$annual_status == "reported_positive", 1L, 0L
+        .data$annual_status == "reported_positive" &
+          !(.data$site_id == 30L & .data$year == 2021L),
+        1L, 0L
       )
     )
   arrow::write_parquet(
@@ -2539,11 +2551,10 @@ for (market in c("sale", "rental")) {
   published <- data.table::as.data.table(dplyr::collect(reopened))
   data.table::setorderv(published, c(id_column, "site_id"))
 
-  # Site 30 sits at 900m, outside the 500m maximum threshold, so the pair never
-  # enters the table. Transaction 003 has no nearby Site Group at all.
+  # Transaction 003 has no nearby Site Group at all, so it contributes no row.
   assert_identical(
     published[[id_column]],
-    c("001", "001"),
+    c("001", "001", "002"),
     paste(
       market,
       "must carry only real pairs inside the maximum radius, and no row for a",
@@ -2551,11 +2562,11 @@ for (market in c("sale", "rental")) {
     )
   )
   assert_identical(
-    published$site_id, c(10L, 20L),
+    published$site_id, c(10L, 20L, 30L),
     paste(market, "must key on the actual nearby Site Groups")
   )
   assert_identical(
-    published$distance_m, c(100, 400),
+    published$distance_m, c(100, 400, 300),
     paste(market, "must carry each pair's own distance, not a radius")
   )
   assert_true(
@@ -2578,21 +2589,38 @@ for (market in c("sale", "rental")) {
     data.table(spill_hrs = 0, spill_count = 0),
     paste(market, "must record a measured zero for a pair with no events")
   )
+  # Site 30 has no events of its own, so it is a measured zero too.
   assert_identical(
-    published$annual_returns_absent, c(FALSE, TRUE),
+    published[site_id == 30L, .(spill_hrs, spill_count)],
+    data.table(spill_hrs = 0, spill_count = 0),
+    paste(market, "must record a measured zero for an evidence-flagged pair")
+  )
+
+  # R3: each of the first three flags is true when its condition holds in at
+  # least one year of the lookback window, and false otherwise. Site 30's
+  # absent year is 2024, outside the 2021-2023 window, so it stays unflagged
+  # as absent while still raising the na-then-absent sequence.
+  assert_identical(
+    published$annual_returns_absent, c(FALSE, TRUE, FALSE),
     paste(market, "must flag a Site Group missing from the crosswalk as absent")
   )
   assert_identical(
-    published$annual_returns_na, c(FALSE, FALSE),
-    paste(market, "must not flag reported_positive years as NA")
+    published$annual_returns_na, c(FALSE, FALSE, TRUE),
+    paste(market, "must flag a reported_na year inside the lookback window")
   )
   assert_identical(
-    published$reported_positive_without_matched_events, c(FALSE, FALSE),
-    paste(market, "must not flag matched reported_positive years")
+    published$reported_positive_without_matched_events, c(FALSE, FALSE, TRUE),
+    paste(
+      market,
+      "must flag an eventless reported_positive year inside the lookback window"
+    )
   )
   assert_identical(
-    published$annual_returns_na_then_absent, c(FALSE, FALSE),
-    paste(market, "must carry the sequence flag without a verdict column")
+    published$annual_returns_na_then_absent, c(FALSE, FALSE, TRUE),
+    paste(
+      market,
+      "must raise the sequence flag on reported_na followed by a later absent"
+    )
   )
 
   # AE8: a duplicated lookup pair must stop publication by name, with no
