@@ -3,11 +3,16 @@
 # ==============================================================================
 #
 # Purpose: Build and publish spill exposure before sale at house-radius grain
-#          through the shared prior-exposure engine.
+#          through the shared prior-exposure engine. The engine derives this
+#          dataset from the unmasked measurement layer (the same pair rows
+#          house_site_spills publishes): re-enumerate the transaction universe
+#          from the eligible-transaction ledger, run the distance-ordered
+#          cumulative reduction, and mask through has_missing_site at
+#          publication.
 #
 # Author: Jacopo Olivieri
 # Date: 2025-12-18
-# Date Modified: 2026-08-13
+# Date Modified: 2026-08-18
 #
 # Inputs:
 #   - data/processed/house_price.parquet

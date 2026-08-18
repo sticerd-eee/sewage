@@ -138,11 +138,14 @@ prior_exposure_variant <- function(market, grain) {
   # Resolve the schema first so unsupported variants fail before any I/O; that
   # leaves only the four supported market-grain pairs below.
   schema <- prior_exposure_public_schema(market, grain)
+  # The public grains are derivations over measurement rows, so they load the
+  # same evidence surface as the measurement contract: all four atomic flags.
+  # Each derivation then ORs its own subset into its verdict (R15).
   c(prior_exposure_market_details(market), list(
     market = market, grain = grain, schema = schema,
-    include_event_evidence = grain == "site",
-    include_annual_return_sequence = grain == "radius",
-    include_atomic_evidence_flags = FALSE
+    include_event_evidence = TRUE,
+    include_annual_return_sequence = TRUE,
+    include_atomic_evidence_flags = TRUE
   ))
 }
 
@@ -486,37 +489,17 @@ prior_exposure_event_order_key <- function() {
 prior_exposure_transaction_site_metrics <- function(joined, contract) {
   lookup <- data.table::copy(joined$internal_lookup)
   if (nrow(lookup) == 0L) return(NULL)
-  has_annual_return_sequence <-
-    "annual_returns_na_then_absent" %in% names(lookup)
-  site_lookup <- if (contract$include_event_evidence) {
-    if (has_annual_return_sequence) {
-      lookup[, .(
-        distance_m = min(distance_m),
-        site_missing = any(site_missing),
-        has_unknown_event_evidence = any(has_unknown_event_evidence),
-        annual_returns_na_then_absent = any(annual_returns_na_then_absent)
-      ), by = .(transaction_id, site_id)]
-    } else {
-      lookup[, .(
-        distance_m = min(distance_m),
-        site_missing = any(site_missing),
-        has_unknown_event_evidence = any(has_unknown_event_evidence)
-      ), by = .(transaction_id, site_id)]
-    }
-  } else {
-    if (has_annual_return_sequence) {
-      lookup[, .(
-        distance_m = min(distance_m),
-        site_missing = any(site_missing),
-        annual_returns_na_then_absent = any(annual_returns_na_then_absent)
-      ), by = .(transaction_id, site_id)]
-    } else {
-      lookup[, .(
-        distance_m = min(distance_m),
-        site_missing = any(site_missing)
-      ), by = .(transaction_id, site_id)]
-    }
+  # No min(distance_m) dedupe: pair uniqueness is a validated property of the
+  # lookup (asserted by the measurement gate, R13), so each pair's own row is
+  # taken as it stands rather than collapsed.
+  columns <- c("transaction_id", "site_id", "distance_m", "site_missing")
+  if (contract$include_event_evidence) {
+    columns <- c(columns, "has_unknown_event_evidence")
   }
+  if ("annual_returns_na_then_absent" %in% names(lookup)) {
+    columns <- c(columns, "annual_returns_na_then_absent")
+  }
+  site_lookup <- lookup[, ..columns]
 
   events <- joined$events_dt
   if (!is.null(events) && nrow(events) > 0L) {
@@ -540,16 +523,15 @@ prior_exposure_transaction_site_metrics <- function(joined, contract) {
   site_lookup
 }
 
+# Pure per-radius replication: each pair row repeats once per configured
+# radius that contains it. Masking is the derivation layer's job, not this
+# reducer's, so the replicated measures pass through unmodified.
 prior_exposure_reduce_site <- function(site_metrics, radii) {
   if (is.null(site_metrics) || nrow(site_metrics) == 0L) return(NULL)
   radii <- sort(radii)
   result <- site_metrics[rep(seq_len(.N), each = length(radii))]
   result[, radius := rep(radii, times = nrow(site_metrics))]
-  result <- result[distance_m <= radius]
-  result[site_missing == TRUE, `:=`(
-    spill_hrs = NA_real_, spill_count = NA_real_
-  )]
-  result
+  result[distance_m <= radius]
 }
 
 prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
@@ -630,9 +612,8 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
       cum_annual_returns_na_then_absent
     )
   )]
-  metrics[has_missing_site == TRUE, `:=`(
-    spill_hrs = NA_real_, spill_count = NA_real_
-  )]
+  # No masking here: the cumulative measures stay as measured, and the
+  # derivation layer decides what has_missing_site hides (R16).
   metrics <- metrics[, .(
     transaction_id, radius, spill_hrs, n_spill_sites, spill_count,
     mean_distance, min_distance, has_missing_site,
@@ -695,34 +676,107 @@ prior_exposure_site_prototype <- function(contract, transaction_ids = character(
   prior_exposure_project_public(result, contract)
 }
 
-prior_exposure_process_joined_chunk <- function(transaction_ids, data, joined) {
-  contract <- data$contract
-  site_metrics <- prior_exposure_transaction_site_metrics(joined, contract)
-  metadata <- prior_exposure_metadata(data$transaction_dt, transaction_ids)
+# Derivation layer
+############################################################
 
-  if (contract$grain == "site") {
-    metrics <- prior_exposure_reduce_site(site_metrics, data$config$radius_thresholds)
-    if (is.null(metrics) || nrow(metrics) == 0L) {
-      return(prior_exposure_site_prototype(contract, metadata$transaction_id))
-    }
-    result <- metadata[metrics, on = "transaction_id"]
-    result[has_unknown_event_evidence == TRUE, `:=`(
-      spill_count = NA_real_, spill_hrs = NA_real_
-    )]
-    result[, has_unknown_event_evidence := NULL]
-  } else {
-    metrics <- prior_exposure_reduce_radius(
-      site_metrics, metadata$transaction_id, data$config$radius_thresholds
-    )
-    result <- metadata[metrics, on = "transaction_id"]
-  }
+# Attach the four published rate columns through the shared rate helper, so
+# both derivations and the study family share one formula.
+prior_exposure_attach_rates <- function(result) {
+  count_rates <- spill_window_rates(result$spill_count, result$n_days_in_window)
+  hour_rates <- spill_window_rates(result$spill_hrs, result$n_days_in_window)
   result[, `:=`(
-    spill_count_daily_avg = spill_count / n_days_in_window,
-    spill_hrs_daily_avg = spill_hrs / n_days_in_window,
-    spill_count_weekly_avg = spill_count / n_days_in_window * 7,
-    spill_hrs_weekly_avg = spill_hrs / n_days_in_window * 7
+    spill_count_daily_avg = count_rates$daily_avg,
+    spill_hrs_daily_avg = hour_rates$daily_avg,
+    spill_count_weekly_avg = count_rates$weekly_avg,
+    spill_hrs_weekly_avg = hour_rates$weekly_avg
   )]
+}
+
+#' Derive one site-grain public chunk from measurement rows.
+#'
+#' A thin derivation over the unmasked measurement grain: replicate each pair
+#' per configured radius that contains it, rejoin transaction metadata from
+#' the in-memory ledger, and apply the Stage-1 verdict — today's finding-11
+#' rule, the OR of `annual_returns_absent`, `annual_returns_na`, and
+#' `reported_positive_without_matched_events` (R15, R16). A transaction with
+#' no nearby Site Group keeps no rows here; only the radius grain
+#' re-enumerates the universe (R4). The rename of `annual_returns_absent` to
+#' `site_missing` happens in this final projection and nowhere else (R19).
+#'
+#' @param measurement Measurement rows in the market's measurement schema.
+#' @param transaction_ids Transaction identifiers in this chunk.
+#' @param data Loaded inputs carrying the contract, config, and ledger.
+#' @return The chunk's public site-grain rows.
+prior_exposure_derive_site_grain <- function(measurement, transaction_ids, data) {
+  contract <- data$contract
+  metadata <- prior_exposure_metadata(data$transaction_dt, transaction_ids)
+  rows <- data.table::as.data.table(data.table::copy(measurement))
+  data.table::setnames(rows, contract$id, "transaction_id")
+  metrics <- prior_exposure_reduce_site(rows, data$config$radius_thresholds)
+  if (is.null(metrics) || nrow(metrics) == 0L) {
+    return(prior_exposure_site_prototype(contract, metadata$transaction_id))
+  }
+  # The event-evidence verdict, computed here and never stored (R15).
+  metrics[
+    annual_returns_absent | annual_returns_na |
+      reported_positive_without_matched_events,
+    `:=`(spill_hrs = NA_real_, spill_count = NA_real_)
+  ]
+  metrics[, site_missing := annual_returns_absent]
+  result <- metadata[metrics, on = "transaction_id"]
+  prior_exposure_attach_rates(result)
   prior_exposure_project_public(result, contract)
+}
+
+#' Derive one radius-grain public chunk from measurement rows.
+#'
+#' Re-enumerates the transaction universe from the in-memory
+#' eligible-transaction ledger, so a transaction with zero nearby Site Groups
+#' still gets its complete zero radius grid (R4). Runs the established
+#' distance-ordered cumulative reduction with stable sums, then applies the
+#' Stage-1 verdict: `has_missing_site` reflects `annual_returns_absent` alone,
+#' and `annual_returns_na_then_absent` passes through unchanged (R16, R19).
+#'
+#' @param measurement Measurement rows in the market's measurement schema.
+#' @param transaction_ids Transaction identifiers in this chunk.
+#' @param data Loaded inputs carrying the contract, config, and ledger.
+#' @return The chunk's public radius-grain rows.
+prior_exposure_derive_radius_grain <- function(measurement, transaction_ids, data) {
+  contract <- data$contract
+  metadata <- prior_exposure_metadata(data$transaction_dt, transaction_ids)
+  rows <- data.table::as.data.table(data.table::copy(measurement))
+  data.table::setnames(rows, contract$id, "transaction_id")
+  site_metrics <- rows[, .(
+    transaction_id, site_id, distance_m,
+    site_missing = annual_returns_absent,
+    annual_returns_na_then_absent,
+    spill_hrs, spill_count
+  )]
+  metrics <- prior_exposure_reduce_radius(
+    site_metrics, metadata$transaction_id, data$config$radius_thresholds
+  )
+  # The absence verdict, applied at the derivation boundary rather than
+  # inside the reducer (R15, R16).
+  metrics[has_missing_site == TRUE, `:=`(
+    spill_hrs = NA_real_, spill_count = NA_real_
+  )]
+  result <- metadata[metrics, on = "transaction_id"]
+  prior_exposure_attach_rates(result)
+  prior_exposure_project_public(result, contract)
+}
+
+# The public chunk path: build the chunk's unmasked measurement rows, then
+# hand them to the grain's derivation. This is the same measurement
+# computation the published measurement tables stream through, so the public
+# datasets are derivations of the measurement layer, never of another masked
+# dataset.
+prior_exposure_process_joined_chunk <- function(transaction_ids, data, joined) {
+  measurement <- prior_exposure_measurement_chunk(transaction_ids, data, joined)
+  if (data$contract$grain == "site") {
+    prior_exposure_derive_site_grain(measurement, transaction_ids, data)
+  } else {
+    prior_exposure_derive_radius_grain(measurement, transaction_ids, data)
+  }
 }
 
 prior_exposure_process_chunk <- function(transaction_ids, data) {
@@ -1196,9 +1250,10 @@ prior_exposure_expected_chunk_keys <- function(transaction_ids, data, lookup = N
         radius = integer()
       )
     } else {
-      lookup <- lookup[
-        , .(distance_m = min(distance_m)), by = .(transaction_id, site_id)
-      ]
+      # The lookup pairs themselves, not a min(distance_m) collapse: pair
+      # uniqueness is asserted rather than deduped away (R13), so a duplicated
+      # pair surfaces as a duplicate-key failure downstream.
+      lookup <- lookup[, .(transaction_id, site_id, distance_m)]
       keys <- lookup[rep(seq_len(.N), each = length(radii))]
       keys[, radius := rep(radii, times = nrow(lookup))]
       keys <- keys[distance_m <= radius, .(transaction_id, site_id, radius)]

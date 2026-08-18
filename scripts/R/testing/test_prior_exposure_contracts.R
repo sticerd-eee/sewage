@@ -2728,6 +2728,136 @@ assert_error_contains(
   "The stage gate must reject a staged fragment that drifts from the schema."
 )
 
+# U4: the derivation layer over measurement rows ------------------------------
+
+# AE2 at derivation level. One transaction per evidence case, all at 100m:
+# t1 status absent, t2 a site-year row the crosswalk never mentions (which
+# arrives at the measurement grain as annual_returns_absent, exactly like t1),
+# t3 reported_na, t4 reported_positive with zero matched events, t5
+# reported_positive with matched events. t6 is in the ledger but has no nearby
+# Site Group at all.
+derivation_case_flags <- data.table(
+  transaction_id = sprintf("t%d", 1:5),
+  annual_returns_absent = c(TRUE, TRUE, FALSE, FALSE, FALSE),
+  annual_returns_na = c(FALSE, FALSE, TRUE, FALSE, FALSE),
+  reported_positive_without_matched_events = c(FALSE, FALSE, FALSE, TRUE, FALSE)
+)
+derivation_measurement <- data.table(
+  house_id = derivation_case_flags$transaction_id,
+  site_id = 10L + seq_len(5L),
+  distance_m = 100,
+  spill_hrs = as.double(1:5),
+  spill_count = as.double(1:5),
+  annual_returns_absent = derivation_case_flags$annual_returns_absent,
+  annual_returns_na = derivation_case_flags$annual_returns_na,
+  reported_positive_without_matched_events =
+    derivation_case_flags$reported_positive_without_matched_events,
+  annual_returns_na_then_absent = c(FALSE, FALSE, TRUE, FALSE, FALSE)
+)
+derivation_ledger <- data.table(
+  transaction_id = sprintf("t%d", 1:6),
+  transaction_value = as.double(1:6) * 100000,
+  n_days_in_window = 100L
+)
+setkey(derivation_ledger, transaction_id)
+derivation_data <- function(grain) {
+  list(
+    contract = prior_exposure_variant("sale", grain),
+    config = list(radius_thresholds = c(250, 500)),
+    transaction_dt = derivation_ledger
+  )
+}
+
+derivation_site <- prior_exposure_derive_site_grain(
+  derivation_measurement, sprintf("t%d", 1:6), derivation_data("site")
+)
+setorderv(derivation_site, c("house_id", "site_id", "radius"))
+assert_identical(
+  sort(unique(derivation_site$house_id)),
+  sprintf("t%d", 1:5),
+  "The site-grain derivation must omit a transaction with no nearby Site Group."
+)
+assert_identical(
+  derivation_site[radius == 250, is.na(spill_hrs)],
+  c(TRUE, TRUE, TRUE, TRUE, FALSE),
+  paste(
+    "The site-grain derivation must mask absent, crosswalk-missing,",
+    "reported_na, and unmatched-positive cases, and keep the matched case."
+  )
+)
+assert_identical(
+  derivation_site[radius == 250, is.na(spill_count)],
+  derivation_site[radius == 250, is.na(spill_hrs)],
+  "The site-grain verdict must mask both spill measures together."
+)
+assert_identical(
+  derivation_site[radius == 250, site_missing],
+  c(TRUE, TRUE, FALSE, FALSE, FALSE),
+  paste(
+    "The published site_missing column must be annual_returns_absent renamed,",
+    "not the masking verdict."
+  )
+)
+assert_true(
+  !any(c(
+    "annual_returns_absent", "annual_returns_na",
+    "reported_positive_without_matched_events", "annual_returns_na_then_absent"
+  ) %in% names(derivation_site)),
+  "The site-grain derivation must not publish the atomic evidence flags."
+)
+assert_identical(
+  derivation_site[house_id == "t5", spill_hrs_daily_avg],
+  c(0.05, 0.05),
+  "The site-grain derivation must attach rates through the shared helper."
+)
+assert_true(
+  all(is.na(derivation_site[house_id == "t1", spill_hrs_daily_avg])),
+  "A masked site-grain row must carry unknown rates."
+)
+
+derivation_radius <- prior_exposure_derive_radius_grain(
+  derivation_measurement, sprintf("t%d", 1:6), derivation_data("radius")
+)
+setorderv(derivation_radius, c("house_id", "radius"))
+assert_identical(
+  sort(unique(derivation_radius$house_id)),
+  sprintf("t%d", 1:6),
+  paste(
+    "The radius-grain derivation must re-enumerate the transaction universe",
+    "from the ledger, including a transaction with no nearby Site Group."
+  )
+)
+assert_identical(
+  derivation_radius[radius == 250, has_missing_site],
+  c(TRUE, TRUE, FALSE, FALSE, FALSE, FALSE),
+  "has_missing_site must reflect annual_returns_absent alone in Stage 1."
+)
+assert_identical(
+  derivation_radius[radius == 250, is.na(spill_hrs)],
+  c(TRUE, TRUE, FALSE, FALSE, FALSE, FALSE),
+  paste(
+    "The radius-grain derivation must mask only the absent and",
+    "crosswalk-missing cases, through has_missing_site."
+  )
+)
+assert_identical(
+  derivation_radius[radius == 250, annual_returns_na_then_absent],
+  c(FALSE, FALSE, TRUE, FALSE, FALSE, FALSE),
+  "The radius-grain derivation must carry the sequence flag through unchanged."
+)
+assert_identical(
+  derivation_radius[house_id == "t6", .(spill_hrs, spill_count, n_spill_sites)],
+  data.table(
+    spill_hrs = c(0, 0), spill_count = c(0, 0), n_spill_sites = c(0L, 0L)
+  ),
+  "A no-site transaction must keep its complete zero radius grid."
+)
+assert_identical(
+  derivation_radius[house_id == "t5", spill_count_weekly_avg],
+  rep(5 / 100 * 7, 2L),
+  "The radius-grain derivation must attach rates through the shared helper."
+)
+
 if (length(expected_contract_failures) > 0L) {
   stop(
     "Expected not-yet-implemented prior-exposure contracts:\n- ",

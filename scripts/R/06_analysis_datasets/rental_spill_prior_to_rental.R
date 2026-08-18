@@ -3,11 +3,15 @@
 # ==============================================================================
 #
 # Purpose: Build and publish spill exposure before rental at rental-site-radius
-#          grain through the shared prior-exposure engine.
+#          grain through the shared prior-exposure engine. The engine derives
+#          this dataset from the unmasked measurement layer (the same pair
+#          rows rental_site_spills publishes): replicate per radius, rejoin
+#          transaction metadata from the eligible-transaction ledger, and
+#          apply the finding-11 evidence verdict at publication.
 #
 # Author: Alina Zeltikova
 # Date: 2026-02-05
-# Date Modified: 2026-08-13
+# Date Modified: 2026-08-18
 #
 # Inputs:
 #   - data/processed/zoopla/zoopla_rentals.parquet
