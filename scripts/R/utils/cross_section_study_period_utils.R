@@ -172,14 +172,19 @@ study_period_annual_evidence_grid <- function(annual_returns, window) {
   }
   study_period_validate_annual_states(annual)
 
-  complete_grid <- data.table::CJ(
-    site_id = sort(unique(annual$site_id)),
-    year = window$years,
-    unique = TRUE
-  )
-  annual <- annual[complete_grid, on = .(site_id, year)]
-  annual[, missing_evidence := is.na(annual_status) |
-    annual_status %in% c("reported_na", "absent")]
+  # Evidence classification comes from the shared truth table. The universe is
+  # this family's own — the window's years — and the gap fill that turns an
+  # unmentioned Site Group-year into `absent` is the core's single copy of that
+  # rule. Stage 1 keeps the verdict at the first two flags, so the crosswalk
+  # read does not yet need `matched_event_count` and the output is unchanged.
+  annual <- data.table::as.data.table(expand_site_year_universe(
+    annual,
+    site_ids = unique(annual$site_id),
+    years = window$years
+  ))
+  evidence <- classify_annual_returns_evidence(annual)
+  annual[, missing_evidence :=
+    evidence$annual_returns_absent | evidence$annual_returns_na]
   annual
 }
 

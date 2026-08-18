@@ -10,15 +10,15 @@ prior_exposure_schema_signature <- function(schema) {
   )
 }
 
-# data.table may replace grouped sum/cumsum calls with optimizer-specific
-# implementations. These wrappers, combined with explicit row ordering at each
-# aggregation boundary, make published floating values reproducible.
+# The stable-sum discipline now lives in the shared measurement core; these
+# names stay as thin aliases so this engine's existing call sites keep reading
+# the same, and are retired when the engine moves onto the core wholesale.
 prior_exposure_stable_sum <- function(value, na.rm = FALSE) {
-  base::sum(value, na.rm = na.rm)
+  spill_stable_sum(value, na.rm = na.rm)
 }
 
 prior_exposure_stable_cumsum <- function(value) {
-  base::cumsum(value)
+  spill_stable_cumsum(value)
 }
 
 #' Resolve one authoritative reopened prior-exposure schema.

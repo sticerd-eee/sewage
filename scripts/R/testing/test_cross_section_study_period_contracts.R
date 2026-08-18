@@ -13,6 +13,9 @@ source(here::here(
   "scripts", "R", "utils", "dataset_publication_utils.R"
 ))
 source(here::here(
+  "scripts", "R", "utils", "site_group_utils.R"
+))
+source(here::here(
   "scripts", "R", "utils", "cross_section_study_period_utils.R"
 ))
 
@@ -1528,6 +1531,147 @@ assert_true(
     grepl("annual-return", documentation_text, fixed = TRUE) &&
     grepl("prior-to-transaction", documentation_text, fixed = TRUE),
   "Supported documentation must distinguish fixed-period and prior exposure."
+)
+
+# U2: shared measurement core, study-family seams ------------------------------
+
+# The window reducer is `any` per Site Group across the window's years. It is
+# built and tested here; the two collapse functions adopt it in ticket 05.
+core_window_universe <- expand_site_year_universe(
+  data.table(
+    site_id = c(50L, 50L, 60L, 60L, 60L),
+    year = c(2021L, 2022L, 2021L, 2022L, 2023L),
+    annual_status = c(
+      "reported_zero", "reported_zero",
+      "reported_zero", "reported_na", "reported_positive"
+    ),
+    matched_event_count = c(0L, 0L, 0L, 0L, 2L)
+  ),
+  site_ids = c(50L, 60L),
+  years = 2021:2023
+)
+core_window_flags <- reduce_evidence_flags_over_window(
+  classify_annual_returns_evidence(core_window_universe)
+)
+assert_identical(
+  core_window_flags$site_id,
+  c(50L, 60L),
+  "The window reducer must return one row per Site Group, in site order."
+)
+assert_identical(
+  core_window_flags$annual_returns_absent,
+  c(TRUE, FALSE),
+  paste(
+    "Site 50's missing 2023 row must raise annual_returns_absent, and site",
+    "60's complete coverage must not."
+  )
+)
+assert_identical(
+  core_window_flags$annual_returns_na,
+  c(FALSE, TRUE),
+  "One reported_na year anywhere in the window must raise the NA flag."
+)
+assert_identical(
+  core_window_flags$reported_positive_without_matched_events,
+  c(FALSE, FALSE),
+  "A reported_positive year with matched events must raise no flag."
+)
+
+# Clip equivalence: the shared clip with the study window's two constants must
+# reproduce study_period_clip_events() on a fixture straddling both edges.
+core_study_events <- data.table(
+  site_id = c(70L, 70L, 70L, 70L, 70L),
+  start_time = utc_time(c(
+    "2020-12-31 12:00:00", "2022-06-01 00:00:00", "2024-12-31 12:00:00",
+    "2020-01-01 00:00:00", "2020-12-30 00:00:00"
+  )),
+  end_time = utc_time(c(
+    "2021-01-01 06:00:00", "2022-06-02 00:00:00", "2025-01-02 00:00:00",
+    "2020-06-01 00:00:00", "2021-01-01 00:00:00"
+  ))
+)
+core_study_clipped <- clip_events_to_window(
+  core_study_events,
+  utc_time("2021-01-01 00:00:00"),
+  utc_time("2025-01-01 00:00:00")
+)
+assert_identical(
+  core_study_clipped[, .(site_id, clipped_start, clipped_end, event_hours)],
+  study_period_clip_events(core_study_events, window_2021_2024),
+  "The shared clip must reproduce the study engine's clipping exactly."
+)
+assert_identical(
+  core_study_clipped$event_hours,
+  c(6, 24, 12),
+  paste(
+    "Clipping must keep only the in-window overlap and drop both the event",
+    "wholly before the window and the one that merely touches its start."
+  )
+)
+
+# Collapse equivalence: the shared collapse grouped by site alone must
+# reproduce the totals collapse_study_period_events() computes today.
+core_study_collapsed <- collapse_events_by_group(
+  clip_events_to_window(
+    events_fixture,
+    utc_time("2021-01-01 00:00:00"),
+    utc_time("2025-01-01 00:00:00")
+  ),
+  by = "site_id"
+)
+setkey(core_study_collapsed, site_id)
+assert_identical(
+  core_study_collapsed[.(10L), .(spill_hrs, spill_count)],
+  events_collapsed[.(10L), .(spill_hrs, spill_count)],
+  "The shared collapse must reproduce the study engine's per-site totals."
+)
+assert_identical(
+  core_study_collapsed[.(20L), .(spill_hrs, spill_count)],
+  data.table(spill_hrs = 5, spill_count = 1),
+  paste(
+    "The shared collapse must total a Site Group the engine later masks for",
+    "missing evidence, since masking is not the collapse's job."
+  )
+)
+assert_identical(
+  core_study_collapsed$site_id,
+  c(10L, 20L, 30L),
+  paste(
+    "The shared collapse must cover only Site Groups with events; the",
+    "evidence grid is what restores the true zeros."
+  )
+)
+
+# The study engine orders by site and clipped start alone, and sums without
+# na.rm so an unexpected NA reaches its own guard. Both are the defaults, so
+# ticket 05 inherits today's behaviour by calling the core plainly.
+assert_identical(
+  formals(collapse_events_by_group)$order_by,
+  "clipped_start",
+  "The default sort key must match the study engine's existing row order."
+)
+assert_identical(
+  formals(collapse_events_by_group)$na.rm,
+  FALSE,
+  "The default must not absorb a missing event hour the study engine guards on."
+)
+
+# An event feed with nothing in the window must survive the whole core without
+# the study engine's separate empty-input branch.
+core_empty_clipped <- clip_events_to_window(
+  events_fixture,
+  utc_time("2030-01-01 00:00:00"),
+  utc_time("2031-01-01 00:00:00")
+)
+assert_identical(
+  names(core_empty_clipped),
+  c(names(events_fixture), "clipped_start", "clipped_end", "event_hours"),
+  "An empty clip must still carry the clipped columns, correctly typed."
+)
+assert_identical(
+  nrow(collapse_events_by_group(core_empty_clipped, by = "site_id")),
+  0L,
+  "Collapsing an empty clip must yield no rows rather than failing."
 )
 
 cat("Study-period cross-section contract tests passed (U1-U5).\n")
