@@ -1466,8 +1466,18 @@ paired_annual <- comparison_fixture(
   spill_hrs = c(3, 5, 7, NA, 0, 11)
 )
 
+divergence_keys <- function(transaction_id, radius) {
+  keys <- data.table(
+    transaction_id = as.character(transaction_id),
+    radius = as.integer(radius)
+  )
+  setkey(keys, transaction_id, radius)
+  keys
+}
+no_divergence <- divergence_keys(character(0), integer(0))
+
 paired_report <- comparison$compare_study_period_sources(
-  paired_events, paired_annual, "sale"
+  paired_events, paired_annual, no_divergence, "sale"
 )
 assert_identical(
   sort(unique(paired_report$radius)),
@@ -1485,13 +1495,18 @@ assert_true(
   "A shared NA row must be excluded from the comparable subset and counted."
 )
 assert_true(
+  all(paired_report$n_divergent == 0L) &&
+    all(paired_report$n_missing_exposure_ea == paired_report$n_missing_exposure),
+  "An undiverged pair must report zero divergence and equal NA counts."
+)
+assert_true(
   paired_report[measure == "spill_hrs" & radius == 500L, diff_mean] == -0.5,
   "The comparison must report the mean events-minus-EA level difference."
 )
 
 assert_error_contains(
   comparison$compare_study_period_sources(
-    paired_events, paired_annual[-1L], "sale"
+    paired_events, paired_annual[-1L], no_divergence, "sale"
   ),
   "row count",
   "A row-count mismatch between sources must fail loudly."
@@ -1499,39 +1514,244 @@ assert_error_contains(
 mismatched_key <- copy(paired_annual)
 mismatched_key[1L, transaction_id := "fabricated"]
 assert_error_contains(
-  comparison$compare_study_period_sources(paired_events, mismatched_key, "sale"),
+  comparison$compare_study_period_sources(
+    paired_events, mismatched_key, no_divergence, "sale"
+  ),
   "identical transaction-radius key set",
   "A fabricated key mismatch between sources must fail loudly."
 )
 duplicate_key <- rbind(paired_annual, paired_annual[1L])
 setkey(duplicate_key, transaction_id, radius)
 assert_error_contains(
-  comparison$compare_study_period_sources(paired_events, duplicate_key, "sale"),
+  comparison$compare_study_period_sources(
+    paired_events, duplicate_key, no_divergence, "sale"
+  ),
   "duplicate transaction-radius key",
   "A duplicated public key must fail loudly."
 )
-extra_na <- copy(paired_annual)
-extra_na[2L, `:=`(spill_count = NA_real_, spill_hrs = NA_real_)]
-assert_error_contains(
-  comparison$compare_study_period_sources(paired_events, extra_na, "sale"),
-  "missingness pattern",
-  "An NA present under one source but not the other must fail loudly."
-)
-divergent_flag <- copy(paired_annual)
-divergent_flag[3L, has_missing_site := TRUE]
+
+# U8: the harmonized relationship replaces exact NA agreement ------------------
+
+extra_ea_na <- copy(paired_annual)
+extra_ea_na[2L, `:=`(
+  spill_count = NA_real_, spill_hrs = NA_real_, has_missing_site = TRUE
+)]
 assert_error_contains(
   comparison$compare_study_period_sources(
-    paired_events, divergent_flag, "sale"
+    paired_events, extra_ea_na, no_divergence, "sale"
   ),
-  "has_missing_site",
-  "A divergent missing-site flag must fail loudly."
+  "are not a subset",
+  "An NA under the Annual Returns alone must fail loudly in either direction."
+)
+
+# The event reading masks two extra rows: transaction 2 at 500 and at 1000.
+diverged_events <- comparison_fixture(
+  spill_count = c(1, 2, 3, NA, NA, NA),
+  spill_hrs = c(2, 4, 6, NA, NA, NA)
+)
+explained_keys <- divergence_keys(c("2", "2"), c(500L, 1000L))
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    diverged_events, paired_annual, no_divergence, "sale"
+  ),
+  "difference set is not the unverifiable-positive rows",
+  "An unexplained event-side NA must fail loudly."
+)
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    paired_events, paired_annual, explained_keys, "sale"
+  ),
+  "difference set is not the unverifiable-positive rows",
+  "An unverifiable-positive row the event reading did not mask must fail."
+)
+divergent_report <- comparison$compare_study_period_sources(
+  diverged_events, paired_annual, explained_keys, "sale"
+)
+assert_identical(
+  divergent_report[measure == "spill_hrs", n_divergent],
+  c(0L, 1L, 1L),
+  "The comparison must count the divergent rows per radius section."
+)
+assert_identical(
+  divergent_report[measure == "spill_hrs",
+    n_missing_exposure - n_missing_exposure_ea],
+  c(0L, 1L, 1L),
+  "The report must expose the NA excess the harmonized rule predicts."
+)
+assert_true(
+  all(divergent_report[radius == 500L, n_comparable] == 1L) &&
+    all(paired_report[radius == 500L, n_comparable] == 2L),
+  "A divergent row must leave the comparable subset."
+)
+
+# A row the Annual Returns already call unknown absorbs the extra gap, so a key
+# on it is no divergence at all.
+absorbed_keys <- divergence_keys("2", 250L)
+assert_true(
+  is.data.table(comparison$compare_study_period_sources(
+    paired_events, paired_annual, absorbed_keys, "sale"
+  )),
+  "An unverifiable positive on an already-unknown row must not be a divergence."
+)
+
+# has_missing_site rides the same relationship, so a flag that moves without an
+# unverifiable positive behind it is caught even when the measures agree.
+flag_only_divergence <- copy(paired_events)
+flag_only_divergence[3L, has_missing_site := TRUE]
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    flag_only_divergence, paired_annual, no_divergence, "sale"
+  ),
+  "has_missing_site difference set is not the unverifiable-positive rows",
+  "An unexplained missing-site flag must fail loudly."
+)
+na_flag <- copy(paired_events)
+na_flag[3L, has_missing_site := NA]
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    na_flag, paired_annual, no_divergence, "sale"
+  ),
+  "missing has_missing_site flag",
+  "A missing missing-site flag must fail loudly rather than read as FALSE."
+)
+divergent_eligibility <- copy(paired_annual)
+divergent_eligibility[3L, spatially_eligible := FALSE]
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    paired_events, divergent_eligibility, no_divergence, "sale"
+  ),
+  "spatially_eligible",
+  "A divergent spatial-eligibility flag must fail loudly."
+)
+
+# The verifier takes its windows and its input paths from the builders it
+# compares, so a builder that moves cannot leave it verifying stale inputs.
+comparison_specs <- comparison$study_period_source_specs()
+assert_identical(
+  vapply(comparison_specs, function(spec) spec$market, character(1)),
+  c("sale", "rental"),
+  "The comparison must cover both markets."
+)
+for (spec in comparison_specs) {
+  builders <- if (spec$market == "sale") {
+    c("cross_section_sales.R", "cross_section_sales_ea.R")
+  } else {
+    c("cross_section_rental.R", "cross_section_rental_ea.R")
+  }
+  events_config <- source_adapter(
+    file.path("scripts", "R", "06_analysis_datasets", builders[[1L]])
+  )$CONFIG
+  annual_config <- source_adapter(
+    file.path("scripts", "R", "06_analysis_datasets", builders[[2L]])
+  )$CONFIG
+  assert_identical(
+    list(
+      spec$events_path, spec$annual_path, spec$lookup_path,
+      spec$crosswalk_path, spec$window
+    ),
+    list(
+      events_config$output_path, annual_config$output_path,
+      events_config$lookup_path, events_config$crosswalk_path,
+      study_period_window(events_config$start_date, events_config$end_date)
+    ),
+    paste(
+      "The", spec$market,
+      "comparison spec must be read out of the builders it compares."
+    )
+  )
+}
+
+# U8: the divergent set is recomputed from the crosswalk and the lookup --------
+
+divergence_crosswalk <- rbindlist(list(
+  data.table(
+    site_id = 10L, year = 2021:2024, annual_status = "reported_zero",
+    spill_count_ea = 0, spill_hrs_ea = 0, matched_event_count = 0L
+  ),
+  data.table(
+    site_id = 20L, year = 2021:2024,
+    annual_status = c(
+      "reported_positive", "reported_zero", "reported_zero", "reported_zero"
+    ),
+    spill_count_ea = c(1, 0, 0, 0), spill_hrs_ea = c(3, 0, 0, 0),
+    matched_event_count = c(0L, 0L, 0L, 0L)
+  ),
+  data.table(
+    site_id = 30L, year = 2021:2024,
+    annual_status = c(
+      "reported_zero", "reported_zero", "reported_positive", "reported_zero"
+    ),
+    spill_count_ea = c(0, 0, 2, 0), spill_hrs_ea = c(0, 0, 4, 0),
+    matched_event_count = c(0L, 0L, 2L, 0L)
+  ),
+  data.table(
+    site_id = 40L, year = 2021:2024, annual_status = "reported_na",
+    spill_count_ea = NA_real_, spill_hrs_ea = NA_real_, matched_event_count = 0L
+  )
+))
+divergence_crosswalk_path <- tempfile(fileext = ".parquet")
+arrow::write_parquet(divergence_crosswalk, divergence_crosswalk_path)
+assert_identical(
+  comparison$unverifiable_positive_site_ids(
+    divergence_crosswalk_path, window_2021_2024
+  ),
+  20L,
+  paste(
+    "Only a Site Group whose window carries a reported_positive year with zero",
+    "matched events is an unverifiable positive."
+  )
+)
+assert_identical(
+  comparison$unverifiable_positive_site_ids(
+    divergence_crosswalk_path, window_2022_2024
+  ),
+  integer(0),
+  "A narrower window must drop an unverifiable positive outside it."
+)
+assert_error_contains(
+  comparison$unverifiable_positive_site_ids(
+    file.path(tempdir(), "absent-crosswalk.parquet"), window_2021_2024
+  ),
+  "crosswalk does not exist",
+  "A missing crosswalk must fail loudly rather than report no divergence."
+)
+
+divergence_lookup_path <- tempfile(fileext = ".parquet")
+write_lookup_fixture(
+  divergence_lookup_path,
+  list(data.table(
+    house_id = c("1", "2", "3"),
+    site_id = c(20L, 10L, 20L),
+    distance_m = c(300, 100, 1000),
+    distance_km = c(0.3, 0.1, 1),
+    n_site_groups = c(1L, 1L, 1L)
+  )),
+  sales_contract
+)
+lifted_keys <- comparison$unverifiable_positive_keys(
+  divergence_lookup_path, "house_id", 20L, c(250L, 500L, 1000L)
+)
+assert_identical(
+  list(lifted_keys$transaction_id, lifted_keys$radius),
+  list(c("1", "1", "3"), c(500L, 1000L, 1000L)),
+  paste(
+    "A transaction-radius row is divergence-eligible exactly when an",
+    "unverifiable-positive Site Group lies inside the radius."
+  )
+)
+assert_identical(
+  nrow(comparison$unverifiable_positive_keys(
+    divergence_lookup_path, "house_id", integer(0), c(250L, 500L, 1000L)
+  )),
+  0L,
+  "No unverifiable positive must lift to no divergent rows without a read."
 )
 
 all_na_events <- comparison_fixture(
   spill_count = rep(NA_real_, 6L), spill_hrs = rep(NA_real_, 6L)
 )
 all_na_report <- comparison$compare_study_period_sources(
-  all_na_events, copy(all_na_events), "sale"
+  all_na_events, copy(all_na_events), no_divergence, "sale"
 )
 assert_true(
   all(is.na(all_na_report$pearson)) && all(is.na(all_na_report$spearman)) &&
@@ -1543,7 +1763,7 @@ constant_events <- comparison_fixture(
 )
 assert_true(
   all(is.na(comparison$compare_study_period_sources(
-    constant_events, copy(constant_events), "sale"
+    constant_events, copy(constant_events), no_divergence, "sale"
   )$pearson)),
   "A zero-variance subset must report an undefined correlation, not an error."
 )
@@ -1813,4 +2033,4 @@ assert_identical(
   "Collapsing an empty clip must yield no rows rather than failing."
 )
 
-cat("Study-period cross-section contract tests passed (U1-U5).\n")
+cat("Study-period cross-section contract tests passed (U1-U5, U8).\n")

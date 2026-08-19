@@ -615,6 +615,31 @@ assert_true(
     pull(annual_returns_na_then_absent)),
   "A site without a later absent year must not be flagged."
 )
+# AE5, first half: the sequence flag is a strict refinement of the reported_na
+# prefix, so it can never fire on a Site Group-cutoff the Stage-2 verdict does
+# not already call unknown. This is what makes the hedonic's manual exclusion
+# redundant rather than merely coincidental on today's data.
+annual_return_sequence_atoms <- suppressMessages(
+  derive_site_group_prefix_missing_flags(
+    annual_return_sequence_fixture,
+    base_year = 2021L,
+    cutoff_years = 2020:2023,
+    include_annual_return_sequence = TRUE,
+    include_atomic_evidence_flags = TRUE
+  )
+)
+assert_true(
+  any(annual_return_sequence_atoms$annual_returns_na_then_absent) &&
+    all(
+      annual_return_sequence_atoms$annual_returns_na[
+        annual_return_sequence_atoms$annual_returns_na_then_absent
+      ]
+    ),
+  paste(
+    "annual_returns_na_then_absent = TRUE must imply annual_returns_na = TRUE,",
+    "the flag the Stage-2 radius-grain verdict masks on."
+  )
+)
 sequence_same_site_metrics <- data.table(
   transaction_id = "001",
   site_id = c(10L, 11L),
@@ -2905,6 +2930,33 @@ assert_identical(
   derivation_radius[radius == 250, annual_returns_na_then_absent],
   c(FALSE, FALSE, TRUE, FALSE, FALSE, FALSE),
   "The radius-grain derivation must carry the sequence flag through unchanged."
+)
+# AE5, second half: with the implication above holding at the Site Group grain,
+# every radius-grain row the sequence flag marks is already unknown under the
+# Stage-2 verdict. The hedonic's manual `!annual_returns_na_then_absent` filter
+# therefore removed nothing its `!is.na(...)` filters did not already remove,
+# which is what licenses deleting it.
+radius_exposure_columns <- c(
+  "spill_hrs", "spill_count",
+  "spill_count_daily_avg", "spill_hrs_daily_avg",
+  "spill_count_weekly_avg", "spill_hrs_weekly_avg"
+)
+sequence_flagged_radius <- derivation_radius[annual_returns_na_then_absent == TRUE]
+assert_true(
+  nrow(sequence_flagged_radius) > 0L,
+  "The redundancy proof needs at least one sequence-flagged radius-grain row."
+)
+assert_true(
+  all(vapply(
+    radius_exposure_columns,
+    function(column) all(is.na(sequence_flagged_radius[[column]])),
+    logical(1)
+  )),
+  paste(
+    "annual_returns_na_then_absent = TRUE must imply unknown spill_hrs,",
+    "spill_count, and all four averages at the radius grain, so dropping the",
+    "hedonic's manual exclusion cannot change its estimation sample."
+  )
 )
 assert_identical(
   derivation_radius[house_id == "t6", .(spill_hrs, spill_count, n_spill_sites)],
