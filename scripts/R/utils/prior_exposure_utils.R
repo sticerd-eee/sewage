@@ -285,11 +285,16 @@ prior_exposure_load_data <- function(config, market, grain,
   input_path <- file.path(config$processed_dir, contract$input)
   logger::log_info("Loading datasets from parquet files")
 
+  # as.data.frame() materializes arrow's chunked columns before data.table sees
+  # them; data.table joins on collected-but-unmaterialized character keys drop
+  # rows nondeterministically. See
+  # docs/solutions/logic-errors/arrow-altrep-data-table-join-nondeterminism.md
   raw_transactions <- arrow::open_dataset(input_path) |>
     dplyr::select(dplyr::all_of(c(
       contract$id, contract$value, contract$endpoint
     ))) |>
-    dplyr::collect()
+    dplyr::collect() |>
+    as.data.frame()
   transaction_dt <- prior_exposure_normalize_transactions(
     raw_transactions, contract, config$window_start, input_path
   )
@@ -324,6 +329,7 @@ prior_exposure_load_data <- function(config, market, grain,
     dplyr::select(dplyr::all_of(c(contract$id, "site_id", "distance_m"))) |>
     dplyr::filter(.data$distance_m <= max_radius) |>
     dplyr::collect() |>
+    as.data.frame() |>
     data.table::as.data.table()
   data.table::setnames(raw_lookup, contract$id, "transaction_id")
   raw_lookup <- raw_lookup[transaction_id %in% transaction_dt$transaction_id]
@@ -339,6 +345,7 @@ prior_exposure_load_data <- function(config, market, grain,
     dplyr::select("site_id", "start_time", "end_time", "year") |>
     dplyr::filter(.data$year >= config$base_year) |>
     dplyr::collect() |>
+    as.data.frame() |>
     data.table::as.data.table()
   raw_events_dt[, year := NULL]
   data.table::setkey(raw_events_dt, site_id)

@@ -103,7 +103,11 @@ load_spill_lookup_within_radius <- function(
     dplyr::select(house_id, site_id, distance_m) |>
     dplyr::filter(distance_m <= radius_m)
 
+  # as.data.frame() materializes arrow's chunked columns before data.table
+  # sees them; the arrow.use_altrep option does NOT protect this path. See
+  # docs/solutions/logic-errors/arrow-altrep-data-table-join-nondeterminism.md
   collect_fn(lookup_query) |>
+    as.data.frame() |>
     as.data.table()
 }
 

@@ -137,9 +137,14 @@ read_study_period_exposure <- function(path, id) {
       call. = FALSE
     )
   }
+  # as.data.frame() materializes arrow's chunked columns before data.table sees
+  # them; data.table joins on collected-but-unmaterialized character keys drop
+  # rows nondeterministically. See
+  # docs/solutions/logic-errors/arrow-altrep-data-table-join-nondeterminism.md
   exposure <- dataset |>
     dplyr::select(dplyr::all_of(columns)) |>
     dplyr::collect() |>
+    as.data.frame() |>
     data.table::as.data.table()
   data.table::setnames(exposure, id, "transaction_id")
   data.table::setkey(exposure, transaction_id, radius)
@@ -232,6 +237,7 @@ unverifiable_positive_keys <- function(lookup_path, id, flagged, radii) {
     dplyr::filter(!is.na(site_id), site_id %in% flagged) |>
     dplyr::select(dplyr::all_of(columns)) |>
     dplyr::collect() |>
+    as.data.frame() |>
     data.table::as.data.table()
   data.table::setnames(pairs, id, "transaction_id")
   if (nrow(pairs) == 0L) return(empty)

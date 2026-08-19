@@ -1,5 +1,5 @@
 ---
-title: Arrow ALTREP character keys make data.table joins nondeterministic
+title: Arrow collected columns make data.table joins nondeterministic
 module: Cross-Section Exposure / Pipeline-wide
 date: 2026-08-19
 category: logic-errors
@@ -7,117 +7,110 @@ problem_type: logic_error
 component: data-pipeline
 symptoms:
   - "data.table::merge on a character key silently returns a strict subset of the true join result."
-  - "Row counts vary across identical merge calls in one R process (e.g. 86,010 then 91,910 rows of a true 229,252)."
+  - "Row counts vary across identical merge calls in one R process (e.g. 86,010 or 91,910 rows of a true 229,252)."
+  - "setkey() reports success but leaves the key column unsorted."
   - "No warning, error, or NA — the partial result looks like a clean inner join."
 root_cause: environment_specific_behavior
-resolution_type: workaround
+resolution_type: code_fix
 severity: high
 related_components: [arrow, data.table, grid-long-difference, dry-spills, rainfall-aggregation, prior-exposure, study-period-exposure]
 tags: [arrow, altrep, data.table, merge, join, nondeterminism, parquet, r]
 ---
 
-# Arrow ALTREP character keys make data.table joins nondeterministic
+# Arrow collected columns make data.table joins nondeterministic
 
 ## Problem
 
-On this machine (R 4.6.0, the `rv`-activated project library), a
-`data.table` merge or keyed join whose key column is a **character vector
-collected from arrow** (an ALTREP-backed string column from
-`arrow::read_parquet()` or `open_dataset() |> collect()`) silently returns a
-**nondeterministic subset** of the true join result. Observed during ticket 09
-of the exposure-builder refactor: an inner join whose true result is 229,252
-rows returned 86,010 rows on one call and 91,910 on the next, within a single
-process, with no warning. `as.data.table()` on the collected tibble does **not**
-remove the hazard — the bug reproduced through it.
+On this machine (R 4.6.0, arrow 24.0.0, data.table 1.18.4, the `rv` project
+library), a `data.table` merge or keyed join whose character key column comes
+from **`arrow::open_dataset() |> dplyr::collect()` converted with
+`as.data.table()`** silently returns a **nondeterministic subset** of the true
+join result — for example 82,569 / 82,696 / 87,435 rows across three identical
+calls whose true result is 229,252 rows. `setkey()` on such a table reports
+success while leaving the column unsorted, which is the observable smoking gun.
+There is no warning or error.
 
-Minimal reproduction:
-`.scratch/exposure-builder-refactor/ticket09-logs/join_debug.R`.
+First seen in ticket 09 of the exposure-builder refactor and initially
+attributed to arrow's ALTREP string vectors (hence this file's name). A probe
+on 2026-08-19 (`scripts/R/testing/probe_altrep_join_safety.R`) **corrected
+that attribution**:
+
+- The collected column inspects as a **plain STRSXP**, not ALTREP, yet still
+  breaks data.table.
+- **`options(arrow.use_altrep = FALSE)` does NOT protect the
+  `open_dataset() |> collect()` path.** It was previously believed sufficient;
+  it is not.
+- No incidental operation on the converted table rescues it: `data.table::copy()`,
+  `setkey()`, and row subsetting all inherit the wrong behaviour.
+- The single-file `arrow::read_parquet() |> as.data.table()` path joined
+  correctly in the same probe. The verified failure shape is the
+  multi-file/chunked `open_dataset()` collect.
+- `chmatch()`, binary-search `dt[key == value]`, `match()`, and dplyr joins on
+  the very same vectors are all correct — the failure is in data.table's
+  join/sort machinery interacting with the collected column's memory.
+
+Probe verdict table (real data, ~229k-row slice; two reps per pattern):
+
+| conversion pattern | correct | deterministic |
+|---|---|---|
+| `as.data.table(collected)` | no | no |
+| `copy(as.data.table(collected))` | no | no |
+| `setkey` after conversion | no | no |
+| row subset after conversion | no | no |
+| `arrow.use_altrep = FALSE` then convert | no | no |
+| `as.data.table(as.data.frame(collected))` | **yes** | yes |
+| `data.table(col = collected$col)` (column extraction) | **yes** | yes |
 
 ## Safe patterns
 
-All of these give the correct, deterministic result:
+- **`as.data.frame()` between `collect()` and `as.data.table()`** — the fix
+  adopted across the pipeline; it materializes every column into ordinary R
+  vectors.
+- Column extraction (`data.table(k = tib$k, ...)`).
+- dplyr joins, base `match()`, `chmatch()`.
+- `options(arrow.use_altrep = FALSE)` is **not** a sufficient guard for
+  `open_dataset()` collects. It remains in the five scripts guarded on
+  2026-08-19 as harmless belt-and-braces for their `read_parquet()` reads, but
+  it must never be relied on alone.
 
-- `dplyr` joins (`inner_join`, `left_join`, ...).
-- Base `match()` lookups.
-- Full materialization before the join: `x[seq_along(x)]` on each column, which
-  converts ALTREP vectors to plain R vectors.
-- `options(arrow.use_altrep = FALSE)` set **before** collecting, so arrow hands
-  back plain character vectors in the first place.
+## Where the fix was applied (2026-08-19, static change only, nothing re-run)
 
-Integer, Date, and in-R-constructed character keys (e.g. `paste()`-built IDs)
-have not shown the failure. Note that `as.character()` on an already-character
-column is an identity operation and does not defeat ALTREP.
+Every live `open_dataset() |> collect() |> as.data.table()` site feeding
+data.table joins got the `as.data.frame()` materialization:
 
-## Exposure check (static reading only, 2026-08-19)
+- `scripts/R/utils/prior_exposure_utils.R` — the three loads in
+  `prior_exposure_load_data` (transactions, lookup, events).
+- `scripts/R/utils/cross_section_study_period_utils.R` —
+  `study_period_read_parquet_columns()`, the single read path for the
+  study-period engines.
+- `scripts/R/testing/verify_study_period_exposure_sources.R` — both collects
+  (a silent drop there would have under-reported divergence, a false green).
+- `scripts/R/06_analysis_datasets/grid_long_difference_sales.R` —
+  `load_spill_lookup_within_radius()`, the strongest exposed case.
 
-A static sweep of every `scripts/R/` file using both arrow and data.table was
-performed as part of ticket 10. Scope agreed with Jacopo: a check only, no
-rebuilds — the ticket-06 and ticket-09 reconciliations already proved the
-published exposure datasets correct (bit-identical across independent builds),
-so canonical outputs needed no re-verification. Nothing was re-run.
+The published exposure datasets themselves need no rebuild: the ticket-06 and
+ticket-09 reconciliations proved them bit-identical across independent builds,
+and the publication gates validate expected key sets, so a silent drop in a
+past build would have failed the gate. The fix makes future runs safe by
+construction instead of empirically lucky.
 
-Before the check, no script in `scripts/R/` set `arrow.use_altrep` or
-deliberately materialized collected columns.
-
-### Exposed paths (character key, arrow-derived, no protection) — now guarded
-
-Each of these files received the one-line guard
-`options(arrow.use_altrep = FALSE)` in its environment-setup function:
-
-- `scripts/R/06_analysis_datasets/grid_long_difference_sales.R` — merges on
-  `house_id` at lines ~251 and ~312; the spill-lookup loader deliberately
-  collects lazily, so the key was ALTREP by construction.
-- `scripts/R/06_analysis_datasets/grid_long_difference_rentals.R` — merges on
-  `rental_id` at lines ~230 and ~291.
-- `scripts/R/03_data_enrichment/aggregate_rainfall_stats.R` — keyed join on
-  `(site_id, ngr)` at line ~216, with `ngr` a character column straight from
-  `read_parquet`.
-- `scripts/R/03_data_enrichment/identify_dry_spills.R` — keyed joins on
-  `(site_id, ngr)` at lines ~194 and ~301.
-- `scripts/R/03_data_enrichment/aggregate_dry_spill_stats.R` — merge at
-  line ~276 whose computed `join_keys` include the character `water_company`.
-
-The guard changes no join logic; it only makes arrow return plain vectors.
-`scripts/R/testing/test_grid_long_difference_sales_contracts.R` asserts the
-sales loader stays lazy until `collect()`; the option does not affect lazy
-evaluation, only the representation of collected vectors.
-
-### Uncertain paths (character key, protected only incidentally) — noted, not changed
-
-These join on character IDs (`transaction_id`, `house_id`/`rental_id`, `ngr`,
-`water_company`) where the key survives only via `data.table::copy()`, an
-incidental row subset, or `setkey()` — none a deliberate materialization. It is
-unknown whether these operations defeat ALTREP, and their outputs are either
-already proven correct by reconciliation or owned by the analysis-layer
-follow-ups, so they were left unchanged:
-
-- `scripts/R/utils/prior_exposure_utils.R` — joins at lines ~363/367/369, ~514,
-  ~598 (a rolling join), ~633, ~647, ~738, ~780, ~878, ~996, ~1260. The
-  ticket-06 Stage-1 reconciliation proved these paths' outputs bit-identical,
-  so they are correct as run; any future edit should add the altrep guard.
-- `scripts/R/utils/cross_section_study_period_utils.R` — joins at lines ~674
-  and ~722; same reconciliation evidence applies.
-- `scripts/R/testing/verify_study_period_exposure_sources.R` — keyed join on
-  `transaction_id` at line ~258. A silent drop here would make the verifier
-  under-report divergence (a false green); worth the guard when the script is
-  next touched.
-- `scripts/R/03_data_enrichment/aggregate_dry_spill_stats.R` line ~232 and
-  `aggregate_daily_spill_rainfall.R` line ~202 — `water_company` / `ngr` keys
-  protected only by intervening aggregation or subsetting. The first file now
-  carries the file-level guard anyway; the second's join sides both pass
-  through `melt()`/`%in%`-subset reallocations.
-
-### Safe by construction
-
-`site_id` is coerced to integer throughout the exposure core; `x_idx`/`y_idx`,
-`year`, and period IDs are integer; `spill_id` is `paste()`-built in R. The
-site panels read through DuckDB, not arrow. The prior-exposure and study-period
-contract tests use `setkey` for ordering only, never for keyed joins. The
-Stage-2 sample-impact memo already guards itself (altrep off plus dplyr joins).
+Paths on the `read_parquet()` shape (the two grid long-difference lookup
+loads via `rio::import`/`read_parquet`, the three enrichment scripts joining
+on `ngr`/`water_company`) joined correctly in the probe and additionally carry
+the `arrow.use_altrep = FALSE` option from the first pass. If any of them is
+ever moved onto `open_dataset()`, it must adopt the `as.data.frame()`
+materialization.
 
 ## Prevention
 
-When joining arrow-collected data with data.table on a string key, either set
-`options(arrow.use_altrep = FALSE)` before collecting or use dplyr joins.
-Treat any new `X[Y, on = ...]` or `merge()` over a collected character column
-as exposed until guarded.
+When data collected from arrow will be joined, merged, or keyed with
+data.table, always materialize first: `collect() |> as.data.frame() |>
+as.data.table()`. Verify any new pattern with
+`Rscript scripts/R/testing/probe_altrep_join_safety.R` (seconds, reads a
+capped slice, rebuilds nothing). A `setkey()` that leaves the column unsorted
+(`is.unsorted(dt$key)` after keying) is the cheap tell that a table is
+affected.
+
+Historical note: the original ticket-09 reproduction is at
+`.scratch/exposure-builder-refactor/ticket09-logs/join_debug.R` (untracked
+scratch); the committed probe supersedes it.
