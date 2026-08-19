@@ -543,13 +543,19 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
     grid[, `:=`(
       spill_hrs = 0, n_spill_sites = 0L, spill_count = 0,
       mean_distance = NA_real_, min_distance = NA_real_,
-      has_missing_site = FALSE,
+      has_missing_site = FALSE, has_unknown_evidence = FALSE,
       annual_returns_na_then_absent = FALSE
     )]
     return(grid)
   }
   if (!"annual_returns_na_then_absent" %in% names(site_metrics)) {
     site_metrics[, annual_returns_na_then_absent := FALSE]
+  }
+  # The derivation's verdict travels as its own pair-grain flag, so the
+  # accumulation below can widen the mask without touching what
+  # `site_missing` — and therefore `has_missing_site` — means (R15, R16).
+  if (!"site_unknown_evidence" %in% names(site_metrics)) {
+    site_metrics[, site_unknown_evidence := FALSE]
   }
   # Preserve the historical accumulation order exactly: collapse distance ties,
   # sort by distance, then take cumulative sums for rolling radius thresholds.
@@ -562,6 +568,7 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
     n_spill_sites = .N,
     distance_sum = prior_exposure_stable_sum(distance_m),
     missing_sites = prior_exposure_stable_sum(site_missing),
+    site_unknown_evidence = any(site_unknown_evidence),
     annual_returns_na_then_absent = any(annual_returns_na_then_absent)
   ), by = .(transaction_id, distance_m)]
   data.table::setorder(site_agg, transaction_id, distance_m)
@@ -571,6 +578,7 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
     cum_distance_sum = prior_exposure_stable_cumsum(distance_sum),
     n_spill_sites = prior_exposure_stable_cumsum(n_spill_sites),
     cum_missing_sites = prior_exposure_stable_cumsum(missing_sites),
+    cum_unknown_evidence = dplyr::cumany(site_unknown_evidence),
     cum_annual_returns_na_then_absent = dplyr::cumany(
       annual_returns_na_then_absent
     ),
@@ -606,6 +614,9 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
     has_missing_site = data.table::fifelse(
       is.na(cum_missing_sites), FALSE, cum_missing_sites > 0
     ),
+    has_unknown_evidence = data.table::fifelse(
+      is.na(cum_unknown_evidence), FALSE, cum_unknown_evidence
+    ),
     annual_returns_na_then_absent = data.table::fifelse(
       is.na(cum_annual_returns_na_then_absent),
       FALSE,
@@ -616,11 +627,12 @@ prior_exposure_reduce_radius <- function(site_metrics, transaction_ids, radii) {
   # derivation layer decides what has_missing_site hides (R16).
   metrics <- metrics[, .(
     transaction_id, radius, spill_hrs, n_spill_sites, spill_count,
-    mean_distance, min_distance, has_missing_site,
+    mean_distance, min_distance, has_missing_site, has_unknown_evidence,
     annual_returns_na_then_absent
   )]
   result <- metrics[grid, on = .(transaction_id, radius)]
   result[is.na(has_missing_site), has_missing_site := FALSE]
+  result[is.na(has_unknown_evidence), has_unknown_evidence := FALSE]
   result[is.na(annual_returns_na_then_absent), annual_returns_na_then_absent := FALSE]
   result[!has_missing_site & is.na(spill_hrs), spill_hrs := 0]
   result[!has_missing_site & is.na(spill_count), spill_count := 0]
@@ -734,8 +746,11 @@ prior_exposure_derive_site_grain <- function(measurement, transaction_ids, data)
 #' eligible-transaction ledger, so a transaction with zero nearby Site Groups
 #' still gets its complete zero radius grid (R4). Runs the established
 #' distance-ordered cumulative reduction with stable sums, then applies the
-#' Stage-1 verdict: `has_missing_site` reflects `annual_returns_absent` alone,
-#' and `annual_returns_na_then_absent` passes through unchanged (R16, R19).
+#' event-evidence verdict — the OR of `annual_returns_absent`,
+#' `annual_returns_na`, and `reported_positive_without_matched_events` (R15,
+#' R17). `has_missing_site` keeps publishing `annual_returns_absent` alone, so
+#' the mask widens without the column changing meaning, and
+#' `annual_returns_na_then_absent` passes through unchanged (R16, R19).
 #'
 #' @param measurement Measurement rows in the market's measurement schema.
 #' @param transaction_ids Transaction identifiers in this chunk.
@@ -749,15 +764,17 @@ prior_exposure_derive_radius_grain <- function(measurement, transaction_ids, dat
   site_metrics <- rows[, .(
     transaction_id, site_id, distance_m,
     site_missing = annual_returns_absent,
+    site_unknown_evidence = annual_returns_absent | annual_returns_na |
+      reported_positive_without_matched_events,
     annual_returns_na_then_absent,
     spill_hrs, spill_count
   )]
   metrics <- prior_exposure_reduce_radius(
     site_metrics, metadata$transaction_id, data$config$radius_thresholds
   )
-  # The absence verdict, applied at the derivation boundary rather than
-  # inside the reducer (R15, R16).
-  metrics[has_missing_site == TRUE, `:=`(
+  # The event-evidence verdict, computed here and never stored (R15), and
+  # applied at the derivation boundary rather than inside the reducer (R16).
+  metrics[has_unknown_evidence == TRUE, `:=`(
     spill_hrs = NA_real_, spill_count = NA_real_
   )]
   result <- metadata[metrics, on = "transaction_id"]

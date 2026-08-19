@@ -189,11 +189,11 @@ study_period_annual_evidence_grid <- function(annual_returns, window) {
   study_period_validate_annual_states(annual)
 
   # Evidence classification comes from the shared truth table, reduced to one
-  # verdict per Site Group by the window reducer (R9). The universe is this
+  # row per Site Group by the window reducer (R9). The universe is this
   # family's own — the window's years — and the gap fill that turns an
   # unmentioned Site Group-year into `absent` is the core's single copy of that
-  # rule. Stage 1 ORs only the first two flags into the verdict (R16); the
-  # third atomic flag rides along untouched until a later stage reads it.
+  # rule. The grid stops at the three atomic flags: each collapse ORs its own
+  # verdict from them, and neither verdict is stored (R15).
   annual <- data.table::as.data.table(expand_site_year_universe(
     annual,
     site_ids = unique(annual$site_id),
@@ -202,16 +202,23 @@ study_period_annual_evidence_grid <- function(annual_returns, window) {
   site_evidence <- data.table::as.data.table(
     reduce_evidence_flags_over_window(classify_annual_returns_evidence(annual))
   )
-  site_evidence[, has_missing_evidence :=
-    annual_returns_absent | annual_returns_na]
   list(annual = annual, site_evidence = site_evidence)
 }
 
 collapse_study_period_annual_returns <- function(annual_returns, window) {
   grid <- study_period_annual_evidence_grid(annual_returns, window)
   annual <- grid$annual
+  # The EA-evidence verdict, computed here and never stored (R15). It reads
+  # only the first two flags, permanently: the third indicts the event
+  # matching, not the Annual Returns these measures are read from, so this is
+  # a second source with its own verdict rather than an opt-out from the
+  # harmonized rule (R17, R18).
+  site_evidence <- grid$site_evidence[, .(
+    site_id,
+    has_missing_evidence = annual_returns_absent | annual_returns_na
+  )]
   annual[
-    grid$site_evidence, on = "site_id",
+    site_evidence, on = "site_id",
     has_missing_evidence := i.has_missing_evidence
   ]
   collapsed <- annual[
@@ -293,7 +300,23 @@ collapse_study_period_events <- function(annual_returns, events, window) {
     )
   }
   grid <- study_period_annual_evidence_grid(annual_returns, window)
-  evidence <- grid$site_evidence[, .(site_id, has_missing_evidence)]
+  # The event-evidence verdict, computed here and never stored (R15): the OR
+  # of all three flags, so the same evidence gap that masks a prior dataset
+  # masks this one too (R17, R18).
+  evidence <- grid$site_evidence[, .(
+    site_id,
+    has_missing_evidence = annual_returns_absent | annual_returns_na |
+      reported_positive_without_matched_events
+  )]
+  # Without `matched_event_count` the third flag is missing rather than FALSE,
+  # which would silently read an unverifiable positive as no gap at all.
+  if (anyNA(evidence$has_missing_evidence)) {
+    stop(
+      "The event-evidence verdict requires matched_event_count on every ",
+      "Annual-Returns row.",
+      call. = FALSE
+    )
+  }
 
   clipped <- study_period_clip_events(events, window)
   # The shared collapse's defaults are this engine's established seam: rows

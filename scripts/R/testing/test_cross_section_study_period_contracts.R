@@ -134,6 +134,8 @@ assert_true(!"rent" %in% rental_schema$names, "rent must not be public.")
 
 # U1: annual-return truth table and collapse -----------------------------------
 
+utc_time <- function(text) as.POSIXct(text, tz = "UTC")
+
 annual_fixture <- rbindlist(list(
   data.table(
     site_id = 10L,
@@ -261,9 +263,12 @@ assert_identical(
   names(evidence_grid$site_evidence),
   c(
     "site_id", "annual_returns_absent", "annual_returns_na",
-    "reported_positive_without_matched_events", "has_missing_evidence"
+    "reported_positive_without_matched_events"
   ),
-  "The grid must expose the three atomic flags plus the Stage-1 verdict."
+  paste(
+    "The grid must expose the three atomic flags and no verdict: each",
+    "collapse ORs its own."
+  )
 )
 assert_identical(
   evidence_grid$site_evidence$site_id,
@@ -283,10 +288,9 @@ assert_identical(
   c(FALSE, TRUE, FALSE, FALSE),
   "Only site 20's reported_na year may raise annual_returns_na."
 )
-assert_identical(
-  evidence_grid$site_evidence$has_missing_evidence,
-  c(FALSE, TRUE, TRUE, FALSE),
-  "The Stage-1 verdict must reproduce today's two-flag masks exactly."
+assert_true(
+  !"has_missing_evidence" %in% names(evidence_grid$site_evidence),
+  "No verdict may be stored on the shared classification (R15)."
 )
 assert_identical(
   evidence_grid$site_evidence$reported_positive_without_matched_events,
@@ -294,8 +298,9 @@ assert_identical(
   "reported_positive years with matched events must not raise the third flag."
 )
 
-# The third atomic flag stays outside the Stage-1 verdict: a reported_positive
-# year without matched events raises it, yet the exposure stays unmasked.
+# The third atomic flag is exactly what separates the two verdicts: a
+# reported_positive year without matched events indicts the event matching, so
+# the event-evidence verdict masks it and the EA-evidence verdict does not.
 stage1_fixture <- data.table(
   site_id = 80L,
   year = 2021:2024,
@@ -311,10 +316,11 @@ stage1_grid <- study_period_annual_evidence_grid(
 )
 assert_true(
   stage1_grid$site_evidence$reported_positive_without_matched_events &&
-    !stage1_grid$site_evidence$has_missing_evidence,
+    !stage1_grid$site_evidence$annual_returns_absent &&
+    !stage1_grid$site_evidence$annual_returns_na,
   paste(
-    "A reported_positive year without matched events must raise the atomic",
-    "flag without entering the Stage-1 verdict."
+    "A reported_positive year without matched events must raise the third",
+    "atomic flag and neither of the first two."
   )
 )
 assert_identical(
@@ -322,7 +328,30 @@ assert_identical(
     , .(spill_count, spill_hrs, has_missing_evidence)
   ],
   data.table(spill_count = 2, spill_hrs = 5, has_missing_evidence = FALSE),
-  "Stage 1 must keep exposure unmasked when only the third flag is raised."
+  paste(
+    "The EA-evidence verdict must keep exposure known when only the third",
+    "flag is raised, permanently and not as an opt-out (R18)."
+  )
+)
+# AE3 for study_period: the same Site Group turns unknown under the
+# event-evidence verdict, and only because of the third flag.
+stage2_events_fixture <- data.table(
+  site_id = 80L,
+  start_time = utc_time("2021-06-01 00:00:00"),
+  end_time = utc_time("2021-06-01 05:00:00")
+)
+stage2_events <- collapse_study_period_events(
+  stage1_fixture, stage2_events_fixture, window_2021_2024
+)
+assert_identical(
+  stage2_events[, .(spill_count, spill_hrs, has_missing_evidence)],
+  data.table(
+    spill_count = NA_real_, spill_hrs = NA_real_, has_missing_evidence = TRUE
+  ),
+  paste(
+    "The event-evidence verdict must mask a reported_positive year with no",
+    "matched events."
+  )
 )
 
 invalid_matched <- copy(annual_fixture)
@@ -334,8 +363,6 @@ assert_error_contains(
 )
 
 # U1: event-based collapse ------------------------------------------------------
-
-utc_time <- function(text) as.POSIXct(text, tz = "UTC")
 
 # Sites 10 and 40 carry complete Annual-Returns evidence, site 20 turns unknown
 # mid-window, and site 30 is missing its 2024 row from the crosswalk grid.
@@ -397,7 +424,8 @@ clipping_annual_fixture <- rbindlist(lapply(
     year = 2021:2024,
     annual_status = "reported_zero",
     spill_count_ea = 0,
-    spill_hrs_ea = 0
+    spill_hrs_ea = 0,
+    matched_event_count = 0L
   )
 ))
 clipping_events_fixture <- data.table(
@@ -436,6 +464,18 @@ assert_identical(
   clipped[.(54L), .(spill_hrs, spill_count)],
   data.table(spill_hrs = 5, spill_count = 2),
   "Separate events at one Site Group must sum hours and count independently."
+)
+
+assert_error_contains(
+  collapse_study_period_events(
+    copy(annual_fixture)[, matched_event_count := NULL],
+    events_fixture, window_2021_2024
+  ),
+  "matched_event_count",
+  paste(
+    "The event-evidence verdict must fail loudly without matched_event_count",
+    "rather than read a missing third flag as no gap."
+  )
 )
 
 events_missing_column <- copy(events_fixture)[, end_time := NULL]

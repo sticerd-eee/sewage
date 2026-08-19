@@ -647,6 +647,35 @@ assert_true(
   "A radius must not combine annual-return NA and later absence from different sites."
 )
 
+# The event-evidence verdict accumulates the same way the published flags do:
+# any contributing Site Group inside the radius raises it, in distance order.
+unknown_evidence_metrics <- data.table(
+  transaction_id = "001",
+  site_id = c(10L, 11L),
+  distance_m = c(100, 200),
+  site_missing = FALSE,
+  site_unknown_evidence = c(FALSE, TRUE),
+  annual_returns_na_then_absent = FALSE,
+  spill_hrs = c(1, 2),
+  spill_count = c(1, 2)
+)
+unknown_evidence_result <- prior_exposure_reduce_radius(
+  unknown_evidence_metrics, "001", c(100L, 250L)
+)
+setorder(unknown_evidence_result, radius)
+assert_identical(
+  unknown_evidence_result$has_unknown_evidence,
+  c(FALSE, TRUE),
+  paste(
+    "A Site Group with unknown evidence must turn only the radii that contain",
+    "it unknown, leaving the nearer radius known."
+  )
+)
+assert_true(
+  !any(unknown_evidence_result$has_missing_site),
+  "The widened verdict must not leak into has_missing_site."
+)
+
 for (invalid_count in list(NA_real_, -1, 1.5, "invalid")) {
   invalid_evidence_fixture <- evidence_state_fixture
   invalid_evidence_fixture$matched_event_count[1] <- invalid_count
@@ -2830,15 +2859,47 @@ assert_identical(
 assert_identical(
   derivation_radius[radius == 250, has_missing_site],
   c(TRUE, TRUE, FALSE, FALSE, FALSE, FALSE),
-  "has_missing_site must reflect annual_returns_absent alone in Stage 1."
+  paste(
+    "has_missing_site must keep publishing annual_returns_absent alone after",
+    "the Stage-2 mask widens."
+  )
+)
+# AE3 at fixture level: the radius grain moves onto the three-flag verdict, so
+# t3 (reported_na) and t4 (unmatched positive) join the two absence cases as
+# masked rows, and nothing else moves.
+stage1_radius_masked <- c(TRUE, TRUE, FALSE, FALSE, FALSE, FALSE)
+stage2_radius_masked <- derivation_radius[radius == 250, is.na(spill_hrs)]
+assert_identical(
+  stage2_radius_masked,
+  c(TRUE, TRUE, TRUE, TRUE, FALSE, FALSE),
+  paste(
+    "The radius-grain derivation must mask the absent, crosswalk-missing,",
+    "reported_na, and unmatched-positive cases on the event-evidence verdict."
+  )
 )
 assert_identical(
-  derivation_radius[radius == 250, is.na(spill_hrs)],
-  c(TRUE, TRUE, FALSE, FALSE, FALSE, FALSE),
+  derivation_radius[radius == 250, is.na(spill_count)],
+  stage2_radius_masked,
+  "The radius-grain verdict must mask both spill measures together."
+)
+assert_identical(
+  derivation_radius[radius == 250, house_id][
+    stage2_radius_masked & !stage1_radius_masked
+  ],
+  c("t3", "t4"),
   paste(
-    "The radius-grain derivation must mask only the absent and",
-    "crosswalk-missing cases, through has_missing_site."
+    "The rows that newly turn unknown must be exactly the ones the two added",
+    "flags predict."
   )
+)
+assert_identical(
+  derivation_radius[radius == 250, spill_hrs][!stage2_radius_masked],
+  c(5, 0),
+  "No radius-grain value outside the new mask may move."
+)
+assert_true(
+  all(is.na(derivation_radius[house_id == "t4", spill_hrs_weekly_avg])),
+  "A newly masked radius-grain row must carry unknown rates."
 )
 assert_identical(
   derivation_radius[radius == 250, annual_returns_na_then_absent],
