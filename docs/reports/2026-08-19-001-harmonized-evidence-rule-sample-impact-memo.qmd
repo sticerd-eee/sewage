@@ -26,16 +26,31 @@ suppressMessages({
 })
 
 repo_root <- here::here()
+# Post-promotion defaults: the canonical tree holds the Stage-2 generations,
+# and the Stage-1 generations survive in the ticket-01 baseline snapshot
+# (proved bit-identical to the accepted Stage-1 outputs by the ticket-06
+# reconciliation). During the pre-promotion dry run this memo was rendered
+# with the same env vars pointing at canonical (then Stage 1) and the staging
+# root instead.
 stage1_root <- Sys.getenv(
   "STAGE2_MEMO_STAGE1_ROOT",
-  file.path(repo_root, "data", "processed", "cross_section")
+  file.path(
+    repo_root, ".scratch", "exposure-builder-refactor", "baseline-snapshot"
+  )
 )
 stage2_root <- Sys.getenv(
   "STAGE2_MEMO_STAGE2_ROOT",
-  file.path(
-    repo_root, ".scratch", "exposure-builder-refactor", "stage2-dryrun"
-  )
+  file.path(repo_root, "data", "processed", "cross_section")
 )
+if (identical(normalizePath(stage1_root, mustWork = FALSE),
+              normalizePath(stage2_root, mustWork = FALSE))) {
+  stop(
+    "The two roots resolve to the same directory; the comparison would be ",
+    "vacuous. Set STAGE2_MEMO_STAGE1_ROOT and STAGE2_MEMO_STAGE2_ROOT to ",
+    "distinct generations.",
+    call. = FALSE
+  )
+}
 changing <- list(
   list(dir = "sales/prior_to_sale", id = "house_id",
        label = "Prior exposure, sales (radius grain)"),
@@ -250,7 +265,7 @@ on three samples per market:
    masks every row the exclusion targeted and more.
 
 ```{r hedonic}
-RAD <- 250L
+preferred_radius_m <- 250L
 
 sales_meta <- arrow::read_parquet(
   file.path(repo_root, "data", "processed", "house_price.parquet"),
@@ -269,7 +284,7 @@ load_hedonic_sample <- function(root, market, manual_exclusion = FALSE) {
   dir <- if (market == "sales") "sales/prior_to_sale" else "rentals/prior_to_rental"
   id <- if (market == "sales") "house_id" else "rental_id"
   dat <- arrow::open_dataset(file.path(root, dir)) |>
-    dplyr::filter(radius == RAD, n_spill_sites > 0) |>
+    dplyr::filter(radius == preferred_radius_m, n_spill_sites > 0) |>
     dplyr::select(dplyr::all_of(c(
       id, "spill_count_weekly_avg", "spill_hrs_weekly_avg",
       "annual_returns_na_then_absent"
@@ -277,6 +292,9 @@ load_hedonic_sample <- function(root, market, manual_exclusion = FALSE) {
     dplyr::collect() |>
     data.table::as.data.table()
   if (manual_exclusion) {
+    # The removed analysis-script filter dropped flagged rows; a missing flag
+    # would silently widen that into dropping NA rows too, so assert first.
+    stopifnot(!anyNA(dat$annual_returns_na_then_absent))
     dat <- dat[annual_returns_na_then_absent == FALSE]
   }
   if (market == "sales") {
@@ -377,16 +395,18 @@ dataset rather than as a filter in the analysis script.
 
 ## Provenance and reproducibility
 
-The Stage-1 generation read by this memo is the canonical tree accepted by
-the ticket-06 reconciliation (bit-identical to the ticket-01 pre-refactor
-snapshot). The Stage-2 generation is the ticket-09 dry run, built by the
-unmodified builder entry scripts with their published output redirected to
-the staging root. Set `STAGE2_MEMO_STAGE1_ROOT` and `STAGE2_MEMO_STAGE2_ROOT`
-to render this memo against relocated generations (after promotion, the
-Stage-1 generation lives in the parked directories or the ticket-01
-snapshot). The row-by-row attribution backing this memo — every difference is
-an NA flip, and the newly-NA row sets equal the flag-predicted sets exactly —
-is recorded in the ticket-09 reconciliation log.
+The Stage-1 generation read by this memo is the accepted Stage-1 output: at
+sign-off time the canonical tree itself, and after promotion the ticket-01
+baseline snapshot, which the ticket-06 reconciliation proved bit-identical to
+it (the defaults above reflect the post-promotion layout; the displaced
+Stage-1 directories are also parked beside their canonical paths as
+`<name>.stage1-parked-20260819`). The Stage-2 generation is the ticket-09 dry
+run, built by the unmodified builder entry scripts with their published
+output redirected to a staging root and promoted to canonical on sign-off.
+Set `STAGE2_MEMO_STAGE1_ROOT` and `STAGE2_MEMO_STAGE2_ROOT` to render against
+relocated generations. The row-by-row attribution backing this memo — every
+difference is an NA flip, and the newly-NA row sets equal the flag-predicted
+sets exactly — is recorded in the ticket-09 reconciliation log.
 
 ## Sign-off
 
