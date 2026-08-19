@@ -37,6 +37,10 @@ initialise_environment <- function() {
     library(pkg, character.only = TRUE)
   }))
   source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+
+  # data.table joins on arrow ALTREP character keys can silently drop rows; see
+  # docs/solutions/logic-errors/arrow-altrep-data-table-join-nondeterminism.md
+  options(arrow.use_altrep = FALSE)
 }
 
 #' Set up logging configuration

@@ -145,7 +145,23 @@ study_period_annual_evidence_grid <- function(annual_returns, window) {
       call. = FALSE
     )
   }
-  annual <- annual[, ..required]
+  selected <- c(required, intersect("matched_event_count", names(annual)))
+  annual <- annual[, ..selected]
+  if ("matched_event_count" %in% names(annual)) {
+    # Validate before the universe expansion: the gap fill turns NA counts into
+    # zeros indiscriminately, so a genuinely missing count must fail here
+    # rather than be silently absorbed as an absence of matched events.
+    count <- annual$matched_event_count
+    if (!is.numeric(count) || anyNA(count) || any(!is.finite(count)) ||
+        any(count < 0) || any(count != floor(count)) ||
+        any(count > .Machine$integer.max)) {
+      stop(
+        "matched_event_count must contain nonmissing nonnegative integer values.",
+        call. = FALSE
+      )
+    }
+    annual[, matched_event_count := as.integer(matched_event_count)]
+  }
   if (!is.numeric(annual$site_id) || anyNA(annual$site_id) ||
       any(!is.finite(annual$site_id)) || any(annual$site_id != floor(annual$site_id)) ||
       any(annual$site_id < -.Machine$integer.max - 1) ||
@@ -172,26 +188,46 @@ study_period_annual_evidence_grid <- function(annual_returns, window) {
   }
   study_period_validate_annual_states(annual)
 
-  complete_grid <- data.table::CJ(
-    site_id = sort(unique(annual$site_id)),
-    year = window$years,
-    unique = TRUE
+  # Evidence classification comes from the shared truth table, reduced to one
+  # row per Site Group by the window reducer (R9). The universe is this
+  # family's own — the window's years — and the gap fill that turns an
+  # unmentioned Site Group-year into `absent` is the core's single copy of that
+  # rule. The grid stops at the three atomic flags: each collapse ORs its own
+  # verdict from them, and neither verdict is stored (R15).
+  annual <- data.table::as.data.table(expand_site_year_universe(
+    annual,
+    site_ids = unique(annual$site_id),
+    years = window$years
+  ))
+  site_evidence <- data.table::as.data.table(
+    reduce_evidence_flags_over_window(classify_annual_returns_evidence(annual))
   )
-  annual <- annual[complete_grid, on = .(site_id, year)]
-  annual[, missing_evidence := is.na(annual_status) |
-    annual_status %in% c("reported_na", "absent")]
-  annual
+  list(annual = annual, site_evidence = site_evidence)
 }
 
 collapse_study_period_annual_returns <- function(annual_returns, window) {
-  annual <- study_period_annual_evidence_grid(annual_returns, window)
+  grid <- study_period_annual_evidence_grid(annual_returns, window)
+  annual <- grid$annual
+  # The EA-evidence verdict, computed here and never stored (R15). It reads
+  # only the first two flags, permanently: the third indicts the event
+  # matching, not the Annual Returns these measures are read from, so this is
+  # a second source with its own verdict rather than an opt-out from the
+  # harmonized rule (R17, R18).
+  site_evidence <- grid$site_evidence[, .(
+    site_id,
+    has_missing_evidence = annual_returns_absent | annual_returns_na
+  )]
+  annual[
+    site_evidence, on = "site_id",
+    has_missing_evidence := i.has_missing_evidence
+  ]
   collapsed <- annual[
     order(site_id, year),
     {
-      unknown <- any(missing_evidence)
+      unknown <- has_missing_evidence[[1L]]
       list(
-        spill_count = if (unknown) NA_real_ else base::sum(spill_count_ea),
-        spill_hrs = if (unknown) NA_real_ else base::sum(spill_hrs_ea),
+        spill_count = if (unknown) NA_real_ else spill_stable_sum(spill_count_ea),
+        spill_hrs = if (unknown) NA_real_ else spill_stable_sum(spill_hrs_ea),
         has_missing_evidence = unknown
       )
     },
@@ -201,10 +237,10 @@ collapse_study_period_annual_returns <- function(annual_returns, window) {
   collapsed
 }
 
-# Clip individual EDM events to the study window, mirroring the overlap filter
-# and clamping that prior_exposure_utils.R applies to per-transaction windows.
-# The window ends at midnight opening the day after end_date, so the final
-# calendar day is fully inside the window.
+# Clip individual EDM events to the study window through the shared clip, with
+# the study family's two window constants (R8). The window ends at midnight
+# opening the day after end_date, so the final calendar day is fully inside
+# the window.
 study_period_clip_events <- function(events, window) {
   if (!is.list(window) || !inherits(window$start_date, "Date") ||
       !inherits(window$end_date, "Date")) {
@@ -248,23 +284,7 @@ study_period_clip_events <- function(events, window) {
   window_end <- as.POSIXct(
     format(window$end_date + 1L, "%Y-%m-%d 00:00:00"), tz = "UTC"
   )
-  clipped <- clipped[start_time < window_end & end_time >= window_start]
-  if (nrow(clipped) == 0L) {
-    return(clipped[, .(
-      site_id = integer(0),
-      clipped_start = as.POSIXct(character(0), tz = "UTC"),
-      clipped_end = as.POSIXct(character(0), tz = "UTC"),
-      event_hours = numeric(0)
-    )])
-  }
-  clipped[, `:=`(
-    clipped_start = pmax(start_time, window_start),
-    clipped_end = pmin(end_time, window_end)
-  )]
-  clipped[, event_hours := as.numeric(difftime(
-    clipped_end, clipped_start, units = "hours"
-  ))]
-  clipped <- clipped[event_hours > 0]
+  clipped <- clip_events_to_window(clipped, window_start, window_end)
   clipped[, .(site_id, clipped_start, clipped_end, event_hours)]
 }
 
@@ -279,22 +299,31 @@ collapse_study_period_events <- function(annual_returns, events, window) {
       call. = FALSE
     )
   }
-  annual <- study_period_annual_evidence_grid(annual_returns, window)
-  evidence <- annual[
-    order(site_id),
-    .(has_missing_evidence = any(missing_evidence)),
-    by = site_id
-  ]
+  grid <- study_period_annual_evidence_grid(annual_returns, window)
+  # The event-evidence verdict, computed here and never stored (R15): the OR
+  # of all three flags, so the same evidence gap that masks a prior dataset
+  # masks this one too (R17, R18).
+  evidence <- grid$site_evidence[, .(
+    site_id,
+    has_missing_evidence = annual_returns_absent | annual_returns_na |
+      reported_positive_without_matched_events
+  )]
+  # Without `matched_event_count` the third flag is missing rather than FALSE,
+  # which would silently read an unverifiable positive as no gap at all.
+  if (anyNA(evidence$has_missing_evidence)) {
+    stop(
+      "The event-evidence verdict requires matched_event_count on every ",
+      "Annual-Returns row: classify_annual_returns_evidence() leaves the ",
+      "third flag missing without it.",
+      call. = FALSE
+    )
+  }
 
   clipped <- study_period_clip_events(events, window)
-  totals <- clipped[
-    order(site_id, clipped_start),
-    .(
-      spill_count = as.numeric(count_spills(clipped_start, clipped_end)),
-      spill_hrs = base::sum(event_hours)
-    ),
-    by = site_id
-  ]
+  # The shared collapse's defaults are this engine's established seam: rows
+  # ordered by the grouping key then clipped_start, and a sum without na.rm so
+  # an unexpected NA reaches the guard below (R10, R12).
+  totals <- collapse_events_by_group(clipped, by = "site_id")
 
   # Right-join onto the evidence grid: a Site Group the positives-only feed never
   # mentions is a true zero, not a gap. Keying that on the join rather than on
@@ -669,6 +698,10 @@ study_period_reduce_validated_lookup_row_group <- function(
       expanded[, evidence_unknown :=
         is.na(has_missing_evidence) | has_missing_evidence |
           is.na(spill_count) | is.na(spill_hrs)]
+      # The per-radius re-summing shape is this engine's intentional difference
+      # from the prior family (R11); only the arithmetic adopts the stable-sum
+      # discipline: a fixed row order, then sums through the wrappers (R12).
+      data.table::setorderv(expanded, c(id, "radius", "site_id"))
       aggregate <- expanded[, {
         if (anyNA(distance_m)) {
           stop(
@@ -679,8 +712,8 @@ study_period_reduce_validated_lookup_row_group <- function(
         unknown <- any(evidence_unknown)
         list(
           n_spill_sites = as.integer(.N),
-          spill_count = if (unknown) NA_real_ else base::sum(spill_count),
-          spill_hrs = if (unknown) NA_real_ else base::sum(spill_hrs),
+          spill_count = if (unknown) NA_real_ else spill_stable_sum(spill_count),
+          spill_hrs = if (unknown) NA_real_ else spill_stable_sum(spill_hrs),
           mean_distance = base::mean(distance_m),
           min_distance = base::min(distance_m),
           has_missing_site = unknown
@@ -711,15 +744,15 @@ study_period_reduce_validated_lookup_row_group <- function(
     min_distance = NA_real_,
     has_missing_site = FALSE
   )]
+  count_rates <- spill_window_rates(base$spill_count, n_days_in_window)
+  hour_rates <- spill_window_rates(base$spill_hrs, n_days_in_window)
   base[, `:=`(
     n_days_in_window = n_days_in_window,
     spatially_eligible = TRUE,
-    spill_count_daily_avg = spill_count / n_days_in_window,
-    spill_hrs_daily_avg = spill_hrs / n_days_in_window
-  )]
-  base[, `:=`(
-    spill_count_weekly_avg = spill_count_daily_avg * 7,
-    spill_hrs_weekly_avg = spill_hrs_daily_avg * 7
+    spill_count_daily_avg = count_rates$daily_avg,
+    spill_hrs_daily_avg = hour_rates$daily_avg,
+    spill_count_weekly_avg = count_rates$weekly_avg,
+    spill_hrs_weekly_avg = hour_rates$weekly_avg
   )]
   data.table::setcolorder(base, contract$schema$names)
   study_period_validate_and_cast_public(base, contract)
@@ -1147,9 +1180,14 @@ study_period_read_parquet_columns <- function(path, columns, context) {
       call. = FALSE
     )
   }
+  # as.data.frame() materializes arrow's chunked columns before data.table sees
+  # them; data.table joins on collected-but-unmaterialized character keys drop
+  # rows nondeterministically. See
+  # docs/solutions/logic-errors/arrow-altrep-data-table-join-nondeterminism.md
   dataset |>
     dplyr::select(dplyr::all_of(columns)) |>
     dplyr::collect() |>
+    as.data.frame() |>
     data.table::as.data.table()
 }
 
@@ -1202,7 +1240,10 @@ build_study_period_cross_section <- function(config) {
   )
   annual_returns <- study_period_read_parquet_columns(
     config$crosswalk_path,
-    c("site_id", "year", "annual_status", "spill_count_ea", "spill_hrs_ea"),
+    c(
+      "site_id", "year", "annual_status", "spill_count_ea", "spill_hrs_ea",
+      "matched_event_count"
+    ),
     "Annual-return crosswalk"
   )
   exposure_source <- resolved$exposure_source

@@ -204,7 +204,7 @@ assert_rental_time_contract <- function(producer_env, fixture_root, label) {
     paste(label, "must retain only the event overlapping the exclusive cutoff")
   )
   assert_identical(
-    joined$events_dt$clamped_end,
+    joined$events_dt$clipped_end,
     expected_endpoint,
     paste(label, "must clamp the overlapping event to rental midnight UTC")
   )
@@ -615,6 +615,31 @@ assert_true(
     pull(annual_returns_na_then_absent)),
   "A site without a later absent year must not be flagged."
 )
+# AE5, first half: the sequence flag is a strict refinement of the reported_na
+# prefix, so it can never fire on a Site Group-cutoff the Stage-2 verdict does
+# not already call unknown. This is what makes the hedonic's manual exclusion
+# redundant rather than merely coincidental on today's data.
+annual_return_sequence_atoms <- suppressMessages(
+  derive_site_group_prefix_missing_flags(
+    annual_return_sequence_fixture,
+    base_year = 2021L,
+    cutoff_years = 2020:2023,
+    include_annual_return_sequence = TRUE,
+    include_atomic_evidence_flags = TRUE
+  )
+)
+assert_true(
+  any(annual_return_sequence_atoms$annual_returns_na_then_absent) &&
+    all(
+      annual_return_sequence_atoms$annual_returns_na[
+        annual_return_sequence_atoms$annual_returns_na_then_absent
+      ]
+    ),
+  paste(
+    "annual_returns_na_then_absent = TRUE must imply annual_returns_na = TRUE,",
+    "the flag the Stage-2 radius-grain verdict masks on."
+  )
+)
 sequence_same_site_metrics <- data.table(
   transaction_id = "001",
   site_id = c(10L, 11L),
@@ -645,6 +670,35 @@ assert_true(
     sequence_mixed_site_metrics, "001", c(100L, 250L)
   )$annual_returns_na_then_absent),
   "A radius must not combine annual-return NA and later absence from different sites."
+)
+
+# The event-evidence verdict accumulates the same way the published flags do:
+# any contributing Site Group inside the radius raises it, in distance order.
+unknown_evidence_metrics <- data.table(
+  transaction_id = "001",
+  site_id = c(10L, 11L),
+  distance_m = c(100, 200),
+  site_missing = FALSE,
+  site_unknown_evidence = c(FALSE, TRUE),
+  annual_returns_na_then_absent = FALSE,
+  spill_hrs = c(1, 2),
+  spill_count = c(1, 2)
+)
+unknown_evidence_result <- prior_exposure_reduce_radius(
+  unknown_evidence_metrics, "001", c(100L, 250L)
+)
+setorder(unknown_evidence_result, radius)
+assert_identical(
+  unknown_evidence_result$has_unknown_evidence,
+  c(FALSE, TRUE),
+  paste(
+    "A Site Group with unknown evidence must turn only the radii that contain",
+    "it unknown, leaving the nearer radius known."
+  )
+)
+assert_true(
+  !any(unknown_evidence_result$has_missing_site),
+  "The widened verdict must not leak into has_missing_site."
 )
 
 for (invalid_count in list(NA_real_, -1, 1.5, "invalid")) {
@@ -1553,10 +1607,10 @@ stable_events <- data.table(
   end_time = as.POSIXct(c(
     "2021-01-01 04:00:00", "2021-01-01 03:00:00", "2021-01-01 02:00:00"
   ), tz = "UTC"),
-  clamped_start = as.POSIXct(c(
+  clipped_start = as.POSIXct(c(
     "2021-01-01 03:00:00", "2021-01-01 02:00:00", "2021-01-01 01:00:00"
   ), tz = "UTC"),
-  clamped_end = as.POSIXct(c(
+  clipped_end = as.POSIXct(c(
     "2021-01-01 04:00:00", "2021-01-01 03:00:00", "2021-01-01 02:00:00"
   ), tz = "UTC"),
   event_hours = c(1e16, 1, 1)
@@ -1725,7 +1779,10 @@ for (label in names(producer_specs)) {
     written_chunks <<- c(written_chunks, as.integer(chunk_index))
     prior_exposure_write_chunk(chunk, stage_path, chunk_index)
   }
-  prior_exposure_stream(data, output_path, write_chunk = observing_writer)
+  prior_exposure_stream(
+    data, output_path,
+    profile = prior_exposure_public_stream_profile(write = observing_writer)
+  )
   reopened <- arrow::open_dataset(output_path)
   result <- reopened |>
     dplyr::collect() |>
@@ -1850,9 +1907,11 @@ unreached_publisher <- function(...) {
 after_write_error <- tryCatch(
   prior_exposure_stream(
     failure_data, failure_canonical,
-    process_joined = fail_second_chunk,
-    write_chunk = observing_first_write,
-    publish_dataset = unreached_publisher
+    profile = prior_exposure_public_stream_profile(
+      process = fail_second_chunk,
+      write = observing_first_write,
+      publish = unreached_publisher
+    )
   ),
   error = identity
 )
@@ -1892,7 +1951,7 @@ validation_error <- tryCatch(
   prior_exposure_stream(
     failure_data, failure_canonical,
     before_publish = corrupt_stage_days,
-    publish_dataset = validating_publisher
+    profile = prior_exposure_public_stream_profile(publish = validating_publisher)
   ),
   error = identity
 )
@@ -1916,11 +1975,13 @@ assert_stream_mutation_fails <- function(label, mutate_result, expected_message)
     prior_exposure_stream(
       failure_data,
       tempfile(paste0("prior-exposure-stream-invalid-", label, "-")),
-      process_joined = mutate_chunk,
-      publish_dataset = function(...) {
-        promotion_reached <<- TRUE
-        invisible(NULL)
-      }
+      profile = prior_exposure_public_stream_profile(
+        process = mutate_chunk,
+        publish = function(...) {
+          promotion_reached <<- TRUE
+          invisible(NULL)
+        }
+      )
     ),
     error = identity
   )
@@ -1996,6 +2057,919 @@ for (label in names(prefix_results)) {
     paste(label, "weekly rates must equal daily rates times seven")
   )
 }
+
+# U2: shared measurement core -------------------------------------------------
+
+# AE2 at truth-table level. One Site Group-year per atomic condition, plus the
+# site-year the crosswalk never mentions, which only exists once the universe
+# has been expanded around it.
+core_evidence_rows <- tibble(
+  site_id = c(1L, 1L, 1L, 1L),
+  year = c(2021L, 2022L, 2024L, 2025L),
+  annual_status = c(
+    "absent", "reported_na", "reported_positive", "reported_positive"
+  ),
+  matched_event_count = c(0L, 0L, 0L, 3L)
+)
+
+core_universe <- expand_site_year_universe(
+  core_evidence_rows,
+  site_ids = 1L,
+  years = 2021:2025
+)
+assert_identical(
+  core_universe$annual_status,
+  c(
+    "absent", "reported_na", "absent",
+    "reported_positive", "reported_positive"
+  ),
+  "An unmentioned Site Group-year must be filled as absent by the universe."
+)
+assert_identical(
+  core_universe$matched_event_count,
+  c(0L, 0L, 0L, 0L, 3L),
+  "A filled Site Group-year must carry no matched events."
+)
+
+core_flags <- classify_annual_returns_evidence(core_universe)
+assert_identical(
+  core_flags$annual_returns_absent,
+  c(TRUE, FALSE, TRUE, FALSE, FALSE),
+  "annual_returns_absent must cover status absent and the missing site-year."
+)
+assert_identical(
+  core_flags$annual_returns_na,
+  c(FALSE, TRUE, FALSE, FALSE, FALSE),
+  "annual_returns_na must cover status reported_na alone."
+)
+assert_identical(
+  core_flags$reported_positive_without_matched_events,
+  c(FALSE, FALSE, FALSE, TRUE, FALSE),
+  "Only reported_positive with zero matched events must raise the third flag."
+)
+
+# A caller that does not read matched_event_count must leave the third flag
+# unknown rather than falsely FALSE, so a verdict that ORs it is loud.
+assert_true(
+  all(is.na(
+    classify_annual_returns_evidence(
+      dplyr::select(core_universe, -"matched_event_count")
+    )$reported_positive_without_matched_events[
+      core_universe$annual_status == "reported_positive"
+    ]
+  )),
+  "Without matched_event_count the third flag must be NA, not FALSE."
+)
+
+core_prefix <- reduce_evidence_flags_to_prefix(core_flags)
+assert_identical(
+  core_prefix$cutoff_year,
+  2021:2025,
+  "The prefix reducer must keep one row per cutoff year, in year order."
+)
+assert_identical(
+  core_prefix$annual_returns_absent,
+  c(TRUE, TRUE, TRUE, TRUE, TRUE),
+  "A flag raised at the first year must stay raised at every later cutoff."
+)
+assert_identical(
+  core_prefix$annual_returns_na,
+  c(FALSE, TRUE, TRUE, TRUE, TRUE),
+  "The prefix reducer must accumulate reported_na from the year it appears."
+)
+assert_identical(
+  core_prefix$reported_positive_without_matched_events,
+  c(FALSE, FALSE, FALSE, TRUE, TRUE),
+  "The prefix reducer must accumulate the matched-event flag from 2024."
+)
+
+# The prefix reducer accumulates within a Site Group, never across two.
+core_two_sites <- expand_site_year_universe(
+  tibble(
+    site_id = c(1L, 1L, 2L, 2L),
+    year = c(2021L, 2022L, 2021L, 2022L),
+    annual_status = c(
+      "absent", "reported_zero", "reported_zero", "reported_zero"
+    ),
+    matched_event_count = c(0L, 0L, 0L, 0L)
+  ),
+  site_ids = c(1L, 2L), years = 2021:2022
+)
+assert_identical(
+  reduce_evidence_flags_to_prefix(
+    classify_annual_returns_evidence(core_two_sites)
+  )$annual_returns_absent,
+  c(TRUE, TRUE, FALSE, FALSE),
+  "One Site Group's absence must not leak into another's prefix."
+)
+
+# Clipping, with per-row window bounds: the prior engine gives every
+# transaction its own endpoint. The fixture straddles both window edges.
+core_window_start <- as.POSIXct("2021-01-01 00:00:00", tz = "UTC")
+core_clip_events <- data.table(
+  event_id = 1:6,
+  start_time = as.POSIXct(
+    c(
+      "2020-12-31 12:00:00", "2021-01-02 00:00:00", "2021-01-04 18:00:00",
+      "2020-12-20 00:00:00", "2021-01-06 00:00:00", "2020-12-31 00:00:00"
+    ),
+    tz = "UTC"
+  ),
+  end_time = as.POSIXct(
+    c(
+      "2021-01-01 06:00:00", "2021-01-03 00:00:00", "2021-01-06 06:00:00",
+      "2020-12-25 00:00:00", "2021-01-07 00:00:00", "2021-01-01 00:00:00"
+    ),
+    tz = "UTC"
+  )
+)
+core_endpoints <- as.POSIXct(
+  rep("2021-01-05 00:00:00", 6), tz = "UTC"
+)
+core_clipped <- clip_events_to_window(
+  core_clip_events, core_window_start, core_endpoints
+)
+assert_identical(
+  core_clipped$event_id,
+  c(1L, 2L, 3L),
+  paste(
+    "Clipping must drop events wholly outside the window and the event that",
+    "only touches window_start."
+  )
+)
+assert_identical(
+  core_clipped$event_hours,
+  c(6, 24, 6),
+  "Clipped hours must measure the overlap with the window only."
+)
+assert_identical(
+  core_clipped$clipped_start,
+  as.POSIXct(
+    c("2021-01-01 00:00:00", "2021-01-02 00:00:00", "2021-01-04 18:00:00"),
+    tz = "UTC"
+  ),
+  "Clipping must clamp an early start up to window_start."
+)
+assert_identical(
+  core_clipped$clipped_end,
+  as.POSIXct(
+    c("2021-01-01 06:00:00", "2021-01-03 00:00:00", "2021-01-05 00:00:00"),
+    tz = "UTC"
+  ),
+  "Clipping must clamp a late end down to that row's own window_end."
+)
+
+# The scalar and per-row paths must agree when every row shares one bound.
+assert_identical(
+  clip_events_to_window(
+    core_clip_events, core_window_start, core_endpoints[1L]
+  ),
+  core_clipped,
+  "A scalar window bound must match the same bound repeated per row."
+)
+
+# Per-row bounds must stay attached to their own event across the filter.
+core_row_bounds <- clip_events_to_window(
+  core_clip_events,
+  core_window_start,
+  as.POSIXct(
+    c(
+      "2021-01-01 03:00:00", "2021-01-05 00:00:00", "2021-01-05 00:00:00",
+      "2021-01-05 00:00:00", "2021-01-05 00:00:00", "2021-01-05 00:00:00"
+    ),
+    tz = "UTC"
+  )
+)
+assert_identical(
+  core_row_bounds$event_id,
+  c(1L, 2L, 3L),
+  "A per-row window must not change which events survive here."
+)
+assert_identical(
+  core_row_bounds$event_hours,
+  c(3, 24, 6),
+  "Each surviving event must be clipped by its own row's window_end."
+)
+
+assert_true(
+  !any(c("clipped_start", "event_hours") %in% names(core_clip_events)),
+  "Clipping must not add columns to the caller's own event table."
+)
+
+# The shared collapse must reproduce the prior engine's per-transaction,
+# per-site totals. Hand-computed: site 7 has two overlapping events inside one
+# 12-hour block, so the 12/24 rule counts them as one spill.
+core_collapse_events <- data.table(
+  transaction_id = c("t1", "t1", "t1", "t2"),
+  site_id = c(7L, 7L, 8L, 7L),
+  start_time = as.POSIXct(
+    c(
+      "2021-01-01 00:00:00", "2021-01-01 04:00:00",
+      "2021-01-02 00:00:00", "2021-01-03 00:00:00"
+    ),
+    tz = "UTC"
+  ),
+  end_time = as.POSIXct(
+    c(
+      "2021-01-01 02:00:00", "2021-01-01 07:00:00",
+      "2021-01-02 03:00:00", "2021-01-03 01:00:00"
+    ),
+    tz = "UTC"
+  )
+)
+# Replicate the prior engine's inline clipping verbatim, so the equivalence
+# checks below never lean on the very function they are meant to corroborate.
+prior_engine_clip <- function(events, window_start) {
+  clipped <- copy(events)
+  clipped <- clipped[start_time < date_of_transfer & end_time >= window_start]
+  endpoint <- clipped$date_of_transfer
+  clipped[, `:=`(
+    clamped_start = pmax(start_time, window_start),
+    clamped_end = pmin(end_time, endpoint)
+  )]
+  clipped[, event_hours := as.numeric(difftime(
+    clamped_end, clamped_start, units = "hours"
+  ))]
+  clipped[event_hours > 0]
+}
+
+core_collapse_events[, `:=`(
+  house_id = transaction_id,
+  date_of_transfer = as.POSIXct("2021-01-10 00:00:00", tz = "UTC")
+)]
+core_engine_clipped <- prior_engine_clip(
+  core_collapse_events, core_window_start
+)
+
+# Clip equivalence against the engine still in place, not against hand values.
+core_shared_clipped <- clip_events_to_window(
+  core_collapse_events, core_window_start, core_collapse_events$date_of_transfer
+)
+assert_identical(
+  core_shared_clipped$event_hours,
+  core_engine_clipped$event_hours,
+  "The shared clip must reproduce the prior engine's clipped hours exactly."
+)
+assert_identical(
+  core_shared_clipped$clipped_start,
+  core_engine_clipped$clamped_start,
+  "The shared clip must reproduce the prior engine's clamped starts exactly."
+)
+assert_identical(
+  core_shared_clipped$clipped_end,
+  core_engine_clipped$clamped_end,
+  "The shared clip must reproduce the prior engine's clamped ends exactly."
+)
+
+# Collapse equivalence: both sides start from the engine's own clipped events,
+# so this compares the collapses alone. The prior engine passes its fuller sort
+# key and na.rm = TRUE, matching what it does today.
+# The engine now consumes the core's column names; the replicated historical
+# clip above still uses the old ones, which is what makes it an independent
+# check rather than a restatement of the new code.
+core_engine_clipped <- copy(core_engine_clipped)[, `:=`(
+  clipped_start = clamped_start, clipped_end = clamped_end
+)]
+core_collapsed <- collapse_events_by_group(
+  core_engine_clipped,
+  by = c("transaction_id", "site_id"),
+  order_by = c("clipped_start", "clipped_end", "start_time", "end_time"),
+  na.rm = TRUE
+)
+setkeyv(core_collapsed, c("transaction_id", "site_id"))
+
+# Hand-computed: site 7 under t1 has two events inside one 12-hour block, so
+# the 12/24 rule counts them as one spill across five spilling hours.
+assert_identical(
+  core_collapsed[.("t1", 7L), .(spill_hrs, spill_count)],
+  data.table(spill_hrs = 5, spill_count = 1),
+  "Two events inside one 12-hour block must collapse to one counted spill."
+)
+assert_identical(
+  core_collapsed[.("t1", 8L), .(spill_hrs, spill_count)],
+  data.table(spill_hrs = 3, spill_count = 1),
+  "A second site under the same transaction must collapse separately."
+)
+assert_identical(
+  core_collapsed[.("t2", 7L), .(spill_hrs, spill_count)],
+  data.table(spill_hrs = 1, spill_count = 1),
+  "The same site under a second transaction must collapse separately."
+)
+
+core_equivalence_lookup <- data.table(
+  transaction_id = c("t1", "t1", "t2"),
+  site_id = c(7L, 8L, 7L),
+  distance_m = c(100, 200, 100),
+  site_missing = FALSE,
+  has_unknown_event_evidence = FALSE
+)
+core_engine_totals <- as.data.table(prior_exposure_calculate_metrics(
+  core_equivalence_lookup, core_engine_clipped,
+  market = "sale", grain = "site", radii = 1000L
+))[, .(house_id, site_id, spill_hrs, spill_count)]
+setkeyv(core_engine_totals, c("house_id", "site_id"))
+assert_identical(
+  core_engine_totals$spill_hrs,
+  core_collapsed$spill_hrs,
+  "The shared collapse must reproduce the prior engine's spill hours."
+)
+assert_identical(
+  core_engine_totals$spill_count,
+  core_collapsed$spill_count,
+  "The shared collapse must reproduce the prior engine's spill counts."
+)
+
+# na.rm is the caller's call: the study family relies on an NA total reaching
+# its own guard, so the default must not absorb one silently.
+core_na_hours <- data.table(
+  site_id = 1L,
+  clipped_start = as.POSIXct(c("2021-01-01", "2021-01-03"), tz = "UTC"),
+  clipped_end = as.POSIXct(c("2021-01-02", "2021-01-04"), tz = "UTC"),
+  event_hours = c(24, NA_real_)
+)
+assert_true(
+  is.na(collapse_events_by_group(core_na_hours, by = "site_id")$spill_hrs),
+  "A missing event hour must propagate by default rather than be dropped."
+)
+assert_identical(
+  collapse_events_by_group(
+    core_na_hours, by = "site_id", na.rm = TRUE
+  )$spill_hrs,
+  24,
+  "na.rm = TRUE must drop a missing event hour, as the prior engine does."
+)
+
+# The rate helper owns both formulas, and the weekly one is defined through
+# the daily one so the two cannot drift apart.
+core_rates <- spill_window_rates(c(10, 0, NA_real_), 100L)
+assert_identical(
+  core_rates$daily_avg,
+  c(0.1, 0, NA_real_),
+  "The daily average must be the window total over its length in days."
+)
+assert_identical(
+  core_rates$weekly_avg,
+  core_rates$daily_avg * 7,
+  "The weekly average must be the daily average times seven, bit for bit."
+)
+assert_true(
+  isTRUE(all.equal(core_rates$weekly_avg, c(0.7, 0, NA_real_))),
+  "The weekly average must be seven times the daily rate in magnitude."
+)
+assert_identical(
+  spill_window_rates(c(10, 20), c(100L, 40L))$daily_avg,
+  c(0.1, 0.5),
+  "The rate helper must accept one window length per row."
+)
+
+# U3: the unmasked measurement tables ------------------------------------------
+
+# Schema pins. These tables stay off the public enumerated list, so the tests
+# are what catch field drift.
+measurement_schema_signatures <- list(
+  sale = c(
+    house_id = "string", site_id = "int32", distance_m = "double",
+    spill_hrs = "double", spill_count = "double",
+    annual_returns_absent = "bool", annual_returns_na = "bool",
+    reported_positive_without_matched_events = "bool",
+    annual_returns_na_then_absent = "bool"
+  ),
+  rental = c(
+    rental_id = "string", site_id = "int32", distance_m = "double",
+    spill_hrs = "double", spill_count = "double",
+    annual_returns_absent = "bool", annual_returns_na = "bool",
+    reported_positive_without_matched_events = "bool",
+    annual_returns_na_then_absent = "bool"
+  )
+)
+for (market in names(measurement_schema_signatures)) {
+  assert_identical(
+    prior_exposure_schema_signature(prior_exposure_measurement_schema(market)),
+    measurement_schema_signatures[[market]],
+    paste(market, "measurement schema must match its pin exactly")
+  )
+  assert_true(
+    !"radius" %in% prior_exposure_measurement_schema(market)$names,
+    paste(market, "measurement table must carry no radius column")
+  )
+  for (field in c("price", "listing_price", "n_days_in_window",
+                  "spill_count_daily_avg", "site_missing",
+                  "has_unknown_event_evidence")) {
+    assert_true(
+      !field %in% prior_exposure_measurement_schema(market)$names,
+      paste(market, "measurement table must not store", field)
+    )
+  }
+}
+assert_error_contains(
+  prior_exposure_measurement_schema("both"),
+  "market must be exactly one of",
+  "The measurement schema must reject an unsupported market."
+)
+
+# The measurement tables stay off the public surface: the only way to reach a
+# published prior-exposure schema is the four-variant switch, and "measurement"
+# is not one of its grains.
+assert_error_contains(
+  prior_exposure_public_schema("sale", "measurement"),
+  "grain must be exactly one of",
+  "The public schema switch must not resolve the measurement grain."
+)
+assert_error_contains(
+  prior_exposure_variant("rental", "measurement"),
+  "grain must be exactly one of",
+  "The public variant switch must not resolve the measurement grain."
+)
+for (market in c("sale", "rental")) {
+  assert_identical(
+    prior_exposure_measurement_contract(market)$grain,
+    "measurement",
+    paste(market, "measurement contract must declare its own grain")
+  )
+}
+
+# A fixture with three transactions: 001 has two nearby Site Groups, 002 has
+# one, and 003 has none at all. Site 20 is absent from the crosswalk entirely.
+# Site 30 carries every positive evidence case inside the 2021-2023 lookback
+# window at once: a reported_positive year with no matched events (2021), a
+# reported_na year (2022), and an absent year (2024) that falls after the
+# window, which is what the na-then-absent sequence requires.
+write_measurement_fixture <- function(root) {
+  zoopla_dir <- file.path(root, "zoopla")
+  event_dir <- file.path(root, "matched_events_annual_data")
+  dir.create(zoopla_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(event_dir, recursive = TRUE, showWarnings = FALSE)
+
+  ids <- c("001", "002", "003")
+  endpoints <- as.POSIXct(rep("2023-06-01 00:00:00", 3L), tz = "UTC")
+  arrow::write_parquet(
+    tibble(
+      house_id = ids, price = c(100000L, 200000L, 300000L),
+      date_of_transfer = endpoints
+    ),
+    file.path(root, "house_price.parquet")
+  )
+  arrow::write_parquet(
+    tibble(
+      rental_id = ids, listing_price = c(1000, 2000, 3000),
+      rented_est = endpoints
+    ),
+    file.path(zoopla_dir, "zoopla_rentals.parquet")
+  )
+
+  lookup <- tibble(
+    transaction_id = c("001", "001", "002"),
+    site_id = c(10L, 20L, 30L),
+    distance_m = c(100, 400, 300)
+  )
+  arrow::write_parquet(
+    transmute(
+      lookup, house_id = .data$transaction_id, site_id = .data$site_id,
+      distance_m = .data$distance_m
+    ),
+    file.path(root, "spill_house_lookup.parquet")
+  )
+  arrow::write_parquet(
+    transmute(
+      lookup, rental_id = .data$transaction_id, site_id = .data$site_id,
+      distance_m = .data$distance_m
+    ),
+    file.path(zoopla_dir, "spill_rental_lookup.parquet")
+  )
+
+  crosswalk <- tidyr::expand_grid(site_id = c(10L, 30L), year = 2021:2024) |>
+    mutate(
+      water_company = "Test Water",
+      annual_status = case_when(
+        .data$site_id == 30L & .data$year == 2022L ~ "reported_na",
+        .data$site_id == 30L & .data$year == 2024L ~ "absent",
+        TRUE ~ "reported_positive"
+      ),
+      matched_event_count = if_else(
+        .data$annual_status == "reported_positive" &
+          !(.data$site_id == 30L & .data$year == 2021L),
+        1L, 0L
+      )
+    )
+  arrow::write_parquet(
+    crosswalk, file.path(event_dir, "site_group_crosswalk.parquet")
+  )
+  arrow::write_parquet(
+    tibble(
+      site_id = c(10L, 10L),
+      start_time = as.POSIXct(
+        c("2021-06-01 00:00:00", "2022-01-01 00:00:00"), tz = "UTC"
+      ),
+      end_time = as.POSIXct(
+        c("2021-06-02 00:00:00", "2022-01-01 06:00:00"), tz = "UTC"
+      ),
+      year = c(2021L, 2022L)
+    ),
+    file.path(event_dir, "matched_events_annual_data.parquet")
+  )
+  invisible(root)
+}
+
+measurement_config <- function(root, market, output_path) {
+  list(
+    market = market,
+    processed_dir = root,
+    output_path = output_path,
+    radius_thresholds = c(250, 500),
+    base_year = 2021,
+    window_start = as.POSIXct("2021-01-01 00:00:00", tz = "UTC"),
+    chunk_size = 1L,
+    site_group_crosswalk_path = file.path(
+      root, "matched_events_annual_data", "site_group_crosswalk.parquet"
+    )
+  )
+}
+
+measurement_root <- tempfile("prior-exposure-measurement-")
+dir.create(measurement_root, recursive = TRUE)
+write_measurement_fixture(measurement_root)
+
+for (market in c("sale", "rental")) {
+  id_column <- if (market == "sale") "house_id" else "rental_id"
+  output_path <- tempfile(paste0("measurement-", market, "-"))
+  prior_exposure_build_measurement(
+    measurement_config(measurement_root, market, output_path), market
+  )
+
+  reopened <- arrow::open_dataset(output_path)
+  assert_identical(
+    prior_exposure_schema_signature(reopened$schema),
+    measurement_schema_signatures[[market]],
+    paste(market, "measurement table must reopen with its pinned schema")
+  )
+  published <- data.table::as.data.table(dplyr::collect(reopened))
+  data.table::setorderv(published, c(id_column, "site_id"))
+
+  # Transaction 003 has no nearby Site Group at all, so it contributes no row.
+  assert_identical(
+    published[[id_column]],
+    c("001", "001", "002"),
+    paste(
+      market,
+      "must carry only real pairs inside the maximum radius, and no row for a",
+      "transaction with no nearby Site Group"
+    )
+  )
+  assert_identical(
+    published$site_id, c(10L, 20L, 30L),
+    paste(market, "must key on the actual nearby Site Groups")
+  )
+  assert_identical(
+    published$distance_m, c(100, 400, 300),
+    paste(market, "must carry each pair's own distance, not a radius")
+  )
+  assert_true(
+    !anyNA(published[[id_column]]) && !anyNA(published$site_id),
+    paste(market, "must contain no NA keys")
+  )
+
+  # Site 10 spills 24 hours in 2021 and 6 hours on 2022-01-01, both inside the
+  # window ending at the 2023-06-01 endpoint: 30 hours. The 24-hour event
+  # counts twice under the 12/24 rule, opening a 12-hour block and running one
+  # 24-hour block past it, and the 6-hour event opens a third block.
+  assert_identical(
+    published[site_id == 10L, .(spill_hrs, spill_count)],
+    data.table(spill_hrs = 30, spill_count = 3),
+    paste(market, "must store window-clipped hours and 12/24 spill counts")
+  )
+  # Site 20 is absent from the crosswalk, so it has no events and reads absent.
+  assert_identical(
+    published[site_id == 20L, .(spill_hrs, spill_count)],
+    data.table(spill_hrs = 0, spill_count = 0),
+    paste(market, "must record a measured zero for a pair with no events")
+  )
+  # Site 30 has no events of its own, so it is a measured zero too.
+  assert_identical(
+    published[site_id == 30L, .(spill_hrs, spill_count)],
+    data.table(spill_hrs = 0, spill_count = 0),
+    paste(market, "must record a measured zero for an evidence-flagged pair")
+  )
+
+  # R3: each of the first three flags is true when its condition holds in at
+  # least one year of the lookback window, and false otherwise. Site 30's
+  # absent year is 2024, outside the 2021-2023 window, so it stays unflagged
+  # as absent while still raising the na-then-absent sequence.
+  assert_identical(
+    published$annual_returns_absent, c(FALSE, TRUE, FALSE),
+    paste(market, "must flag a Site Group missing from the crosswalk as absent")
+  )
+  assert_identical(
+    published$annual_returns_na, c(FALSE, FALSE, TRUE),
+    paste(market, "must flag a reported_na year inside the lookback window")
+  )
+  assert_identical(
+    published$reported_positive_without_matched_events, c(FALSE, FALSE, TRUE),
+    paste(
+      market,
+      "must flag an eventless reported_positive year inside the lookback window"
+    )
+  )
+  assert_identical(
+    published$annual_returns_na_then_absent, c(FALSE, FALSE, TRUE),
+    paste(
+      market,
+      "must raise the sequence flag on reported_na followed by a later absent"
+    )
+  )
+
+  # AE8: a duplicated lookup pair must stop publication by name, with no
+  # silent min(distance_m) collapse anywhere (R13).
+  duplicate_root <- tempfile("prior-exposure-measurement-duplicate-")
+  dir.create(duplicate_root, recursive = TRUE)
+  write_measurement_fixture(duplicate_root)
+  lookup_file <- if (market == "sale") {
+    file.path(duplicate_root, "spill_house_lookup.parquet")
+  } else {
+    file.path(duplicate_root, "zoopla", "spill_rental_lookup.parquet")
+  }
+  duplicated_lookup <- arrow::read_parquet(lookup_file)
+  arrow::write_parquet(
+    dplyr::bind_rows(duplicated_lookup, duplicated_lookup[1, ]), lookup_file
+  )
+  duplicate_output <- tempfile(paste0("measurement-duplicate-", market, "-"))
+  assert_error_contains(
+    prior_exposure_build_measurement(
+      measurement_config(duplicate_root, market, duplicate_output), market
+    ),
+    "duplicate transaction-site pair",
+    paste(market, "must reject a duplicated transaction-site pair")
+  )
+  duplicate_error <- tryCatch(
+    prior_exposure_build_measurement(
+      measurement_config(duplicate_root, market, duplicate_output), market
+    ),
+    error = conditionMessage
+  )
+  assert_true(
+    grepl("site_id=10", duplicate_error, fixed = TRUE) &&
+      grepl(paste0(id_column, "=001"), duplicate_error, fixed = TRUE),
+    paste(market, "must name the duplicate key it rejected")
+  )
+  assert_true(
+    !dir.exists(duplicate_output),
+    paste(market, "must publish nothing when the pair gate fails")
+  )
+}
+
+# The stage gate is what catches a duplicate pair split across two fragments,
+# which the chunk-local gate cannot see. It streams row groups rather than
+# collecting the stage, so it needs its own fixtures.
+measurement_stage_contract <- prior_exposure_measurement_contract("sale")
+write_measurement_stage <- function(fragments) {
+  stage <- tempfile("measurement-stage-")
+  dir.create(stage, recursive = TRUE)
+  for (index in seq_along(fragments)) {
+    arrow::write_parquet(
+      fragments[[index]],
+      file.path(stage, sprintf("chunk-%010d-0.parquet", index))
+    )
+  }
+  stage
+}
+measurement_stage_row <- function(id, site_id) {
+  tibble(
+    house_id = id, site_id = as.integer(site_id), distance_m = 100,
+    spill_hrs = 1, spill_count = 1,
+    annual_returns_absent = FALSE, annual_returns_na = FALSE,
+    reported_positive_without_matched_events = FALSE,
+    annual_returns_na_then_absent = FALSE
+  )
+}
+
+clean_stage <- write_measurement_stage(list(
+  measurement_stage_row("001", 10L), measurement_stage_row("002", 20L)
+))
+assert_true(
+  isTRUE(prior_exposure_validate_measurement_stage(
+    clean_stage, prior_exposure_measurement_schema("sale"), 2,
+    measurement_stage_contract
+  )),
+  "A clean measurement stage must validate across fragments."
+)
+
+split_duplicate_stage <- write_measurement_stage(list(
+  measurement_stage_row("001", 10L), measurement_stage_row("001", 10L)
+))
+assert_error_contains(
+  prior_exposure_validate_measurement_stage(
+    split_duplicate_stage, prior_exposure_measurement_schema("sale"), 2,
+    measurement_stage_contract
+  ),
+  "duplicate transaction-site pair",
+  "The stage gate must catch a duplicate pair split across two fragments."
+)
+assert_error_contains(
+  prior_exposure_validate_measurement_stage(
+    clean_stage, prior_exposure_measurement_schema("sale"), 3,
+    measurement_stage_contract
+  ),
+  "row count mismatch",
+  "The streaming scan must conserve rows against the expected total."
+)
+assert_error_contains(
+  prior_exposure_validate_measurement_stage(
+    write_measurement_stage(list(
+      dplyr::mutate(measurement_stage_row("001", 10L), spill_hrs = NULL)
+    )),
+    prior_exposure_measurement_schema("sale"), 1, measurement_stage_contract
+  ),
+  "schema mismatch",
+  "The stage gate must reject a staged fragment that drifts from the schema."
+)
+
+# U4: the derivation layer over measurement rows ------------------------------
+
+# AE2 at derivation level. One transaction per evidence case, all at 100m:
+# t1 status absent, t2 a site-year row the crosswalk never mentions (which
+# arrives at the measurement grain as annual_returns_absent, exactly like t1),
+# t3 reported_na, t4 reported_positive with zero matched events, t5
+# reported_positive with matched events. t6 is in the ledger but has no nearby
+# Site Group at all.
+derivation_case_flags <- data.table(
+  transaction_id = sprintf("t%d", 1:5),
+  annual_returns_absent = c(TRUE, TRUE, FALSE, FALSE, FALSE),
+  annual_returns_na = c(FALSE, FALSE, TRUE, FALSE, FALSE),
+  reported_positive_without_matched_events = c(FALSE, FALSE, FALSE, TRUE, FALSE)
+)
+derivation_measurement <- data.table(
+  house_id = derivation_case_flags$transaction_id,
+  site_id = 10L + seq_len(5L),
+  distance_m = 100,
+  spill_hrs = as.double(1:5),
+  spill_count = as.double(1:5),
+  annual_returns_absent = derivation_case_flags$annual_returns_absent,
+  annual_returns_na = derivation_case_flags$annual_returns_na,
+  reported_positive_without_matched_events =
+    derivation_case_flags$reported_positive_without_matched_events,
+  annual_returns_na_then_absent = c(FALSE, FALSE, TRUE, FALSE, FALSE)
+)
+derivation_ledger <- data.table(
+  transaction_id = sprintf("t%d", 1:6),
+  transaction_value = as.double(1:6) * 100000,
+  n_days_in_window = 100L
+)
+setkey(derivation_ledger, transaction_id)
+derivation_data <- function(grain) {
+  list(
+    contract = prior_exposure_variant("sale", grain),
+    config = list(radius_thresholds = c(250, 500)),
+    transaction_dt = derivation_ledger
+  )
+}
+
+derivation_site <- prior_exposure_derive_site_grain(
+  derivation_measurement, sprintf("t%d", 1:6), derivation_data("site")
+)
+setorderv(derivation_site, c("house_id", "site_id", "radius"))
+assert_identical(
+  sort(unique(derivation_site$house_id)),
+  sprintf("t%d", 1:5),
+  "The site-grain derivation must omit a transaction with no nearby Site Group."
+)
+assert_identical(
+  derivation_site[radius == 250, is.na(spill_hrs)],
+  c(TRUE, TRUE, TRUE, TRUE, FALSE),
+  paste(
+    "The site-grain derivation must mask absent, crosswalk-missing,",
+    "reported_na, and unmatched-positive cases, and keep the matched case."
+  )
+)
+assert_identical(
+  derivation_site[radius == 250, is.na(spill_count)],
+  derivation_site[radius == 250, is.na(spill_hrs)],
+  "The site-grain verdict must mask both spill measures together."
+)
+assert_identical(
+  derivation_site[radius == 250, site_missing],
+  c(TRUE, TRUE, FALSE, FALSE, FALSE),
+  paste(
+    "The published site_missing column must be annual_returns_absent renamed,",
+    "not the masking verdict."
+  )
+)
+assert_true(
+  !any(c(
+    "annual_returns_absent", "annual_returns_na",
+    "reported_positive_without_matched_events", "annual_returns_na_then_absent"
+  ) %in% names(derivation_site)),
+  "The site-grain derivation must not publish the atomic evidence flags."
+)
+assert_identical(
+  derivation_site[house_id == "t5", spill_hrs_daily_avg],
+  c(0.05, 0.05),
+  "The site-grain derivation must attach rates through the shared helper."
+)
+assert_true(
+  all(is.na(derivation_site[house_id == "t1", spill_hrs_daily_avg])),
+  "A masked site-grain row must carry unknown rates."
+)
+
+derivation_radius <- prior_exposure_derive_radius_grain(
+  derivation_measurement, sprintf("t%d", 1:6), derivation_data("radius")
+)
+setorderv(derivation_radius, c("house_id", "radius"))
+assert_identical(
+  sort(unique(derivation_radius$house_id)),
+  sprintf("t%d", 1:6),
+  paste(
+    "The radius-grain derivation must re-enumerate the transaction universe",
+    "from the ledger, including a transaction with no nearby Site Group."
+  )
+)
+assert_identical(
+  derivation_radius[radius == 250, has_missing_site],
+  c(TRUE, TRUE, FALSE, FALSE, FALSE, FALSE),
+  paste(
+    "has_missing_site must keep publishing annual_returns_absent alone after",
+    "the Stage-2 mask widens."
+  )
+)
+# AE3 at fixture level: the radius grain moves onto the three-flag verdict, so
+# t3 (reported_na) and t4 (unmatched positive) join the two absence cases as
+# masked rows, and nothing else moves.
+stage1_radius_masked <- c(TRUE, TRUE, FALSE, FALSE, FALSE, FALSE)
+stage2_radius_masked <- derivation_radius[radius == 250, is.na(spill_hrs)]
+assert_identical(
+  stage2_radius_masked,
+  c(TRUE, TRUE, TRUE, TRUE, FALSE, FALSE),
+  paste(
+    "The radius-grain derivation must mask the absent, crosswalk-missing,",
+    "reported_na, and unmatched-positive cases on the event-evidence verdict."
+  )
+)
+assert_identical(
+  derivation_radius[radius == 250, is.na(spill_count)],
+  stage2_radius_masked,
+  "The radius-grain verdict must mask both spill measures together."
+)
+assert_identical(
+  derivation_radius[radius == 250, house_id][
+    stage2_radius_masked & !stage1_radius_masked
+  ],
+  c("t3", "t4"),
+  paste(
+    "The rows that newly turn unknown must be exactly the ones the two added",
+    "flags predict."
+  )
+)
+assert_identical(
+  derivation_radius[radius == 250, spill_hrs][!stage2_radius_masked],
+  c(5, 0),
+  "No radius-grain value outside the new mask may move."
+)
+assert_true(
+  all(is.na(derivation_radius[house_id == "t4", spill_hrs_weekly_avg])),
+  "A newly masked radius-grain row must carry unknown rates."
+)
+assert_identical(
+  derivation_radius[radius == 250, annual_returns_na_then_absent],
+  c(FALSE, FALSE, TRUE, FALSE, FALSE, FALSE),
+  "The radius-grain derivation must carry the sequence flag through unchanged."
+)
+# AE5, second half: with the implication above holding at the Site Group grain,
+# every radius-grain row the sequence flag marks is already unknown under the
+# Stage-2 verdict. The hedonic's manual `!annual_returns_na_then_absent` filter
+# therefore removed nothing its `!is.na(...)` filters did not already remove,
+# which is what licenses deleting it.
+radius_exposure_columns <- c(
+  "spill_hrs", "spill_count",
+  "spill_count_daily_avg", "spill_hrs_daily_avg",
+  "spill_count_weekly_avg", "spill_hrs_weekly_avg"
+)
+sequence_flagged_radius <- derivation_radius[annual_returns_na_then_absent == TRUE]
+assert_true(
+  nrow(sequence_flagged_radius) > 0L,
+  "The redundancy proof needs at least one sequence-flagged radius-grain row."
+)
+assert_true(
+  all(vapply(
+    radius_exposure_columns,
+    function(column) all(is.na(sequence_flagged_radius[[column]])),
+    logical(1)
+  )),
+  paste(
+    "annual_returns_na_then_absent = TRUE must imply unknown spill_hrs,",
+    "spill_count, and all four averages at the radius grain, so dropping the",
+    "hedonic's manual exclusion cannot change its estimation sample."
+  )
+)
+assert_identical(
+  derivation_radius[house_id == "t6", .(spill_hrs, spill_count, n_spill_sites)],
+  data.table(
+    spill_hrs = c(0, 0), spill_count = c(0, 0), n_spill_sites = c(0L, 0L)
+  ),
+  "A no-site transaction must keep its complete zero radius grid."
+)
+assert_identical(
+  derivation_radius[house_id == "t5", spill_count_weekly_avg],
+  rep(5 / 100 * 7, 2L),
+  "The radius-grain derivation must attach rates through the shared helper."
+)
 
 if (length(expected_contract_failures) > 0L) {
   stop(

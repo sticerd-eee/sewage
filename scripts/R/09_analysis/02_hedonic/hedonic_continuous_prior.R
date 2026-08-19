@@ -155,9 +155,6 @@ run_for_radius <- function(RAD) {
     inner_join(sales, by = "house_id") |>
     mutate(log_price = log(price)) |>
     filter(
-      # Exposure is understated where a nearby overflow stopped reporting and
-      # was subsequently absent from the register, so these are excluded.
-      !annual_returns_na_then_absent,
       !is.na(spill_count_weekly_avg),
       !is.na(spill_hrs_weekly_avg),
       !is.na(lsoa),
@@ -198,9 +195,6 @@ run_for_radius <- function(RAD) {
     inner_join(rentals, by = "rental_id") |>
     mutate(log_price = log(listing_price)) |>
     filter(
-      # Exposure is understated where a nearby overflow stopped reporting and
-      # was subsequently absent from the register, so these are excluded.
-      !annual_returns_na_then_absent,
       !is.na(spill_count_weekly_avg),
       !is.na(spill_hrs_weekly_avg),
       !is.na(lsoa),

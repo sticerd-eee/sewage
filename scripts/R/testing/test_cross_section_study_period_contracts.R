@@ -13,6 +13,12 @@ source(here::here(
   "scripts", "R", "utils", "dataset_publication_utils.R"
 ))
 source(here::here(
+  "scripts", "R", "utils", "spill_aggregation_utils.R"
+))
+source(here::here(
+  "scripts", "R", "utils", "site_group_utils.R"
+))
+source(here::here(
   "scripts", "R", "utils", "cross_section_study_period_utils.R"
 ))
 
@@ -128,6 +134,8 @@ assert_true(!"rent" %in% rental_schema$names, "rent must not be public.")
 
 # U1: annual-return truth table and collapse -----------------------------------
 
+utc_time <- function(text) as.POSIXct(text, tz = "UTC")
+
 annual_fixture <- rbindlist(list(
   data.table(
     site_id = 10L,
@@ -137,7 +145,8 @@ annual_fixture <- rbindlist(list(
       "reported_zero"
     ),
     spill_count_ea = c(0, 1, 2, 0),
-    spill_hrs_ea = c(0, 3, 4, 0)
+    spill_hrs_ea = c(0, 3, 4, 0),
+    matched_event_count = c(0L, 1L, 2L, 0L)
   ),
   data.table(
     site_id = 20L,
@@ -146,21 +155,24 @@ annual_fixture <- rbindlist(list(
       "reported_zero", "reported_na", "absent", "reported_zero"
     ),
     spill_count_ea = c(0, NA, NA, 0),
-    spill_hrs_ea = c(0, NA, NA, 0)
+    spill_hrs_ea = c(0, NA, NA, 0),
+    matched_event_count = 0L
   ),
   data.table(
     site_id = 30L,
     year = 2021:2023,
     annual_status = "reported_zero",
     spill_count_ea = 0,
-    spill_hrs_ea = 0
+    spill_hrs_ea = 0,
+    matched_event_count = 0L
   ),
   data.table(
     site_id = 40L,
     year = 2021:2025,
     annual_status = "reported_zero",
     spill_count_ea = 0,
-    spill_hrs_ea = 0
+    spill_hrs_ea = 0,
+    matched_event_count = 0L
   )
 ))
 
@@ -242,11 +254,115 @@ assert_identical(
   "The Annual-Returns collapse must survive the pluggable-source refactor intact."
 )
 
+# U1: the evidence grid rides the shared truth table and window reducer --------
+
+evidence_grid <- study_period_annual_evidence_grid(
+  annual_fixture, window_2021_2024
+)
+assert_identical(
+  names(evidence_grid$site_evidence),
+  c(
+    "site_id", "annual_returns_absent", "annual_returns_na",
+    "reported_positive_without_matched_events"
+  ),
+  paste(
+    "The grid must expose the three atomic flags and no verdict: each",
+    "collapse ORs its own."
+  )
+)
+assert_identical(
+  evidence_grid$site_evidence$site_id,
+  c(10L, 20L, 30L, 40L),
+  "The window reducer must return one verdict per Site Group, in site order."
+)
+assert_identical(
+  evidence_grid$site_evidence$annual_returns_absent,
+  c(FALSE, TRUE, TRUE, FALSE),
+  paste(
+    "Site 20's absent year and site 30's missing 2024 row must both raise",
+    "annual_returns_absent through the shared gap fill."
+  )
+)
+assert_identical(
+  evidence_grid$site_evidence$annual_returns_na,
+  c(FALSE, TRUE, FALSE, FALSE),
+  "Only site 20's reported_na year may raise annual_returns_na."
+)
+assert_true(
+  !"has_missing_evidence" %in% names(evidence_grid$site_evidence),
+  "No verdict may be stored on the shared classification (R15)."
+)
+assert_identical(
+  evidence_grid$site_evidence$reported_positive_without_matched_events,
+  c(FALSE, FALSE, FALSE, FALSE),
+  "reported_positive years with matched events must not raise the third flag."
+)
+
+# The third atomic flag is exactly what separates the two verdicts: a
+# reported_positive year without matched events indicts the event matching, so
+# the event-evidence verdict masks it and the EA-evidence verdict does not.
+stage1_fixture <- data.table(
+  site_id = 80L,
+  year = 2021:2024,
+  annual_status = c(
+    "reported_positive", "reported_zero", "reported_zero", "reported_zero"
+  ),
+  spill_count_ea = c(2, 0, 0, 0),
+  spill_hrs_ea = c(5, 0, 0, 0),
+  matched_event_count = 0L
+)
+stage1_grid <- study_period_annual_evidence_grid(
+  stage1_fixture, window_2021_2024
+)
+assert_true(
+  stage1_grid$site_evidence$reported_positive_without_matched_events &&
+    !stage1_grid$site_evidence$annual_returns_absent &&
+    !stage1_grid$site_evidence$annual_returns_na,
+  paste(
+    "A reported_positive year without matched events must raise the third",
+    "atomic flag and neither of the first two."
+  )
+)
+assert_identical(
+  collapse_study_period_annual_returns(stage1_fixture, window_2021_2024)[
+    , .(spill_count, spill_hrs, has_missing_evidence)
+  ],
+  data.table(spill_count = 2, spill_hrs = 5, has_missing_evidence = FALSE),
+  paste(
+    "The EA-evidence verdict must keep exposure known when only the third",
+    "flag is raised, permanently and not as an opt-out (R18)."
+  )
+)
+# AE3 for study_period: the same Site Group turns unknown under the
+# event-evidence verdict, and only because of the third flag.
+stage2_events_fixture <- data.table(
+  site_id = 80L,
+  start_time = utc_time("2021-06-01 00:00:00"),
+  end_time = utc_time("2021-06-01 05:00:00")
+)
+stage2_events <- collapse_study_period_events(
+  stage1_fixture, stage2_events_fixture, window_2021_2024
+)
+assert_identical(
+  stage2_events[, .(spill_count, spill_hrs, has_missing_evidence)],
+  data.table(
+    spill_count = NA_real_, spill_hrs = NA_real_, has_missing_evidence = TRUE
+  ),
+  paste(
+    "The event-evidence verdict must mask a reported_positive year with no",
+    "matched events."
+  )
+)
+
+invalid_matched <- copy(annual_fixture)
+invalid_matched[site_id == 10L & year == 2021L, matched_event_count := NA_integer_]
+assert_error_contains(
+  collapse_study_period_annual_returns(invalid_matched, window_2021_2024),
+  "matched_event_count",
+  "A missing matched_event_count must fail loudly, not gap-fill to zero."
+)
+
 # U1: event-based collapse ------------------------------------------------------
-
-utc_time <- function(text) as.POSIXct(text, tz = "UTC")
-
-source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
 
 # Sites 10 and 40 carry complete Annual-Returns evidence, site 20 turns unknown
 # mid-window, and site 30 is missing its 2024 row from the crosswalk grid.
@@ -308,7 +424,8 @@ clipping_annual_fixture <- rbindlist(lapply(
     year = 2021:2024,
     annual_status = "reported_zero",
     spill_count_ea = 0,
-    spill_hrs_ea = 0
+    spill_hrs_ea = 0,
+    matched_event_count = 0L
   )
 ))
 clipping_events_fixture <- data.table(
@@ -347,6 +464,18 @@ assert_identical(
   clipped[.(54L), .(spill_hrs, spill_count)],
   data.table(spill_hrs = 5, spill_count = 2),
   "Separate events at one Site Group must sum hours and count independently."
+)
+
+assert_error_contains(
+  collapse_study_period_events(
+    copy(annual_fixture)[, matched_event_count := NULL],
+    events_fixture, window_2021_2024
+  ),
+  "matched_event_count",
+  paste(
+    "The event-evidence verdict must fail loudly without matched_event_count",
+    "rather than read a missing third flag as no gap."
+  )
 )
 
 events_missing_column <- copy(events_fixture)[, end_time := NULL]
@@ -1155,6 +1284,18 @@ for (spec in adapter_specs) {
       paste(market, "adapter must not retain obsolete execution text:", obsolete)
     )
   }
+  # Adapters run standalone under Rscript, where the shared measurement core is
+  # only available if the adapter sources it itself; this suite's environment
+  # would mask that omission because the core is already attached here.
+  for (required_source in c(
+    "spill_aggregation_utils.R", "site_group_utils.R",
+    "cross_section_study_period_utils.R"
+  )) {
+    assert_true(
+      grepl(required_source, adapter_text, fixed = TRUE),
+      paste(market, "adapter must source the shared core file:", required_source)
+    )
+  }
 }
 
 build_root <- tempfile("study-period-build-")
@@ -1325,8 +1466,18 @@ paired_annual <- comparison_fixture(
   spill_hrs = c(3, 5, 7, NA, 0, 11)
 )
 
+divergence_keys <- function(transaction_id, radius) {
+  keys <- data.table(
+    transaction_id = as.character(transaction_id),
+    radius = as.integer(radius)
+  )
+  setkey(keys, transaction_id, radius)
+  keys
+}
+no_divergence <- divergence_keys(character(0), integer(0))
+
 paired_report <- comparison$compare_study_period_sources(
-  paired_events, paired_annual, "sale"
+  paired_events, paired_annual, no_divergence, "sale"
 )
 assert_identical(
   sort(unique(paired_report$radius)),
@@ -1344,13 +1495,18 @@ assert_true(
   "A shared NA row must be excluded from the comparable subset and counted."
 )
 assert_true(
+  all(paired_report$n_divergent == 0L) &&
+    all(paired_report$n_missing_exposure_ea == paired_report$n_missing_exposure),
+  "An undiverged pair must report zero divergence and equal NA counts."
+)
+assert_true(
   paired_report[measure == "spill_hrs" & radius == 500L, diff_mean] == -0.5,
   "The comparison must report the mean events-minus-EA level difference."
 )
 
 assert_error_contains(
   comparison$compare_study_period_sources(
-    paired_events, paired_annual[-1L], "sale"
+    paired_events, paired_annual[-1L], no_divergence, "sale"
   ),
   "row count",
   "A row-count mismatch between sources must fail loudly."
@@ -1358,39 +1514,244 @@ assert_error_contains(
 mismatched_key <- copy(paired_annual)
 mismatched_key[1L, transaction_id := "fabricated"]
 assert_error_contains(
-  comparison$compare_study_period_sources(paired_events, mismatched_key, "sale"),
+  comparison$compare_study_period_sources(
+    paired_events, mismatched_key, no_divergence, "sale"
+  ),
   "identical transaction-radius key set",
   "A fabricated key mismatch between sources must fail loudly."
 )
 duplicate_key <- rbind(paired_annual, paired_annual[1L])
 setkey(duplicate_key, transaction_id, radius)
 assert_error_contains(
-  comparison$compare_study_period_sources(paired_events, duplicate_key, "sale"),
+  comparison$compare_study_period_sources(
+    paired_events, duplicate_key, no_divergence, "sale"
+  ),
   "duplicate transaction-radius key",
   "A duplicated public key must fail loudly."
 )
-extra_na <- copy(paired_annual)
-extra_na[2L, `:=`(spill_count = NA_real_, spill_hrs = NA_real_)]
-assert_error_contains(
-  comparison$compare_study_period_sources(paired_events, extra_na, "sale"),
-  "missingness pattern",
-  "An NA present under one source but not the other must fail loudly."
-)
-divergent_flag <- copy(paired_annual)
-divergent_flag[3L, has_missing_site := TRUE]
+
+# U8: the harmonized relationship replaces exact NA agreement ------------------
+
+extra_ea_na <- copy(paired_annual)
+extra_ea_na[2L, `:=`(
+  spill_count = NA_real_, spill_hrs = NA_real_, has_missing_site = TRUE
+)]
 assert_error_contains(
   comparison$compare_study_period_sources(
-    paired_events, divergent_flag, "sale"
+    paired_events, extra_ea_na, no_divergence, "sale"
   ),
-  "has_missing_site",
-  "A divergent missing-site flag must fail loudly."
+  "are not a subset",
+  "An NA under the Annual Returns alone must fail loudly in either direction."
+)
+
+# The event reading masks two extra rows: transaction 2 at 500 and at 1000.
+diverged_events <- comparison_fixture(
+  spill_count = c(1, 2, 3, NA, NA, NA),
+  spill_hrs = c(2, 4, 6, NA, NA, NA)
+)
+explained_keys <- divergence_keys(c("2", "2"), c(500L, 1000L))
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    diverged_events, paired_annual, no_divergence, "sale"
+  ),
+  "difference set is not the unverifiable-positive rows",
+  "An unexplained event-side NA must fail loudly."
+)
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    paired_events, paired_annual, explained_keys, "sale"
+  ),
+  "difference set is not the unverifiable-positive rows",
+  "An unverifiable-positive row the event reading did not mask must fail."
+)
+divergent_report <- comparison$compare_study_period_sources(
+  diverged_events, paired_annual, explained_keys, "sale"
+)
+assert_identical(
+  divergent_report[measure == "spill_hrs", n_divergent],
+  c(0L, 1L, 1L),
+  "The comparison must count the divergent rows per radius section."
+)
+assert_identical(
+  divergent_report[measure == "spill_hrs",
+    n_missing_exposure - n_missing_exposure_ea],
+  c(0L, 1L, 1L),
+  "The report must expose the NA excess the harmonized rule predicts."
+)
+assert_true(
+  all(divergent_report[radius == 500L, n_comparable] == 1L) &&
+    all(paired_report[radius == 500L, n_comparable] == 2L),
+  "A divergent row must leave the comparable subset."
+)
+
+# A row the Annual Returns already call unknown absorbs the extra gap, so a key
+# on it is no divergence at all.
+absorbed_keys <- divergence_keys("2", 250L)
+assert_true(
+  is.data.table(comparison$compare_study_period_sources(
+    paired_events, paired_annual, absorbed_keys, "sale"
+  )),
+  "An unverifiable positive on an already-unknown row must not be a divergence."
+)
+
+# has_missing_site rides the same relationship, so a flag that moves without an
+# unverifiable positive behind it is caught even when the measures agree.
+flag_only_divergence <- copy(paired_events)
+flag_only_divergence[3L, has_missing_site := TRUE]
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    flag_only_divergence, paired_annual, no_divergence, "sale"
+  ),
+  "has_missing_site difference set is not the unverifiable-positive rows",
+  "An unexplained missing-site flag must fail loudly."
+)
+na_flag <- copy(paired_events)
+na_flag[3L, has_missing_site := NA]
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    na_flag, paired_annual, no_divergence, "sale"
+  ),
+  "missing has_missing_site flag",
+  "A missing missing-site flag must fail loudly rather than read as FALSE."
+)
+divergent_eligibility <- copy(paired_annual)
+divergent_eligibility[3L, spatially_eligible := FALSE]
+assert_error_contains(
+  comparison$compare_study_period_sources(
+    paired_events, divergent_eligibility, no_divergence, "sale"
+  ),
+  "spatially_eligible",
+  "A divergent spatial-eligibility flag must fail loudly."
+)
+
+# The verifier takes its windows and its input paths from the builders it
+# compares, so a builder that moves cannot leave it verifying stale inputs.
+comparison_specs <- comparison$study_period_source_specs()
+assert_identical(
+  vapply(comparison_specs, function(spec) spec$market, character(1)),
+  c("sale", "rental"),
+  "The comparison must cover both markets."
+)
+for (spec in comparison_specs) {
+  builders <- if (spec$market == "sale") {
+    c("cross_section_sales.R", "cross_section_sales_ea.R")
+  } else {
+    c("cross_section_rental.R", "cross_section_rental_ea.R")
+  }
+  events_config <- source_adapter(
+    file.path("scripts", "R", "06_analysis_datasets", builders[[1L]])
+  )$CONFIG
+  annual_config <- source_adapter(
+    file.path("scripts", "R", "06_analysis_datasets", builders[[2L]])
+  )$CONFIG
+  assert_identical(
+    list(
+      spec$events_path, spec$annual_path, spec$lookup_path,
+      spec$crosswalk_path, spec$window
+    ),
+    list(
+      events_config$output_path, annual_config$output_path,
+      events_config$lookup_path, events_config$crosswalk_path,
+      study_period_window(events_config$start_date, events_config$end_date)
+    ),
+    paste(
+      "The", spec$market,
+      "comparison spec must be read out of the builders it compares."
+    )
+  )
+}
+
+# U8: the divergent set is recomputed from the crosswalk and the lookup --------
+
+divergence_crosswalk <- rbindlist(list(
+  data.table(
+    site_id = 10L, year = 2021:2024, annual_status = "reported_zero",
+    spill_count_ea = 0, spill_hrs_ea = 0, matched_event_count = 0L
+  ),
+  data.table(
+    site_id = 20L, year = 2021:2024,
+    annual_status = c(
+      "reported_positive", "reported_zero", "reported_zero", "reported_zero"
+    ),
+    spill_count_ea = c(1, 0, 0, 0), spill_hrs_ea = c(3, 0, 0, 0),
+    matched_event_count = c(0L, 0L, 0L, 0L)
+  ),
+  data.table(
+    site_id = 30L, year = 2021:2024,
+    annual_status = c(
+      "reported_zero", "reported_zero", "reported_positive", "reported_zero"
+    ),
+    spill_count_ea = c(0, 0, 2, 0), spill_hrs_ea = c(0, 0, 4, 0),
+    matched_event_count = c(0L, 0L, 2L, 0L)
+  ),
+  data.table(
+    site_id = 40L, year = 2021:2024, annual_status = "reported_na",
+    spill_count_ea = NA_real_, spill_hrs_ea = NA_real_, matched_event_count = 0L
+  )
+))
+divergence_crosswalk_path <- tempfile(fileext = ".parquet")
+arrow::write_parquet(divergence_crosswalk, divergence_crosswalk_path)
+assert_identical(
+  comparison$unverifiable_positive_site_ids(
+    divergence_crosswalk_path, window_2021_2024
+  ),
+  20L,
+  paste(
+    "Only a Site Group whose window carries a reported_positive year with zero",
+    "matched events is an unverifiable positive."
+  )
+)
+assert_identical(
+  comparison$unverifiable_positive_site_ids(
+    divergence_crosswalk_path, window_2022_2024
+  ),
+  integer(0),
+  "A narrower window must drop an unverifiable positive outside it."
+)
+assert_error_contains(
+  comparison$unverifiable_positive_site_ids(
+    file.path(tempdir(), "absent-crosswalk.parquet"), window_2021_2024
+  ),
+  "crosswalk does not exist",
+  "A missing crosswalk must fail loudly rather than report no divergence."
+)
+
+divergence_lookup_path <- tempfile(fileext = ".parquet")
+write_lookup_fixture(
+  divergence_lookup_path,
+  list(data.table(
+    house_id = c("1", "2", "3"),
+    site_id = c(20L, 10L, 20L),
+    distance_m = c(300, 100, 1000),
+    distance_km = c(0.3, 0.1, 1),
+    n_site_groups = c(1L, 1L, 1L)
+  )),
+  sales_contract
+)
+lifted_keys <- comparison$unverifiable_positive_keys(
+  divergence_lookup_path, "house_id", 20L, c(250L, 500L, 1000L)
+)
+assert_identical(
+  list(lifted_keys$transaction_id, lifted_keys$radius),
+  list(c("1", "1", "3"), c(500L, 1000L, 1000L)),
+  paste(
+    "A transaction-radius row is divergence-eligible exactly when an",
+    "unverifiable-positive Site Group lies inside the radius."
+  )
+)
+assert_identical(
+  nrow(comparison$unverifiable_positive_keys(
+    divergence_lookup_path, "house_id", integer(0), c(250L, 500L, 1000L)
+  )),
+  0L,
+  "No unverifiable positive must lift to no divergent rows without a read."
 )
 
 all_na_events <- comparison_fixture(
   spill_count = rep(NA_real_, 6L), spill_hrs = rep(NA_real_, 6L)
 )
 all_na_report <- comparison$compare_study_period_sources(
-  all_na_events, copy(all_na_events), "sale"
+  all_na_events, copy(all_na_events), no_divergence, "sale"
 )
 assert_true(
   all(is.na(all_na_report$pearson)) && all(is.na(all_na_report$spearman)) &&
@@ -1402,7 +1763,7 @@ constant_events <- comparison_fixture(
 )
 assert_true(
   all(is.na(comparison$compare_study_period_sources(
-    constant_events, copy(constant_events), "sale"
+    constant_events, copy(constant_events), no_divergence, "sale"
   )$pearson)),
   "A zero-variance subset must report an undefined correlation, not an error."
 )
@@ -1530,4 +1891,146 @@ assert_true(
   "Supported documentation must distinguish fixed-period and prior exposure."
 )
 
-cat("Study-period cross-section contract tests passed (U1-U5).\n")
+# U2: shared measurement core, study-family seams ------------------------------
+
+# The window reducer is `any` per Site Group across the window's years. It is
+# exercised directly here; the two collapse functions consume it through
+# study_period_annual_evidence_grid() since ticket 05.
+core_window_universe <- expand_site_year_universe(
+  data.table(
+    site_id = c(50L, 50L, 60L, 60L, 60L),
+    year = c(2021L, 2022L, 2021L, 2022L, 2023L),
+    annual_status = c(
+      "reported_zero", "reported_zero",
+      "reported_zero", "reported_na", "reported_positive"
+    ),
+    matched_event_count = c(0L, 0L, 0L, 0L, 2L)
+  ),
+  site_ids = c(50L, 60L),
+  years = 2021:2023
+)
+core_window_flags <- reduce_evidence_flags_over_window(
+  classify_annual_returns_evidence(core_window_universe)
+)
+assert_identical(
+  core_window_flags$site_id,
+  c(50L, 60L),
+  "The window reducer must return one row per Site Group, in site order."
+)
+assert_identical(
+  core_window_flags$annual_returns_absent,
+  c(TRUE, FALSE),
+  paste(
+    "Site 50's missing 2023 row must raise annual_returns_absent, and site",
+    "60's complete coverage must not."
+  )
+)
+assert_identical(
+  core_window_flags$annual_returns_na,
+  c(FALSE, TRUE),
+  "One reported_na year anywhere in the window must raise the NA flag."
+)
+assert_identical(
+  core_window_flags$reported_positive_without_matched_events,
+  c(FALSE, FALSE),
+  "A reported_positive year with matched events must raise no flag."
+)
+
+# Clip equivalence: the shared clip with the study window's two constants must
+# reproduce study_period_clip_events() on a fixture straddling both edges.
+core_study_events <- data.table(
+  site_id = c(70L, 70L, 70L, 70L, 70L),
+  start_time = utc_time(c(
+    "2020-12-31 12:00:00", "2022-06-01 00:00:00", "2024-12-31 12:00:00",
+    "2020-01-01 00:00:00", "2020-12-30 00:00:00"
+  )),
+  end_time = utc_time(c(
+    "2021-01-01 06:00:00", "2022-06-02 00:00:00", "2025-01-02 00:00:00",
+    "2020-06-01 00:00:00", "2021-01-01 00:00:00"
+  ))
+)
+core_study_clipped <- clip_events_to_window(
+  core_study_events,
+  utc_time("2021-01-01 00:00:00"),
+  utc_time("2025-01-01 00:00:00")
+)
+assert_identical(
+  core_study_clipped[, .(site_id, clipped_start, clipped_end, event_hours)],
+  study_period_clip_events(core_study_events, window_2021_2024),
+  "The shared clip must reproduce the study engine's clipping exactly."
+)
+assert_identical(
+  core_study_clipped$event_hours,
+  c(6, 24, 12),
+  paste(
+    "Clipping must keep only the in-window overlap and drop both the event",
+    "wholly before the window and the one that merely touches its start."
+  )
+)
+
+# Collapse equivalence: the shared collapse grouped by site alone must
+# reproduce the totals collapse_study_period_events() computes today.
+core_study_collapsed <- collapse_events_by_group(
+  clip_events_to_window(
+    events_fixture,
+    utc_time("2021-01-01 00:00:00"),
+    utc_time("2025-01-01 00:00:00")
+  ),
+  by = "site_id"
+)
+setkey(core_study_collapsed, site_id)
+assert_identical(
+  core_study_collapsed[.(10L), .(spill_hrs, spill_count)],
+  events_collapsed[.(10L), .(spill_hrs, spill_count)],
+  "The shared collapse must reproduce the study engine's per-site totals."
+)
+assert_identical(
+  core_study_collapsed[.(20L), .(spill_hrs, spill_count)],
+  data.table(spill_hrs = 5, spill_count = 1),
+  paste(
+    "The shared collapse must total a Site Group the engine later masks for",
+    "missing evidence, since masking is not the collapse's job."
+  )
+)
+assert_identical(
+  core_study_collapsed$site_id,
+  c(10L, 20L, 30L),
+  paste(
+    "The shared collapse must cover only Site Groups with events; the",
+    "evidence grid is what restores the true zeros."
+  )
+)
+
+# The study engine orders by site and clipped start alone, and sums without
+# na.rm so an unexpected NA reaches its own guard. Both are the defaults, so
+# the engine inherits today's behaviour by calling the core plainly.
+assert_identical(
+  formals(collapse_events_by_group)$order_by,
+  "clipped_start",
+  "The default sort key must match the study engine's existing row order."
+)
+assert_identical(
+  formals(collapse_events_by_group)$na.rm,
+  FALSE,
+  "The default must not absorb a missing event hour the study engine guards on."
+)
+
+# An event feed with nothing in the window must survive the whole core without
+# the study engine's separate empty-input branch.
+core_empty_clipped <- clip_events_to_window(
+  events_fixture,
+  utc_time("2030-01-01 00:00:00"),
+  utc_time("2031-01-01 00:00:00")
+)
+assert_identical(
+  names(core_empty_clipped),
+  c(names(events_fixture), "clipped_start", "clipped_end", "event_hours"),
+  "An empty clip must still carry the clipped columns, correctly typed."
+)
+assert_identical(
+  nrow(collapse_events_by_group(core_empty_clipped, by = "site_id")),
+  0L,
+  "Collapsing an empty clip must yield no rows rather than failing."
+)
+
+cat("Study-period cross-section contract tests passed (U1-U5, U8).\n")

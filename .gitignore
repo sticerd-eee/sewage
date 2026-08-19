@@ -104,3 +104,4 @@ _old/
 # Embedded subprojects blocked entirely
 RiverNetworks/
 upstream_downstream/
+.scratch/

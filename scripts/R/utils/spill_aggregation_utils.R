@@ -281,6 +281,128 @@ calculate_spill_hours <- function(start_times, end_times) {
   )
 }
 
+# Shared Measurement Core: spill arithmetic
+############################################################
+
+# data.table may replace grouped sum/cumsum calls with optimizer-specific
+# implementations. These wrappers, combined with a fixed row order at every
+# aggregation boundary, keep published floating values reproducible. Both
+# exposure engines route every sum and cumulative sum through them (R12).
+
+#' Sum a numeric vector without data.table's grouped optimiser
+#'
+#' @param value Numeric vector to sum.
+#' @param na.rm Whether to drop missing values.
+#' @return The sum, computed by `base::sum()`.
+#' @export
+spill_stable_sum <- function(value, na.rm = FALSE) {
+  base::sum(value, na.rm = na.rm)
+}
+
+#' Accumulate a numeric vector without data.table's grouped optimiser
+#'
+#' @param value Numeric vector to accumulate.
+#' @return The cumulative sum, computed by `base::cumsum()`.
+#' @export
+spill_stable_cumsum <- function(value) {
+  base::cumsum(value)
+}
+
+#' Clip spill events to an exposure window
+#'
+#' The single implementation of the overlap filter, the clamping, and the
+#' positive-duration filter that both exposure engines apply. `window_start`
+#' and `window_end` accept either one scalar bound shared by every row or a
+#' per-row vector: the study engine passes its two window constants, and the
+#' prior engine passes each transaction's own endpoint.
+#'
+#' An event enters the window when it starts strictly before `window_end` and
+#' has not already ended before `window_start`. Surviving events are clamped to
+#' the window and those left with no positive duration are dropped, so a caller
+#' never has to remember the `event_hours > 0` filter separately.
+#'
+#' Carries no validation, per R14: correctness lives in the unit fixtures and
+#' the publication gate.
+#'
+#' @param events Event table with POSIXct `start_time` and `end_time`.
+#' @param window_start Window opening, scalar or one value per event row.
+#' @param window_end Window closing, scalar or one value per event row.
+#' @return A new data.table of the surviving events, carrying every input
+#'   column plus `clipped_start`, `clipped_end`, and `event_hours`. The
+#'   caller's table is never modified.
+#' @export
+clip_events_to_window <- function(events, window_start, window_end) {
+  dt <- as.data.table(events)
+  window_start <- rep(window_start, length.out = nrow(dt))
+  window_end <- rep(window_end, length.out = nrow(dt))
+
+  # Subset the bounds alongside the rows so a per-row window stays aligned
+  # with its own event once the overlap filter has dropped rows.
+  overlaps <- dt$start_time < window_end & dt$end_time >= window_start
+  dt <- dt[overlaps]
+  window_start <- window_start[overlaps]
+  window_end <- window_end[overlaps]
+
+  dt[, `:=`(
+    clipped_start = pmax(start_time, window_start),
+    clipped_end = pmin(end_time, window_end)
+  )]
+  dt[, event_hours := as.numeric(difftime(
+    clipped_end, clipped_start, units = "hours"
+  ))]
+  dt[event_hours > 0]
+}
+
+#' Collapse clipped events to spill totals per group
+#'
+#' The single per-group reduction behind both engines: the prior engine groups
+#' by transaction and site, the study engine by site alone. Rows are ordered
+#' explicitly before the reduction so the floating sum is reproducible (R12),
+#' and `count_spills()` stays the only 12/24 implementation.
+#'
+#' Carries no validation, per R14.
+#'
+#' @param clipped_events Output of `clip_events_to_window()`.
+#' @param by Character vector of grouping key columns.
+#' @param order_by Character vector of tie-breaking sort columns applied after
+#'   the grouping keys. Defaults to the clipped start alone; the prior engine
+#'   adds the clipped end and both unclipped endpoints so that events sharing a
+#'   start still sort deterministically. Changing this changes which order the
+#'   floating sum accumulates in, so each engine passes its own established key.
+#' @param na.rm Whether to drop missing event hours from the sum. Defaults to
+#'   `FALSE`, which lets an unexpected NA reach the caller's own guard rather
+#'   than being silently absorbed; the prior engine passes `TRUE`.
+#' @return A data.table with one row per group carrying `spill_hrs` and
+#'   `spill_count`.
+#' @export
+collapse_events_by_group <- function(clipped_events, by,
+                                     order_by = "clipped_start",
+                                     na.rm = FALSE) {
+  events <- as.data.table(clipped_events)
+  setorderv(events, c(by, order_by))
+  events[, .(
+    spill_hrs = spill_stable_sum(event_hours, na.rm = na.rm),
+    spill_count = as.numeric(count_spills(clipped_start, clipped_end))
+  ), by = by]
+}
+
+#' Convert a window total into daily and weekly averages
+#'
+#' The single owner of both rate formulas. The weekly average is the daily
+#' average times seven rather than an independent expression, so the two can
+#' never drift apart.
+#'
+#' Carries no validation, per R14.
+#'
+#' @param total Numeric window total, such as spill hours or spill counts.
+#' @param n_days_in_window Length of the window in days, scalar or per-row.
+#' @return A list with numeric `daily_avg` and `weekly_avg`.
+#' @export
+spill_window_rates <- function(total, n_days_in_window) {
+  daily_avg <- total / n_days_in_window
+  list(daily_avg = daily_avg, weekly_avg = daily_avg * 7)
+}
+
 #' Return standard rainfall offset column names
 #'
 #' These offsets are shared across daily-panel and spill-level rainfall matching.

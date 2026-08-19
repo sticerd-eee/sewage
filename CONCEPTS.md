@@ -53,7 +53,7 @@ The total spill count or spill hours accumulated within a property's Near-Overfl
 ### Study-Period Spill Exposure
 A Whole-Period Spill Exposure measured over a fixed study window rather than a per-transaction one — 2021–2024 for sales, 2021–2023 for rentals. It is a time-invariant property-area measure and may include spill activity after an individual sale or rental transaction; it is published as a whole-period total and as equivalent daily and weekly averages.
 
-It comes in two variants that share a schema, a grain, a window, and a missingness rule, and differ only in where the exposure numbers come from. Which variant is canonical for the paper is an open question; the comparison between them is reported by `scripts/R/testing/verify_study_period_exposure_sources.R`.
+It comes in two variants that share a schema, a grain, a window, and one shared evidence classification, and differ in where the exposure numbers come from and — following from that — in one clause of their missingness rule. Which variant is canonical for the paper is an open question; the comparison between them is reported by `scripts/R/testing/verify_study_period_exposure_sources.R`.
 
 ### Event-Based Study-Period Spill Exposure
 The Study-Period Spill Exposure measured from matched individual EDM events clipped to the study window, with spill hours summed from the clipped durations and spill counts recomputed under the 12/24 counting rule. This is the same measurement the prior-to-transaction datasets use, so the two families differ only in window. It is what the unsuffixed `data/processed/cross_section/{sales,rentals}/study_period/` paths carry and what downstream analysis reads.
@@ -61,13 +61,31 @@ The Study-Period Spill Exposure measured from matched individual EDM events clip
 ### Annual-Returns (EA) Study-Period Spill Exposure
 The Study-Period Spill Exposure measured by summing the EA-revised annual-return totals (`spill_count_ea`, `spill_hrs_ea`) over the window years. "EA data" and "Annual Returns" name the same source throughout this project — the Environment Agency publishes the returns — and the `_ea` suffix marks it. It is published to the sibling `study_period_ea/` paths.
 
-Both variants take the Annual Status as their evidence oracle, because the event feed carries positives only and cannot distinguish a genuinely silent Site Group from an unmonitored one. A radius containing any Site Group with a `reported_na` or `absent` window year, or a window year missing from the crosswalk grid, therefore reports unknown exposure under both. The two outputs consequently share a missingness pattern row for row.
+Both variants take the Annual Status as their evidence oracle, because the event feed carries positives only and cannot distinguish a genuinely silent Site Group from an unmonitored one. A radius containing any Site Group with a `reported_na` or `absent` window year, or a window year missing from the crosswalk grid, therefore reports unknown exposure under both. One clause separates them: a `reported_positive` window year with no matched events indicts the event matching rather than the Annual Returns, so it makes the event-based variant unknown and leaves the Annual-Returns variant known. The event-based output's unknown rows are consequently a superset of the Annual-Returns output's, and the difference set is exactly the radii containing such an unverifiable positive and no gap shared by both variants.
+
+### Measurement Layer (`house_site_spills` / `rental_site_spills`)
+The pre-masking transaction-by-Site-Group record of clipped event measures and evidence flags from which the published prior-exposure datasets are derived. Each row is one eligible transaction paired with one nearby Site Group, carrying the pair's window-clipped spill hours, the 12/24-rule spill count, the pair's actual distance, and the four Atomic Evidence Flags — with no missingness masking applied. The published prior-exposure datasets are derivations over this layer: they replicate pairs per radius, rejoin transaction metadata, compute their evidence verdict as an OR of atomic flags, and mask exposure to NA where the verdict says the evidence is unknown.
+
+### Atomic Evidence Flags
+The four boolean flags carried by the Measurement Layer, from which every evidence verdict is computed as an OR in the derivation layer; no composite verdict is ever stored.
+
+- **`annual_returns_absent`** — true when, in at least one year of the transaction's lookback window, the Site Group filed no annual return (Annual Status `absent`) or has no site-year row in the crosswalk at all. Published in the site-grain schemas under its frozen public name `site_missing`.
+- **`annual_returns_na`** — true when at least one window year has Annual Status `reported_na`: a return was filed but the spill metrics are missing.
+- **`reported_positive_without_matched_events`** — true when at least one window year has Annual Status `reported_positive` but zero matched EDM events. This indicts the event matching rather than the Annual Returns, so it enters the event-evidence verdict only.
+- **`annual_returns_na_then_absent`** — the sequence flag, unchanged from the Annual-Return NA-Then-Absent Indicator's definition: a `reported_na` year within the window, no `absent` year within the window, and an `absent` year after it over the full crosswalk horizon. Its defining absent year lies outside the lookback window by construction.
+
+### NA-Propagation Convention
+Missing evidence stays NA all the way into the regression sample. When a contributing Site Group has unknown evidence under a dataset's verdict, the derivation publishes NA exposure, and every downstream consumer must propagate that NA rather than remove it: re-reducing published exposure with `na.rm = TRUE`, or coercing missing evidence to zero exposure (e.g. `replace_na(..., 0)`), is nonconforming.
+
+Event-based derivations have no opt-out from this rule: the missing-evidence rule is baked into the shared reduction, and any event-based dataset's total is NA whenever a contributing site has unknown evidence. `study_period_ea`'s two-flag verdict is a per-source rule rather than an opt-out: it is a different data source whose verdict omits only `reported_positive_without_matched_events`, because that flag indicts the event matching and not the Annual Returns its measures are read from — the classification it draws the other two flags from is the same shared one.
 
 ### Spatially Eligible Transaction
 A sale or rental transaction with usable property coordinates, for which nearby Site Groups can be evaluated. A spatially eligible transaction with no Site Group inside its Near-Overflow Radius has zero Spill Exposure; a transaction without usable coordinates has unknown, not zero, exposure.
 
 ### Average Daily Spill Exposure
 Spill Exposure divided by the number of days in its stated exposure window. Headline coefficients may be reported in per-week units for interpretability.
+
+All exposure datasets publish these averages under the same column names: `spill_count_daily_avg`, `spill_hrs_daily_avg`, `spill_count_weekly_avg`, `spill_hrs_weekly_avg`. The window differs by family. The prior-to-transaction datasets average over each transaction's own lookback window; the study-period datasets average over the fixed study window. Each row records its window length in `n_days_in_window`. When joining datasets from the two families, rename these columns first.
 
 ### Average Weekly Spill Exposure
 Average Daily Spill Exposure multiplied by seven, used as the principal reporting scale in the project's analyses.

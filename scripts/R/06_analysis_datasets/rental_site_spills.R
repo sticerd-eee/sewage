@@ -1,28 +1,30 @@
 # ==============================================================================
-# Prior-to-Sale Radius Exposure Builder
+# Rentals Measurement-Table Builder (rental_site_spills)
 # ==============================================================================
 #
-# Purpose: Build and publish spill exposure before sale at house-radius grain
-#          through the shared prior-exposure engine. The engine derives this
-#          dataset from the unmasked measurement layer (the same pair rows
-#          house_site_spills publishes): re-enumerate the transaction universe
-#          from the eligible-transaction ledger, run the distance-ordered
-#          cumulative reduction, and mask through has_missing_site at
-#          publication.
+# Purpose: Publish the unmasked measurement layer for the rental market: one
+#          row per eligible transaction by nearby Site Group within the maximum
+#          radius threshold, carrying the window-clipped spill measures and the
+#          four atomic evidence flags.
+#
+#          This is the intermediate the prior-exposure engine already computed
+#          and immediately masked. Materializing it lets the four published
+#          prior datasets be derived from one measurement pass rather than each
+#          recomputing it. No verdict is stored: each derivation ORs its own
+#          subset of the flags.
 #
 # Author: Jacopo Olivieri
-# Date: 2025-12-18
-# Date Modified: 2026-08-18
+# Date: 2026-08-18
 #
 # Inputs:
-#   - data/processed/house_price.parquet
-#   - data/processed/spill_house_lookup.parquet
+#   - data/processed/zoopla/zoopla_rentals.parquet
+#   - data/processed/zoopla/spill_rental_lookup.parquet
 #   - data/processed/matched_events_annual_data/matched_events_annual_data.parquet
 #   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #
 # Outputs:
-#   - data/processed/cross_section/sales/prior_to_sale/
-#   - output/log/cross_section_prior_to_sale.log
+#   - data/processed/cross_section/rentals/rental_site_spills/
+#   - output/log/rental_site_spills.log
 #
 # ==============================================================================
 
@@ -47,7 +49,7 @@ REQUIRED_PACKAGES <- c(
   "tidyr"
 )
 
-LOG_FILE <- here::here("output", "log", "cross_section_prior_to_sale.log")
+LOG_FILE <- here::here("output", "log", "rental_site_spills.log")
 
 check_required_packages(REQUIRED_PACKAGES)
 
@@ -69,16 +71,16 @@ source(
 )
 
 CONFIG <- list(
-  market = "sale",
-  grain = "radius",
+  market = "rental",
+  grain = "measurement",
   processed_dir = here::here("data", "processed"),
   output_path = here::here(
-    "data", "processed", "cross_section", "sales", "prior_to_sale"
+    "data", "processed", "cross_section", "rentals", "rental_site_spills"
   ),
   radius_thresholds = c(250, 500, 1000),
   base_year = 2021,
   window_start = as.POSIXct("2021-01-01 00:00:00", tz = "UTC"),
-  chunk_size = 100000,
+  chunk_size = 10000,
   site_group_crosswalk_path = here::here(
     "data", "processed", "matched_events_annual_data",
     "site_group_crosswalk.parquet"
@@ -93,29 +95,23 @@ initialise_logging <- function() {
 }
 
 load_data <- function() {
-  prior_exposure_load_data(CONFIG, CONFIG$market, CONFIG$grain)
+  prior_exposure_load_data(
+    CONFIG, CONFIG$market, CONFIG$grain,
+    prior_exposure_measurement_contract(CONFIG$market)
+  )
 }
 
-create_joined_events <- function(house_ids, data) {
-  prior_exposure_join_events(house_ids, data)
-}
-
-get_house_metadata <- function(house_dt) {
-  house_dt[, .(house_id, price, n_days_in_window)]
-}
-
-process_chunk <- function(house_ids, data) {
-  prior_exposure_process_chunk(house_ids, data)
-}
-
-create_prior_to_sale_db <- function(data) {
-  prior_exposure_stream(data, CONFIG$output_path)
+build_measurement_table <- function(data) {
+  prior_exposure_stream(
+    data, CONFIG$output_path,
+    profile = prior_exposure_measurement_stream_profile()
+  )
 }
 
 main <- function() {
   initialise_logging()
   data <- load_data()
-  create_prior_to_sale_db(data)
+  build_measurement_table(data)
   logger::log_info("Script completed successfully: {CONFIG$output_path}")
 }
 

@@ -38,6 +38,142 @@ assert_left_row_count <- function(before, after, context = "metadata join") {
   invisible(after)
 }
 
+# Shared Measurement Core: evidence classification
+############################################################
+
+#' Expand crosswalk rows to a complete Site Group-by-year universe.
+#'
+#' The one place that decides what a missing crosswalk row means. A site-year
+#' the crosswalk never mentions is indistinguishable from one it reports as
+#' `absent`, so the gap is filled as `absent` with no matched events before any
+#' classification happens.
+#'
+#' The universe belongs to the caller because the two families need different
+#' ones: the prefix reducer expands over the crosswalk's full horizon, the
+#' window reducer over the years of one fixed window. Keeping the universe out
+#' here leaves the truth table a pure classifier of the rows it is handed.
+#'
+#' Carries no validation, per R14.
+#'
+#' @param site_years Crosswalk rows at `site_id`-`year` grain.
+#' @param site_ids Site Groups the universe must cover.
+#' @param years Years the universe must cover.
+#' @return A tibble with one row per `site_id`-`year` in the universe, carrying
+#'   every column of `site_years` and ordered by `site_id` then `year`. Rows
+#'   with no crosswalk match have `annual_status` `"absent"` and, when the
+#'   column is present, `matched_event_count` `0L`; every other column stays
+#'   missing. A filled gap is therefore indistinguishable from a row the
+#'   crosswalk reports as `absent`, which is the intended reading.
+expand_site_year_universe <- function(site_years, site_ids, years) {
+  site_years <- tibble::as_tibble(site_years)
+
+  expanded <- tidyr::expand_grid(
+    site_id = sort(unique(as.integer(site_ids))),
+    year = sort(unique(as.integer(years)))
+  ) |>
+    dplyr::left_join(site_years, by = c("site_id", "year")) |>
+    dplyr::mutate(
+      annual_status = tidyr::replace_na(.data$annual_status, "absent")
+    )
+
+  if ("matched_event_count" %in% names(expanded)) {
+    expanded <- dplyr::mutate(
+      expanded,
+      matched_event_count = tidyr::replace_na(.data$matched_event_count, 0L)
+    )
+  }
+
+  expanded
+}
+
+#' Classify Site Group-year evidence into the three atomic condition flags.
+#'
+#' The single evidence truth table behind both exposure families. It answers
+#' only what one site-year's record says, and leaves every question of which
+#' site-years to ask about, and how to combine their answers, to the reducers
+#' above it.
+#'
+#' The three conditions are deliberately atomic rather than pre-combined: each
+#' derivation ORs its own subset of them into a verdict, and holding them apart
+#' is what lets those verdicts differ without the classification differing.
+#'
+#' Carries no validation, per R14.
+#'
+#' @param site_years Site Group-year rows carrying `site_id`, `year`, and
+#'   `annual_status`. A missing `annual_status` counts as `absent`, so callers
+#'   that have filled universe gaps through `expand_site_year_universe()` and
+#'   callers that have not classify a missing record the same way.
+#'   `matched_event_count` is optional: without it,
+#'   `reported_positive_without_matched_events` comes back missing rather than
+#'   falsely `FALSE`, so a verdict that ORs the flag is loud instead of
+#'   silently wrong for a caller that does not yet read the column.
+#' @return A tibble with one row per input site-year, in input order, carrying
+#'   `site_id`, `year`, and the three logical flags `annual_returns_absent`,
+#'   `annual_returns_na`, and `reported_positive_without_matched_events`.
+classify_annual_returns_evidence <- function(site_years) {
+  site_years <- tibble::as_tibble(site_years)
+  annual_status <- site_years$annual_status
+  matched_event_count <- if ("matched_event_count" %in% names(site_years)) {
+    site_years$matched_event_count
+  } else {
+    NA_integer_
+  }
+  reported <- !is.na(annual_status)
+
+  tibble::tibble(
+    site_id = site_years$site_id,
+    year = site_years$year,
+    annual_returns_absent = !reported | annual_status == "absent",
+    annual_returns_na = reported & annual_status == "reported_na",
+    reported_positive_without_matched_events =
+      reported & annual_status == "reported_positive" &
+        matched_event_count == 0L
+  )
+}
+
+#' Reduce Site Group-year evidence flags cumulatively to each cutoff year.
+#'
+#' The prior family's reducer. Each transaction looks back over the prefix of
+#' years from the window's start through its own cutoff, so a flag raised in
+#' any earlier year stays raised for every later cutoff.
+#'
+#' Carries no validation, per R14.
+#'
+#' @param evidence Output of `classify_annual_returns_evidence()`.
+#' @return A tibble with one row per `site_id`-`year`, ordered by `site_id`
+#'   then `year`, carrying `cutoff_year` and each flag accumulated with a
+#'   running `any` within its Site Group.
+reduce_evidence_flags_to_prefix <- function(evidence) {
+  flag_columns <- setdiff(names(evidence), c("site_id", "year"))
+  evidence |>
+    dplyr::rename(cutoff_year = "year") |>
+    dplyr::arrange(.data$site_id, .data$cutoff_year) |>
+    dplyr::mutate(
+      dplyr::across(dplyr::all_of(flag_columns), dplyr::cumany),
+      .by = "site_id"
+    )
+}
+
+#' Reduce Site Group-year evidence flags across one fixed window.
+#'
+#' The study family's reducer. Every transaction shares one window, so each
+#' flag collapses to a single `any` per Site Group over the window's years.
+#'
+#' Carries no validation, per R14.
+#'
+#' @param evidence Output of `classify_annual_returns_evidence()`.
+#' @return A tibble with one row per Site Group, ordered by `site_id`, carrying
+#'   each flag reduced with `any` across the window.
+reduce_evidence_flags_over_window <- function(evidence) {
+  flag_columns <- setdiff(names(evidence), c("site_id", "year"))
+  evidence |>
+    dplyr::summarise(
+      dplyr::across(dplyr::all_of(flag_columns), any),
+      .by = "site_id"
+    ) |>
+    dplyr::arrange(.data$site_id)
+}
+
 #' Derive analysis-window missingness at Site Group grain.
 #'
 #' A Site Group is missing for an analysis window when at least one requested
@@ -142,13 +278,20 @@ read_site_group_missing_flags <- function(file_path, years) {
 #' @param include_annual_return_sequence Whether to include the site-level
 #'   `annual_returns_na_then_absent` sequence flag. The full available
 #'   crosswalk horizon is used for the later `absent` test.
+#' @param include_atomic_evidence_flags Whether to include the three atomic
+#'   prefix flags separately, rather than only their OR in
+#'   `has_unknown_event_evidence`. The measurement tables store the atomic
+#'   flags so each derivation can OR its own subset.
 #' @return A tibble unique on `site_id` and `cutoff_year`, with logical
-#'   `site_missing` and, when requested, `has_unknown_event_evidence` and
-#'   `annual_returns_na_then_absent`.
+#'   `site_missing` and, when requested, `has_unknown_event_evidence`,
+#'   `annual_returns_na_then_absent`, and the atomic
+#'   `annual_returns_absent`, `annual_returns_na`, and
+#'   `reported_positive_without_matched_events`.
 derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
                                                    cutoff_years,
                                                    include_event_evidence = FALSE,
-                                                   include_annual_return_sequence = FALSE) {
+                                                   include_annual_return_sequence = FALSE,
+                                                   include_atomic_evidence_flags = FALSE) {
   required_columns <- c(
     "site_id", "year", "water_company", "annual_status",
     "matched_event_count"
@@ -285,43 +428,41 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
       cutoff_year = integer(),
       site_missing = logical(),
       has_unknown_event_evidence = logical(),
-      has_reported_na_prefix = logical()
+      has_reported_na_prefix = logical(),
+      annual_returns_absent = logical(),
+      annual_returns_na = logical(),
+      reported_positive_without_matched_events = logical()
     )
   } else {
-    tidyr::expand_grid(
-      site_id = all_site_ids,
-      cutoff_year = required_years
-    ) |>
-      dplyr::left_join(
-        dplyr::select(
-          observed,
-          "site_id",
-          cutoff_year = "year",
-          "annual_status",
-          "matched_event_count"
-        ),
-        by = c("site_id", "cutoff_year")
-      ) |>
-      dplyr::arrange(.data$site_id, .data$cutoff_year) |>
-      dplyr::mutate(
-        annual_status = tidyr::replace_na(.data$annual_status, "absent"),
-        matched_event_count = tidyr::replace_na(.data$matched_event_count, 0L),
-        event_evidence_unknown =
-          .data$annual_status %in% c("reported_na", "absent") |
-          (.data$annual_status == "reported_positive" &
-            .data$matched_event_count == 0L),
-        site_missing = dplyr::cumany(.data$annual_status == "absent"),
-        has_reported_na_prefix = dplyr::cumany(
-          .data$annual_status == "reported_na"
-        ),
-        has_unknown_event_evidence = dplyr::cumany(.data$event_evidence_unknown),
-        .by = "site_id"
-      ) |>
-      dplyr::filter(.data$cutoff_year %in% cutoff_years) |>
+    # Each prefix flag is the shared truth table's atomic condition accumulated
+    # to the cutoff. Accumulating the three conditions separately and ORing them
+    # afterwards is the same result as ORing first and accumulating once, so the
+    # historical `has_unknown_event_evidence` is unchanged.
+    universe <- expand_site_year_universe(
       dplyr::select(
-        "site_id", "cutoff_year", "site_missing",
-        "has_unknown_event_evidence", "has_reported_na_prefix"
-      )
+        observed, "site_id", "year", "annual_status", "matched_event_count"
+      ),
+      site_ids = all_site_ids,
+      years = required_years
+    )
+    prefix_flags <- reduce_evidence_flags_to_prefix(
+      classify_annual_returns_evidence(universe)
+    )
+    prefix_flags |>
+      dplyr::transmute(
+        site_id = .data$site_id,
+        cutoff_year = .data$cutoff_year,
+        site_missing = .data$annual_returns_absent,
+        has_unknown_event_evidence = .data$annual_returns_absent |
+          .data$annual_returns_na |
+          .data$reported_positive_without_matched_events,
+        has_reported_na_prefix = .data$annual_returns_na,
+        annual_returns_absent = .data$annual_returns_absent,
+        annual_returns_na = .data$annual_returns_na,
+        reported_positive_without_matched_events =
+          .data$reported_positive_without_matched_events
+      ) |>
+      dplyr::filter(.data$cutoff_year %in% cutoff_years)
   }
 
   if (isTRUE(include_annual_return_sequence) && nrow(non_empty_prefixes) > 0L) {
@@ -350,6 +491,7 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
     non_empty_prefixes$annual_returns_na_then_absent <- FALSE
   }
 
+  # An empty prefix has no years to raise anything, so every flag is FALSE.
   empty_prefixes <- if ((base_year - 1L) %in% cutoff_years) {
     tibble::tibble(
       site_id = all_site_ids,
@@ -357,6 +499,9 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
       site_missing = FALSE,
       has_unknown_event_evidence = FALSE,
       has_reported_na_prefix = FALSE,
+      annual_returns_absent = FALSE,
+      annual_returns_na = FALSE,
+      reported_positive_without_matched_events = FALSE,
       annual_returns_na_then_absent = FALSE
     )
   } else {
@@ -366,6 +511,9 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
       site_missing = logical(),
       has_unknown_event_evidence = logical(),
       has_reported_na_prefix = logical(),
+      annual_returns_absent = logical(),
+      annual_returns_na = logical(),
+      reported_positive_without_matched_events = logical(),
       annual_returns_na_then_absent = logical()
     )
   }
@@ -378,6 +526,13 @@ derive_site_group_prefix_missing_flags <- function(crosswalk, base_year,
   }
   if (isTRUE(include_annual_return_sequence)) {
     output_columns <- c(output_columns, "annual_returns_na_then_absent")
+  }
+  if (isTRUE(include_atomic_evidence_flags)) {
+    output_columns <- c(
+      output_columns,
+      "annual_returns_absent", "annual_returns_na",
+      "reported_positive_without_matched_events"
+    )
   }
   prefixes <- dplyr::select(prefixes, dplyr::all_of(output_columns))
   prefixes

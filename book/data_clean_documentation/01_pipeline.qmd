@@ -390,6 +390,19 @@ digraph DataPipeline {
 
 ### Master Dataset Assembly Layer {#sec-01-03-06-master-dataset-assembly}
 
+**Prior-Exposure Measurement Layer (Sales and Rentals)**
+
+- **script_name**: `house_site_spills.R` / `rental_site_spills.R`
+- **purpose**: Publish the unmasked measurement layer — one row per eligible transaction × nearby Site Group within the maximum radius, carrying the window-clipped spill hours, the 12/24-rule spill count, the pair distance, and the four atomic evidence flags, with no missingness masking. The published prior-exposure datasets are derivations over these tables; the tables stay off the public enumerated dataset list but publish through the staged gate with pinned schemas.
+- **inputs**:
+  - `"data/processed/house_price.parquet"` / `"data/processed/zoopla/zoopla_rentals.parquet"`
+  - `"data/processed/spill_house_lookup.parquet"` / `"data/processed/zoopla/spill_rental_lookup.parquet"`
+  - `"data/processed/matched_events_annual_data/site_group_crosswalk.parquet"`
+  - `"data/processed/matched_events_annual_data/matched_events_annual_data.parquet"`
+- **outputs**:
+  - `"data/processed/cross_section/sales/house_site_spills/"`
+  - `"data/processed/cross_section/rentals/rental_site_spills/"`
+
 **Cross-Sectional Database Creation (Sales, Individual EDM Events)**
 
 - **script_name**: `cross_section_sales.R`
