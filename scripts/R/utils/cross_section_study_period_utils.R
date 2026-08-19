@@ -313,7 +313,8 @@ collapse_study_period_events <- function(annual_returns, events, window) {
   if (anyNA(evidence$has_missing_evidence)) {
     stop(
       "The event-evidence verdict requires matched_event_count on every ",
-      "Annual-Returns row.",
+      "Annual-Returns row: classify_annual_returns_evidence() leaves the ",
+      "third flag missing without it.",
       call. = FALSE
     )
   }
