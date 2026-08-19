@@ -45,6 +45,10 @@ source(
   local = TRUE
 )
 source(
+  here::here("scripts", "R", "utils", "spill_aggregation_utils.R"),
+  local = TRUE
+)
+source(
   here::here("scripts", "R", "utils", "site_group_utils.R"),
   local = TRUE
 )

@@ -13,6 +13,9 @@ source(here::here(
   "scripts", "R", "utils", "dataset_publication_utils.R"
 ))
 source(here::here(
+  "scripts", "R", "utils", "spill_aggregation_utils.R"
+))
+source(here::here(
   "scripts", "R", "utils", "site_group_utils.R"
 ))
 source(here::here(
@@ -140,7 +143,8 @@ annual_fixture <- rbindlist(list(
       "reported_zero"
     ),
     spill_count_ea = c(0, 1, 2, 0),
-    spill_hrs_ea = c(0, 3, 4, 0)
+    spill_hrs_ea = c(0, 3, 4, 0),
+    matched_event_count = c(0L, 1L, 2L, 0L)
   ),
   data.table(
     site_id = 20L,
@@ -149,21 +153,24 @@ annual_fixture <- rbindlist(list(
       "reported_zero", "reported_na", "absent", "reported_zero"
     ),
     spill_count_ea = c(0, NA, NA, 0),
-    spill_hrs_ea = c(0, NA, NA, 0)
+    spill_hrs_ea = c(0, NA, NA, 0),
+    matched_event_count = 0L
   ),
   data.table(
     site_id = 30L,
     year = 2021:2023,
     annual_status = "reported_zero",
     spill_count_ea = 0,
-    spill_hrs_ea = 0
+    spill_hrs_ea = 0,
+    matched_event_count = 0L
   ),
   data.table(
     site_id = 40L,
     year = 2021:2025,
     annual_status = "reported_zero",
     spill_count_ea = 0,
-    spill_hrs_ea = 0
+    spill_hrs_ea = 0,
+    matched_event_count = 0L
   )
 ))
 
@@ -245,11 +252,90 @@ assert_identical(
   "The Annual-Returns collapse must survive the pluggable-source refactor intact."
 )
 
+# U1: the evidence grid rides the shared truth table and window reducer --------
+
+evidence_grid <- study_period_annual_evidence_grid(
+  annual_fixture, window_2021_2024
+)
+assert_identical(
+  names(evidence_grid$site_evidence),
+  c(
+    "site_id", "annual_returns_absent", "annual_returns_na",
+    "reported_positive_without_matched_events", "has_missing_evidence"
+  ),
+  "The grid must expose the three atomic flags plus the Stage-1 verdict."
+)
+assert_identical(
+  evidence_grid$site_evidence$site_id,
+  c(10L, 20L, 30L, 40L),
+  "The window reducer must return one verdict per Site Group, in site order."
+)
+assert_identical(
+  evidence_grid$site_evidence$annual_returns_absent,
+  c(FALSE, TRUE, TRUE, FALSE),
+  paste(
+    "Site 20's absent year and site 30's missing 2024 row must both raise",
+    "annual_returns_absent through the shared gap fill."
+  )
+)
+assert_identical(
+  evidence_grid$site_evidence$annual_returns_na,
+  c(FALSE, TRUE, FALSE, FALSE),
+  "Only site 20's reported_na year may raise annual_returns_na."
+)
+assert_identical(
+  evidence_grid$site_evidence$has_missing_evidence,
+  c(FALSE, TRUE, TRUE, FALSE),
+  "The Stage-1 verdict must reproduce today's two-flag masks exactly."
+)
+assert_identical(
+  evidence_grid$site_evidence$reported_positive_without_matched_events,
+  c(FALSE, FALSE, FALSE, FALSE),
+  "reported_positive years with matched events must not raise the third flag."
+)
+
+# The third atomic flag stays outside the Stage-1 verdict: a reported_positive
+# year without matched events raises it, yet the exposure stays unmasked.
+stage1_fixture <- data.table(
+  site_id = 80L,
+  year = 2021:2024,
+  annual_status = c(
+    "reported_positive", "reported_zero", "reported_zero", "reported_zero"
+  ),
+  spill_count_ea = c(2, 0, 0, 0),
+  spill_hrs_ea = c(5, 0, 0, 0),
+  matched_event_count = 0L
+)
+stage1_grid <- study_period_annual_evidence_grid(
+  stage1_fixture, window_2021_2024
+)
+assert_true(
+  stage1_grid$site_evidence$reported_positive_without_matched_events &&
+    !stage1_grid$site_evidence$has_missing_evidence,
+  paste(
+    "A reported_positive year without matched events must raise the atomic",
+    "flag without entering the Stage-1 verdict."
+  )
+)
+assert_identical(
+  collapse_study_period_annual_returns(stage1_fixture, window_2021_2024)[
+    , .(spill_count, spill_hrs, has_missing_evidence)
+  ],
+  data.table(spill_count = 2, spill_hrs = 5, has_missing_evidence = FALSE),
+  "Stage 1 must keep exposure unmasked when only the third flag is raised."
+)
+
+invalid_matched <- copy(annual_fixture)
+invalid_matched[site_id == 10L & year == 2021L, matched_event_count := NA_integer_]
+assert_error_contains(
+  collapse_study_period_annual_returns(invalid_matched, window_2021_2024),
+  "matched_event_count",
+  "A missing matched_event_count must fail loudly, not gap-fill to zero."
+)
+
 # U1: event-based collapse ------------------------------------------------------
 
 utc_time <- function(text) as.POSIXct(text, tz = "UTC")
-
-source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
 
 # Sites 10 and 40 carry complete Annual-Returns evidence, site 20 turns unknown
 # mid-window, and site 30 is missing its 2024 row from the crosswalk grid.
@@ -1158,6 +1244,18 @@ for (spec in adapter_specs) {
       paste(market, "adapter must not retain obsolete execution text:", obsolete)
     )
   }
+  # Adapters run standalone under Rscript, where the shared measurement core is
+  # only available if the adapter sources it itself; this suite's environment
+  # would mask that omission because the core is already attached here.
+  for (required_source in c(
+    "spill_aggregation_utils.R", "site_group_utils.R",
+    "cross_section_study_period_utils.R"
+  )) {
+    assert_true(
+      grepl(required_source, adapter_text, fixed = TRUE),
+      paste(market, "adapter must source the shared core file:", required_source)
+    )
+  }
 }
 
 build_root <- tempfile("study-period-build-")
@@ -1536,7 +1634,8 @@ assert_true(
 # U2: shared measurement core, study-family seams ------------------------------
 
 # The window reducer is `any` per Site Group across the window's years. It is
-# built and tested here; the two collapse functions adopt it in ticket 05.
+# exercised directly here; the two collapse functions consume it through
+# study_period_annual_evidence_grid() since ticket 05.
 core_window_universe <- expand_site_year_universe(
   data.table(
     site_id = c(50L, 50L, 60L, 60L, 60L),
@@ -1644,7 +1743,7 @@ assert_identical(
 
 # The study engine orders by site and clipped start alone, and sums without
 # na.rm so an unexpected NA reaches its own guard. Both are the defaults, so
-# ticket 05 inherits today's behaviour by calling the core plainly.
+# the engine inherits today's behaviour by calling the core plainly.
 assert_identical(
   formals(collapse_events_by_group)$order_by,
   "clipped_start",
