@@ -89,12 +89,14 @@ Shared edit: `05_news/extensive_margin_news_utils.R` L245 `Year <= base_year + 2
 
 ## In-text hardcoded numbers (update after the reruns above)
 
-- [ ] Sample-period prose: "from 2021--2023" claims, incl. "universe of ≈14,000 storm overflows in England from 2021--2023" (L208).
-- [ ] "More than 1.1 Mn spill events totalling ≈8 Mn spill-hours" (L162, L215) — recompute for 2021–2024.
-- [ ] "≈3.18 Mn sales, ≈1.4 Mn within 1 km" (L229) — study window now 2021–2024 (~4.15 Mn total sales).
-- [ ] "≈1.45 Mn rental listings, ≈0.62 Mn within 1 km" (L237) — verify unchanged (rentals window unchanged, but cleaning fixes may have shifted counts).
-- [ ] "5% (16%) of England's population within 250m (500m)" (L371–372) — from new `population_exposure.tex`.
-- [ ] "+35% in cumulative articles ... 0.07% larger rental discount" (L736) — from new `did_articles_prior_extensive.tex`.
+- [X] Sample-period prose: "from 2021--2023" claims, incl. "universe of ≈14,000 storm overflows in England from 2021--2023" (L208).
+- [X] "More than 1.1 Mn spill events totalling ≈8 Mn spill-hours" (L162, L215) — recompute for 2021–2024.
+- [X] "≈3.18 Mn sales, ≈1.4 Mn within 1 km" (L229) — study window now 2021–2024 (~4.15 Mn total sales).
+- [X] "≈1.45 Mn rental listings, ≈0.62 Mn within 1 km" (L237) — verify unchanged (rentals window unchanged, but cleaning fixes may have shifted counts).
+- [X] "5% (16%) of England's population within 250m (500m)" (L371–372) — from new `population_exposure.tex`.
+- [X] "+35% in cumulative articles ... 0.07% larger rental discount" (L736) — from new `did_articles_prior_extensive.tex`.
+
+  Done 2026-08-20. Added `01_descriptive/deck_hardcoded_numbers.R` as a reproducible stdout audit and ran it against the canonical Stage-2 study-period cross-sections (sales rebuilt 2026-08-19 15:10; rentals 15:17) and Site-Group yearly spill aggregates. Updated the deck and corresponding paper prose to 1.5 Mn spill events / approximately 12.0 Mn spill-hours (exactly 1,541,687 / 11,954,531), 4.15 Mn sales / 1.85 Mn within 1 km (4,148,830 / 1,849,570), and 1.45 Mn rentals / 0.64 Mn within 1 km (1,446,802 / 642,680). The 1 km figures describe spatial proximity; the audit separately reports the reporting-gap-excluded complete-exposure samples (1,082,767 sales / 338,288 rentals). The approximately 14,000-overflow 2021--2024 claim was already current. Population shares remain 5% / 16%; the refreshed table and isolated deck conversion were copied to Overleaf (Any Spill population rises about 3--4%, while mapped spilling Site Groups fall 13,068 -> 12,639 after consolidation). The old cumulative-articles claim had already been replaced by the approved post-August-2022 result; a concurrent Overleaf wording edit (0.66% rental decline) was preserved. User decision: high-level paper sample prose says 2021--2024 for all property transactions in anticipation of the forthcoming 2024 rental refresh, although the currently counted Zoopla listings remain 2021--2023. Known population-table caveat remains: the Dry Spills row lacks a complete 2024 rainfall match; the Any Spill figures used for the population claims are valid through 2024. Both deck trees compiled to 86 pages; both paper trees compiled to 100 pages with the same three pre-existing undefined-control-sequence errors and unresolved-reference warnings.
 
 ## No update needed (static graphics)
 
