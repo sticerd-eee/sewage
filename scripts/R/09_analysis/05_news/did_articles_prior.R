@@ -81,7 +81,7 @@ cat("Loading LexisNexis article counts...\n")
 articles <- arrow::read_parquet(
   here::here("data", "processed", "lexis_nexis", "search1_monthly.parquet")
 ) |>
-  filter(month_id >= 1, month_id <= 36) |>  # Jan 2021 - Dec 2023
+  filter(month_id >= 1, month_id <= 48) |>  # Jan 2021 - Dec 2024
   arrange(month_id) |>
   mutate(
     cumulative_articles = cumsum(article_count),
@@ -146,8 +146,12 @@ run_for_radius <- function(RAD) {
     here::here("data", "processed", "cross_section", "sales", "prior_to_sale")
   ) |>
     filter(radius == RAD) |>
-    filter(n_spill_sites > 0) |>
-    collect()
+    select(
+      house_id, price, spill_count_weekly_avg, n_spill_sites,
+      has_missing_site, annual_returns_na_then_absent
+    ) |>
+    collect() |>
+    filter(n_spill_sites > 0L)
 
   cat(sprintf("  Found %d sales records within %dm\n", nrow(dat_cs_sales), RAD))
 
@@ -162,6 +166,8 @@ run_for_radius <- function(RAD) {
     ) |>
     mutate(log_price = log(price.y)) |>
     filter(
+      month_id >= 1L,
+      month_id <= 48L,
       !is.na(spill_count_weekly_avg),
       is.finite(log_cumulative_articles),
       !is.na(lsoa),
@@ -205,8 +211,12 @@ run_for_radius <- function(RAD) {
     here::here("data", "processed", "cross_section", "rentals", "prior_to_rental")
   ) |>
     filter(radius == RAD) |>
-    filter(n_spill_sites > 0) |>
-    collect()
+    select(
+      rental_id, listing_price, spill_count_weekly_avg, n_spill_sites,
+      has_missing_site, annual_returns_na_then_absent
+    ) |>
+    collect() |>
+    filter(n_spill_sites > 0L)
 
   cat(sprintf("  Found %d rental records within %dm\n", nrow(dat_cs_rentals), RAD))
 
@@ -221,6 +231,8 @@ run_for_radius <- function(RAD) {
     ) |>
     mutate(log_price = log(listing_price.y)) |>
     filter(
+      month_id >= 1L,
+      month_id <= 36L,
       !is.na(spill_count_weekly_avg),
       is.finite(log_cumulative_articles),
       !is.na(lsoa),
@@ -407,7 +419,7 @@ run_for_radius <- function(RAD) {
 
   # Notes
   custom_notes <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. $\\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative UK news coverage of sewage spills from LexisNexis from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Observations with incomplete annual reporting within ", RAD, "m (including overflows that stopped reporting and left the register) are excluded. $\\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative UK news coverage of sewage spills from LexisNexis from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Set option to avoid siunitx wrapping
@@ -487,7 +499,7 @@ cat("  Radii:", paste(RADII, collapse = ", "), "m\n")
 cat("\nBuilding cross-radius robustness summary...\n")
 
 custom_notes_summary <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the cumulative media coverage estimates to the house-to-site radius. Each column reports estimates for the sample of properties within the stated radius (250m, 500m, or 1000m) of a storm overflow in England, 2021--2023. Each cell is the coefficient on the interaction between the weekly spill count and $\\\\log (\\\\text{Articles})$, the natural logarithm of cumulative UK news coverage of sewage spills from January 2021 to the transaction month, from the fully-saturated specification including property controls, the stated location fixed effects, and month fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the cumulative media coverage estimates to the house-to-site radius. Each column reports estimates for the sample of properties within the stated radius (250m, 500m, or 1000m) of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Each cell is the coefficient on the interaction between the weekly spill count and $\\\\log (\\\\text{Articles})$, the natural logarithm of cumulative UK news coverage of sewage spills from January 2021 to the transaction month, from the fully-saturated specification including property controls, the stated location fixed effects, and month fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Observations with incomplete annual reporting within the stated radius (including overflows that stopped reporting and left the register) are excluded. Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 write_radius_robustness_table(
