@@ -10,6 +10,7 @@
 #
 # Author: Jacopo Olivieri
 # Date: 2026-04-07
+# Date Modified: 2026-08-20
 #
 # Inputs:
 #   - data/processed/house_price.parquet
@@ -62,7 +63,10 @@ check_required_packages(REQUIRED_PACKAGES)
 # 1. Configuration
 # ==============================================================================
 START_DATE <- as.Date("2021-01-01")
-END_DATE   <- as.Date("2023-12-31")
+SALES_END_DATE <- as.Date("2024-12-31")
+RENTAL_END_DATE <- as.Date("2023-12-31")
+SALES_END_MONTH_ID <- 48L
+RENTAL_END_MONTH_ID <- 36L
 LOOKUP_MAX_DISTANCE <- 10000
 VCOV_MODE  <- "hetero"
 
@@ -204,7 +208,7 @@ load_peak_month_id <- function() {
     here::here("data", "raw", "google_trends", "google_trends_uk.xlsx"),
     sheet = "united_kingdom"
   ) |>
-    dplyr::filter(.data$Year >= 2021, .data$Year <= 2023)
+    dplyr::filter(.data$Year >= 2021, .data$Year <= 2024)
 
   peak_row <- google_trends |>
     dplyr::slice_max(`'Sewage Spill' Google Searches`, n = 1, with_ties = FALSE)
@@ -220,7 +224,7 @@ load_articles <- function() {
   arrow::read_parquet(
     here::here("data", "processed", "lexis_nexis", "search1_monthly.parquet")
   ) |>
-    dplyr::filter(.data$month_id >= 1L, .data$month_id <= 36L) |>
+    dplyr::filter(.data$month_id >= 1L, .data$month_id <= SALES_END_MONTH_ID) |>
     dplyr::arrange(.data$month_id) |>
     dplyr::mutate(
       cumulative_articles     = cumsum(.data$article_count),
@@ -256,7 +260,7 @@ load_nearest_lookup <- function(path, id_col) {
     dplyr::collect()
 }
 
-#' Load Land Registry sales transactions (2021-2023)
+#' Load Land Registry sales transactions (2021-2024)
 load_sales_transactions <- function() {
   rio::import(
     here::here("data", "processed", "house_price.parquet"),
@@ -277,9 +281,9 @@ load_sales_transactions <- function() {
     ) |>
     dplyr::filter(
       .data$date_of_transfer >= START_DATE,
-      .data$date_of_transfer <= END_DATE,
+      .data$date_of_transfer <= SALES_END_DATE,
       .data$month_id >= 1L,
-      .data$month_id <= 36L,
+      .data$month_id <= SALES_END_MONTH_ID,
       is.finite(.data$log_price)
     )
 }
@@ -303,9 +307,9 @@ load_rental_transactions <- function() {
     ) |>
     dplyr::filter(
       .data$rented_est >= START_DATE,
-      .data$rented_est <= END_DATE,
+      .data$rented_est <= RENTAL_END_DATE,
       .data$month_id >= 1L,
-      .data$month_id <= 36L,
+      .data$month_id <= RENTAL_END_MONTH_ID,
       is.finite(.data$log_price)
     )
 }
