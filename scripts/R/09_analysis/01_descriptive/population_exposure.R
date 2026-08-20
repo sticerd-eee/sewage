@@ -45,7 +45,7 @@ REQUIRED_PACKAGES <- c(
 # ==============================================================================
 # 1. Configuration
 # ==============================================================================
-TARGET_YEARS <- 2021:2023
+TARGET_YEARS <- 2021:2024
 BASE_YEAR <- 2021L
 DRY_SPILL_COUNT_COL <- "dry_spill_count_mo_r1_d0123_strict"
 DISTANCES_M <- c(50, 100, 250, 500, 1000)
@@ -281,7 +281,7 @@ tex_lines <- c(
   "\\begin{table}[H]",
   "\\centering",
   "\\begin{talltblr}[",
-  "caption={Residential Population (Thousands) Within Distance of Spill Sites (2021--2023)},",
+  "caption={Residential Population (Thousands) Within Distance of Spill Sites (2021--2024)},",
   "label={tab:pop_exposure},",
   "note{a}={Population (in thousands) is computed from the UK residential population 2021 raster",
   "  (100\\,m grid). Where buffers from multiple sites overlap, the overlapping",
