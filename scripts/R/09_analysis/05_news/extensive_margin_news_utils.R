@@ -7,6 +7,7 @@
 #
 # Author: Jacopo Olivieri
 # Date: 2026-04-07
+# Date Modified: 2026-08-20
 #
 # ==============================================================================
 
@@ -242,7 +243,7 @@ load_google_trends_peak <- function(
   google_trends <- readxl::read_excel(path, sheet = sheet) |>
     dplyr::filter(
       .data$Year >= base_year,
-      .data$Year <= base_year + 2L
+      .data$Year <= base_year + 3L
     )
 
   peak_row <- google_trends |>
