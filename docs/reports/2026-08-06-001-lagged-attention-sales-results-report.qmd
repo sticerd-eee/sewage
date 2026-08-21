@@ -1,7 +1,7 @@
 ---
 title: "Lagged public attention and house sales"
 subtitle: "Extensive-margin core and intensive-margin extension"
-date: 2026-08-06
+date: 2026-08-21
 format:
   html:
     toc: true
@@ -118,12 +118,13 @@ sign_agreement <- vapply(
 ## Conclusion
 
 Taken together, the realized extensive-margin paths do not support mistimed
-attention as a general explanation for the sales null. The post-indicator sales
-path moves toward the contemporaneous rental sign at some shorter lags, but the
-movement is not sustained; the article sales path never shares the rental sign;
-and the rental associations remain strong when attention is deliberately
-backdated. This is a qualitative KTD7 assessment across both measures and the
-rental placebo, not a mechanical threshold rule.
+attention as a general explanation for the sales null. Neither lagged sales path
+shares the negative contemporaneous rental sign at any tested lag; instead, the
+updated sales estimates are positive throughout, with isolated significant
+coefficients that point away from the rental pattern. Rental associations remain
+strong when attention is deliberately backdated. This is a qualitative KTD7
+assessment across both measures and the rental placebo, not a mechanical
+threshold rule.
 
 The report applies KTD7 descriptively and does not assign a mechanical pass/fail
 verdict. Mistiming is more plausible when sales estimates move coherently toward
@@ -147,16 +148,17 @@ patterns should be read jointly to assess whether timing plausibly explains the
 sales null; the code deliberately does not convert them into an unapproved
 numeric decision rule.
 
-The lag-12 post estimate deserves less weight than the other points: shifting the
-August 2022 threshold forward by 12 months leaves only five post-threshold months
-(August--December 2023), even though the full 36-month estimation sample remains.
-All intervals shown here are ordinary pointwise 95% confidence intervals; no
-simultaneous-band or multiple-testing adjustment is applied.
+The rental lag-12 post estimate deserves less weight than the other rental
+points: shifting the August 2022 threshold forward by 12 months leaves only five
+post-threshold rental months (August--December 2023). The corresponding sales
+estimate has 17 post-threshold months through December 2024. All intervals shown
+here are ordinary pointwise 95% confidence intervals; no simultaneous-band or
+multiple-testing adjustment is applied.
 
 ## Extensive-margin core and rental placebo
 
 ```{r}
-#| fig-cap: "Extensive-margin lagged-attention coefficient paths. The outcome, exposure comparison, and estimated interaction are stated in the panel labels. Sales are the issue-closing core; rentals are a secondary placebo."
+#| fig-cap: "Extensive-margin lagged-attention coefficient paths, using 2021–2024 sales and 2021–2023 rentals. Treatment is proximity to a mapped overflow, so annual reporting gaps do not affect classification. Sales are the issue-closing core; rentals are a secondary placebo."
 #| out-width: "100%"
 knitr::include_graphics(core_figure_path)
 ```
@@ -193,7 +195,7 @@ not as a separate significance test.
 ## Intensive-margin extension
 
 ```{r}
-#| fig-cap: "Intensive-margin lagged-attention coefficient paths. The outcome is log transaction price; exposure is the weekly average spill count within the indicated radius."
+#| fig-cap: "Intensive-margin lagged-attention coefficient paths, using 2021–2024 sales and 2021–2023 rentals. Exposure is the weekly average spill count within the indicated radius; observations affected by the annual-returns-NA-then-absent reporting gap are excluded."
 #| out-width: "100%"
 knitr::include_graphics(extension_figure_path)
 ```
@@ -221,10 +223,11 @@ knitr::kable(
 
 The intensive estimates are an extension, not the issue-closing test. Radius
 comparisons should be read within radius because the 250m, 500m, and 1000m
-specifications select different property samples. Post models use January
-2021--December 2023 at every lag. Article paths use the common January
-2022--December 2023 sample, while `full_reference` rows preserve the
-contemporaneous January 2021--December 2023 benchmark.
+specifications select different property samples. Sales post models use January
+2021--December 2024, while rental benchmarks use January 2021--December 2023.
+Sales article paths use the common January 2022--December 2024 sample; sales
+`full_reference` rows begin in January 2021. Rental article references retain
+January 2021--December 2023.
 
 As a descriptive cross-margin check, the median lagged intensive sales estimate
 has the same sign as the median lagged extensive sales estimate at

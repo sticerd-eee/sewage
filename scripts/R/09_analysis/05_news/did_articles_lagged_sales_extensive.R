@@ -4,8 +4,8 @@
 #
 # Purpose: Re-estimate the headline extensive-margin specification using
 #          cumulative article coverage lagged by 0, 3, 6, and 12 months. Main
-#          sales and rental-placebo paths use a common January 2022--December
-#          2023 sample; full-sample contemporaneous estimates are references.
+#          sales and rental-placebo paths use market-specific common samples;
+#          full-sample contemporaneous estimates are references.
 #
 # Inputs:
 #   - data/processed/lexis_nexis/search1_monthly.parquet
@@ -72,7 +72,8 @@ source(
 
 CONFIG <- list(
   analysis_start_month_id = 1L,
-  analysis_end_month_id = 36L,
+  sales_end_month_id = 48L,
+  rental_end_month_id = 36L,
   lags = c(0L, 3L, 6L, 12L),
   max_lag = 12L,
   comparison = list(
@@ -119,7 +120,7 @@ prepare_sales_base_sample <- function(comparison) {
     dplyr::filter(
       !is.na(.data$month_id),
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$sales_end_month_id
     )
 
   sales_lookup <- load_nearest_distance_lookup(
@@ -150,6 +151,10 @@ prepare_sales_base_sample <- function(comparison) {
     standardise_sales_estimation_data()
 
   print_extensive_margin_summary(dat, "Sales", comparison)
+  stopifnot(
+    min(dat$month_id) == CONFIG$analysis_start_month_id,
+    max(dat$month_id) == CONFIG$sales_end_month_id
+  )
   dat
 }
 
@@ -161,7 +166,7 @@ prepare_rental_base_sample <- function(comparison) {
     dplyr::filter(
       !is.na(.data$month_id),
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$rental_end_month_id
     )
 
   rental_lookup <- load_nearest_distance_lookup(
@@ -192,6 +197,10 @@ prepare_rental_base_sample <- function(comparison) {
     standardise_rental_estimation_data()
 
   print_extensive_margin_summary(dat, "Rentals", comparison)
+  stopifnot(
+    min(dat$month_id) == CONFIG$analysis_start_month_id,
+    max(dat$month_id) == CONFIG$rental_end_month_id
+  )
   dat
 }
 
@@ -284,6 +293,12 @@ estimate_common_lag_path <- function(base_sample, articles, market) {
       lag = lag,
       common_sample = TRUE
     )
+    expected_end_month_id <- if (market == "sales") {
+      CONFIG$sales_end_month_id
+    } else {
+      CONFIG$rental_end_month_id
+    }
+    stopifnot(max(dat$month_id) == expected_end_month_id)
 
     cat(sprintf(
       "  %s common lag %2d: transaction months %d--%d, article months %d--%d, N = %s\n",
@@ -379,8 +394,12 @@ export_table <- function(
     "$\\log(\\text{Articles})$ is the natural logarithm of cumulative UK ",
     "LexisNexis sewage coverage since January 2021, evaluated $L$ months before ",
     "the transaction month. Common-sample columns retain January 2022--December ",
-    "2023 (month_id 13--36) at every lag; full-reference columns use January ",
-    "2021--December 2023 with contemporaneous coverage. The rental common-sample ",
+    "2024 for sales (month_id 13--48) and January 2022--December 2023 for ",
+    "rentals (month_id 13--36) at every lag. Full-reference columns use January ",
+    "2021--December 2024 for sales and January 2021--December 2023 for rentals ",
+    "with contemporaneous coverage. Treatment is proximity to a mapped ",
+    "overflow, so annual reporting gaps do not affect classification. The ",
+    "rental common-sample ",
     "placebo path is reported in the component results file. All models include ",
     "property controls, LSOA fixed effects, and month fixed effects. Standard ",
     "errors are clustered by LSOA. *** p<0.01, ** p<0.05, * p<0.1.}},"
@@ -547,6 +566,8 @@ main <- function() {
     identical(CONFIG$lags, c(0L, 3L, 6L, 12L)),
     CONFIG$max_lag == max(CONFIG$lags),
     CONFIG$analysis_start_month_id + CONFIG$max_lag == 13L,
+    CONFIG$sales_end_month_id == 48L,
+    CONFIG$rental_end_month_id == 36L,
     identical(
       unname(unlist(CONFIG$comparison[c(
         "near_min", "near_max", "far_min", "far_max"
@@ -559,12 +580,12 @@ main <- function() {
   articles <- load_articles_data(
     path = CONFIG$article_path,
     start_month_id = CONFIG$analysis_start_month_id,
-    end_month_id = CONFIG$analysis_end_month_id
+    end_month_id = CONFIG$sales_end_month_id
   )
 
   stopifnot(
     min(articles$month_id) == 1L,
-    max(articles$month_id) == 36L,
+    max(articles$month_id) == 48L,
     !anyDuplicated(articles$month_id),
     all(is.finite(articles$cumulative_articles)),
     all(is.finite(articles$log_cumulative_articles)),

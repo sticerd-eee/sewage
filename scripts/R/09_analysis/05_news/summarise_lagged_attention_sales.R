@@ -450,8 +450,8 @@ create_core_coefficient_figure <- function(data, pdf_path, png_path) {
       y = "Estimated near × attention coefficient (95% CI)",
       caption = paste(
         "Models include property controls and LSOA-clustered standard errors.",
-        "\nPost models use Jan 2021-Dec 2023; article models use the common",
-        "Jan 2022-Dec 2023 sample."
+        "\nSales use Jan 2021-Dec 2024 (post) or Jan 2022-Dec 2024",
+        "(articles); rentals end in Dec 2023."
       )
     ) +
     ggplot2::theme_minimal(base_size = 10) +
@@ -509,8 +509,8 @@ create_intensive_coefficient_figure <- function(data, pdf_path, png_path) {
       colour = "Exposure radius",
       caption = paste(
         "Models include property controls, LSOA and month fixed effects, and",
-        "LSOA-clustered standard errors.\nPost models use Jan 2021-Dec 2023;",
-        "article models use the common Jan 2022-Dec 2023 sample."
+        "LSOA-clustered standard errors.\nSales end in Dec 2024; rentals end",
+        "in Dec 2023. Article paths begin in Jan 2022."
       )
     ) +
     ggplot2::theme_minimal(base_size = 10) +
