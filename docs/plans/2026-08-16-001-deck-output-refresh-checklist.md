@@ -78,7 +78,8 @@ Shared edit: `05_news/extensive_margin_news_utils.R` L245 `Year <= base_year + 2
 
 ### Structural edit
 
-- [ ] **Repeat-sales table** (`repeat_sales.tex`) — `03_repeat_sales/repeat_sales.R`: migrate the exposure join from per-`site_id` grain to Site Group grain (decision 2026-08-16) so it matches every other table; then rerun (repeat mappings and lookups on disk are current, sales include 2024).
+- [X] **Repeat-sales table** (`repeat_sales.tex`) — `03_repeat_sales/repeat_sales.R`: migrate the exposure join from per-`site_id` grain to Site Group grain (decision 2026-08-16) so it matches every other table; then rerun (repeat mappings and lookups on disk are current, sales include 2024).
+  Done 2026-08-21. Rewired both lookup joins and the quarterly reducer to canonical Site Group IDs, retaining the four-quarter-before-transaction estimand. Annual evidence is now propagated as `NA` rather than silently summed away; `annual_returns_na_then_absent` reporting-gap Site Groups are excluded consistently. The refreshed table uses 2021--2024 sales / 2021--2023 rentals and reports Conley SEs with the existing 500m cutoff. The stable-ID rebuild surprise was that the on-disk lookup already contained canonical Site Group IDs; the required change was therefore the downstream grain and missingness handling, not another lookup rebuild. Rerun: 5,767 sale pairs and 8,454 rental pairs; output notes were checked after a second run to correct LaTeX note escaping.
 
 ## Category 3 — upstream code not yet fixed
 
