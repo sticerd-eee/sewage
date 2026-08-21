@@ -240,8 +240,12 @@ is intended to stay ASCII-compatible: `&minus;`, `&times;`, `&ndash;`, and
   Reusable: re-run after the tables are regenerated.
 - `CONCEPTS.md` -- defines the Radius Buffer `B`, Directional/Nearest-Site
   Exposure, and Cross-Radius Robustness Summary vocabulary these reports use.
-- `scripts/python/build_windowed_article_salience_html_report.py` -- builder for
-  the locally generated cumulative/windowed article-salience report.
+- `scripts/R/09_analysis/05_news/did_articles_windowed_prior.R` and
+  `did_articles_windowed_prior_extensive.R` -- parameterized R analysis scripts
+  for the cumulative/windowed article-salience specifications.
+- `docs/reports/2026-06-23-001-windowed-article-salience-results-report.qmd` --
+  Quarto report source that validates the generated artifacts and renders the
+  synchronized radius and comparison tabsets.
 - Locally generated `docs/reports/*.html` files -- preview and validation
   artifacts; ignored by Git and published separately only when needed.
 - GitHub issue #6 -- related regression-table reporting context for adding MSOA

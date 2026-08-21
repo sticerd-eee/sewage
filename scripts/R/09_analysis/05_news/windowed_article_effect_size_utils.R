@@ -73,7 +73,8 @@ write_windowed_article_effect_sizes <- function(
   interaction_term_fn,
   margin = c("intensive", "extensive"),
   output_path,
-  spill_col = NULL
+  spill_col = NULL,
+  metadata = list()
 ) {
   margin <- match.arg(margin)
 
@@ -108,12 +109,6 @@ write_windowed_article_effect_sizes <- function(
 
     for (market in names(market_specs)) {
       market_spec <- market_specs[[market]]
-      inputs <- summarise_effect_inputs(
-        data = market_spec$data,
-        salience_col = salience_col,
-        spill_col = if (margin == "intensive") spill_col else NULL
-      )
-      scale <- if (margin == "intensive") inputs$spill_sd[[1]] else 1
 
       for (fe in names(fe_specs)) {
         model_name <- paste0(market_spec$model_prefix, "_", fe)
@@ -126,6 +121,13 @@ write_windowed_article_effect_sizes <- function(
           )
         }
 
+        estimation_data <- fixest::fixest_data(model, sample = "estimation")
+        inputs <- summarise_effect_inputs(
+          data = estimation_data,
+          salience_col = salience_col,
+          spill_col = if (margin == "intensive") spill_col else NULL
+        )
+        scale <- if (margin == "intensive") inputs$spill_sd[[1]] else 1
         coef_stats <- extract_fixest_term(model, term)
 
         row_id <- row_id + 1L
@@ -137,6 +139,7 @@ write_windowed_article_effect_sizes <- function(
           measure = measure,
           salience_col = salience_col,
           term = term,
+          effect_sample_n = nrow(estimation_data),
           estimate = coef_stats[["estimate"]],
           std_error = coef_stats[["std_error"]],
           p_value = coef_stats[["p_value"]],
@@ -159,6 +162,21 @@ write_windowed_article_effect_sizes <- function(
   }
 
   out <- dplyr::bind_rows(rows)
+
+  if (length(metadata) > 0L) {
+    if (is.null(names(metadata)) || any(names(metadata) == "")) {
+      stop("`metadata` must be a named list.", call. = FALSE)
+    }
+    invalid_metadata <- vapply(metadata, length, integer(1)) != 1L
+    if (any(invalid_metadata)) {
+      stop(
+        "Each metadata value must have length one: ",
+        paste(names(metadata)[invalid_metadata], collapse = ", "),
+        call. = FALSE
+      )
+    }
+    out <- dplyr::mutate(out, !!!metadata, .after = "margin")
+  }
 
   dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(out, output_path, row.names = FALSE, na = "")

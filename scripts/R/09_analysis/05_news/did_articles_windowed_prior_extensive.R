@@ -19,8 +19,8 @@
 #   - scripts/R/09_analysis/05_news/extensive_margin_news_utils.R
 #
 # Outputs:
-#   - output/tables/did_articles_windowed_prior_extensive_<WIN>m.tex
-#   - output/tables/did_articles_windowed_prior_extensive_effect_sizes.csv
+#   - output/tables/did_articles_windowed_prior_extensive_<COMPARISON>_<MEASURE>.tex
+#   - output/tables/did_articles_windowed_prior_extensive_<COMPARISON>_effect_sizes.csv
 #
 # ==============================================================================
 
@@ -62,6 +62,13 @@ source(
   ),
   local = TRUE
 )
+source(
+  here::here(
+    "scripts", "R", "09_analysis", "05_news",
+    "windowed_article_analysis_config.R"
+  ),
+  local = TRUE
+)
 
 
 # ==============================================================================
@@ -69,16 +76,10 @@ source(
 # ==============================================================================
 CONFIG <- list(
   analysis_start_month_id = 1L,
-  analysis_end_month_id = 36L,
-  windows = c(3L, 6L, 12L),
-  comparison = list(
-    comparison_id = "500_vs_1000_2000",
-    comparison_label = "0-500m vs 1000-2000m",
-    near_min = 0L,
-    near_max = 500L,
-    far_min = 1000L,
-    far_max = 2000L
-  ),
+  sales_end_month_id = 48L,
+  rental_end_month_id = 36L,
+  windows = windowed_article_windows,
+  comparisons = unname(windowed_article_extensive_comparisons),
   article_path = here::here(
     "data", "processed", "lexis_nexis", "search1_monthly.parquet"
   ),
@@ -88,10 +89,7 @@ CONFIG <- list(
   rental_lookup_path = here::here(
     "data", "processed", "zoopla", "spill_rental_lookup.parquet"
   ),
-  output_dir = here::here("output", "tables"),
-  effect_size_output_path = here::here(
-    "output", "tables", "did_articles_windowed_prior_extensive_effect_sizes.csv"
-  )
+  output_dir = here::here("output", "tables")
 )
 
 
@@ -112,14 +110,6 @@ article_log_columns <- function(articles) {
   grep("^log_(cumulative_articles|articles_[0-9]+m)$", names(articles), value = TRUE)
 }
 
-window_label <- function(window) {
-  paste0(window, "-month")
-}
-
-salience_col_for_window <- function(window) {
-  paste0("log_articles_", window, "m")
-}
-
 interaction_term <- function(salience_col) {
   paste0("near_bin:", salience_col)
 }
@@ -132,6 +122,41 @@ make_formula <- function(rhs, fixed_effects = NULL) {
   ))
 }
 
+measure_slug <- function(measure) {
+  windowed_article_measure_slugs[[measure]]
+}
+
+extensive_table_path <- function(comparison, measure) {
+  file.path(
+    CONFIG$output_dir,
+    paste0(
+      "did_articles_windowed_prior_extensive_", comparison$comparison_id, "_",
+      measure_slug(measure), ".tex"
+    )
+  )
+}
+
+extensive_effect_size_path <- function(comparison) {
+  file.path(
+    CONFIG$output_dir,
+    paste0(
+      "did_articles_windowed_prior_extensive_", comparison$comparison_id,
+      "_effect_sizes.csv"
+    )
+  )
+}
+
+legacy_extensive_table_path <- function(comparison, measure) {
+  if (comparison$comparison_id != "500_vs_1000_2000") return(NULL)
+  if (measure == "Cumulative") {
+    return(file.path(CONFIG$output_dir, "did_articles_prior_extensive.tex"))
+  }
+  file.path(
+    CONFIG$output_dir,
+    paste0("did_articles_windowed_prior_extensive_", measure_slug(measure), ".tex")
+  )
+}
+
 
 # ==============================================================================
 # 4. Data Preparation
@@ -141,23 +166,10 @@ make_formula <- function(rhs, fixed_effects = NULL) {
 #'
 #' @param comparison Validated comparison config.
 #' @param articles Article-count panel from `load_windowed_articles_data()`.
+#' @param sales Filtered sales transactions.
+#' @param sales_lookup Nearest-overflow lookup covering every comparison.
 #' @return Tibble ready for estimation.
-prepare_sales_analysis_data <- function(comparison, articles) {
-  cat("Loading sales transactions...\n")
-
-  sales <- load_sales_transactions(CONFIG$sales_path) |>
-    dplyr::filter(
-      !is.na(.data$month_id),
-      .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
-    )
-
-  sales_lookup <- load_nearest_distance_lookup(
-    path = CONFIG$sales_lookup_path,
-    id_col = "house_id",
-    max_distance = comparison$far_max
-  )
-
+prepare_sales_analysis_data <- function(comparison, articles, sales, sales_lookup) {
   cat("Creating sales analysis dataset...\n")
 
   log_cols <- article_log_columns(articles)
@@ -193,23 +205,10 @@ prepare_sales_analysis_data <- function(comparison, articles) {
 #'
 #' @param comparison Validated comparison config.
 #' @param articles Article-count panel from `load_windowed_articles_data()`.
+#' @param rentals Filtered rental transactions.
+#' @param rental_lookup Nearest-overflow lookup covering every comparison.
 #' @return Tibble ready for estimation.
-prepare_rental_analysis_data <- function(comparison, articles) {
-  cat("Loading rental transactions...\n")
-
-  rentals <- load_rental_transactions(CONFIG$rental_path) |>
-    dplyr::filter(
-      !is.na(.data$month_id),
-      .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
-    )
-
-  rental_lookup <- load_nearest_distance_lookup(
-    path = CONFIG$rental_lookup_path,
-    id_col = "rental_id",
-    max_distance = comparison$far_max
-  )
-
+prepare_rental_analysis_data <- function(comparison, articles, rentals, rental_lookup) {
   cat("Creating rental analysis dataset...\n")
 
   log_cols <- article_log_columns(articles)
@@ -366,22 +365,25 @@ preferred_models <- function(models) {
 # 6. Export Table
 # ==============================================================================
 
-#' Export one window-stamped regression table
+#' Export one measure-stamped regression table
 #'
 #' @param models Named list of fitted models.
 #' @param comparison Validated comparison config.
-#' @param window Integer window length in months.
+#' @param measure Salience-measure display label.
 #' @param salience_col Log article-count measure column.
 #' @return Output path, invisibly.
-export_table <- function(models, comparison, window, salience_col) {
+export_table <- function(models, comparison, measure, salience_col) {
   cat("\nExporting regression table...\n")
 
   interaction <- interaction_term(salience_col)
-  salience_label <- paste0("$\\log (\\text{Articles}_{", window, "m})$")
+  cumulative <- measure == "Cumulative"
+  salience_label <- if (cumulative) {
+    "$\\log (\\text{Articles})$"
+  } else {
+    paste0("$\\log (\\text{Articles}_{", measure, "})$")
+  }
   interaction_label <- paste0(
-    "{Near bin \\\\ $\\times$ $\\log (\\text{Articles}_{",
-    window,
-    "m})$}"
+    "{Near bin \\\\ $\\times$ ", salience_label, "}"
   )
 
   coef_labels <- c(
@@ -413,7 +415,8 @@ export_table <- function(models, comparison, window, salience_col) {
     "This table presents hedonic estimates of the relationship between proximity ",
     "to sewage overflows, public attention, and property values. ",
     comparison_note_text(comparison),
-    "The dependent variable is the log transaction price for sales ",
+    "The sales sample covers 2021--2024 and the rental sample covers 2021--2023 ",
+    "(no 2024 rental data are available). The dependent variable is the log transaction price for sales ",
     "(columns 1--6) or the log weekly asking rent for rentals ",
     "(columns 7--12). Near bin is an indicator equal to one for properties in the ",
     comparison$near_band_label,
@@ -421,10 +424,19 @@ export_table <- function(models, comparison, window, salience_col) {
     comparison$far_band_label,
     " band. ",
     salience_label,
-    " is the natural logarithm of UK news coverage of sewage spills from ",
-    "LexisNexis over the trailing ",
-    window,
-    " months, inclusive of the transaction month. Property controls include ",
+    if (cumulative) {
+      paste0(
+        " is the natural logarithm of cumulative UK news coverage of sewage spills ",
+        "from LexisNexis from January 2021 through the transaction month. "
+      )
+    } else {
+      paste0(
+        " is the natural logarithm of UK news coverage of sewage spills from ",
+        "LexisNexis over the trailing ", sub("m$", "", measure),
+        " months, inclusive of the transaction month. "
+      )
+    },
+    "Property controls include ",
     "type (flat, semi-detached, terraced, other), new build status, and tenure ",
     "for sales; and type (bungalow, detached, semi-detached, terraced), ",
     "bedrooms, and bathrooms for rentals. Standard errors clustered at the ",
@@ -466,7 +478,7 @@ export_table <- function(models, comparison, window, salience_col) {
     notes = " ",
     title = paste0(
       "Effect of Overflow Proximity on Property Values: Log ",
-      window_label(window),
+      if (cumulative) "Cumulative" else sub("m$", "-month", measure),
       " Media Coverage (Prior to Transaction, ",
       comparison$comparison_label,
       ")"
@@ -475,16 +487,21 @@ export_table <- function(models, comparison, window, salience_col) {
 
   table_latex <- patch_modelsummary_latex(
     table_latex = table_latex,
-    label = paste0("tbl:did-articles-windowed-prior-extensive-", window, "m"),
+    label = paste0(
+      "tbl:did-articles-windowed-prior-extensive-", comparison$comparison_id,
+      "-", measure_slug(measure)
+    ),
     notes = custom_notes
   )
 
-  output_path <- file.path(
-    CONFIG$output_dir,
-    paste0("did_articles_windowed_prior_extensive_", window, "m.tex")
-  )
+  output_path <- extensive_table_path(comparison, measure)
   ensure_output_dir(output_path)
   writeLines(table_latex, output_path)
+
+  legacy_path <- legacy_extensive_table_path(comparison, measure)
+  if (!is.null(legacy_path)) {
+    writeLines(table_latex, legacy_path)
+  }
 
   cat(sprintf("LaTeX table exported to: %s\n", output_path))
 
@@ -495,15 +512,63 @@ export_table <- function(models, comparison, window, salience_col) {
 # ==============================================================================
 # 7. Per-Window Workflow
 # ==============================================================================
-run_for_window <- function(window, comparison, dat, dat_rental) {
-  cat("\n========================== Window:", window, "months ==========================\n")
+run_for_comparison <- function(
+    comparison, articles, sales, rentals, sales_lookup, rental_lookup) {
+  comparison <- validate_comparison_config(comparison, allow_adjacent = TRUE)
+  cat("\n========================== Comparison:", comparison$comparison_label,
+      "==========================\n")
 
-  salience_col <- salience_col_for_window(window)
+  sales_articles <- dplyr::filter(
+    articles, .data$month_id <= CONFIG$sales_end_month_id
+  )
+  rental_articles <- dplyr::filter(
+    articles, .data$month_id <= CONFIG$rental_end_month_id
+  )
+  dat <- prepare_sales_analysis_data(comparison, sales_articles, sales, sales_lookup)
+  dat_rental <- prepare_rental_analysis_data(
+    comparison, rental_articles, rentals, rental_lookup
+  )
 
-  models <- estimate_models(dat, dat_rental, salience_col)
-  export_table(models, comparison, window, salience_col)
+  salience_cols <- windowed_article_salience_cols
+  models_by_measure <- purrr::imap(salience_cols, function(salience_col, measure) {
+    models <- estimate_models(dat, dat_rental, salience_col)
+    export_table(models, comparison, measure, salience_col)
+    preferred_models(models)
+  })
 
-  preferred_models(models)
+  effect_sizes <- write_windowed_article_effect_sizes(
+    models_by_measure = models_by_measure,
+    salience_cols = salience_cols,
+    sales_data = dat,
+    rental_data = dat_rental,
+    interaction_term_fn = interaction_term,
+    margin = "extensive",
+    output_path = extensive_effect_size_path(comparison),
+    metadata = list(
+      comparison_id = comparison$comparison_id,
+      comparison_label = comparison$comparison_label,
+      near_min = comparison$near_min,
+      near_max = comparison$near_max,
+      far_min = comparison$far_min,
+      far_max = comparison$far_max
+    )
+  )
+  if (comparison$comparison_id == "500_vs_1000_2000") {
+    utils::write.csv(
+      effect_sizes,
+      file.path(
+        CONFIG$output_dir,
+        "did_articles_windowed_prior_extensive_effect_sizes.csv"
+      ),
+      row.names = FALSE,
+      na = ""
+    )
+  }
+
+  invisible(list(
+    comparison = comparison,
+    effect_size_output_path = extensive_effect_size_path(comparison)
+  ))
 }
 
 
@@ -515,63 +580,57 @@ main <- function() {
 
   dir.create(CONFIG$output_dir, recursive = TRUE, showWarnings = FALSE)
 
-  comparison <- validate_comparison_config(CONFIG$comparison)
   articles <- load_windowed_articles_data(
     path = CONFIG$article_path,
     windows = CONFIG$windows,
     start_month_id = CONFIG$analysis_start_month_id,
-    end_month_id = CONFIG$analysis_end_month_id
+    end_month_id = max(CONFIG$sales_end_month_id, CONFIG$rental_end_month_id)
   )
-
-  dat <- prepare_sales_analysis_data(comparison, articles)
-  dat_rental <- prepare_rental_analysis_data(comparison, articles)
-
-  models_by_window <- purrr::map(
-    CONFIG$windows,
-    run_for_window,
-    comparison = comparison,
-    dat = dat,
-    dat_rental = dat_rental
+  sales <- load_sales_transactions(CONFIG$sales_path) |>
+    dplyr::filter(
+      !is.na(.data$month_id),
+      .data$month_id >= CONFIG$analysis_start_month_id,
+      .data$month_id <= CONFIG$sales_end_month_id
+    )
+  rentals <- load_rental_transactions(CONFIG$rental_path) |>
+    dplyr::filter(
+      !is.na(.data$month_id),
+      .data$month_id >= CONFIG$analysis_start_month_id,
+      .data$month_id <= CONFIG$rental_end_month_id
+    )
+  max_far_distance <- max(vapply(CONFIG$comparisons, `[[`, integer(1), "far_max"))
+  sales_lookup <- load_nearest_distance_lookup(
+    CONFIG$sales_lookup_path, "house_id", max_far_distance
   )
-  names(models_by_window) <- paste0(CONFIG$windows, "m")
-
-  salience_cols <- c(
-    "Cumulative" = "log_cumulative_articles",
-    "3m" = "log_articles_3m",
-    "6m" = "log_articles_6m",
-    "12m" = "log_articles_12m"
+  rental_lookup <- load_nearest_distance_lookup(
+    CONFIG$rental_lookup_path, "rental_id", max_far_distance
   )
-  cumulative_models <- estimate_models(
-    dat,
-    dat_rental,
-    salience_cols[["Cumulative"]]
-  ) |>
-    preferred_models()
-  models_by_measure <- stats::setNames(
-    c(list(cumulative_models), models_by_window[names(salience_cols)[-1L]]),
-    names(salience_cols)
+  results <- purrr::map(
+    CONFIG$comparisons,
+    run_for_comparison,
+    articles = articles,
+    sales = sales,
+    rentals = rentals,
+    sales_lookup = sales_lookup,
+    rental_lookup = rental_lookup
   )
-  write_windowed_article_effect_sizes(
-    models_by_measure = models_by_measure,
-    salience_cols = salience_cols,
-    sales_data = dat,
-    rental_data = dat_rental,
-    interaction_term_fn = interaction_term,
-    margin = "extensive",
-    output_path = CONFIG$effect_size_output_path
+  names(results) <- vapply(
+    CONFIG$comparisons, `[[`, character(1), "comparison_id"
   )
 
   cat("\nScript completed successfully.\n")
-  cat("  Windows:", paste(CONFIG$windows, collapse = ", "), "months\n")
-  cat("  Comparison:", comparison$comparison_label, "\n")
+  cat("  Measures: Cumulative, ", paste0(CONFIG$windows, "m", collapse = ", "), "\n", sep = "")
+  cat(
+    "  Comparisons:",
+    paste(vapply(CONFIG$comparisons, `[[`, character(1), "comparison_label"), collapse = "; "),
+    "\n"
+  )
 
   invisible(
     list(
-      windows = CONFIG$windows,
-      comparison = comparison$comparison_label,
-      models_by_window = models_by_window,
-      models_by_measure = models_by_measure,
-      effect_size_output_path = CONFIG$effect_size_output_path
+      measures = c("Cumulative", paste0(CONFIG$windows, "m")),
+      comparisons = CONFIG$comparisons,
+      results = results
     )
   )
 }

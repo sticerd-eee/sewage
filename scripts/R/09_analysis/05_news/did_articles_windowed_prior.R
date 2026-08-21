@@ -19,9 +19,9 @@
 #   - scripts/R/09_analysis/05_news/extensive_margin_news_utils.R
 #
 # Outputs:
-#   - output/tables/did_articles_windowed_prior_<WIN>m.tex
+#   - output/tables/did_articles_windowed_prior_<RADIUS>m_<MEASURE>.tex
 #   - output/tables/did_articles_windowed_prior_comparison.tex
-#   - output/tables/did_articles_windowed_prior_effect_sizes.csv
+#   - output/tables/did_articles_windowed_prior_<RADIUS>m_effect_sizes.csv
 #
 # ==============================================================================
 
@@ -64,6 +64,13 @@ source(
   ),
   local = TRUE
 )
+source(
+  here::here(
+    "scripts", "R", "09_analysis", "05_news",
+    "windowed_article_analysis_config.R"
+  ),
+  local = TRUE
+)
 
 
 # ==============================================================================
@@ -71,9 +78,10 @@ source(
 # ==============================================================================
 CONFIG <- list(
   analysis_start_month_id = 1L,
-  analysis_end_month_id = 36L,
-  windows = c(3L, 6L, 12L),
-  radius = 250L,
+  sales_end_month_id = 48L,
+  rental_end_month_id = 36L,
+  windows = windowed_article_windows,
+  radii = unname(windowed_article_intensive_radii),
   article_path = here::here(
     "data", "processed", "lexis_nexis", "search1_monthly.parquet"
   ),
@@ -85,10 +93,7 @@ CONFIG <- list(
   ),
   sales_path = here::here("data", "processed", "house_price.parquet"),
   rental_path = here::here("data", "processed", "zoopla", "zoopla_rentals.parquet"),
-  output_dir = here::here("output", "tables"),
-  effect_size_output_path = here::here(
-    "output", "tables", "did_articles_windowed_prior_effect_sizes.csv"
-  )
+  output_dir = here::here("output", "tables")
 )
 
 
@@ -105,18 +110,6 @@ initialise_environment <- function() {
 # ==============================================================================
 # 3. Shared Formatting Helpers
 # ==============================================================================
-window_label <- function(window) {
-  paste0(window, "-month")
-}
-
-salience_col_for_window <- function(window) {
-  paste0("log_articles_", window, "m")
-}
-
-salience_description <- function(window) {
-  paste0("log ", window_label(window), " article count")
-}
-
 interaction_term <- function(salience_col) {
   paste0("spill_count_weekly_avg:", salience_col)
 }
@@ -407,16 +400,53 @@ preferred_models <- function(models) {
 # ==============================================================================
 # 6. Export Per-Window Tables
 # ==============================================================================
-export_window_table <- function(models, window, rad, salience_col) {
+measure_slug <- function(measure) {
+  windowed_article_measure_slugs[[measure]]
+}
+
+intensive_table_path <- function(rad, measure) {
+  file.path(
+    CONFIG$output_dir,
+    paste0(
+      "did_articles_windowed_prior_", rad, "m_", measure_slug(measure), ".tex"
+    )
+  )
+}
+
+intensive_effect_size_path <- function(rad) {
+  file.path(
+    CONFIG$output_dir,
+    paste0("did_articles_windowed_prior_", rad, "m_effect_sizes.csv")
+  )
+}
+
+legacy_intensive_table_path <- function(rad, measure) {
+  if (measure == "Cumulative") {
+    return(file.path(CONFIG$output_dir, paste0("did_articles_prior_", rad, "m.tex")))
+  }
+  if (rad == 250L) {
+    return(file.path(
+      CONFIG$output_dir,
+      paste0("did_articles_windowed_prior_", measure_slug(measure), ".tex")
+    ))
+  }
+  NULL
+}
+
+export_measure_table <- function(models, measure, rad, salience_col) {
   cat("\nExporting regression table...\n")
 
   interaction <- interaction_term(salience_col)
-  salience_label <- paste0("$\\log (\\text{Articles}_{", window, "m})$")
+  cumulative <- measure == "Cumulative"
+  salience_label <- if (cumulative) {
+    "$\\log (\\text{Articles})$"
+  } else {
+    paste0("$\\log (\\text{Articles}_{", measure, "})$")
+  }
   interaction_label <- paste0(
     "{Spills per week (avg.) \\\\ $\\times$ ",
-    "$\\log (\\text{Articles}_{",
-    window,
-    "m})$}"
+    salience_label,
+    "}"
   )
 
   coef_labels <- c(
@@ -446,13 +476,20 @@ export_window_table <- function(models, window, rad, salience_col) {
   custom_notes <- paste0(
     "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within ",
     rad,
-    "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ",
+    "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ",
     rad,
     "m from January 2021 to the transaction date. ",
     salience_label,
-    " is the natural logarithm of UK news coverage of sewage spills from LexisNexis over the trailing ",
-    window,
-    " months, inclusive of the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    if (cumulative) {
+      " is the natural logarithm of cumulative UK news coverage of sewage spills from LexisNexis from January 2021 through the transaction month. "
+    } else {
+      paste0(
+        " is the natural logarithm of UK news coverage of sewage spills from LexisNexis over the trailing ",
+        sub("m$", "", measure),
+        " months, inclusive of the transaction month. "
+      )
+    },
+    "Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   panels <- list(
@@ -489,24 +526,27 @@ export_window_table <- function(models, window, rad, salience_col) {
     notes = " ",
     title = paste0(
       "Effect of Sewage Spills on Property Values: ",
-      "Log ",
-      window_label(window),
+      if (cumulative) "Log Cumulative" else paste0("Log ", sub("m$", "-month", measure)),
       " Media Coverage (Prior to Transaction)"
     )
   )
 
   table_latex <- patch_modelsummary_latex(
     table_latex = table_latex,
-    label = paste0("tbl:did-articles-windowed-prior-", window, "m"),
+    label = paste0(
+      "tbl:did-articles-windowed-prior-", rad, "m-", measure_slug(measure)
+    ),
     notes = custom_notes
   )
 
-  output_path <- file.path(
-    CONFIG$output_dir,
-    paste0("did_articles_windowed_prior_", window, "m.tex")
-  )
+  output_path <- intensive_table_path(rad, measure)
   ensure_output_dir(output_path)
   writeLines(table_latex, output_path)
+
+  legacy_path <- legacy_intensive_table_path(rad, measure)
+  if (!is.null(legacy_path)) {
+    writeLines(table_latex, legacy_path)
+  }
 
   cat(sprintf("LaTeX table exported to: %s\n", output_path))
 
@@ -517,33 +557,9 @@ export_window_table <- function(models, window, rad, salience_col) {
 # ==============================================================================
 # 7. Comparison Table and Summary
 # ==============================================================================
-comparison_specs <- function(dat, dat_rental, models_by_window) {
-  measures <- c(
-    "Cumulative" = "log_cumulative_articles",
-    "3m" = "log_articles_3m",
-    "6m" = "log_articles_6m",
-    "12m" = "log_articles_12m"
-  )
-
-  cumulative_models <- estimate_models(dat, dat_rental, measures[["Cumulative"]]) |>
-    preferred_models()
-
-  window_models <- models_by_window[names(measures)[-1L]]
-
-  stats::setNames(
-    c(list(cumulative_models), window_models),
-    names(measures)
-  )
-}
-
 write_window_comparison_table <- function(models_by_measure) {
   measure_labels <- names(models_by_measure)
-  salience_cols <- c(
-    "Cumulative" = "log_cumulative_articles",
-    "3m" = "log_articles_3m",
-    "6m" = "log_articles_6m",
-    "12m" = "log_articles_12m"
-  )
+  salience_cols <- windowed_article_salience_cols
   terms <- stats::setNames(
     vapply(salience_cols, interaction_term, character(1)),
     names(salience_cols)
@@ -590,7 +606,7 @@ write_window_comparison_table <- function(models_by_measure) {
     "\\end{tblr}",
     "\\vspace{0.3em}",
     "\\begin{minipage}{\\linewidth}",
-    "\\footnotesize \\textbf{Notes:} Each cell reports the coefficient on the interaction between weekly spill count and the stated public-attention measure, with LSOA-clustered standard errors in parentheses. All models are estimated at the 250m radius on the same 2021--2023 transaction samples and include property controls, the stated location fixed effects, and month fixed effects. Article-count measures differ in scale, so the comparison is intended to read the sign and significance pattern across windows rather than raw magnitudes. *** p<0.01, ** p<0.05, * p<0.1.",
+    "\\footnotesize \\textbf{Notes:} Each cell reports the coefficient on the interaction between weekly spill count and the stated public-attention measure, with LSOA-clustered standard errors in parentheses. Models use sales from 2021--2024 and rentals from 2021--2023 at the 250m radius and include property controls, the stated location fixed effects, and month fixed effects. Article-count measures differ in scale, so the comparison is intended to read the sign and significance pattern across windows rather than raw magnitudes. *** p<0.01, ** p<0.05, * p<0.1.",
     "\\end{minipage}",
     "\\end{table}"
   )
@@ -607,116 +623,53 @@ write_window_comparison_table <- function(models_by_measure) {
   invisible(output_path)
 }
 
-classify_pattern <- function(estimates, p_values) {
-  finite_idx <- is.finite(estimates) & is.finite(p_values)
-
-  if (!all(finite_idx)) {
-    return("incomplete estimates; inspect model output before interpretation")
-  }
-
-  window_names <- c("3m", "6m", "12m")
-  signs_match <- all(sign(estimates[window_names]) == sign(estimates["Cumulative"]))
-  all_significant <- all(p_values[c("Cumulative", window_names)] < 0.1)
-  none_significant <- all(p_values[c("Cumulative", window_names)] >= 0.1)
-  shorter_weakens <- abs(estimates["3m"]) < abs(estimates["12m"]) &&
-    p_values["3m"] >= 0.1
-
-  if (none_significant) {
-    "no statistically precise salience pattern"
-  } else if (signs_match && all_significant) {
-    "robust across cumulative and windowed measures"
-  } else if (shorter_weakens) {
-    "attenuates for the shortest window, consistent with short-lived salience"
-  } else {
-    "mixed across windows"
-  }
-}
-
-print_window_comparison_summary <- function(models_by_measure) {
-  salience_cols <- c(
-    "Cumulative" = "log_cumulative_articles",
-    "3m" = "log_articles_3m",
-    "6m" = "log_articles_6m",
-    "12m" = "log_articles_12m"
-  )
-  terms <- stats::setNames(
-    vapply(salience_cols, interaction_term, character(1)),
-    names(salience_cols)
-  )
-
-  cat("\nPreferred-spec interaction summary (LSOA FE + controls):\n")
-
-  sales <- purrr::map_dfr(names(salience_cols), function(measure) {
-    est <- extract_estimate(models_by_measure[[measure]]$sale_lsoa, terms[[measure]])
-    tibble::tibble(
-      measure = measure,
-      estimate = est[["estimate"]],
-      std_error = est[["std_error"]],
-      p_value = est[["p_value"]]
-    )
-  })
-  rentals <- purrr::map_dfr(names(salience_cols), function(measure) {
-    est <- extract_estimate(models_by_measure[[measure]]$rent_lsoa, terms[[measure]])
-    tibble::tibble(
-      measure = measure,
-      estimate = est[["estimate"]],
-      std_error = est[["std_error"]],
-      p_value = est[["p_value"]]
-    )
-  })
-
-  for (measure in names(salience_cols)) {
-    sales_row <- sales[sales$measure == measure, ]
-    rentals_row <- rentals[rentals$measure == measure, ]
-
-    cat(sprintf(
-      "  %-10s sales: %.3f (SE %.3f, p=%.3f); rentals: %.3f (SE %.3f, p=%.3f)\n",
-      measure,
-      sales_row$estimate,
-      sales_row$std_error,
-      sales_row$p_value,
-      rentals_row$estimate,
-      rentals_row$std_error,
-      rentals_row$p_value
-    ))
-  }
-
-  sales_read <- classify_pattern(
-    stats::setNames(sales$estimate, sales$measure),
-    stats::setNames(sales$p_value, sales$measure)
-  )
-  rentals_read <- classify_pattern(
-    stats::setNames(rentals$estimate, rentals$measure),
-    stats::setNames(rentals$p_value, rentals$measure)
-  )
-
-  cat("  Read: sales ", sales_read, "; rentals ", rentals_read, ".\n", sep = "")
-
-  invisible(list(sales = sales, rentals = rentals))
-}
-
-
 # ==============================================================================
 # 8. Per-Window Workflow
 # ==============================================================================
-run_for_window <- function(window, dat, dat_rental) {
-  cat("\n========================== Window:", window, "months ==========================\n")
+run_for_radius <- function(rad, sales, rentals, articles) {
+  cat("\n========================== Radius:", rad, "m ==========================\n")
 
-  salience_col <- salience_col_for_window(window)
+  sales_articles <- dplyr::filter(
+    articles, .data$month_id <= CONFIG$sales_end_month_id
+  )
+  rental_articles <- dplyr::filter(
+    articles, .data$month_id <= CONFIG$rental_end_month_id
+  )
+  dat <- prepare_sales_analysis_data(rad, sales_articles, sales)
+  dat_rental <- prepare_rental_analysis_data(rad, rental_articles, rentals)
 
-  cat(sprintf(
-    "  %s: mean=%.2f, sd=%.2f, min=%.2f, max=%.2f\n",
-    salience_description(window),
-    mean(dat[[salience_col]], na.rm = TRUE),
-    stats::sd(dat[[salience_col]], na.rm = TRUE),
-    min(dat[[salience_col]], na.rm = TRUE),
-    max(dat[[salience_col]], na.rm = TRUE)
+  salience_cols <- windowed_article_salience_cols
+  models_by_measure <- purrr::imap(salience_cols, function(salience_col, measure) {
+    models <- estimate_models(dat, dat_rental, salience_col)
+    export_measure_table(models, measure, rad, salience_col)
+    preferred_models(models)
+  })
+
+  effect_sizes <- write_windowed_article_effect_sizes(
+    models_by_measure = models_by_measure,
+    salience_cols = salience_cols,
+    sales_data = dat,
+    rental_data = dat_rental,
+    interaction_term_fn = interaction_term,
+    margin = "intensive",
+    output_path = intensive_effect_size_path(rad),
+    spill_col = "spill_count_weekly_avg",
+    metadata = list(radius = rad)
+  )
+  if (rad == 250L) {
+    utils::write.csv(
+      effect_sizes,
+      file.path(CONFIG$output_dir, "did_articles_windowed_prior_effect_sizes.csv"),
+      row.names = FALSE,
+      na = ""
+    )
+    write_window_comparison_table(models_by_measure)
+  }
+
+  invisible(list(
+    radius = rad,
+    effect_size_output_path = intensive_effect_size_path(rad)
   ))
-
-  models <- estimate_models(dat, dat_rental, salience_col)
-  export_window_table(models, window, CONFIG$radius, salience_col)
-
-  preferred_models(models)
 }
 
 
@@ -733,7 +686,7 @@ main <- function() {
     path = CONFIG$article_path,
     windows = CONFIG$windows,
     start_month_id = CONFIG$analysis_start_month_id,
-    end_month_id = CONFIG$analysis_end_month_id
+    end_month_id = max(CONFIG$sales_end_month_id, CONFIG$rental_end_month_id)
   )
   cat(sprintf("  Article counts: %d months\n", nrow(articles)))
 
@@ -745,48 +698,24 @@ main <- function() {
   rentals <- load_rental_transactions(CONFIG$rental_path)
   cat(sprintf("  Loaded %d rental transactions\n", nrow(rentals)))
 
-  dat <- prepare_sales_analysis_data(CONFIG$radius, articles, sales)
-  dat_rental <- prepare_rental_analysis_data(CONFIG$radius, articles, rentals)
-
-  models_by_window <- purrr::map(
-    CONFIG$windows,
-    run_for_window,
-    dat = dat,
-    dat_rental = dat_rental
+  results <- purrr::map(
+    CONFIG$radii,
+    run_for_radius,
+    sales = sales,
+    rentals = rentals,
+    articles = articles
   )
-  names(models_by_window) <- paste0(CONFIG$windows, "m")
-
-  cat("\nBuilding cumulative-vs-windowed comparison summary...\n")
-  models_by_measure <- comparison_specs(dat, dat_rental, models_by_window)
-  write_window_comparison_table(models_by_measure)
-  print_window_comparison_summary(models_by_measure)
-  write_windowed_article_effect_sizes(
-    models_by_measure = models_by_measure,
-    salience_cols = c(
-      "Cumulative" = "log_cumulative_articles",
-      "3m" = "log_articles_3m",
-      "6m" = "log_articles_6m",
-      "12m" = "log_articles_12m"
-    ),
-    sales_data = dat,
-    rental_data = dat_rental,
-    interaction_term_fn = interaction_term,
-    margin = "intensive",
-    output_path = CONFIG$effect_size_output_path,
-    spill_col = "spill_count_weekly_avg"
-  )
+  names(results) <- paste0(CONFIG$radii, "m")
 
   cat("\nScript completed successfully.\n")
-  cat("  Windows:", paste(CONFIG$windows, collapse = ", "), "months\n")
-  cat("  Radius:", CONFIG$radius, "m\n")
+  cat("  Measures: Cumulative, ", paste0(CONFIG$windows, "m", collapse = ", "), "\n", sep = "")
+  cat("  Radii:", paste0(CONFIG$radii, "m", collapse = ", "), "\n")
 
   invisible(
     list(
-      windows = CONFIG$windows,
-      radius = CONFIG$radius,
-      models_by_window = models_by_window,
-      models_by_measure = models_by_measure,
-      effect_size_output_path = CONFIG$effect_size_output_path
+      measures = c("Cumulative", paste0(CONFIG$windows, "m")),
+      radii = CONFIG$radii,
+      results = results
     )
   )
 }
