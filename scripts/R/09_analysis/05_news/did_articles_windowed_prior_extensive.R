@@ -21,6 +21,8 @@
 # Outputs:
 #   - output/tables/did_articles_windowed_prior_extensive_<COMPARISON>_<MEASURE>.tex
 #   - output/tables/did_articles_windowed_prior_extensive_<COMPARISON>_effect_sizes.csv
+#   - output/tables/did_articles_windowed_prior_extensive_slide.tex
+#   - output/tables/did_articles_windowed_prior_extensive_slide_effects.csv
 #
 # ==============================================================================
 
@@ -89,7 +91,14 @@ CONFIG <- list(
   rental_lookup_path = here::here(
     "data", "processed", "zoopla", "spill_rental_lookup.parquet"
   ),
-  output_dir = here::here("output", "tables")
+  output_dir = here::here("output", "tables"),
+  slide_comparison_id = "500_vs_1000_2000",
+  slide_table_path = here::here(
+    "output", "tables", "did_articles_windowed_prior_extensive_slide.tex"
+  ),
+  slide_effect_path = here::here(
+    "output", "tables", "did_articles_windowed_prior_extensive_slide_effects.csv"
+  )
 )
 
 
@@ -508,6 +517,242 @@ export_table <- function(models, comparison, measure, salience_col) {
   invisible(output_path)
 }
 
+#' Summarise interaction and scaled effects for the appendix comparison slide
+#'
+#' @param effect_inputs Model-level statistics from the effect-size export.
+#' @return One row per market, fixed-effect specification, measure, and effect.
+summarise_slide_effects <- function(effect_inputs) {
+  required_columns <- c(
+    "market", "fixed_effects", "measure", "term", "estimate", "std_error",
+    "p_value", "salience_iqr", "salience_sd", "effect_sample_n"
+  )
+  missing_columns <- setdiff(required_columns, names(effect_inputs))
+  if (length(missing_columns) > 0L) {
+    stop(
+      "Missing slide-effect input columns: ",
+      paste(missing_columns, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  rows <- list()
+  row_id <- 0L
+
+  for (input_id in seq_len(nrow(effect_inputs))) {
+    model_inputs <- effect_inputs[input_id, , drop = FALSE]
+    effect_scales <- c(
+      interaction = 1,
+      change_per_iqr = model_inputs$salience_iqr[[1]],
+      change_per_sd = model_inputs$salience_sd[[1]]
+    )
+
+    for (effect in names(effect_scales)) {
+      scale <- effect_scales[[effect]]
+      estimate_log <- model_inputs$estimate[[1]] * scale
+      std_error_log <- model_inputs$std_error[[1]] * scale
+      percent_effect <- if (effect == "interaction") {
+        c(estimate_pct = NA_real_, std_error_pct = NA_real_)
+      } else {
+        exact_percent_effect(
+          estimate = estimate_log,
+          std_error = std_error_log
+        )
+      }
+
+      row_id <- row_id + 1L
+      rows[[row_id]] <- tibble::tibble(
+        market = model_inputs$market[[1]],
+        fixed_effects = model_inputs$fixed_effects[[1]],
+        measure = model_inputs$measure[[1]],
+        term = model_inputs$term[[1]],
+        effect = effect,
+        scale = scale,
+        estimate_log = estimate_log,
+        std_error_log = std_error_log,
+        estimate_pct = percent_effect[["estimate_pct"]],
+        std_error_pct = percent_effect[["std_error_pct"]],
+        p_value = model_inputs$p_value[[1]],
+        salience_iqr = model_inputs$salience_iqr[[1]],
+        salience_sd = model_inputs$salience_sd[[1]],
+        observations = model_inputs$effect_sample_n[[1]]
+      )
+    }
+  }
+
+  dplyr::bind_rows(rows)
+}
+
+significance_stars <- function(p_value) {
+  if (p_value < 0.01) return("***")
+  if (p_value < 0.05) return("**")
+  if (p_value < 0.1) return("*")
+  ""
+}
+
+format_slide_number <- function(value, digits) {
+  rounded <- round(value, digits)
+  if (abs(rounded) < 0.5 * 10^(-digits)) rounded <- 0
+  sprintf(paste0("%.", digits, "f"), rounded)
+}
+
+slide_effect_cells <- function(
+    effects, fixed_effects, effect, statistic, measure_order) {
+  statistic <- match.arg(statistic, c("estimate", "std_error"))
+  markets <- c("sales", "rentals")
+
+  unlist(lapply(markets, function(market) {
+    vapply(measure_order, function(measure) {
+      row <- dplyr::filter(
+        effects,
+        .data$market == .env$market,
+        .data$fixed_effects == .env$fixed_effects,
+        .data$measure == .env$measure,
+        .data$effect == .env$effect
+      )
+      if (nrow(row) != 1L) {
+        stop(
+          "Expected one slide-effect row for ",
+          paste(market, fixed_effects, measure, effect, sep = "/"),
+          call. = FALSE
+        )
+      }
+
+      coefficient_row <- effect == "interaction"
+      value_column <- if (coefficient_row) {
+        if (statistic == "estimate") "estimate_log" else "std_error_log"
+      } else {
+        if (statistic == "estimate") "estimate_pct" else "std_error_pct"
+      }
+      digits <- if (coefficient_row) 3L else 2L
+      value <- row[[value_column]][[1]]
+
+      if (statistic == "estimate") {
+        paste0(
+          format_slide_number(value, digits),
+          significance_stars(row$p_value[[1]])
+        )
+      } else {
+        paste0("(", format_slide_number(value, digits), ")")
+      }
+    }, character(1))
+  }), use.names = FALSE)
+}
+
+slide_table_row <- function(label, cells) {
+  paste(c(label, cells), collapse = " & ")
+}
+
+#' Export the compact window-comparison table used by the Beamer appendix
+#'
+#' @param effects Output from `summarise_slide_effects()`.
+#' @param measure_order Display order for the four salience measures.
+#' @param table_path Destination for the LaTeX table.
+#' @param effect_path Destination for the underlying transformed effects.
+#' @return Output path, invisibly.
+export_slide_table <- function(effects, measure_order, table_path, effect_path) {
+  if (
+    length(measure_order) != 4L || anyDuplicated(measure_order) ||
+      !setequal(unique(effects$measure), measure_order)
+  ) {
+    stop(
+      "`measure_order` must contain each of the table's four measures once.",
+      call. = FALSE
+    )
+  }
+
+  label_row <- function(label) {
+    slide_table_row(label, rep("", 8L))
+  }
+  effect_rows <- function(fixed_effects) {
+    shaded_label <- function(label) {
+      paste0("\\beamerrowcolor{blue!4} ", label)
+    }
+    table_row <- function(label, effect, statistic = "estimate") {
+      paste0(
+        slide_table_row(
+          label,
+          slide_effect_cells(
+            effects, fixed_effects, effect, statistic, measure_order
+          )
+        ),
+        " \\\\"
+      )
+    }
+
+    c(
+      table_row(
+        "{Near bin \\\\ $\\times$ log (Articles measure)}",
+        "interaction"
+      ),
+      table_row("", "interaction", "std_error"),
+      paste0(
+        label_row(shaded_label("Implied price effect (\\%):")),
+        " \\\\"
+      ),
+      table_row(
+        shaded_label("\\quad IQR increase in salience"),
+        "change_per_iqr"
+      ),
+      table_row(
+        shaded_label("\\quad 1-SD increase in salience"),
+        "change_per_sd"
+      )
+    )
+  }
+
+  table_latex <- c(
+    "\\providecommand{\\beamerrowcolor}[1]{}",
+    "\\begin{table}[H]",
+    "\\centering",
+    "\\begin{talltblr}[",
+    paste0(
+      "caption={Extensive Margin: Alternative Article-Salience Windows},"
+    ),
+    "label={tbl:did-articles-windowed-prior-extensive-slide},",
+    "]",
+    "{",
+    "colsep=2pt,",
+    "cells={font=\\fontsize{8pt}{9pt}\\selectfont},",
+    "colspec={l X[c] X[c] X[c] X[c] X[c] X[c] X[c] X[c]},",
+    "hline{2}={2-9}{solid, black, 0.03em},",
+    "hline{3}={1-9}{solid, black, 0.05em},",
+    "hline{9}={1-9}{solid, black, 0.05em},",
+    "hline{1}={1-9}{solid, black, 0.08em},",
+    "hline{15}={1-9}{solid, black, 0.08em},",
+    "row{6-8,12-14}={bg=blue!4},",
+    "cell{1}{2}={c=4}{halign=c},",
+    "cell{1}{6}={c=4}{halign=c},",
+    "cell{3,9}{1}={c=9}{halign=l},",
+    "cell{2-14}{2-9}={}{halign=c},",
+    "}",
+    paste0(
+      "& House Sales &  &  &  & House Rentals &  &  &  \\\\"
+    ),
+    paste0(slide_table_row("", rep(measure_order, 2L)), " \\\\"),
+    paste0(label_row("Property controls + MSOA FE"), " \\\\"),
+    effect_rows("msoa"),
+    paste0(label_row("Property controls + LSOA FE"), " \\\\"),
+    effect_rows("lsoa"),
+    "\\end{talltblr}",
+    "\\end{table}"
+  )
+
+  ensure_output_dir(table_path)
+  ensure_output_dir(effect_path)
+  writeLines(table_latex, table_path)
+  utils::write.csv(
+    effects,
+    effect_path,
+    row.names = FALSE,
+    na = ""
+  )
+
+  cat(sprintf("Slide table exported to: %s\n", table_path))
+  cat(sprintf("Slide effects exported to: %s\n", effect_path))
+
+  invisible(table_path)
+}
+
 
 # ==============================================================================
 # 7. Per-Window Workflow
@@ -560,6 +805,16 @@ run_for_comparison <- function(
       ),
       row.names = FALSE,
       na = ""
+    )
+  }
+
+  if (comparison$comparison_id == CONFIG$slide_comparison_id) {
+    slide_effects <- summarise_slide_effects(effect_sizes)
+    export_slide_table(
+      effects = slide_effects,
+      measure_order = names(salience_cols),
+      table_path = CONFIG$slide_table_path,
+      effect_path = CONFIG$slide_effect_path
     )
   }
 

@@ -27,6 +27,18 @@ extract_fixest_term <- function(model, term) {
   out
 }
 
+exact_percent_effect <- function(estimate, std_error) {
+  if (
+    length(estimate) != 1L || length(std_error) != 1L ||
+      !is.finite(estimate) || !is.finite(std_error) || std_error < 0
+  ) {
+    stop(
+      "`estimate` must be finite and `std_error` must be a finite, ",
+      "non-negative scalar.",
+      call. = FALSE
+    )
+  }
+
   c(
     estimate_pct = 100 * expm1(estimate),
     std_error_pct = 100 * exp(estimate) * std_error
