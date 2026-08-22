@@ -67,8 +67,6 @@ on.exit(unlink(output_path), add = TRUE)
 effect_sizes <- write_windowed_article_effect_sizes(
   models_by_measure = models_by_measure,
   salience_cols = c(Cumulative = "salience"),
-  sales_data = toy_data,
-  rental_data = toy_data,
   interaction_term_fn = function(column) paste0("spill:", column),
   margin = "intensive",
   output_path = output_path,

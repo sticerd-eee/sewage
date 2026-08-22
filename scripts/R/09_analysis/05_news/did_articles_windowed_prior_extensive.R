@@ -539,8 +539,6 @@ run_for_comparison <- function(
   effect_sizes <- write_windowed_article_effect_sizes(
     models_by_measure = models_by_measure,
     salience_cols = salience_cols,
-    sales_data = dat,
-    rental_data = dat_rental,
     interaction_term_fn = interaction_term,
     margin = "extensive",
     output_path = extensive_effect_size_path(comparison),

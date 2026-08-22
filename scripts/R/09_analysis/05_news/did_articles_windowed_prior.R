@@ -648,8 +648,6 @@ run_for_radius <- function(rad, sales, rentals, articles) {
   effect_sizes <- write_windowed_article_effect_sizes(
     models_by_measure = models_by_measure,
     salience_cols = salience_cols,
-    sales_data = dat,
-    rental_data = dat_rental,
     interaction_term_fn = interaction_term,
     margin = "intensive",
     output_path = intensive_effect_size_path(rad),
