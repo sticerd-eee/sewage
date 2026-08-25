@@ -18,8 +18,8 @@
 #   - data/processed/house_price.parquet - House price data with property characteristics
 #   - data/processed/cross_section/rentals/prior_to_rental_rental_site - Cross-sectional rentals (rental - spill site level)
 #   - data/processed/zoopla/zoopla_rentals.parquet - Rental data with property characteristics
-#   - upstream_downstream/output/18-03/river_filter/spill_house_signed.csv - House - upstream/downstream spill site pairs
-#   - upstream_downstream/output/18-03/river_filter/spill_rental_signed.csv - Rental - upstream/downstream spill site pairs
+#   - upstream_downstream/output/river_filter/spill_house_signed.csv - House - upstream/downstream spill site pairs
+#   - upstream_downstream/output//river_filter/spill_rental_signed.csv - Rental - upstream/downstream spill site pairs
 #
 # Outputs:
 #   - output/tables/hedonic_count_continuous_prior_nearest_site.tex
@@ -123,18 +123,15 @@ cat("Preparing upstream/downstream data...\n")
 path_upstream_downstream_sales <- here::here(
   "upstream_downstream",
   "output",
-   "18-03",
-  "river_filter",
   "spill_house_signed.csv"
 )
 
 upstream_downstream_sales <- import(path_upstream_downstream_sales)
 
 upstream_downstream_sales <- upstream_downstream_sales |>
-  mutate(direction=ifelse(direction==-1, 1,0),
+  mutate(direction=ifelse(direction==1, 1,0),
          dist_river_m = abs(signed_dist_m))|>
-  filter(spill_lateral_m <= 250 & house_lateral_m <= 250 & dist_river_m <= 1000 & spill_house_euclid_m <= RAD) |>
-  distinct()
+  filter(spill_lateral_m <= 250 & house_lateral_m <= 250 & dist_river_m <= 1000 & spill_house_euclid_m <= RAD)
 
 # Prepare Sales Data -----------------------------------------------------------
 cat("Preparing sales data...\n")
@@ -171,6 +168,8 @@ dat_nearest_sales <- dat_sales_clean |>
   slice_head(n = 1) |>
   ungroup() |>
   mutate(log_price = log(price))
+
+cat("  Sales observations (house-site pairs):", nrow(dat_nearest_sales), "\n")
 
 # ==============================================================================
 # Panel B: Rentals
@@ -211,15 +210,13 @@ cat("Preparing upstream/downstream data...\n")
 path_upstream_downstream_rentals <- here::here(
   "upstream_downstream",
   "output",
-  "18-03",
-  "river_filter",
   "spill_rental_signed.csv"
 )
 
 upstream_downstream_rentals <- import(path_upstream_downstream_rentals)
 
 upstream_downstream_rentals <- upstream_downstream_rentals |>
-  mutate(direction=ifelse(direction==-1, 1,0),
+  mutate(direction=ifelse(direction==1, 1,0),
          dist_river_m = abs(signed_dist_m))|>
   filter(spill_lateral_m <= 250 & rental_lateral_m <= 250 & dist_river_m <= 1000  & spill_rental_euclid_m <= RAD) |>
   distinct()
