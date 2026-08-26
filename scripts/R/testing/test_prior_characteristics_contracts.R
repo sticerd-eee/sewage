@@ -217,6 +217,15 @@ if (all(vapply(producer_env$MARKET_SPECS, function(spec) {
         length(dataset$schema$names) == length(expected_columns),
       paste(spec$market, "canonical schema must be exact.")
     )
+    expected_signature <- producer_env$arrow_schema_signature(
+      producer_env$prior_characteristics_schema(spec$id, include_radius = TRUE)
+    )
+    observed_signature <- producer_env$arrow_schema_signature(dataset$schema)
+    assert_identical(
+      observed_signature[names(expected_signature)],
+      expected_signature,
+      paste(spec$market, "canonical physical types must be exact.")
+    )
     radii <- dataset |>
       select("radius") |>
       distinct() |>
@@ -242,6 +251,11 @@ if (all(vapply(producer_env$MARKET_SPECS, function(spec) {
   assert_true(file.exists(cutoff_path), "The combined cutoff audit must exist.")
   cutoff <- arrow::read_parquet(cutoff_path)
   producer_env$validate_cutoff_audit(cutoff)
+  assert_identical(
+    producer_env$arrow_schema_signature(arrow::open_dataset(cutoff_path)$schema),
+    producer_env$arrow_schema_signature(producer_env$cutoff_audit_schema()),
+    "The cutoff audit must retain the exact physical types."
+  )
   assert_identical(nrow(cutoff), 12L, "The cutoff audit must contain 2 markets × 3 radii × 2 measures.")
 }
 

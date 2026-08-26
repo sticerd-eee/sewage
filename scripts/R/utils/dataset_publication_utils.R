@@ -3,6 +3,13 @@
 # Project: Sewage
 ############################################################
 
+arrow_schema_signature <- function(schema) {
+  stats::setNames(
+    vapply(schema$fields, function(field) field$type$ToString(), character(1)),
+    schema$names
+  )
+}
+
 dataset_publication_remove <- function(path, remove_path) {
   error <- NULL
   tryCatch(
@@ -203,6 +210,111 @@ publish_validated_dataset <- function(
         call. = FALSE
       )
     }
+  }
+  invisible(output_path)
+}
+
+#' Publish one fully validated sibling file generation.
+#'
+#' File counterpart to `publish_validated_dataset()`: the product owns the
+#' validator and this helper preserves, promotes, restores, and cleans up one
+#' canonical file generation.
+publish_validated_file <- function(
+    stage_path, output_path, validate,
+    rename_path = file.rename,
+    remove_path = unlink) {
+  if (!is.function(validate) || !is.function(rename_path) ||
+      !is.function(remove_path)) {
+    stop("validate, rename_path, and remove_path must be functions.", call. = FALSE)
+  }
+  if (!file.exists(stage_path)) {
+    stop("Publication stage does not exist: ", stage_path, call. = FALSE)
+  }
+  if (identical(normalizePath(stage_path), normalizePath(output_path, mustWork = FALSE)) ||
+      identical(basename(stage_path), paste0(basename(output_path), ".prev"))) {
+    stop("The publication stage must be distinct from canonical and .prev.",
+      call. = FALSE)
+  }
+  if (!identical(
+      normalizePath(dirname(stage_path), mustWork = TRUE),
+      normalizePath(dirname(output_path), mustWork = TRUE))) {
+    stop("The publication stage must be a sibling of the canonical path.", call. = FALSE)
+  }
+  previous_path <- paste0(output_path, ".prev")
+  if (file.exists(previous_path)) {
+    stop("Publication state is ambiguous: .prev is present: ", previous_path,
+      call. = FALSE)
+  }
+  dataset_publication_validate(
+    validate, stage_path, "Staged candidate validation failed"
+  )
+
+  canonical_exists <- file.exists(output_path)
+  if (canonical_exists) {
+    preserved <- tryCatch(
+      isTRUE(rename_path(output_path, previous_path)),
+      error = function(error) FALSE
+    ) &&
+      !file.exists(output_path) && file.exists(previous_path)
+    if (!preserved) {
+      readable <- c(
+        if (file.exists(output_path)) output_path,
+        if (file.exists(previous_path)) previous_path
+      )
+      stop(
+        "Failed to preserve the canonical file before promotion. Readable path(s): ",
+        paste(readable, collapse = ", "), call. = FALSE
+      )
+    }
+  }
+  promoted <- tryCatch(
+    isTRUE(rename_path(stage_path, output_path)),
+    error = function(error) FALSE
+  ) &&
+    file.exists(output_path) && !file.exists(stage_path)
+  if (!promoted) {
+    if (canonical_exists) {
+      restored <- tryCatch(
+        isTRUE(rename_path(previous_path, output_path)),
+        error = function(error) FALSE
+      ) &&
+        file.exists(output_path) && !file.exists(previous_path)
+      if (restored) {
+        stop("Failed to promote the staged file; the prior canonical was restored.",
+          call. = FALSE)
+      }
+      stop(
+        "Failed to promote the staged file and failed to restore the prior canonical. ",
+        "Recoverable path: ", previous_path, call. = FALSE
+      )
+    }
+    stop("Failed to promote the first file generation.", call. = FALSE)
+  }
+
+  final_error <- tryCatch({ validate(output_path); NULL }, error = identity)
+  if (inherits(final_error, "error")) {
+    removed <- isTRUE(remove_path(output_path) == 0L) && !file.exists(output_path)
+    restored <- canonical_exists && removed && tryCatch(
+      isTRUE(rename_path(previous_path, output_path)),
+      error = function(error) FALSE
+    ) &&
+      file.exists(output_path) && !file.exists(previous_path)
+    if (canonical_exists && restored) {
+      stop("Final validation failed; the prior canonical was restored: ",
+        conditionMessage(final_error), call. = FALSE)
+    }
+    if (!canonical_exists && removed) {
+      stop("Final validation failed for the first generation; the rejected file was removed: ",
+        conditionMessage(final_error), call. = FALSE)
+    }
+    stop("Final validation failed and automatic restoration did not complete: ",
+      conditionMessage(final_error), call. = FALSE)
+  }
+
+  if (canonical_exists &&
+      (!isTRUE(remove_path(previous_path) == 0L) || file.exists(previous_path))) {
+    stop("Publication cleanup incomplete: canonical and .prev remain readable.",
+      call. = FALSE)
   }
   invisible(output_path)
 }

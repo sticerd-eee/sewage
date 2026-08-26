@@ -482,6 +482,14 @@ validate_published_market <- function(path, spec) {
       length(dataset$schema$names) != length(expected_columns)) {
     stop(spec$market, " published schema is not exact.", call. = FALSE)
   }
+  expected_signature <- arrow_schema_signature(
+    prior_characteristics_schema(spec$id, include_radius = TRUE)
+  )
+  observed_signature <- arrow_schema_signature(dataset$schema)
+  if (!identical(
+      observed_signature[names(expected_signature)], expected_signature)) {
+    stop(spec$market, " published physical types are not exact.", call. = FALSE)
+  }
   observed_radii <- sort(unique(
     dataset |> dplyr::select("radius") |> dplyr::distinct() |> dplyr::collect() |>
       dplyr::pull("radius")
@@ -517,12 +525,12 @@ write_market_stage <- function(stage_path, spec, site_path) {
     arrow::write_parquet(table, file.path(partition_path, "part-0.parquet"))
     audits[[index]] <- result$audit
     logger::log_info(
-      "{spec$market} radius {radius_value}: rows={nrow(result$data)}, no_site={sum(result$data$n_spill_sites == 0L)}, bath_unknown={sum(result$data$bath_unknown_2124)}, shell_unknown={sum(result$data$shell_unknown_2124)}"
+      "{spec$market} radius {radius_value}: source_rows={nrow(result$data)}, lookup_matched_rows={sum(result$data$n_spill_sites > 0L)}, no_site={sum(result$data$n_spill_sites == 0L)}, bath_unknown={sum(result$data$bath_unknown_2124)}, shell_unknown={sum(result$data$shell_unknown_2124)}"
     )
     for (measure in MEASURES) {
       row <- result$audit[result$audit$measure == measure, ]
       logger::log_info(
-        "{spec$market} radius {radius_value} {measure}: p50={row$p50}, positive={row$n_positive}, le={row$n_le_p50}, gt={row$n_gt_p50}"
+        "{spec$market} radius {radius_value} {measure}: p50={row$p50}, no_site={row$n_no_site}, unknown={row$n_unknown}, zero={row$n_zero}, positive={row$n_positive}, le={row$n_le_p50}, gt={row$n_gt_p50}"
       )
     }
   }
@@ -536,6 +544,9 @@ publish_market <- function(spec, site_path = SITE_CHARACTERISTICS_PATH) {
     paste0(".", basename(spec$output_path), ".stage-", Sys.getpid())
   )
   if (dir.exists(stage_path)) unlink(stage_path, recursive = TRUE)
+  on.exit({
+    if (dir.exists(stage_path)) unlink(stage_path, recursive = TRUE)
+  }, add = TRUE)
   result <- write_market_stage(stage_path, spec, site_path)
   publish_validated_dataset(
     stage_path, spec$output_path,
@@ -548,30 +559,20 @@ publish_cutoff_audit <- function(data, output_path = CUTOFF_OUTPUT_PATH) {
   validate_cutoff_audit(data)
   dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
   candidate <- file.path(dirname(output_path), paste0(".", basename(output_path), ".candidate"))
-  previous <- paste0(output_path, ".prev")
   if (file.exists(candidate)) unlink(candidate)
-  if (file.exists(previous)) stop("Ambiguous cutoff publication state: .prev exists.", call. = FALSE)
   arrow::write_parquet(
     arrow::Table$create(data, schema = cutoff_audit_schema()), candidate
   )
-  validate_file <- function(path) validate_cutoff_audit(arrow::read_parquet(path))
-  validate_file(candidate)
-  had_output <- file.exists(output_path)
-  if (had_output && !file.rename(output_path, previous)) {
-    stop("Could not preserve the existing cutoff audit.", call. = FALSE)
+  validate_file <- function(path) {
+    if (!identical(
+        arrow_schema_signature(arrow::open_dataset(path)$schema),
+        arrow_schema_signature(cutoff_audit_schema()))) {
+      stop("Cutoff audit physical types do not match the hand-written schema.",
+        call. = FALSE)
+    }
+    validate_cutoff_audit(arrow::read_parquet(path))
   }
-  if (!file.rename(candidate, output_path)) {
-    if (had_output) file.rename(previous, output_path)
-    stop("Could not promote the cutoff audit; prior output restored.", call. = FALSE)
-  }
-  final_error <- tryCatch({ validate_file(output_path); NULL }, error = identity)
-  if (inherits(final_error, "error")) {
-    unlink(output_path)
-    if (had_output) file.rename(previous, output_path)
-    stop("Cutoff validation failed; prior output restored: ", conditionMessage(final_error), call. = FALSE)
-  }
-  if (had_output) unlink(previous)
-  invisible(output_path)
+  publish_validated_file(candidate, output_path, validate_file)
 }
 
 main <- function() {

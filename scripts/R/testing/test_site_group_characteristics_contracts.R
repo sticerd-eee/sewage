@@ -143,6 +143,13 @@ assert_error_contains(
   "Unmapped",
   "Unmapped canonical sites with annual evidence must fail closed."
 )
+assert_error_contains(
+  producer_env$build_designation_histories(
+    annual, lookup, bind_rows(membership, membership[1, ]), 1:3, years
+  ),
+  "unique",
+  "Duplicate canonical membership rows must fail closed."
+)
 
 # Dissolving adjacent land polygons removes their internal administrative
 # border. Distances must be planar metres to the exterior Mean High Water line.
@@ -189,6 +196,71 @@ assert_error_contains(
   "Unexpected designation enums must be rejected."
 )
 
+# The shared sibling-file publisher validates before and after promotion and
+# restores the previous generation when final validation fails.
+publication_root <- tempfile("characteristics-file-publication-")
+dir.create(publication_root)
+canonical_file <- file.path(publication_root, "canonical.txt")
+candidate_file <- file.path(publication_root, ".candidate.txt")
+writeLines("old", canonical_file)
+writeLines("new", candidate_file)
+validate_generation <- function(path) {
+  value <- readLines(path, warn = FALSE)
+  if (!value %in% c("old", "new")) stop("invalid generation", call. = FALSE)
+}
+producer_env$publish_validated_file(
+  candidate_file, canonical_file, validate_generation
+)
+assert_identical(
+  readLines(canonical_file, warn = FALSE), "new",
+  "The validated candidate file must replace the prior generation."
+)
+assert_true(
+  !file.exists(paste0(canonical_file, ".prev")),
+  "Successful file publication must remove its temporary backup."
+)
+
+writeLines("bad", candidate_file)
+assert_error_contains(
+  producer_env$publish_validated_file(
+    candidate_file,
+    canonical_file,
+    function(path) {
+      value <- readLines(path, warn = FALSE)
+      if (identical(path, canonical_file) && value == "bad") {
+        stop("injected final validation failure", call. = FALSE)
+      }
+    }
+  ),
+  "restored",
+  "A failed final file validation must restore the prior generation."
+)
+assert_identical(
+  readLines(canonical_file, warn = FALSE), "new",
+  "File publication failure must leave the prior canonical readable."
+)
+
+writeLines("candidate", candidate_file)
+assert_error_contains(
+  producer_env$publish_validated_file(
+    candidate_file,
+    canonical_file,
+    function(path) invisible(path),
+    rename_path = function(from, to) {
+      if (identical(from, candidate_file) && identical(to, canonical_file)) {
+        return(FALSE)
+      }
+      file.rename(from, to)
+    }
+  ),
+  "restored",
+  "A failed file promotion must report successful restoration."
+)
+assert_identical(
+  readLines(canonical_file, warn = FALSE), "new",
+  "Promotion failure must restore the prior canonical file."
+)
+
 # Optional production read-back. The test remains a pure fixture test before
 # the first build, then becomes the canonical contract gate once output exists.
 canonical_path <- producer_env$CONFIG$output_path
@@ -202,6 +274,15 @@ if (file.exists(canonical_path)) {
     arrow::open_dataset(canonical_path)$schema$names,
     producer_env$site_group_characteristics_columns(),
     "Canonical Site Group parquet must retain the exact physical schema."
+  )
+  assert_identical(
+    producer_env$arrow_schema_signature(
+      arrow::open_dataset(canonical_path)$schema
+    ),
+    producer_env$arrow_schema_signature(
+      producer_env$site_group_characteristics_schema()
+    ),
+    "Canonical Site Group parquet must retain the exact physical types."
   )
 
   for (lookup_path in c(

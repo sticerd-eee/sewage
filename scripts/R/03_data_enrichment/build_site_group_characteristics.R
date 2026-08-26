@@ -26,6 +26,10 @@ if (!requireNamespace("here", quietly = TRUE)) {
 
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 source(here::here("scripts", "R", "utils", "site_group_utils.R"), local = TRUE)
+source(
+  here::here("scripts", "R", "utils", "dataset_publication_utils.R"),
+  local = TRUE
+)
 
 REQUIRED_PACKAGES <- c(
   "arrow", "dplyr", "here", "logger", "sf", "tibble", "tidyr"
@@ -186,8 +190,7 @@ build_designation_histories <- function(
     )
   }
   membership_data <- tibble::as_tibble(membership_data) |>
-    dplyr::select("site_id_canonical", "site_id") |>
-    dplyr::distinct()
+    dplyr::select("site_id_canonical", "site_id")
   validate_unique_mapping(
     membership_data, "site_id_canonical", "Canonical Site Group membership"
   )
@@ -367,34 +370,6 @@ validate_site_group_characteristics <- function(data, expected_site_ids) {
   invisible(data)
 }
 
-publish_validated_parquet <- function(candidate_path, output_path, validate) {
-  if (!file.exists(candidate_path)) stop("Candidate parquet does not exist.", call. = FALSE)
-  validate(candidate_path)
-  previous_path <- paste0(output_path, ".prev")
-  if (file.exists(previous_path)) {
-    stop("Ambiguous parquet publication state: .prev exists.", call. = FALSE)
-  }
-  had_output <- file.exists(output_path)
-  if (had_output && !file.rename(output_path, previous_path)) {
-    stop("Could not preserve the existing canonical parquet.", call. = FALSE)
-  }
-  if (!file.rename(candidate_path, output_path)) {
-    if (had_output) file.rename(previous_path, output_path)
-    stop("Could not promote the candidate parquet; prior output restored.", call. = FALSE)
-  }
-  final_error <- tryCatch({ validate(output_path); NULL }, error = identity)
-  if (inherits(final_error, "error")) {
-    unlink(output_path)
-    if (had_output) file.rename(previous_path, output_path)
-    stop("Canonical parquet validation failed; prior output restored: ",
-      conditionMessage(final_error), call. = FALSE)
-  }
-  if (had_output && !isTRUE(unlink(previous_path) == 0L)) {
-    stop("Canonical parquet is valid but .prev cleanup failed.", call. = FALSE)
-  }
-  invisible(output_path)
-}
-
 read_site_characteristic_inputs <- function(config = CONFIG) {
   required_paths <- unlist(config[c(
     "annual_path", "lookup_path", "membership_path", "crosswalk_path",
@@ -439,11 +414,15 @@ log_site_diagnostics <- function(data) {
     for (year in 21:24) {
       counts <- table(data[[paste0(type, "_status_", year)]], useNA = "ifany")
       logger::log_info("{type} status {year}: {paste(names(counts), counts, sep = '=', collapse = ', ')}")
+      logger::log_info(
+        "{type} diagnostics {year}: mixed={sum(data[[paste0(type, '_mixed_', year)]])}, unknown_evidence={sum(data[[paste0(type, '_unknown_', year)]])}"
+      )
     }
     logger::log_info(
       "{type} summary ever={sum(data[[paste0(type, '_ever_2124')]])}, changed={sum(data[[paste0(type, '_changed_2124')]])}, unknown={sum(data[[paste0(type, '_unknown_2124')]])}"
     )
   }
+  logger::log_info("Annual Return and Canonical membership mapping misses: 0")
 }
 
 main <- function() {
@@ -461,10 +440,20 @@ main <- function() {
   table <- arrow::Table$create(output, schema = site_group_characteristics_schema())
   arrow::write_parquet(table, candidate)
   validate_file <- function(path) {
+    observed_signature <- arrow_schema_signature(
+      arrow::open_dataset(path)$schema
+    )
+    expected_signature <- arrow_schema_signature(
+      site_group_characteristics_schema()
+    )
+    if (!identical(observed_signature, expected_signature)) {
+      stop("Site Group parquet physical types do not match the hand-written schema.",
+        call. = FALSE)
+    }
     candidate_data <- arrow::read_parquet(path)
     validate_site_group_characteristics(candidate_data, inputs$projection$site_id)
   }
-  publish_validated_parquet(candidate, CONFIG$output_path, validate_file)
+  publish_validated_file(candidate, CONFIG$output_path, validate_file)
   logger::log_info("Published {CONFIG$output_path}")
 }
 
