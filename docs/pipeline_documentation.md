@@ -54,6 +54,16 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
   - Pre-resolution conflict audit (refreshed every run, zero-row when clean): `annual_return_lookup_conflict_summary.parquet`, `annual_return_lookup_conflict_records.parquet`, `annual_return_lookup_conflict_edges.parquet`, `annual_return_lookup_resolution_kept_edges.parquet`, `annual_return_lookup_resolution_dropped_edges.parquet`, `annual_return_lookup_conflicts.xlsx`.
   - Post-resolution diagnostics (`annual_return_lookup_post_resolution_*.parquet`, `annual_return_lookup_post_resolution_conflicts.xlsx`): written only when the final same-year safety net trips; a healthy run deletes any stale copies, so their absence is the expected state.
 - `create_unique_spill_sites.R`: builds one row per Canonical Spill Site in the Annual Return Lookup, keyed by `site_id_canonical`. The repeated `site_id` column records Site Group membership; availability, location, operation, closure, and commissioning fields remain canonical metadata.
+- `build_site_group_characteristics.R`: publishes
+  `data/processed/site_characteristics/site_group_characteristics.parquet`,
+  keyed uniquely by Site Group `site_id`. It combines 2021–2024 bathing- and
+  shellfish-designation histories with continuous Site Coast Distance. The
+  coastline is the dissolved England, Wales, and Scotland boundary from the
+  ONS December 2024 Countries BGC product (EPSG:27700), licensed under the Open
+  Government Licence v3.0; contains OS data © Crown copyright and database
+  right 2024. `distance_to_coast_m` measures the nearest Mean High Water tidal
+  line—including tidal reaches of rivers such as the Thames and Severn. It is
+  neither distance to open sea nor a receiving-water classification.
 - `aggregate_rainfall_stats.R`: aggregates rainfall to site-period level.
 - `identify_dry_spills.R`: identifies dry spills using spill and rainfall information.
 - `aggregate_dry_spill_stats.R`: integrates dry-spill metrics into the main aggregation outputs.
@@ -76,6 +86,18 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 - `cross_section_sales.R` and `cross_section_rental.R`: publish the fixed-window `study_period` sales (2021–2024) and rental (2021–2023) cross-sections from matched individual EDM events at 250, 500, and 1,000 m. Events are clipped to the window and spill counts recomputed under the 12/24 rule, the same measurement the prior-to-transaction builders use. They retain every source transaction and distinguish eligible zero exposure, unknown annual evidence, and spatial ineligibility.
 - `cross_section_sales_ea.R` and `cross_section_rental_ea.R`: publish the same cross-sections to `study_period_ea` from EA annual-return evidence instead. Both families share one pipeline in `cross_section_study_period_utils.R` and one missingness rule, so their outputs differ only in the exposure numbers; `scripts/R/testing/verify_study_period_exposure_sources.R` reports the difference.
 - `cross_section_prior_to_sale.R` and `cross_section_prior_to_rental.R`: build prior-to-transaction exposure at property-radius grain. This remains a separate estimand from the fixed-period product, now differing from it only in window.
+- `build_prior_characteristics.R`: reads the closed prior-to-transaction
+  products and existing property–Site Group lookups without rebuilding either.
+  It publishes joinable Hive-partitioned companions keyed by transaction ID and
+  `radius` at
+  `data/processed/cross_section/sales/prior_characteristics/` (`house_id`) and
+  `data/processed/cross_section/rentals/prior_characteristics/` (`rental_id`).
+  These companions contain nearby-Site-Group coast ranges, designation
+  summaries, and market/radius/measure-specific spill-intensity bands. Their
+  cutoffs and reconciliation counts are keyed by `market`, `radius`, and
+  `measure` in
+  `data/processed/cross_section/prior_intensity_cutoffs.parquet`. The companion
+  boundary keeps the existing prior-exposure schemas and paths unchanged.
 - `house_spill_prior_to_sale.R` and `rental_spill_prior_to_rental.R`: build sale- and rental-spill prior-exposure datasets from raw matched events.
 - `site_panel_sales.R` and `site_panel_rental.R`: build site-level panels.
 - `house_panel_within_radius.R` and `rental_panel_within_radius.R`: build within-radius property panels.
@@ -133,18 +155,19 @@ The `scripts/R/09_analysis/` folder contains the main descriptive, hedonic, repe
 13. `create_annual_return_lookup.R` — build cross-year site lookup tables.
 14. `merge_individ_annual_location.R` — attach event records to Site Groups and publish the Site Group crosswalk.
 15. `create_unique_spill_sites.R` — resolve canonical metadata and create the one-row-per-`site_id_canonical` inventory.
-16. `aggregate_spill_stats.R` — produce Site Group-keyed spill aggregations from matched events and group-year status.
-17. `clean_rainfall_data.R` — clean rainfall inputs and site-grid lookups.
-18. `aggregate_rainfall_stats.R` — aggregate rainfall by year, month, and quarter.
-19. `identify_dry_spills.R` — identify and classify dry spills.
-20. `aggregate_dry_spill_stats.R` — integrate dry-spill metrics into the main spill aggregations.
-21. `aggregate_daily_spill_rainfall.R` — construct the balanced site-day spill-and-rainfall panel; feeds the `07_dry_spills` and `01_descriptive` analysis.
+16. `build_site_group_characteristics.R` — publish Site Group coast and designated-water characteristics after canonical membership and the Site Group projection are available.
+17. `aggregate_spill_stats.R` — produce Site Group-keyed spill aggregations from matched events and group-year status.
+18. `clean_rainfall_data.R` — clean rainfall inputs and site-grid lookups.
+19. `aggregate_rainfall_stats.R` — aggregate rainfall by year, month, and quarter.
+20. `identify_dry_spills.R` — identify and classify dry spills.
+21. `aggregate_dry_spill_stats.R` — integrate dry-spill metrics into the main spill aggregations.
+22. `aggregate_daily_spill_rainfall.R` — construct the balanced site-day spill-and-rainfall panel; feeds the `07_dry_spills` and `01_descriptive` analysis.
 
 ### Layer 04: Feature Engineering
 
-22. `site_house_sale_match.R` — create house-to-site spatial matches using the configured radius (currently 10 km).
-23. `site_rental_match.R` — create rental-to-site spatial matches using the configured radius (currently 10 km).
-24. `compute_spill_stats.R` — build enhanced spill statistics and treatment indicators.
+23. `site_house_sale_match.R` — create house-to-site spatial matches using the configured radius (currently 10 km).
+24. `site_rental_match.R` — create rental-to-site spatial matches using the configured radius (currently 10 km).
+25. `compute_spill_stats.R` — build enhanced spill statistics and treatment indicators.
 
 ### Layer 05: Data Integration
 
@@ -152,26 +175,27 @@ Integration scripts are executed earlier for dependency reasons; see steps 12 an
 
 ### Layer 06: Analysis Datasets
 
-25. `house_site_spills.R` — publish the unmasked sales measurement layer at transaction–Site Group grain.
-26. `rental_site_spills.R` — publish the unmasked rental measurement layer at transaction–Site Group grain.
-27. `cross_section_sales.R` — build the fixed 2021–2024 sales `study_period` cross-section from matched individual EDM events.
-28. `cross_section_rental.R` — build the fixed 2021–2023 rental `study_period` cross-section from matched individual EDM events.
-29. `cross_section_sales_ea.R` — build the fixed 2021–2024 sales `study_period_ea` cross-section from EA annual-return evidence.
-30. `cross_section_rental_ea.R` — build the fixed 2021–2023 rental `study_period_ea` cross-section from EA annual-return evidence.
-31. `cross_section_prior_to_sale.R` — derive prior-to-sale sales cross-sections from the measurement layer.
-32. `cross_section_prior_to_rental.R` — derive prior-to-rental rental cross-sections from the measurement layer.
-33. `house_spill_prior_to_sale.R` — derive the sale-spill prior-exposure dataset from the measurement layer.
-34. `rental_spill_prior_to_rental.R` — derive the rental-spill prior-exposure dataset from the measurement layer.
-35. `site_panel_sales.R` — build site-level sales panels.
-36. `site_panel_rental.R` — build site-level rental panels.
-37. `house_panel_within_radius.R` — build within-radius house panels.
-38. `rental_panel_within_radius.R` — build within-radius rental panels.
-39. `sale_panel_exp.R` — export the general sales panel.
-40. `rental_panel_exp.R` — export the general rental panel.
-41. `grid_long_difference_sales.R` — build the sales long-difference grid dataset.
-42. `grid_long_difference_rentals.R` — build the rental long-difference grid dataset.
-43. `repeat_sales.R` — build the long-run sales repeat mapping and review tables.
-44. `repeat_rentals.R` — build the long-run rental repeat mapping and review tables.
+26. `house_site_spills.R` — publish the unmasked sales measurement layer at transaction–Site Group grain.
+27. `rental_site_spills.R` — publish the unmasked rental measurement layer at transaction–Site Group grain.
+28. `cross_section_sales.R` — build the fixed 2021–2024 sales `study_period` cross-section from matched individual EDM events.
+29. `cross_section_rental.R` — build the fixed 2021–2023 rental `study_period` cross-section from matched individual EDM events.
+30. `cross_section_sales_ea.R` — build the fixed 2021–2024 sales `study_period_ea` cross-section from EA annual-return evidence.
+31. `cross_section_rental_ea.R` — build the fixed 2021–2023 rental `study_period_ea` cross-section from EA annual-return evidence.
+32. `cross_section_prior_to_sale.R` — derive prior-to-sale sales cross-sections from the measurement layer.
+33. `cross_section_prior_to_rental.R` — derive prior-to-rental rental cross-sections from the measurement layer.
+34. `build_prior_characteristics.R` — publish sales and rental property-radius companion characteristics and the combined cutoff audit after both prior-exposure products exist.
+35. `house_spill_prior_to_sale.R` — derive the sale-spill prior-exposure dataset from the measurement layer.
+36. `rental_spill_prior_to_rental.R` — derive the rental-spill prior-exposure dataset from the measurement layer.
+37. `site_panel_sales.R` — build site-level sales panels.
+38. `site_panel_rental.R` — build site-level rental panels.
+39. `house_panel_within_radius.R` — build within-radius house panels.
+40. `rental_panel_within_radius.R` — build within-radius rental panels.
+41. `sale_panel_exp.R` — export the general sales panel.
+42. `rental_panel_exp.R` — export the general rental panel.
+43. `grid_long_difference_sales.R` — build the sales long-difference grid dataset.
+44. `grid_long_difference_rentals.R` — build the rental long-difference grid dataset.
+45. `repeat_sales.R` — build the long-run sales repeat mapping and review tables.
+46. `repeat_rentals.R` — build the long-run rental repeat mapping and review tables.
 
 ## Dependency Notes
 
@@ -179,7 +203,7 @@ Integration scripts are executed earlier for dependency reasons; see steps 12 an
 - Steps 3 to 6 are independent; step 5 is only needed for rental workflows.
 - Steps 7 to 10 depend on the ingestion outputs.
 - Step 11 is independent and only required for the `05_news` analysis.
-- Steps 17 to 21 form the rainfall and dry-spill sub-pipeline.
+- Steps 18 to 22 form the rainfall and dry-spill sub-pipeline.
 - The layer-06 scripts build on spill aggregations and spatial matching outputs.
 - The cleaned long-run/study pairs are one atomic data generation: never rebuild
   or promote one member independently. All ID-keyed artifacts must regenerate
