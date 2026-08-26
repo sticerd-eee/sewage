@@ -42,6 +42,21 @@ A Record-Linkage Component containing more than one Annual-Return Site from the 
 ### Near-Overflow Radius
 The straight-line distance threshold within which a property is treated as exposed to a storm overflow, used to build the near-property cross-sections. The main analyses are run at several such thresholds, with the others serving as robustness checks. In regression specifications it is written generically as the radius buffer **B**, which takes the values 250, 500, and 1000 m across the sweep; each individual result table still reports its specific radius.
 
+### Site Coast Distance
+The straight-line distance from a Site Group's overflow location to the coastline. It describes geographic proximity to the coast, not whether the overflow discharges into coastal or transitional water.
+
+### Annual Designated-Water Status
+The reporting-year classification of a Site Group's bathing-water or shellfish-water evidence as designated, not designated, or unknown. Bathing-water and shellfish-water statuses are distinct and may change or conflict across reporting years.
+
+### Ever-Observed Designated-Water Indicator
+A Site Group indicator that positive bathing-water or shellfish-water designation evidence appears in at least one Annual Return EDM from 2021 through 2024. It does not imply continuous designation throughout that period.
+
+### Property Designated-Water Proximity
+A property-radius classification derived from the Ever-Observed Designated-Water Indicators of every nearby Site Group. Its primary flag records whether any nearby Site Group is designated; all-designated, mixed, unknown, and designated-site-count fields preserve the radius composition.
+
+### Property Spill-Intensity Band
+A property-radius classification of total nearby Prior-to-Transaction Spill Exposure as unknown, zero, positive at or below the positive-exposure median, or positive above that median. It aggregates every Site Group within the property's Near-Overflow Radius and is defined separately by market and radius.
+
 ### Spill Exposure
 A property's continuous measure of nearby storm-overflow activity — spill count and spill hours at the overflows within its Near-Overflow Radius — measured over a stated exposure window.
 
