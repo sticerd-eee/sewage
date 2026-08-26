@@ -189,4 +189,73 @@ assert_error_contains(
   "Unexpected designation enums must be rejected."
 )
 
+# Optional production read-back. The test remains a pure fixture test before
+# the first build, then becomes the canonical contract gate once output exists.
+canonical_path <- producer_env$CONFIG$output_path
+if (file.exists(canonical_path)) {
+  canonical <- arrow::read_parquet(canonical_path)
+  projection <- producer_env$read_site_group_projection(
+    producer_env$CONFIG$crosswalk_path, years = 2021:2024
+  )
+  producer_env$validate_site_group_characteristics(canonical, projection$site_id)
+  assert_identical(
+    arrow::open_dataset(canonical_path)$schema$names,
+    producer_env$site_group_characteristics_columns(),
+    "Canonical Site Group parquet must retain the exact physical schema."
+  )
+
+  for (lookup_path in c(
+      here::here("data", "processed", "spill_house_lookup.parquet"),
+      here::here("data", "processed", "zoopla", "spill_rental_lookup.parquet")
+    )) {
+    pair_site_ids <- arrow::open_dataset(lookup_path) |>
+      filter(.data$distance_m <= 1000) |>
+      select("site_id") |>
+      distinct() |>
+      collect() |>
+      pull("site_id")
+    assert_true(
+      all(pair_site_ids %in% canonical$site_id),
+      paste("All real <=1 km property pairs must join Site Group characteristics:", lookup_path)
+    )
+  }
+
+  # Nearest-site spot checks cover inland, coastal, Welsh, northern-English,
+  # island, and both documented tidal-estuary semantics.
+  located <- projection |>
+    left_join(select(canonical, "site_id", "distance_to_coast_m"), by = "site_id")
+  references <- tribble(
+    ~label, ~easting, ~northing, ~minimum_m, ~maximum_m,
+    "Birmingham inland", 407000, 287000, 50000, Inf,
+    "Brighton coastal", 531000, 104000, 0, 5000,
+    "Cardiff Welsh", 318000, 176000, 0, 5000,
+    "Northern-English border guard", 393000, 568000, 10000, Inf,
+    "Isle of Wight", 450000, 85000, 0, 10000,
+    "Tidal Thames London", 530000, 180000, 0, 5000,
+    "Severn Gloucester", 383000, 219000, 0, 5000
+  )
+  spot_checks <- bind_rows(lapply(seq_len(nrow(references)), function(index) {
+    squared <- (located$easting - references$easting[[index]])^2 +
+      (located$northing - references$northing[[index]])^2
+    nearest <- located[which.min(squared), ]
+    tibble(
+      label = references$label[[index]],
+      site_id = nearest$site_id,
+      distance_to_reference_m = sqrt(min(squared, na.rm = TRUE)),
+      distance_to_coast_m = nearest$distance_to_coast_m,
+      minimum_m = references$minimum_m[[index]],
+      maximum_m = references$maximum_m[[index]]
+    )
+  }))
+  assert_true(
+    all(spot_checks$distance_to_coast_m >= spot_checks$minimum_m &
+      spot_checks$distance_to_coast_m <= spot_checks$maximum_m),
+    paste(
+      "Site Coast Distance spot checks failed:",
+      paste(capture.output(print(spot_checks)), collapse = " ")
+    )
+  )
+  print(spot_checks)
+}
+
 cat("All Site Group characteristics contract tests passed.\n")

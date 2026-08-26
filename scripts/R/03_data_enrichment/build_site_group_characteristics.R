@@ -15,6 +15,9 @@
 # Site Coast Distance is distance to the nearest Mean High Water tidal line.
 # It is a near-coast location measure, not a receiving-water classification or
 # a measure of distance to open sea.
+# Boundary source: Office for National Statistics, December 2024 Countries
+# (BGC), licensed under the Open Government Licence v3.0. Contains OS data
+# © Crown copyright and database right 2024.
 # ==============================================================================
 
 if (!requireNamespace("here", quietly = TRUE)) {
