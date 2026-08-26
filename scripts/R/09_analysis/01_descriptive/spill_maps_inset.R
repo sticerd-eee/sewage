@@ -3,7 +3,7 @@
 # ==============================================================================
 #
 # Purpose: Generate static PDF maps showing average annual spill counts by MSOA
-#          for 2021-2023 with a London inset panel.
+#          for 2021-2024 with a London inset panel.
 #          Produces two maps: all spills and dry spills.
 #
 # Author: Jacopo Olivieri
@@ -18,10 +18,10 @@
 #   - data/raw/shapefiles/local_authorities_uk_buc/ - London LAD boundaries
 #
 # Outputs:
-#   - output/figures/maps/spill_avg_annual_count_2021_2023_london_inset.pdf
-#   - output/figures/maps/dry_spill_avg_annual_count_2021_2023_london_inset.pdf
-#   - output/figures/maps/spill_avg_annual_count_2021_2023_london_inset_slides.pdf
-#   - output/figures/maps/dry_spill_avg_annual_count_2021_2023_london_inset_slides.pdf
+#   - output/figures/maps/spill_avg_annual_count_2021_2024_london_inset.pdf
+#   - output/figures/maps/dry_spill_avg_annual_count_2021_2024_london_inset.pdf
+#   - output/figures/maps/spill_avg_annual_count_2021_2024_london_inset_slides.pdf
+#   - output/figures/maps/dry_spill_avg_annual_count_2021_2024_london_inset_slides.pdf
 #
 # ==============================================================================
 
@@ -37,7 +37,7 @@ PLOT_DPI <- 300
 SLIDE_PLOT_WIDTH <- 7.0
 SLIDE_PLOT_HEIGHT <- 5.6
 SLIDE_PLOT_DPI <- 300
-TARGET_YEARS <- 2021:2023
+TARGET_YEARS <- 2021:2024
 YEAR_RANGE_LABEL <- paste0(min(TARGET_YEARS), "-", max(TARGET_YEARS))
 YEAR_FILENAME_LABEL <- paste(min(TARGET_YEARS), max(TARGET_YEARS), sep = "_")
 NO_SPILL_COLOR <- "grey90"

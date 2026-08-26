@@ -10,6 +10,7 @@
 #
 # Author: Jacopo Olivieri
 # Date: 2026-04-07
+# Date Modified: 2026-08-22
 #
 # Inputs:
 #   - data/processed/house_price.parquet
@@ -22,6 +23,8 @@
 # Outputs:
 #   - output/figures/extensive_margin_news_coefficients_lsoa.pdf
 #   - output/figures/extensive_margin_news_coefficients_msoa.pdf
+#   - output/figures/extensive_margin_news_coefficients_lsoa_slides.pdf
+#   - output/figures/extensive_margin_news_coefficients_msoa_slides.pdf
 #
 # ==============================================================================
 
@@ -62,23 +65,64 @@ check_required_packages(REQUIRED_PACKAGES)
 # 1. Configuration
 # ==============================================================================
 START_DATE <- as.Date("2021-01-01")
-END_DATE   <- as.Date("2023-12-31")
+SALES_END_DATE <- as.Date("2024-12-31")
+RENTAL_END_DATE <- as.Date("2023-12-31")
+SALES_END_MONTH_ID <- 48L
+RENTAL_END_MONTH_ID <- 36L
 LOOKUP_MAX_DISTANCE <- 10000
-VCOV_MODE  <- "hetero"
 
-PLOT_WIDTH  <- 18
-PLOT_HEIGHT <- 10
-PLOT_DPI    <- 300
-
-MARKET_COLOURS <- c(Sales = "#1F78B4", Rentals = "#D95F02")
+PLOT_DPI <- 300
 FAMILIES <- c("post", "articles")
 
-PATH_OUTPUT_LSOA <- here::here(
-  "output", "figures", "extensive_margin_news_coefficients_lsoa.pdf"
+# Paper and slides differ in canvas size, palette, and text scaling. Slides are
+# exported near their final Beamer display size (\linewidth is 14.6cm at
+# aspectratio=169 with 7mm margins) so LaTeX does not shrink labels away.
+PLOT_VARIANTS <- list(
+  paper = list(
+    file_suffix        = "",
+    width_cm           = 18,
+    height_cm          = 10,
+    market_colours     = c(Sales = "#1F78B4", Rentals = "#D95F02"),
+    base_text_size     = 10,
+    axis_title_size    = 12,
+    axis_text_size     = 10,
+    legend_text_size   = 10,
+    strip_text_size    = 11,
+    point_size         = 2.3,
+    errorbar_height    = 0.16,
+    errorbar_linewidth = 0.5,
+    legend_box_spacing = 5.5,
+    short_labels       = FALSE,
+    plot_margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
+  ),
+  slides = list(
+    file_suffix        = "_slides",
+    width_cm           = 14.0,
+    height_cm          = 4.6,
+    market_colours     = c(Sales = "#B63679FF", Rentals = "#21908CFF"),
+    base_text_size     = 8.5,
+    axis_title_size    = 9,
+    axis_text_size     = 8,
+    legend_text_size   = 8.5,
+    strip_text_size    = 9,
+    point_size         = 1.7,
+    errorbar_height    = 0.12,
+    errorbar_linewidth = 0.4,
+    legend_box_spacing = 2,
+    short_labels       = TRUE,
+    plot_margin = ggplot2::margin(t = 2, r = 5, b = 2, l = 3, unit = "pt")
+  )
 )
-PATH_OUTPUT_MSOA <- here::here(
-  "output", "figures", "extensive_margin_news_coefficients_msoa.pdf"
-)
+
+output_path_for <- function(fe_unit, settings) {
+  here::here(
+    "output", "figures",
+    paste0(
+      "extensive_margin_news_coefficients_", fe_unit,
+      settings$file_suffix, ".pdf"
+    )
+  )
+}
 
 comparison_specs <- tibble::tribble(
   ~comparison_id,       ~comparison_label,        ~near_min, ~near_max, ~far_min, ~far_max,
@@ -119,9 +163,32 @@ initialise_environment()
 # ==============================================================================
 
 # 3.1 Font Setup ---------------------------------------------------------------
+FONT_FAMILY <- "libertinus"
+
+add_libertinus_font <- function() {
+  local_font_files <- c(
+    regular = "~/Library/Fonts/LibertinusSerif-Regular.ttf",
+    bold = "~/Library/Fonts/LibertinusSerif-Bold.ttf",
+    italic = "~/Library/Fonts/LibertinusSerif-Italic.ttf",
+    bolditalic = "~/Library/Fonts/LibertinusSerif-BoldItalic.ttf"
+  )
+  local_font_files <- path.expand(local_font_files)
+
+  if (all(file.exists(local_font_files))) {
+    do.call(
+      sysfonts::font_add,
+      c(list(family = FONT_FAMILY), as.list(local_font_files))
+    )
+    return(invisible(FONT_FAMILY))
+  }
+
+  sysfonts::font_add_google("Libertinus Serif", FONT_FAMILY, db_cache = TRUE)
+  invisible(FONT_FAMILY)
+}
+
 showtext::showtext_auto()
 showtext::showtext_opts(dpi = 300)
-sysfonts::font_add_google("Libertinus Serif", "Libertinus Serif", db_cache = FALSE)
+add_libertinus_font()
 
 # 3.2 Output Directory ---------------------------------------------------------
 output_dir <- here::here("output", "figures")
@@ -130,31 +197,44 @@ if (!dir.exists(output_dir)) {
 }
 
 # 3.3 ggplot Theme -------------------------------------------------------------
-theme_pref <- ggplot2::theme_minimal() +
-  ggplot2::theme(
-    text = element_text(size = 10, family = "Libertinus Serif"),
-    plot.title = element_text(
-      face = "bold", size = 12, family = "Libertinus Serif",
-      margin = ggplot2::margin(b = 9, unit = "pt")
-    ),
-    plot.subtitle = element_text(size = 10, family = "Libertinus Serif"),
-    axis.title = element_text(
-      face = "bold", size = 12, family = "Libertinus Serif"
-    ),
-    axis.text = element_text(size = 10, family = "Libertinus Serif"),
-    panel.grid.minor = element_blank(),
-    panel.grid.major.x = element_line(color = "gray95"),
-    panel.grid.major.y = element_line(color = "gray95"),
-    panel.background = element_rect(fill = "white", color = NA),
-    plot.background = element_rect(fill = "white", color = NA),
-    legend.position = "bottom",
-    legend.title = element_blank(),
-    legend.text = element_text(size = 10, family = "Libertinus Serif"),
-    strip.text = element_text(
-      face = "bold", size = 11, family = "Libertinus Serif"
-    ),
-    plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")
-  )
+theme_pref <- function(settings) {
+  ggplot2::theme_minimal(
+    base_family = FONT_FAMILY,
+    base_size = settings$base_text_size
+  ) +
+    ggplot2::theme(
+      text = element_text(size = settings$base_text_size, family = FONT_FAMILY),
+      plot.title = element_text(
+        face = "bold", size = settings$axis_title_size, family = FONT_FAMILY,
+        margin = ggplot2::margin(b = 9, unit = "pt")
+      ),
+      plot.subtitle = element_text(
+        size = settings$base_text_size, family = FONT_FAMILY
+      ),
+      axis.title = element_text(
+        face = "bold", size = settings$axis_title_size, family = FONT_FAMILY
+      ),
+      axis.text = element_text(
+        size = settings$axis_text_size, family = FONT_FAMILY
+      ),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = "gray95"),
+      panel.grid.major.y = element_line(color = "gray95"),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      legend.position = "bottom",
+      legend.title = element_blank(),
+      legend.text = element_text(
+        size = settings$legend_text_size, family = FONT_FAMILY
+      ),
+      legend.margin = ggplot2::margin(t = 0, b = 0, unit = "pt"),
+      legend.box.spacing = unit(settings$legend_box_spacing, "pt"),
+      strip.text = element_text(
+        face = "bold", size = settings$strip_text_size, family = FONT_FAMILY
+      ),
+      plot.margin = settings$plot_margin
+    )
+}
 
 
 # ==============================================================================
@@ -204,7 +284,7 @@ load_peak_month_id <- function() {
     here::here("data", "raw", "google_trends", "google_trends_uk.xlsx"),
     sheet = "united_kingdom"
   ) |>
-    dplyr::filter(.data$Year >= 2021, .data$Year <= 2023)
+    dplyr::filter(.data$Year >= 2021, .data$Year <= 2024)
 
   peak_row <- google_trends |>
     dplyr::slice_max(`'Sewage Spill' Google Searches`, n = 1, with_ties = FALSE)
@@ -220,7 +300,7 @@ load_articles <- function() {
   arrow::read_parquet(
     here::here("data", "processed", "lexis_nexis", "search1_monthly.parquet")
   ) |>
-    dplyr::filter(.data$month_id >= 1L, .data$month_id <= 36L) |>
+    dplyr::filter(.data$month_id >= 1L, .data$month_id <= SALES_END_MONTH_ID) |>
     dplyr::arrange(.data$month_id) |>
     dplyr::mutate(
       cumulative_articles     = cumsum(.data$article_count),
@@ -256,7 +336,7 @@ load_nearest_lookup <- function(path, id_col) {
     dplyr::collect()
 }
 
-#' Load Land Registry sales transactions (2021-2023)
+#' Load Land Registry sales transactions (2021-2024)
 load_sales_transactions <- function() {
   rio::import(
     here::here("data", "processed", "house_price.parquet"),
@@ -277,9 +357,9 @@ load_sales_transactions <- function() {
     ) |>
     dplyr::filter(
       .data$date_of_transfer >= START_DATE,
-      .data$date_of_transfer <= END_DATE,
+      .data$date_of_transfer <= SALES_END_DATE,
       .data$month_id >= 1L,
-      .data$month_id <= 36L,
+      .data$month_id <= SALES_END_MONTH_ID,
       is.finite(.data$log_price)
     )
 }
@@ -303,9 +383,9 @@ load_rental_transactions <- function() {
     ) |>
     dplyr::filter(
       .data$rented_est >= START_DATE,
-      .data$rented_est <= END_DATE,
+      .data$rented_est <= RENTAL_END_DATE,
       .data$month_id >= 1L,
-      .data$month_id <= 36L,
+      .data$month_id <= RENTAL_END_MONTH_ID,
       is.finite(.data$log_price)
     )
 }
@@ -364,8 +444,10 @@ build_comparison_sample <- function(data, comparison_row) {
 
 # 4.4 Estimation Functions -----------------------------------------------------
 
-resolve_vcov <- function(data) {
-  "hetero"
+# Cluster on the specification's own fixed-effect unit, matching the sibling
+# table scripts in this folder (all of which pass `vcov = ~lsoa`).
+resolve_vcov <- function(spec_row) {
+  stats::as.formula(paste0("~", spec_row$fe_unit))
 }
 
 build_formula <- function(family, spec_row, market) {
@@ -493,7 +575,7 @@ estimate_one_model <- function(sample, market, comparison_row, family, spec_row)
     fixest::feols(
       fml  = build_formula(family, spec_row, market),
       data = data_est,
-      vcov = resolve_vcov(data_est)
+      vcov = resolve_vcov(spec_row)
     ),
     error = function(e) NULL
   )
@@ -503,8 +585,23 @@ estimate_one_model <- function(sample, market, comparison_row, family, spec_row)
 
 # 4.5 Plot Function ------------------------------------------------------------
 
-make_coefficient_plot <- function(data) {
+#' Compact band labels for slides: "0-250m vs 250-500m" -> "0-250 vs 250-500 m"
+#' with en-dashes. Applied as a scale label function so the factor levels and
+#' ordering set in `prepare_plot_data()` are left untouched.
+slide_comparison_label <- function(x) {
+  x |>
+    stringr::str_remove("m(?= vs )") |>
+    stringr::str_replace("m$", " m") |>
+    stringr::str_replace_all("(?<=[0-9])-(?=[0-9])", "–")
+}
+
+make_coefficient_plot <- function(data, settings) {
   dodge <- ggplot2::position_dodge(width = 0.45)
+  y_labels <- if (isTRUE(settings$short_labels)) {
+    slide_comparison_label
+  } else {
+    ggplot2::waiver()
+  }
 
   ggplot2::ggplot(
     data,
@@ -518,12 +615,20 @@ make_coefficient_plot <- function(data) {
     )
   ) +
     ggplot2::geom_vline(xintercept = 0, linetype = 2, colour = "grey60") +
-    ggplot2::geom_errorbarh(height = 0.16, alpha = 0.8, position = dodge) +
-    ggplot2::geom_point(size = 2.3, position = dodge) +
+    ggplot2::geom_errorbarh(
+      height = settings$errorbar_height,
+      linewidth = settings$errorbar_linewidth,
+      alpha = 0.8,
+      position = dodge
+    ) +
+    ggplot2::geom_point(size = settings$point_size, position = dodge) +
     ggplot2::facet_wrap(~ family, scales = "free_x") +
-    ggplot2::scale_colour_manual(values = MARKET_COLOURS, drop = FALSE) +
+    ggplot2::scale_y_discrete(labels = y_labels) +
+    ggplot2::scale_colour_manual(
+      values = settings$market_colours, drop = FALSE
+    ) +
     ggplot2::labs(x = "Coefficient", y = NULL, colour = NULL) +
-    theme_pref
+    theme_pref(settings)
 }
 
 
@@ -604,28 +709,26 @@ msoa_plot_data      <- prepare_plot_data(main_results, "msoa_month_controls")
 # ==============================================================================
 cat("Creating figures...\n")
 
-p_lsoa <- make_coefficient_plot(preferred_plot_data)
-
-ggsave(
-  filename = PATH_OUTPUT_LSOA,
-  plot     = p_lsoa,
-  width    = PLOT_WIDTH,
-  height   = PLOT_HEIGHT,
-  dpi      = PLOT_DPI,
-  units    = "cm"
+plot_data_by_fe <- list(
+  lsoa = preferred_plot_data,
+  msoa = msoa_plot_data
 )
-cat("  Saved: ", PATH_OUTPUT_LSOA, "\n", sep = "")
 
-p_msoa <- make_coefficient_plot(msoa_plot_data)
+for (fe_unit in names(plot_data_by_fe)) {
+  for (variant_name in names(PLOT_VARIANTS)) {
+    settings <- PLOT_VARIANTS[[variant_name]]
+    path <- output_path_for(fe_unit, settings)
 
-ggsave(
-  filename = PATH_OUTPUT_MSOA,
-  plot     = p_msoa,
-  width    = PLOT_WIDTH,
-  height   = PLOT_HEIGHT,
-  dpi      = PLOT_DPI,
-  units    = "cm"
-)
-cat("  Saved: ", PATH_OUTPUT_MSOA, "\n", sep = "")
+    ggplot2::ggsave(
+      filename = path,
+      plot     = make_coefficient_plot(plot_data_by_fe[[fe_unit]], settings),
+      width    = settings$width_cm,
+      height   = settings$height_cm,
+      dpi      = PLOT_DPI,
+      units    = "cm"
+    )
+    cat("  Saved: ", path, "\n", sep = "")
+  }
+}
 
 cat("Done.\n")

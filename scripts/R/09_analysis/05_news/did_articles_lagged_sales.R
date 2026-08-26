@@ -4,7 +4,7 @@
 #
 # Purpose: Estimate the preferred intensive-margin sales specification over a
 #          cumulative-article lag-by-radius grid. Main sales comparisons use a
-#          common Jan 2022--Dec 2023 sample; full-sample contemporaneous sales
+#          common Jan 2022--Dec 2024 sales sample; full-sample contemporaneous sales
 #          and rental estimates are reported as references.
 #
 # Inputs:
@@ -66,7 +66,8 @@ CONFIG <- list(
   lags = c(0L, 3L, 6L, 12L),
   max_lag = 12L,
   analysis_start_month_id = 1L,
-  analysis_end_month_id = 36L,
+  sales_end_month_id = 48L,
+  rental_end_month_id = 36L,
   articles_path = here::here(
     "data", "processed", "lexis_nexis", "search1_monthly.parquet"
   ),
@@ -95,10 +96,14 @@ CONFIG <- list(
 # ==============================================================================
 
 load_articles <- function() {
+  expected_month_ids <- seq.int(
+    CONFIG$analysis_start_month_id,
+    CONFIG$sales_end_month_id
+  )
   articles <- arrow::read_parquet(CONFIG$articles_path) |>
     dplyr::filter(
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$sales_end_month_id
     ) |>
     dplyr::arrange(.data$month_id) |>
     dplyr::mutate(
@@ -110,9 +115,9 @@ load_articles <- function() {
     )
 
   stopifnot(
-    nrow(articles) == 36L,
+    nrow(articles) == length(expected_month_ids),
     !anyDuplicated(articles$month_id),
-    all(articles$month_id == seq.int(1L, 36L)),
+    all(articles$month_id == expected_month_ids),
     all(is.finite(articles$cumulative_articles)),
     all(is.finite(articles$log_cumulative_articles)),
     all(diff(articles$cumulative_articles) >= 0),
@@ -134,7 +139,7 @@ load_global_transactions <- function() {
     dplyr::filter(
       !is.na(.data$month_id),
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$sales_end_month_id
     ) |>
     dplyr::select(
       "house_id", "price", "month_id", "lsoa", "latitude", "longitude",
@@ -151,7 +156,7 @@ load_global_transactions <- function() {
     dplyr::filter(
       !is.na(.data$month_id),
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$rental_end_month_id
     ) |>
     dplyr::select(
       "rental_id", "listing_price", "month_id", "lsoa", "latitude",
@@ -168,15 +173,23 @@ prepare_sales_base <- function(radius, sales) {
 
   dat_cs <- arrow::open_dataset(CONFIG$sales_cross_section_path) |>
     dplyr::filter(.data$radius == .env$radius, .data$n_spill_sites > 0) |>
-    dplyr::select("house_id", "price", "spill_count_weekly_avg") |>
+    dplyr::select(
+      "house_id", "price", "spill_count_weekly_avg",
+      "annual_returns_na_then_absent"
+    ) |>
     dplyr::collect()
+
+  stopifnot(all(
+    !dat_cs$annual_returns_na_then_absent |
+      is.na(dat_cs$spill_count_weekly_avg)
+  ))
 
   dat <- dat_cs |>
     dplyr::inner_join(sales, by = "house_id") |>
     dplyr::mutate(log_price = log(.data$price.y)) |>
     dplyr::filter(
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id,
+      .data$month_id <= CONFIG$sales_end_month_id,
       !is.na(.data$spill_count_weekly_avg),
       !is.na(.data$lsoa),
       !is.na(.data$month_id),
@@ -197,6 +210,11 @@ prepare_sales_base <- function(radius, sales) {
   if (nrow(dat) == 0L) {
     stop("No complete sales observations at radius ", radius, ".", call. = FALSE)
   }
+  stopifnot(
+    !any(dat$annual_returns_na_then_absent),
+    min(dat$month_id) == CONFIG$analysis_start_month_id,
+    max(dat$month_id) == CONFIG$sales_end_month_id
+  )
 
   cat(sprintf("  Sales base sample: %s observations\n", format(nrow(dat), big.mark = ",")))
   dat
@@ -207,15 +225,23 @@ prepare_rental_base <- function(radius, rentals) {
 
   dat_cs <- arrow::open_dataset(CONFIG$rental_cross_section_path) |>
     dplyr::filter(.data$radius == .env$radius, .data$n_spill_sites > 0) |>
-    dplyr::select("rental_id", "listing_price", "spill_count_weekly_avg") |>
+    dplyr::select(
+      "rental_id", "listing_price", "spill_count_weekly_avg",
+      "annual_returns_na_then_absent"
+    ) |>
     dplyr::collect()
+
+  stopifnot(all(
+    !dat_cs$annual_returns_na_then_absent |
+      is.na(dat_cs$spill_count_weekly_avg)
+  ))
 
   dat <- dat_cs |>
     dplyr::inner_join(rentals, by = "rental_id") |>
     dplyr::mutate(log_price = log(.data$listing_price.y)) |>
     dplyr::filter(
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id,
+      .data$month_id <= CONFIG$rental_end_month_id,
       !is.na(.data$spill_count_weekly_avg),
       !is.na(.data$lsoa),
       !is.na(.data$month_id),
@@ -234,6 +260,11 @@ prepare_rental_base <- function(radius, rentals) {
   if (nrow(dat) == 0L) {
     stop("No complete rental observations at radius ", radius, ".", call. = FALSE)
   }
+  stopifnot(
+    !any(dat$annual_returns_na_then_absent),
+    min(dat$month_id) == CONFIG$analysis_start_month_id,
+    max(dat$month_id) == CONFIG$rental_end_month_id
+  )
 
   cat(sprintf("  Rental base sample: %s observations\n", format(nrow(dat), big.mark = ",")))
   dat
@@ -311,6 +342,7 @@ estimate_sales_lag_path <- function(base_sample, articles, radius) {
     stopifnot(
       nrow(dat) > 0L,
       min(dat$month_id) == 13L,
+      max(dat$month_id) == CONFIG$sales_end_month_id,
       all(dat$month_id >= 13L),
       all(dat$lagged_month_id == dat$month_id - lag)
     )
@@ -531,11 +563,14 @@ export_grid_table <- function(component_results) {
     "This table is the intensive-margin extension. Cells report the coefficient ",
     "on weekly-average spill count $\\times$ log cumulative articles, with ",
     "LSOA-clustered standard errors in parentheses. Common-sample sales models ",
-    "retain January 2022--December 2023 (month\\_id $\\geq 13$) at every lag. ",
-    "The Full lag-0 column reports contemporaneous January 2021--December 2023 ",
-    "references; rentals appear only in that column and are not lagged. All ",
+    "retain January 2022--December 2024 (month\\_id 13--48) at every lag. ",
+    "The sales Full lag-0 column reports contemporaneous January 2021--December ",
+    "2024; rentals use January 2021--December 2023 and appear only in the Full ",
+    "lag-0 column. All ",
     "models include property controls, LSOA fixed effects, and month fixed ",
-    "effects. Month effects absorb the article-measure main effect. Cumulative ",
+    "effects. Month effects absorb the article-measure main effect. Exposure is ",
+    "missing and observations are excluded when annual returns are reported NA ",
+    "and later absent. Cumulative ",
     "articles originate in January 2021. *** $p<0.01$, ** $p<0.05$, * $p<0.1$.} \\\\")
 
   latex <- c(
@@ -603,7 +638,9 @@ main <- function() {
     identical(CONFIG$radii, c(250L, 500L, 1000L)),
     identical(CONFIG$lags, c(0L, 3L, 6L, 12L)),
     CONFIG$max_lag == max(CONFIG$lags),
-    CONFIG$analysis_start_month_id + CONFIG$max_lag == 13L
+    CONFIG$analysis_start_month_id + CONFIG$max_lag == 13L,
+    CONFIG$sales_end_month_id == 48L,
+    CONFIG$rental_end_month_id == 36L
   )
 
   articles <- load_articles()

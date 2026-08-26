@@ -50,7 +50,7 @@ REQUIRED_PACKAGES <- c(
 # ==============================================================================
 # 1. Configuration
 # ==============================================================================
-TARGET_YEARS <- 2021:2023
+TARGET_YEARS <- 2021:2024
 DRY_SPILL_COUNT_COL <- "dry_spill_count_yr_r1_d01_weak"
 LONDON_LAD_PREFIX <- "^E09"
 

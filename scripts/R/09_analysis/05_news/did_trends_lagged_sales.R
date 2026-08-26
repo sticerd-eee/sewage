@@ -64,7 +64,8 @@ CONFIG <- list(
   radii = c(250L, 500L, 1000L),
   lags = c(0L, 3L, 6L, 12L),
   analysis_start_month_id = 1L,
-  analysis_end_month_id = 36L,
+  sales_end_month_id = 48L,
+  rental_end_month_id = 36L,
   base_year = 2021L,
   google_trends_sheet = "united_kingdom",
   google_trends_path = here::here(
@@ -95,11 +96,16 @@ CONFIG <- list(
 # ==============================================================================
 
 load_google_trends_peak <- function() {
+  sales_end_year <- CONFIG$base_year +
+    (CONFIG$sales_end_month_id - 1L) %/% 12L
   trends <- readxl::read_excel(
     CONFIG$google_trends_path,
     sheet = CONFIG$google_trends_sheet
   ) |>
-    dplyr::filter(.data$Year >= 2021L, .data$Year <= 2023L)
+    dplyr::filter(
+      .data$Year >= CONFIG$base_year,
+      .data$Year <= sales_end_year
+    )
 
   peak_row <- trends |>
     dplyr::slice_max(
@@ -124,7 +130,7 @@ load_global_transactions <- function() {
     dplyr::filter(
       !is.na(.data$month_id),
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$sales_end_month_id
     ) |>
     dplyr::select(
       "house_id", "price", "month_id", "lsoa", "msoa", "latitude",
@@ -141,7 +147,7 @@ load_global_transactions <- function() {
     dplyr::filter(
       !is.na(.data$month_id),
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$rental_end_month_id
     ) |>
     dplyr::select(
       "rental_id", "listing_price", "month_id", "lsoa", "msoa",
@@ -158,15 +164,23 @@ prepare_sales_sample <- function(radius, sales) {
 
   dat_cs <- arrow::open_dataset(CONFIG$sales_cross_section_path) |>
     dplyr::filter(.data$radius == .env$radius, .data$n_spill_sites > 0) |>
-    dplyr::select("house_id", "price", "spill_count_weekly_avg") |>
+    dplyr::select(
+      "house_id", "price", "spill_count_weekly_avg",
+      "annual_returns_na_then_absent"
+    ) |>
     dplyr::collect()
+
+  stopifnot(all(
+    !dat_cs$annual_returns_na_then_absent |
+      is.na(dat_cs$spill_count_weekly_avg)
+  ))
 
   dat <- dat_cs |>
     dplyr::inner_join(sales, by = "house_id") |>
     dplyr::mutate(log_price = log(.data$price.y)) |>
     dplyr::filter(
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id,
+      .data$month_id <= CONFIG$sales_end_month_id,
       !is.na(.data$spill_count_weekly_avg),
       !is.na(.data$lsoa),
       !is.na(.data$msoa),
@@ -189,6 +203,11 @@ prepare_sales_sample <- function(radius, sales) {
   if (nrow(dat) == 0L) {
     stop("No complete sales observations at radius ", radius, ".", call. = FALSE)
   }
+  stopifnot(
+    !any(dat$annual_returns_na_then_absent),
+    min(dat$month_id) == CONFIG$analysis_start_month_id,
+    max(dat$month_id) == CONFIG$sales_end_month_id
+  )
 
   cat(sprintf("  Sales base sample: %s observations\n", format(nrow(dat), big.mark = ",")))
   dat
@@ -199,15 +218,23 @@ prepare_rental_sample <- function(radius, rentals) {
 
   dat_cs <- arrow::open_dataset(CONFIG$rental_cross_section_path) |>
     dplyr::filter(.data$radius == .env$radius, .data$n_spill_sites > 0) |>
-    dplyr::select("rental_id", "listing_price", "spill_count_weekly_avg") |>
+    dplyr::select(
+      "rental_id", "listing_price", "spill_count_weekly_avg",
+      "annual_returns_na_then_absent"
+    ) |>
     dplyr::collect()
+
+  stopifnot(all(
+    !dat_cs$annual_returns_na_then_absent |
+      is.na(dat_cs$spill_count_weekly_avg)
+  ))
 
   dat <- dat_cs |>
     dplyr::inner_join(rentals, by = "rental_id") |>
     dplyr::mutate(log_price = log(.data$listing_price.y)) |>
     dplyr::filter(
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id,
+      .data$month_id <= CONFIG$rental_end_month_id,
       !is.na(.data$spill_count_weekly_avg),
       !is.na(.data$lsoa),
       !is.na(.data$msoa),
@@ -228,6 +255,11 @@ prepare_rental_sample <- function(radius, rentals) {
   if (nrow(dat) == 0L) {
     stop("No complete rental observations at radius ", radius, ".", call. = FALSE)
   }
+  stopifnot(
+    !any(dat$annual_returns_na_then_absent),
+    min(dat$month_id) == CONFIG$analysis_start_month_id,
+    max(dat$month_id) == CONFIG$rental_end_month_id
+  )
 
   cat(sprintf("  Rental base sample: %s observations\n", format(nrow(dat), big.mark = ",")))
   dat
@@ -259,8 +291,10 @@ estimate_sales_lag_path <- function(base_sample, peak_month_id, radius) {
       max(pre_months) == expected_cut - 1L
     )
     if (lag == 12L) {
-      # The August 2023 cutoff leaves only Aug--Dec 2023 (five post months).
-      stopifnot(length(post_months) == 5L)
+      # The August 2023 cutoff leaves 17 sales post months through Dec 2024.
+      stopifnot(
+        length(post_months) == CONFIG$sales_end_month_id - expected_cut + 1L
+      )
     }
 
     # Month FE absorbs the monthly post main effect, so identification comes
@@ -452,11 +486,13 @@ export_grid_table <- function(component_results, peak_info) {
     "on weekly-average spill count $\\times$ Post, with LSOA-clustered standard ",
     "errors in parentheses. Post begins in ", peak_info$peak_date,
     " (month\\_id ", peak_info$peak_month_id,
-    "); sales lag $L$ shifts that threshold forward by $L$ months. All models ",
-    "retain January 2021--December 2023, include property controls, LSOA fixed ",
+    "); sales lag $L$ shifts that threshold forward by $L$ months. Models use ",
+    "January 2021--December 2024 for sales and January 2021--December 2023 for ",
+    "rentals, include property controls, LSOA fixed ",
     "effects, and month fixed effects. Month effects absorb the Post main effect. ",
-    "Lag 12 has only five post months. Rentals are contemporaneous benchmarks ",
-    "only. *** $p<0.01$, ** $p<0.05$, * $p<0.1$.} \\\\"
+    "Lag 12 has 17 sales post months. Rentals are contemporaneous benchmarks ",
+    "only. Exposure is missing and observations are excluded when annual returns ",
+    "are reported NA and later absent. *** $p<0.01$, ** $p<0.05$, * $p<0.1$.} \\\\"
   )
 
   latex <- c(
@@ -520,7 +556,9 @@ main <- function() {
   run_news_lag_sanity_checks()
   stopifnot(
     identical(CONFIG$radii, c(250L, 500L, 1000L)),
-    identical(CONFIG$lags, c(0L, 3L, 6L, 12L))
+    identical(CONFIG$lags, c(0L, 3L, 6L, 12L)),
+    CONFIG$sales_end_month_id == 48L,
+    CONFIG$rental_end_month_id == 36L
   )
 
   peak_info <- load_google_trends_peak()

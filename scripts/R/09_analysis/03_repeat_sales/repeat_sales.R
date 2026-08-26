@@ -4,7 +4,7 @@
 #
 # Purpose: Estimate the effect of sewage spills on property values using
 #          repeat sales/rentals methodology following Palmquist (1982).
-#          Sample: Repeat sales/rentals within 250m of spill sites.
+#          Sample: Repeat sales/rentals within 250m of canonical Site Groups.
 #
 # Reference: Palmquist, R.B. (1982). "Measuring Environmental Effects on
 #            Property Values without Hedonic Regressions." Journal of Urban
@@ -21,6 +21,8 @@
 #   - data/processed/spill_house_lookup.parquet - House-spill distance lookup
 #   - data/processed/zoopla/spill_rental_lookup.parquet - Rental-spill lookup
 #   - data/processed/agg_spill_stats/agg_spill_qtr.parquet - Quarterly spills
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet -
+#       Annual evidence and reporting-gap flags
 #
 # Outputs:
 #   - output/tables/repeat_sales.tex - LaTeX regression table
@@ -64,6 +66,7 @@ install_if_missing(required_packages)
 
 # Shared table formatting helpers
 source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"))
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 
 
 # ==============================================================================
@@ -128,7 +131,7 @@ repeat_rentals <- repeat_rental_ids |>
 cat(sprintf("  Found %d transactions from %d repeat-rental properties\n",
             nrow(repeat_rentals), n_distinct(repeat_rentals$repeat_id)))
 
-# 4.3 Link to nearby spill sites (250m) ----------------------------------------
+# 4.3 Link to nearby canonical Site Groups (250m) ------------------------------
 cat("Loading spill-house lookup...\n")
 
 spill_lookup <- import(
@@ -136,9 +139,14 @@ spill_lookup <- import(
   trust = TRUE
 ) |>
   filter(distance_m <= RAD) |>
-  select(house_id, site_id, distance_m)
+  transmute(house_id, site_group_id = site_id, distance_m) |>
+  distinct()
 
-cat(sprintf("  Found %d house-site pairs within %dm\n", nrow(spill_lookup), RAD))
+if (anyDuplicated(spill_lookup[c("house_id", "site_group_id")])) {
+  stop("House lookup must be unique on house_id and Site Group.", call. = FALSE)
+}
+
+cat(sprintf("  Found %d house-Site Group pairs within %dm\n", nrow(spill_lookup), RAD))
 
 cat("Loading spill-rental lookup...\n")
 
@@ -147,38 +155,83 @@ spill_rental_lookup <- import(
   trust = TRUE
 ) |>
   filter(distance_m <= RAD) |>
-  select(rental_id, site_id, distance_m)
+  transmute(rental_id, site_group_id = site_id, distance_m) |>
+  distinct()
 
-cat(sprintf("  Found %d rental-site pairs within %dm\n", nrow(spill_rental_lookup), RAD))
+if (anyDuplicated(spill_rental_lookup[c("rental_id", "site_group_id")])) {
+  stop("Rental lookup must be unique on rental_id and Site Group.", call. = FALSE)
+}
 
-# 4.4 Compute 4-quarter rolling spill exposure ---------------------------------
+cat(sprintf("  Found %d rental-Site Group pairs within %dm\n", nrow(spill_rental_lookup), RAD))
+
+# 4.4 Compute 4-quarter rolling canonical exposure -----------------------------
 cat("Computing 4-quarter rolling spill exposure...\n")
+
+site_group_crosswalk <- import(
+  here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  trust = TRUE
+)
+
+gap_flags <- derive_site_group_prefix_missing_flags(
+  site_group_crosswalk,
+  base_year = BASE_YEAR,
+  cutoff_years = sort(unique(site_group_crosswalk$year)),
+  include_annual_return_sequence = TRUE
+) |>
+  filter(annual_returns_na_then_absent) |>
+  distinct(site_group_id = site_id)
+
+cat(sprintf(
+  "  Excluding %d Site Groups with an annual_returns_na_then_absent reporting gap\n",
+  nrow(gap_flags)
+))
 
 agg_spill <- import(
   here::here("data", "processed", "agg_spill_stats", "agg_spill_qtr.parquet"),
   trust = TRUE
 ) |>
-  select(site_id, qtr_id, spill_count_qt, spill_hrs_qt)
+  transmute(
+    site_group_id = site_id,
+    qtr_id,
+    annual_status,
+    spill_count_qt,
+    spill_hrs_qt
+  ) |>
+  mutate(
+    evidence_complete = !is.na(annual_status) &
+      annual_status %in% c("reported_zero", "reported_positive") &
+      is.finite(spill_count_qt) & is.finite(spill_hrs_qt),
+    spill_count_qt = if_else(evidence_complete, spill_count_qt, NA_real_),
+    spill_hrs_qt = if_else(evidence_complete, spill_hrs_qt, NA_real_),
+    reporting_gap = site_group_id %in% gap_flags$site_group_id,
+    spill_count_qt = if_else(reporting_gap, NA_real_, spill_count_qt),
+    spill_hrs_qt = if_else(reporting_gap, NA_real_, spill_hrs_qt)
+  )
 
 # Convert to data.table for frollsum
 agg_spill_dt <- as.data.table(agg_spill)
-setorder(agg_spill_dt, site_id, qtr_id)
+setorder(agg_spill_dt, site_group_id, qtr_id)
 
 # Compute rolling sum, then lag by 1 (previous quarters)
 agg_spill_dt[, `:=`(
   spill_count_roll_raw = frollsum(spill_count_qt, n = SPILL_WINDOW, align = "right"),
   spill_hrs_roll_raw = frollsum(spill_hrs_qt, n = SPILL_WINDOW, align = "right")
-), by = site_id]
+), by = site_group_id]
 
 agg_spill_dt[, `:=`(
   spill_count_roll = shift(spill_count_roll_raw, n = 1, type = "lag"),
   spill_hrs_roll = shift(spill_hrs_roll_raw, n = 1, type = "lag")
-), by = site_id]
+), by = site_group_id]
 
 # Keep only necessary columns
-agg_spill_clean <- agg_spill_dt[, .(site_id, qtr_id, spill_count_roll, spill_hrs_roll)]
+agg_spill_clean <- agg_spill_dt[, .(
+  site_group_id, qtr_id, spill_count_roll, spill_hrs_roll
+)]
 
-cat(sprintf("  Computed rolling exposure for %d site-quarter observations\n",
+cat(sprintf("  Computed rolling exposure for %d Site Group-quarter observations\n",
             nrow(agg_spill_clean)))
 
 # 1.4 Join and aggregate to house-transaction level ----------------------------
@@ -191,16 +244,17 @@ houses_near_sites <- repeat_sales |>
 cat(sprintf("  %d repeat-sale transactions are within %dm of spill sites\n",
             nrow(houses_near_sites), RAD))
 
-# Join with spill lookup and aggregated spills
+# Join with the canonical Site Group lookup and rolling exposure
 dat_panel <- houses_near_sites |>
   inner_join(spill_lookup, by = "house_id", relationship = "many-to-many") |>
-  inner_join(agg_spill_clean, by = c("site_id", "qtr_id")) |>
+  inner_join(agg_spill_clean, by = c("site_group_id", "qtr_id")) |>
   group_by(house_id, repeat_id, qtr_id, price, latitude, longitude) |>
   summarise(
-    spill_count_roll = sum(spill_count_roll, na.rm = TRUE),
-    spill_hrs_roll = sum(spill_hrs_roll, na.rm = TRUE),
+    # A missing Site Group-quarter is unknown evidence, not zero exposure.
+    spill_count_roll = sum(spill_count_roll),
+    spill_hrs_roll = sum(spill_hrs_roll),
     min_dist_m = min(distance_m),
-    n_sites = n_distinct(site_id),
+    n_sites = n_distinct(site_group_id),
     .groups = "drop"
   ) |>
   # Filter out warmup quarters (incomplete rolling window)
@@ -222,13 +276,14 @@ cat(sprintf("  %d repeat-rental transactions are within %dm of spill sites\n",
 # Join with spill lookup and aggregated spills
 dat_panel_rental <- rentals_near_sites |>
   inner_join(spill_rental_lookup, by = "rental_id", relationship = "many-to-many") |>
-  inner_join(agg_spill_clean, by = c("site_id", "qtr_id")) |>
+  inner_join(agg_spill_clean, by = c("site_group_id", "qtr_id")) |>
   group_by(rental_id, repeat_id, qtr_id, listing_price, latitude, longitude) |>
   summarise(
-    spill_count_roll = sum(spill_count_roll, na.rm = TRUE),
-    spill_hrs_roll = sum(spill_hrs_roll, na.rm = TRUE),
+    # A missing Site Group-quarter is unknown evidence, not zero exposure.
+    spill_count_roll = sum(spill_count_roll),
+    spill_hrs_roll = sum(spill_hrs_roll),
     min_dist_m = min(distance_m),
-    n_sites = n_distinct(site_id),
+    n_sites = n_distinct(site_group_id),
     .groups = "drop"
   ) |>
   # Filter out warmup quarters (incomplete rolling window)
@@ -514,7 +569,7 @@ attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents repeat-transaction estimates of the effect of changes in sewage spill exposure on property values, following Palmquist (1982). The sample includes properties within 250m of a storm overflow in England that have at least two transactions during 2021--2023. The dependent variable is the depreciation-adjusted change in log transaction price for sales (columns 1--2) or in log weekly asking rent for rentals (columns 3--4) between consecutive transactions, assuming 1\\\\% annual depreciation. Spill exposure is measured as the change in total spill count (12/24 count) or the change in total spill hours recorded across all storm overflows within 250m during the four quarters preceding each transaction. Time fixed effects are implemented using Bailey--Muth--Nourse (BMN) dummies, which take value $+1$ for the final transaction quarter and $-1$ for the initial transaction quarter. No additional covariates are included. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents repeat-transaction estimates of the effect of changes in sewage spill exposure on property values, following Palmquist (1982). The sample includes properties within 250m of a storm overflow in England that have at least two transactions during 2021--2024 (sales) / 2021--2023 (rentals). The dependent variable is the depreciation-adjusted change in log transaction price for sales (columns 1--2) or in log weekly asking rent for rentals (columns 3--4) between consecutive transactions, assuming 1\\\\% annual depreciation. Spill exposure is measured as the change in total spill count (12/24 count) or the change in total spill hours recorded across all canonical Site Groups within 250m during the four quarters preceding each transaction. Site Group-quarters with incomplete annual evidence, including the standard annual_returns_na_then_absent reporting-gap exclusion, remain missing and are excluded from the differenced samples. Time fixed effects are implemented using Bailey--Muth--Nourse (BMN) dummies, which take value $+1$ for the final transaction quarter and $-1$ for the initial transaction quarter. No additional covariates are included. Conley spatially robust standard errors with a 500m cutoff are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Structure models into panels (like hedonic_daily_avg.R)

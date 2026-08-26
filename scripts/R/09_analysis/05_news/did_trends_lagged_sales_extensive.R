@@ -73,7 +73,8 @@ source(
 
 CONFIG <- list(
   analysis_start_month_id = 1L,
-  analysis_end_month_id = 36L,
+  sales_end_month_id = 48L,
+  rental_end_month_id = 36L,
   base_year = 2021L,
   lags = c(0L, 3L, 6L, 12L),
   google_trends_sheet = "united_kingdom",
@@ -121,7 +122,7 @@ prepare_sales_base_sample <- function(comparison) {
     dplyr::filter(
       !is.na(.data$month_id),
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$sales_end_month_id
     )
 
   sales_lookup <- load_nearest_distance_lookup(
@@ -152,6 +153,10 @@ prepare_sales_base_sample <- function(comparison) {
     standardise_sales_estimation_data()
 
   print_extensive_margin_summary(dat, "Sales", comparison)
+  stopifnot(
+    min(dat$month_id) == CONFIG$analysis_start_month_id,
+    max(dat$month_id) == CONFIG$sales_end_month_id
+  )
   dat
 }
 
@@ -163,7 +168,7 @@ prepare_rental_base_sample <- function(comparison) {
     dplyr::filter(
       !is.na(.data$month_id),
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$rental_end_month_id
     )
 
   rental_lookup <- load_nearest_distance_lookup(
@@ -194,6 +199,10 @@ prepare_rental_base_sample <- function(comparison) {
     standardise_rental_estimation_data()
 
   print_extensive_margin_summary(dat, "Rentals", comparison)
+  stopifnot(
+    min(dat$month_id) == CONFIG$analysis_start_month_id,
+    max(dat$month_id) == CONFIG$rental_end_month_id
+  )
   dat
 }
 
@@ -230,8 +239,14 @@ estimate_lag_path <- function(base_sample, peak_month_id, market) {
       max(observed_pre_months) == expected_cut - 1L
     )
     if (lag == 12L) {
-      # Lag 12 shifts the cut to August 2023, leaving only five post months.
-      stopifnot(length(observed_post_months) == 5L)
+      market_end_month_id <- if (market == "sales") {
+        CONFIG$sales_end_month_id
+      } else {
+        CONFIG$rental_end_month_id
+      }
+      stopifnot(
+        length(observed_post_months) == market_end_month_id - expected_cut + 1L
+      )
     }
 
     # Month FE absorbs the monthly main attention effect; identification comes
@@ -301,9 +316,11 @@ export_table <- function(sales_models, rental_models, comparison, peak_info) {
     comparison_note_text(comparison),
     "Post is based on the Google Trends peak in ", peak_info$peak_date,
     " (month_id ", peak_info$peak_month_id,
-    "); lag $L$ shifts the post threshold forward by $L$ months. All models ",
-    "retain the full January 2021--December 2023 sample. The lag-12 threshold ",
-    "leaves only five post months and should be interpreted cautiously. The ",
+    "); lag $L$ shifts the post threshold forward by $L$ months. Sales use ",
+    "January 2021--December 2024 and rentals use January 2021--December 2023. ",
+    "The lag-12 threshold leaves 17 sales post months but only five rental post ",
+    "months. Treatment is proximity to a mapped overflow, so annual reporting ",
+    "gaps do not affect classification. The ",
     "rental column is the contemporaneous benchmark; rental lag paths are ",
     "reported in the component results file. All models include property ",
     "controls, LSOA fixed effects, and month fixed effects. Standard errors are ",
@@ -434,6 +451,8 @@ main <- function() {
   run_news_lag_sanity_checks()
   stopifnot(
     identical(CONFIG$lags, c(0L, 3L, 6L, 12L)),
+    CONFIG$sales_end_month_id == 48L,
+    CONFIG$rental_end_month_id == 36L,
     identical(
       unname(unlist(CONFIG$comparison[c(
         "near_min", "near_max", "far_min", "far_max"

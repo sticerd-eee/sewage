@@ -3,21 +3,23 @@
 # ==============================================================================
 #
 # Purpose: Estimate the effect of sewage spills on property values using
-#          continuous daily average measures calculated over the entire
-#          2021-2023 period (not just prior to transaction date).
+#          continuous weekly average measures calculated over the entire
+#          study window (2021-2024 for sales, 2021-2023 for rentals; not
+#          just prior to transaction date).
 #          Panel A: Sales (log house prices), Panel B: Rentals (log rental
 #          prices). Each panel includes OLS, Controls, MSOA FE, MSOA FE +
 #          Controls, LSOA FE, and LSOA FE + Controls.
 #
 # Author: Jacopo Olivieri
 # Date: 2025-01-15
+# Date Modified: 2026-08-20 (migrated from general_panel to the study-period
+#          cross-sections; asymmetric sales/rentals windows)
 #
 # Inputs:
-#   - data/processed/agg_spill_stats/agg_spill_yr.parquet - Yearly spill data
 #   - data/processed/house_price.parquet - House sales transactions
 #   - data/processed/zoopla/zoopla_rentals.parquet - Rental transactions
-#   - data/processed/general_panel/sales/ - General panel (Arrow dataset)
-#   - data/processed/general_panel/rentals/ - General panel (Arrow dataset)
+#   - data/processed/cross_section/sales/study_period/ - Study-period exposure
+#   - data/processed/cross_section/rentals/study_period/ - Study-period exposure
 #
 # Outputs:
 #   - output/tables/hedonic_count_continuous_full.tex
@@ -30,8 +32,8 @@
 # 1. Configuration
 # ==============================================================================
 RAD <- 250L
-BASE_YEAR <- 2021
-N_DAYS_FULL_PERIOD <- 1095L  # 365 * 3 (2021-2023)
+N_DAYS_SALES <- 1461L    # 2021-2024 (incl. leap year 2024)
+N_DAYS_RENTALS <- 1095L  # 2021-2023 (no 2024 rental data)
 
 
 # ==============================================================================
@@ -73,17 +75,6 @@ if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
-# 3.2 Data Loading - Common ----------------------------------------------------
-# Sewage Spills
-path_spill_yr <- here::here(
-  "data",
-  "processed",
-  "agg_spill_stats",
-  "agg_spill_yr.parquet"
-)
-
-spills <- import(path_spill_yr, trust = TRUE)
-
 # ==============================================================================
 # 4. Panel A: Sales
 # ==============================================================================
@@ -94,25 +85,18 @@ cat("Loading sales data...\n")
 # House Prices
 path_sales <- here::here("data", "processed", "house_price.parquet")
 
-# Panel Data - General
-path_general_panel_sales <- here::here(
+# Study-period exposure: full-window spill totals per property. Exposure is
+# NA when any overflow within the radius has unreported annual data for part
+# of the window, so continuous measures are complete-window sums.
+path_cross_section_sales <- here::here(
   "data",
   "processed",
-  "general_panel",
-  "sales"
+  "cross_section",
+  "sales",
+  "study_period"
 )
 
-gen_panel_sales <- arrow::open_dataset(path_general_panel_sales) |>
-  filter(radius == RAD) |>
-  collect() |>
-  mutate(
-    year = (qtr_id - 1) %/% 4 + BASE_YEAR,
-    year_transfer = qtr_id_transfer %/% 4 + BASE_YEAR
-  ) |>
-  distinct(house_id, site_id, year, year_transfer, distance_m, within_radius)
-
 sales <- import(path_sales, trust = TRUE) |>
-  mutate(year = (qtr_id - 1) %/% 4 + 1) |>
   select(
     -date_of_transfer,
     -quality,
@@ -135,20 +119,18 @@ sales <- import(path_sales, trust = TRUE) |>
 # 4.2 Prepare Sales Data -------------------------------------------------------
 cat("Preparing sales data...\n")
 
-spill_sales_collapsed <- gen_panel_sales |>
-  filter(!is.na(site_id)) |>
-  left_join(spills, by = join_by(site_id, year)) |>
-  group_by(house_id) |>
-  summarise(
-    spill_count = sum(spill_count_yr),
-    spill_hrs = sum(spill_hrs_yr)
-  )
+spill_sales_collapsed <- arrow::open_dataset(path_cross_section_sales) |>
+  filter(radius == RAD) |>
+  select(house_id, spill_count, spill_hrs, n_spill_sites, spatially_eligible) |>
+  collect() |>
+  filter(spatially_eligible, n_spill_sites > 0L) |>
+  select(house_id, spill_count, spill_hrs)
 
 dat_sales_clean <- sales |>
   left_join(spill_sales_collapsed, by = join_by(house_id)) |>
   mutate(
-    spill_count_weekly_avg = spill_count / N_DAYS_FULL_PERIOD,
-    spill_hrs_weekly_avg = spill_hrs / N_DAYS_FULL_PERIOD,
+    spill_count_weekly_avg = spill_count / N_DAYS_SALES,
+    spill_hrs_weekly_avg = spill_hrs / N_DAYS_SALES,
     spill_count_weekly_avg = spill_count_weekly_avg * 7,
     spill_hrs_weekly_avg = spill_hrs_weekly_avg * 7,
     log_price = log(price)
@@ -181,25 +163,17 @@ cat("Loading rental data...\n")
 # Rental Prices
 path_rent <- here::here("data", "processed", "zoopla", "zoopla_rentals.parquet")
 
-# Panel Data - General
-path_general_panel_rental <- here::here(
+# Study-period exposure for rentals (2021--2023 window; see
+# scripts/R/06_analysis_datasets/cross_section_rental.R).
+path_cross_section_rental <- here::here(
   "data",
   "processed",
-  "general_panel",
-  "rentals"
+  "cross_section",
+  "rentals",
+  "study_period"
 )
 
-gen_panel_rental <- arrow::open_dataset(path_general_panel_rental) |>
-  filter(radius == RAD) |>
-  collect() |>
-  mutate(
-    year = (qtr_id - 1) %/% 4 + BASE_YEAR,
-    year_transfer = qtr_id_transfer %/% 4 + BASE_YEAR
-  ) |>
-  distinct(rental_id, site_id, year, year_transfer, distance_m, within_radius)
-
 rentals <- import(path_rent, trust = TRUE) |>
-  mutate(year = (qtr_id - 1) %/% 4 + 2021) |>
   select(
     -postcode,
     -listing_created,
@@ -217,20 +191,20 @@ rentals <- import(path_rent, trust = TRUE) |>
 # 5.2 Prepare Rental Data ------------------------------------------------------
 cat("Preparing rental data...\n")
 
-spill_rental_collapsed <- gen_panel_rental |>
-  filter(!is.na(site_id)) |>
-  left_join(spills, by = join_by(site_id, year)) |>
-  group_by(rental_id) |>
-  summarise(
-    spill_count = sum(spill_count_yr),
-    spill_hrs = sum(spill_hrs_yr)
-  )
+spill_rental_collapsed <- arrow::open_dataset(path_cross_section_rental) |>
+  filter(radius == RAD) |>
+  select(
+    rental_id, spill_count, spill_hrs, n_spill_sites, spatially_eligible
+  ) |>
+  collect() |>
+  filter(spatially_eligible, n_spill_sites > 0L) |>
+  select(rental_id, spill_count, spill_hrs)
 
 dat_rental_clean <- rentals |>
   left_join(spill_rental_collapsed, by = join_by(rental_id)) |>
   mutate(
-    spill_count_weekly_avg = spill_count / N_DAYS_FULL_PERIOD,
-    spill_hrs_weekly_avg = spill_hrs / N_DAYS_FULL_PERIOD,
+    spill_count_weekly_avg = spill_count / N_DAYS_RENTALS,
+    spill_hrs_weekly_avg = spill_hrs / N_DAYS_RENTALS,
     spill_count_weekly_avg = spill_count_weekly_avg * 7,
     spill_hrs_weekly_avg = spill_hrs_weekly_avg * 7,
     log_price = log(listing_price)
@@ -458,7 +432,7 @@ attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes_count <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within 250m over the entire 2021--2023 period. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within 250m over the entire study window (2021--2024 for sales, 2021--2023 for rentals). Properties are excluded where any overflow within 250m lacks reported annual spill data for part of the window (including overflows that stopped reporting and subsequently left the register), so exposure is always a complete-window average. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export table
@@ -519,7 +493,7 @@ panels_hrs <- list(
 
 # Notes
 custom_notes_hrs <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within 250m over the entire 2021--2023 period. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within 250m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within 250m over the entire study window (2021--2024 for sales, 2021--2023 for rentals). Properties are excluded where any overflow within 250m lacks reported annual spill data for part of the window (including overflows that stopped reporting and subsequently left the register), so exposure is always a complete-window average. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export table
