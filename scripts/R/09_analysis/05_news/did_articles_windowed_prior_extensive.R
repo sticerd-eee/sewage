@@ -729,9 +729,15 @@ export_slide_table <- function(effects, measure_order, table_path, effect_path) 
       "& House Sales &  &  &  & House Rentals &  &  &  \\\\"
     ),
     paste0(slide_table_row("", rep(measure_order, 2L)), " \\\\"),
-    paste0(label_row("Property controls + MSOA FE"), " \\\\"),
+    paste0(
+      label_row("\\textbf{Property controls + MSOA FE}"),
+      " \\\\"
+    ),
     effect_rows("msoa"),
-    paste0(label_row("Property controls + LSOA FE"), " \\\\"),
+    paste0(
+      label_row("\\textbf{Property controls + LSOA FE}"),
+      " \\\\"
+    ),
     effect_rows("lsoa"),
     "\\end{talltblr}",
     "\\end{table}"
