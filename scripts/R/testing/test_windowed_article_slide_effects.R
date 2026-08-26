@@ -292,7 +292,12 @@ stopifnot(
   sum(grepl("(0.001)", table_text, fixed = TRUE)) == 2L,
   !any(grepl("(0.01)", table_text, fixed = TRUE)),
   !any(grepl("Near--far gap at mean salience", table_text, fixed = TRUE)),
-  any(grepl("Property controls + LSOA FE", table_text, fixed = TRUE))
+  any(grepl(
+    "\\textbf{Property controls + MSOA FE}", table_text, fixed = TRUE
+  )),
+  any(grepl(
+    "\\textbf{Property controls + LSOA FE}", table_text, fixed = TRUE
+  ))
 )
 
 cat("Windowed-article slide-effect validation passed.\n")
