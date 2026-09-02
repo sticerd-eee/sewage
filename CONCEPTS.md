@@ -51,6 +51,11 @@ The reporting-year classification of a Site Group's bathing-water or shellfish-w
 ### Ever-Observed Designated-Water Indicator
 A Site Group indicator that positive bathing-water or shellfish-water designation evidence appears in at least one Annual Return EDM from 2021 through 2024. It does not imply continuous designation throughout that period.
 
+For bathing salience, an observed positive establishes ever-designation even
+when other years have unknown evidence. Designation remains unresolved only
+when evidence is unknown or missing and no positive is observed; at property
+radius, any positively designated nearby Site Group establishes bathing.
+
 ### Property Designated-Water Proximity
 A property-radius classification derived from the Ever-Observed Designated-Water Indicators of every nearby Site Group. Its primary flag records whether any nearby Site Group is designated; all-designated, mixed, unknown, and designated-site-count fields preserve the radius composition.
 
@@ -62,6 +67,11 @@ A cross-sectional property of place describing where a sewage spill does more ha
 
 ### Salience Stratum
 A mutually exclusive subsample of transactions defined by Local Salience, within which a property-price specification is re-estimated. Heterogeneity by salience compares the same specification across strata rather than adding interaction terms.
+
+The coast/bathing family crosses coastal location, defined strictly by the
+coast-distance threshold, with ever-observed bathing designation: coastal
+bathing, coastal not bathing, inland bathing, and inland not bathing.
+Designation does not determine coastal location.
 
 ### Spill Exposure
 A property's continuous measure of nearby storm-overflow activity — spill count and spill hours at the overflows within its Near-Overflow Radius — measured over a stated exposure window.

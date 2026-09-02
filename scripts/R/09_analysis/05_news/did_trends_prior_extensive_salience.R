@@ -68,7 +68,8 @@ verify_salience_reproduction <- function(model, reference_path) {
 #' @param path Output LaTeX path.
 #' @return Output path, invisibly.
 export_salience_tracer <- function(models, path) {
-  labels <- c("Bathing", "Coastal not bathing", "Coastal (all)", "Inland")
+  labels <- c("{Coastal \\\\ bathing}", "{Coastal \\\\ not bathing}",
+              "{Inland \\\\ bathing}", "{Inland \\\\ not bathing}")
   names(models) <- labels
   extra <- tibble::tibble(term = c("Property controls", "Location FE", "Time FE"))
   for (label in labels) extra[[label]] <- c("Yes", "LSOA", "Month")
@@ -90,11 +91,13 @@ export_salience_tracer <- function(models, path) {
     "the far group is over 1000m and at most 2000m away. Post starts in August ",
     "2022. The dependent variable is log sale price. Each column re-estimates ",
     "the saturated model within the stated nearest-Site-Group stratum. Bathing ",
-    "means ever designated in 2021--2024. Coastal not bathing means coast ",
-    "distance at most 2000m and no observed designation. Coastal (all) is the ",
-    "union of those two columns; inland is the remainder. Missing coast ",
-    "distances are excluded and unknown bathing evidence counts as not ",
-    "designated. Controls are property type, new-build status and tenure, ",
+    "means ever designated in 2021--2024. Coastal means coast distance at most ",
+    "2000m; inland means greater than 2000m, independently of designation. ",
+    "The four columns are mutually exclusive. Not bathing means no observed ",
+    "designation, including unresolved evidence in this headline table. ",
+    "Positive designation takes precedence over unknown evidence in other ",
+    "years. Missing coast distances are excluded. Controls are property type, ",
+    "new-build status and tenure, ",
     "with LSOA and month fixed effects. LSOA-clustered standard errors appear ",
     "in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )

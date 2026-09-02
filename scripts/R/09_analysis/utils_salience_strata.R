@@ -54,14 +54,17 @@ nearest_salience_sites <- function(lookup, characteristics, id_col) {
 #' @param data Transactions with nearest-site or radius-companion evidence.
 #' @param coast_rule_m Coast threshold in metres: 2000 (headline) or 10000.
 #' @param unknown_policy `not_designated` (headline) retains uncertain evidence;
-#'   `exclude` removes any unknown-evidence row from this family, including
-#'   radius companions that contain both designated and unknown sites.
+#'   `exclude` removes only unresolved designation: unknown evidence with no
+#'   observed positive. Ever-designated sites and radius companions with any
+#'   positively designated site remain eligible despite other unknown evidence.
 #' @param source `nearest` uses `distance_to_coast_m` and `bath_ever_2124`;
 #'   `radius` uses `min_coast_dist_m` and `any_bath_2124`.
-#' @return Input rows with `salience_class`, `coast_rule_m`, `bath_unknown` and
-#'   `unknown_policy`. Missing coast distance always gives an NA class. Bathing
-#'   takes precedence even beyond the coast threshold: coastal is the union of
-#'   bathing and coastal-not-bathing, per the plan's three-class contract.
+#' @return Input rows with independent `coastal` and `bathing` flags, the four
+#'   coast x bathing `salience_class` values, `coast_rule_m`, `bath_unknown`,
+#'   `bath_unresolved` and `unknown_policy`. Source evidence is preserved;
+#'   `bath_unknown` also flags missing evidence, while `bath_unresolved` requires
+#'   no observed positive. Coastal depends only on distance; designation beyond
+#'   the threshold is inland bathing. Missing coast distance gives an NA class.
 classify_salience_coast <- function(
   data, coast_rule_m = 2000, unknown_policy = c("not_designated", "exclude"),
   source = c("nearest", "radius")
@@ -77,13 +80,17 @@ classify_salience_coast <- function(
     dplyr::mutate(
       coast_rule_m = .env$coast_rule_m,
       unknown_policy = .env$unknown_policy,
+      coastal = .data[[coast_col]] <= .env$coast_rule_m,
+      bathing = .data[[bath_col]] %in% TRUE,
       bath_unknown = dplyr::coalesce(.data$bath_unknown_2124, TRUE) | is.na(.data[[bath_col]]),
+      bath_unresolved = .data$bath_unknown & !.data$bathing,
       salience_class = dplyr::case_when(
         is.na(.data[[coast_col]]) ~ NA_character_,
-        .env$unknown_policy == "exclude" & .data$bath_unknown ~ NA_character_,
-        .data[[bath_col]] %in% TRUE ~ "bathing",
-        .data[[coast_col]] <= .env$coast_rule_m ~ "coastal_not_bathing",
-        TRUE ~ "inland"
+        .env$unknown_policy == "exclude" & .data$bath_unresolved ~ NA_character_,
+        .data$coastal & .data$bathing ~ "coastal_bathing",
+        .data$coastal ~ "coastal_not_bathing",
+        .data$bathing ~ "inland_bathing",
+        TRUE ~ "inland_not_bathing"
       )
     )
 }
@@ -157,17 +164,17 @@ join_radius_salience <- function(
 #'   far group in each comparison. A nonmissing far band other than `no_site`
 #'   is an error. Unknown and zero near bands enter neither intensity stratum.
 #' @return Named list of functions taking a classified data frame and returning
-#'   logical row masks without NA. Coastal overlaps its two component columns;
-#'   the three base coast classes are disjoint. Intensity masks are disjoint
+#'   logical row masks without NA. The four coast x bathing classes are disjoint
+#'   and exhaustive among eligible rows. Intensity masks are disjoint
 #'   among near rows, with shared far controls when requested.
 salience_strata <- function(family = c("coast_bathing", "intensity"), include_far = FALSE) {
   family <- match.arg(family)
   if (family == "coast_bathing") {
     return(list(
-      bathing = function(data) data$salience_class %in% "bathing",
+      coastal_bathing = function(data) data$salience_class %in% "coastal_bathing",
       coastal_not_bathing = function(data) data$salience_class %in% "coastal_not_bathing",
-      coastal = function(data) data$salience_class %in% c("bathing", "coastal_not_bathing"),
-      inland = function(data) data$salience_class %in% "inland"
+      inland_bathing = function(data) data$salience_class %in% "inland_bathing",
+      inland_not_bathing = function(data) data$salience_class %in% "inland_not_bathing"
     ))
   }
   levels <- c("spill_le_p50", "spill_gt_p50")
@@ -207,6 +214,9 @@ salience_strata <- function(family = c("coast_bathing", "intensity"), include_fa
 #'   nearest Site Groups represented in this sample (before the London drop).
 #'   Prints cell counts; callers can bind and write the returned audit as CSV.
 #'   Empty cells fail by market/stratum, including no treated rows for intensity.
+#'   When `near_bin` is present, both distance groups must survive the London
+#'   drop; when `post` is also present, all four near/far x pre/post cells must
+#'   survive. Their counts are returned for inspection before estimation.
 log_salience_cells <- function(data, nearest, market, family, include_far = FALSE) {
   sites <- nearest |>
     dplyr::filter(.data$site_id %in% data$site_id) |>
@@ -228,6 +238,26 @@ log_salience_cells <- function(data, nearest, market, family, include_far = FALS
       stop("Empty salience stratum: ", market, " / ", stratum,
            " (before/after London drop).", call. = FALSE)
     }
+    period_counts <- c(near_pre = NA_integer_, near_post = NA_integer_,
+                       far_pre = NA_integer_, far_post = NA_integer_)
+    if ("near_bin" %in% names(data)) {
+      support <- c(near = sum(retained & data$near_bin == 1L),
+                   far = sum(retained & data$near_bin == 0L))
+      if ("post" %in% names(data)) {
+        period_counts <- c(
+          near_pre = sum(retained & data$near_bin == 1L & data$post == 0L),
+          near_post = sum(retained & data$near_bin == 1L & data$post == 1L),
+          far_pre = sum(retained & data$near_bin == 0L & data$post == 0L),
+          far_post = sum(retained & data$near_bin == 0L & data$post == 1L)
+        )
+        support <- period_counts
+      }
+      if (any(support == 0L)) {
+        stop("Insufficient near/far support: ", market, " / ", stratum,
+             " (", paste(names(support)[support == 0L], collapse = ", "),
+             " after London drop).", call. = FALSE)
+      }
+    }
     tibble::tibble(
       market = market, family = family, stratum = stratum,
       coast_rule_m = settings$coast_rule_m, unknown_policy = settings$unknown_policy,
@@ -236,6 +266,10 @@ log_salience_cells <- function(data, nearest, market, family, include_far = FALS
       n_near_after = if ("near_bin" %in% names(data)) sum(retained & data$near_bin == 1L) else NA_integer_,
       n_far_before = if ("near_bin" %in% names(data)) sum(selected & data$near_bin == 0L) else NA_integer_,
       n_far_after = if ("near_bin" %in% names(data)) sum(retained & data$near_bin == 0L) else NA_integer_,
+      n_near_pre_after = unname(period_counts["near_pre"]),
+      n_near_post_after = unname(period_counts["near_post"]),
+      n_far_pre_after = unname(period_counts["far_pre"]),
+      n_far_post_after = unname(period_counts["far_post"]),
       n_input = nrow(data), n_unclassified = n_unclassified,
       n_without_nearest = sum(is.na(data$site_id)),
       n_nearest_sites = nrow(sites),

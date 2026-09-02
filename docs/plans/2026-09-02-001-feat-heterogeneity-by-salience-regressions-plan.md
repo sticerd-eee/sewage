@@ -12,6 +12,12 @@ execution: code
 Status: locked — signed off by Jacopo on 2026-09-02 after a
 `grill-with-docs` design session.
 
+Amended with Jacopo's explicit approval on 2026-09-02 after ticket 01:
+coastal location and bathing designation are independent dimensions, giving
+four mutually exclusive strata; the unknown-evidence robustness excludes
+only unresolved designation and retains every observed positive. These
+definitions supersede the original bathing/coastal-union classification.
+
 ## Goal Capsule
 
 - **Objective:** Test whether the Public Attention effect on property prices
@@ -84,17 +90,25 @@ attention tables  attention tables  tables (appendix)
 
 - **R7. Coast and bathing family (four strata, one table family).**
   A property's class comes from its nearest Site Group (extensive margin and
-  baseline hedonic) or from its radius companion (intensive margin):
-  - *bathing*: nearest Site Group has `bath_ever_2124 = TRUE`
-    (intensive margin: `any_bath_2124` at 250 m);
-  - *coastal not bathing*: coastal (below) and not bathing;
-  - *coastal (all)*: nearest Site Group `distance_to_coast_m <= 2000`
-    (intensive margin: `min_coast_dist_m <= 2000`);
-  - *inland*: not coastal.
-  Bathing is expected to be almost entirely a subset of coastal; the
-  coastal-not-bathing column isolates designation from coastal location.
-- **R8. Unknown bathing evidence** (`bath_unknown_2124`, never observed
-  designated) counts as not designated in the headline.
+  baseline hedonic) or from its radius companion (intensive margin).
+  Coastal is defined strictly by `distance_to_coast_m <= 2000`
+  (intensive margin: `min_coast_dist_m <= 2000`). Bathing is independently
+  defined by `bath_ever_2124 = TRUE` (intensive margin: `any_bath_2124` at
+  250 m). The ordered, mutually exclusive strata are:
+  - *coastal bathing*;
+  - *coastal not bathing*;
+  - *inland bathing*;
+  - *inland not bathing*.
+  Inland means coast distance above the threshold, including designated
+  freshwater bathing locations. A supplementary *coastal (all)* estimate,
+  if reported, pools only the two coastal strata; it is not one of the four
+  primary columns. Missing coast distance remains excluded.
+- **R8. Unresolved bathing evidence** means unknown or missing evidence with
+  no observed positive designation. It counts as not designated in the
+  headline. A positive in any year establishes ever-designation regardless
+  of unknown evidence in other years; similarly, any designated nearby site
+  establishes radius-level bathing regardless of other unknown nearby sites.
+  Preserve the published unknown flags for auditing.
 - **R9. Intensity family (near group only).** Extensive margin: near
   properties split by their 500 m `spill_count_band` into `spill_le_p50`
   and `spill_gt_p50`, each estimated against the full far group, which has
@@ -116,7 +130,12 @@ attention tables  attention tables  tables (appendix)
 - **R12.** Coast rule at 10,000 m instead of 2,000 m, rerunning the whole
   four-way family.
 - **R13.** With Greater London retained, coast/bathing family only.
-- **R14.** Bathing family with unknown-evidence Site Groups excluded.
+- **R14.** Coast/bathing family with unresolved designation excluded:
+  `bath_unknown_2124 & !bath_ever_2124` for nonmissing nearest-site flags,
+  or `bath_unknown_2124 & !any_bath_2124` for radius companions. Missing
+  designation evidence also counts as unresolved when no positive is
+  observed. Ever-designated sites and any-designated radius companions
+  remain eligible under both policies.
 
 #### Tables and logs
 
@@ -125,7 +144,10 @@ attention tables  attention tables  tables (appendix)
   only the saturated specification. Each table reports N per column.
 - **R16.** Logs record, per market and family, the number of transactions
   in each stratum before and after the London drop, and the share of
-  nearest Site Groups with missing coast distance.
+  nearest Site Groups with missing coast distance. Before estimating an
+  extensive-margin stratum, require near and far observations after the
+  London drop. For Post specifications, require observations in all four
+  near/far x pre/post cells.
 - **R17.** No deck, slide, or manuscript change. Which tables enter the
   deck is decided after review.
 
@@ -148,9 +170,11 @@ prior-exposure dataset stops at 1 km); any new data build.
 
 Stratum assignment output (in-memory, not published): one row per
 transaction with `salience_class` in
-`{bathing, coastal_not_bathing, inland}` (coastal = union of the first
-two), `coast_rule_m` in `{2000, 10000}`, `bath_unknown`, `london`, and
-for the intensity family `spill_count_band` at the relevant radius.
+`{coastal_bathing, coastal_not_bathing, inland_bathing, inland_not_bathing}`,
+independent `coastal` and `bathing` flags, `coast_rule_m` in `{2000, 10000}`,
+the original `bath_unknown_2124`, `bath_unknown` (including missing evidence),
+`bath_unresolved = bath_unknown & !bathing`, `london`, and for the intensity
+family `spill_count_band` at the relevant radius.
 
 ## Implementation Units
 
@@ -164,7 +188,8 @@ for the intensity family `spill_count_band` at the relevant radius.
   a cell-count logger.
 - Contract tests in `scripts/R/testing/test_salience_strata_contracts.R`
   with fixtures for ties, missing coast distance, unknown evidence, the
-  2 km / 10 km rules, and the far group's absent band.
+  2 km / 10 km rules, inland bathing, positive designation with other unknown
+  evidence, near/far x pre/post support, and the far group's absent band.
 
 ### U2. Extensive-margin attention by stratum
 
@@ -204,7 +229,7 @@ for the intensity family `spill_count_band` at the relevant radius.
 |---|---|
 | Parse | all new R files parse under the project environment |
 | Stratum contract tests | fixtures pass; strata are mutually exclusive and exhaustive within each family |
-| Cell counts | every stratum × market has N logged; no stratum silently empty |
+| Cell counts | every stratum × market has N logged; extensive strata retain near/far support, in both periods for Post |
 | Reproduction | with the stratum filter removed and London retained, the headline scripts reproduce the existing deck coefficients exactly |
 | Publication | all tables compile in the deck's table harness |
 
@@ -215,6 +240,9 @@ for the intensity family `spill_count_band` at the relevant radius.
 - Property with no Site Group within 2 km: not in the extensive-margin
   sample by construction; excluded from the baseline hedonic strata.
 - Empty stratum for a market: hard failure with the stratum named.
+- Extensive-margin stratum without near or far observations after the London
+  drop (in either period for Post specifications): hard failure with the
+  market, stratum and missing support cells named.
 - Far-group property with a non-`no_site` band at 500 m: hard failure, it
   contradicts the far definition.
 
