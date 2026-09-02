@@ -209,15 +209,18 @@ salience_strata <- function(family = c("coast_bathing", "intensity"), include_fa
 #' @param market Market name for the audit and any empty-cell error.
 #' @param family Family passed to `salience_strata()`.
 #' @param include_far Include shared far controls for extensive intensity.
+#' @param drop_london FALSE validates the London-retained robustness sample.
 #' @return One row per stratum with transaction counts before/after the London
 #'   drop, input/exclusion counts, and the missing-coast share over distinct
 #'   nearest Site Groups represented in this sample (before the London drop).
 #'   Prints cell counts; callers can bind and write the returned audit as CSV.
 #'   Empty cells fail by market/stratum, including no treated rows for intensity.
-#'   When `near_bin` is present, both distance groups must survive the London
-#'   drop; when `post` is also present, all four near/far x pre/post cells must
-#'   survive. Their counts are returned for inspection before estimation.
-log_salience_cells <- function(data, nearest, market, family, include_far = FALSE) {
+#'   Both distance groups (and all four near/far x pre/post cells for Post)
+#'   must survive the selected London policy. Estimation counts and counts after
+#'   the London drop are reported separately, even when London is retained.
+log_salience_cells <- function(
+  data, nearest, market, family, include_far = FALSE, drop_london = TRUE
+) {
   sites <- nearest |>
     dplyr::filter(.data$site_id %in% data$site_id) |>
     dplyr::distinct(.data$site_id, .data$distance_to_coast_m)
@@ -231,45 +234,58 @@ log_salience_cells <- function(data, nearest, market, family, include_far = FALS
   counts <- dplyr::bind_rows(lapply(names(filters), function(stratum) {
     selected <- masks[[stratum]]
     retained <- selected & !data$london
+    estimation <- if (drop_london) retained else selected
+    london_policy <- if (drop_london) "after London drop" else "London retained"
     n_before <- sum(selected)
     n_after <- sum(retained)
-    if (n_before == 0L || n_after == 0L ||
-        (include_far && !any(retained & data$near_bin == 1L))) {
+    if (!any(estimation) ||
+        (include_far && !any(estimation & data$near_bin == 1L))) {
       stop("Empty salience stratum: ", market, " / ", stratum,
-           " (before/after London drop).", call. = FALSE)
+           " (", london_policy, ").", call. = FALSE)
     }
-    period_counts <- c(near_pre = NA_integer_, near_post = NA_integer_,
-                       far_pre = NA_integer_, far_post = NA_integer_)
+    period_counts <- function(mask) {
+      if (!all(c("near_bin", "post") %in% names(data))) {
+        return(c(near_pre = NA_integer_, near_post = NA_integer_,
+                 far_pre = NA_integer_, far_post = NA_integer_))
+      }
+      c(near_pre = sum(mask & data$near_bin == 1L & data$post == 0L),
+        near_post = sum(mask & data$near_bin == 1L & data$post == 1L),
+        far_pre = sum(mask & data$near_bin == 0L & data$post == 0L),
+        far_post = sum(mask & data$near_bin == 0L & data$post == 1L))
+    }
+    after_periods <- period_counts(retained)
+    estimation_periods <- period_counts(estimation)
     if ("near_bin" %in% names(data)) {
-      support <- c(near = sum(retained & data$near_bin == 1L),
-                   far = sum(retained & data$near_bin == 0L))
+      support <- c(near = sum(estimation & data$near_bin == 1L),
+                   far = sum(estimation & data$near_bin == 0L))
       if ("post" %in% names(data)) {
-        period_counts <- c(
-          near_pre = sum(retained & data$near_bin == 1L & data$post == 0L),
-          near_post = sum(retained & data$near_bin == 1L & data$post == 1L),
-          far_pre = sum(retained & data$near_bin == 0L & data$post == 0L),
-          far_post = sum(retained & data$near_bin == 0L & data$post == 1L)
-        )
-        support <- period_counts
+        support <- estimation_periods
       }
       if (any(support == 0L)) {
         stop("Insufficient near/far support: ", market, " / ", stratum,
              " (", paste(names(support)[support == 0L], collapse = ", "),
-             " after London drop).", call. = FALSE)
+             "; ", london_policy, ").", call. = FALSE)
       }
     }
     tibble::tibble(
       market = market, family = family, stratum = stratum,
       coast_rule_m = settings$coast_rule_m, unknown_policy = settings$unknown_policy,
       n_before_london_drop = n_before, n_after_london_drop = n_after,
+      drop_london = drop_london, n_estimation = sum(estimation),
+      n_near_estimation = if ("near_bin" %in% names(data)) sum(estimation & data$near_bin == 1L) else NA_integer_,
+      n_far_estimation = if ("near_bin" %in% names(data)) sum(estimation & data$near_bin == 0L) else NA_integer_,
       n_near_before = if ("near_bin" %in% names(data)) sum(selected & data$near_bin == 1L) else NA_integer_,
       n_near_after = if ("near_bin" %in% names(data)) sum(retained & data$near_bin == 1L) else NA_integer_,
       n_far_before = if ("near_bin" %in% names(data)) sum(selected & data$near_bin == 0L) else NA_integer_,
       n_far_after = if ("near_bin" %in% names(data)) sum(retained & data$near_bin == 0L) else NA_integer_,
-      n_near_pre_after = unname(period_counts["near_pre"]),
-      n_near_post_after = unname(period_counts["near_post"]),
-      n_far_pre_after = unname(period_counts["far_pre"]),
-      n_far_post_after = unname(period_counts["far_post"]),
+      n_near_pre_after = unname(after_periods["near_pre"]),
+      n_near_post_after = unname(after_periods["near_post"]),
+      n_far_pre_after = unname(after_periods["far_pre"]),
+      n_far_post_after = unname(after_periods["far_post"]),
+      n_near_pre_estimation = unname(estimation_periods["near_pre"]),
+      n_near_post_estimation = unname(estimation_periods["near_post"]),
+      n_far_pre_estimation = unname(estimation_periods["far_pre"]),
+      n_far_post_estimation = unname(estimation_periods["far_post"]),
       n_input = nrow(data), n_unclassified = n_unclassified,
       n_without_nearest = sum(is.na(data$site_id)),
       n_nearest_sites = nrow(sites),
@@ -280,8 +296,9 @@ log_salience_cells <- function(data, nearest, market, family, include_far = FALS
   cat(sprintf("%s / %s / coast %sm / %s:\n", market, family,
               settings$coast_rule_m, settings$unknown_policy))
   for (i in seq_len(nrow(counts))) {
-    cat(sprintf("  %s: %d before, %d after London drop\n", counts$stratum[i],
-                counts$n_before_london_drop[i], counts$n_after_london_drop[i]))
+    cat(sprintf("  %s: %d before, %d after London drop; %d for estimation\n", counts$stratum[i],
+                counts$n_before_london_drop[i], counts$n_after_london_drop[i],
+                counts$n_estimation[i]))
   }
   counts
 }

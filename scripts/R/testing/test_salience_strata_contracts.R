@@ -124,6 +124,16 @@ assert_equal(extensive_bands$spill_le_p50(intensity), c(TRUE, FALSE, FALSE, FALS
 assert_equal(extensive_bands$spill_gt_p50(intensity), c(FALSE, TRUE, FALSE, FALSE, TRUE, TRUE))
 assert_error(extensive_bands$spill_gt_p50(mutate(intensity, spill_count_band = "zero")),
              "Far-group")
+for (band in c("unknown", "zero", "spill_le_p50", "spill_gt_p50")) {
+  bad_far <- intensity
+  bad_far$spill_count_band[bad_far$near_bin == 0L] <- band
+  assert_error(extensive_bands$spill_le_p50(bad_far), "Far-group")
+}
+no_site_near <- bind_rows(intensity, tibble::tibble(spill_count_band = "no_site", near_bin = 1L))
+assert_equal(extensive_bands$spill_le_p50(no_site_near),
+             c(TRUE, FALSE, FALSE, FALSE, TRUE, TRUE, FALSE))
+assert_equal(extensive_bands$spill_gt_p50(no_site_near),
+             c(FALSE, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE))
 
 # Joining property evidence must preserve repeated transactions and their order.
 transactions <- tibble::tibble(house_id = c("tie", "tie", "boundary", "unmatched"),
@@ -195,6 +205,20 @@ assert_error(log_salience_cells(mutate(support_data, near_bin = 1L),
              "support.*sales.*coastal_bathing")
 assert_error(log_salience_cells(filter(support_data, !(near_bin == 0L & post == 0L)),
                                count_nearest, "rentals", "coast_bathing"),
+             "support.*rentals.*coastal_bathing")
+# Retaining London validates the actual estimation cells while still reporting
+# the counterfactual counts after dropping London. Here far/pre exists only there.
+london_support <- mutate(support_data, london = near_bin == 0L & post == 0L)
+assert_error(log_salience_cells(london_support, count_nearest, "sales", "coast_bathing"),
+             "support.*sales.*coastal_bathing")
+london_counts <- log_salience_cells(london_support, count_nearest, "sales",
+                                    "coast_bathing", drop_london = FALSE)
+assert_equal(london_counts$n_estimation, c(8L, 4L, 4L, 4L))
+assert_equal(london_counts$n_after_london_drop, c(6L, 3L, 3L, 3L))
+assert_equal(london_counts$n_far_pre_estimation, c(2L, 1L, 1L, 1L))
+assert_equal(london_counts$n_far_pre_after, rep(0L, 4))
+assert_error(log_salience_cells(filter(london_support, !(near_bin == 0L & post == 0L)),
+                               count_nearest, "rentals", "coast_bathing", drop_london = FALSE),
              "support.*rentals.*coastal_bathing")
 intensity_counts <- intensity |>
   mutate(site_id = 1L, salience_class = "coastal_bathing", london = FALSE,
