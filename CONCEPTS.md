@@ -57,6 +57,12 @@ A property-radius classification derived from the Ever-Observed Designated-Water
 ### Property Spill-Intensity Band
 A property-radius classification of total nearby Prior-to-Transaction Spill Exposure as unknown, zero, positive at or below the positive-exposure median, or positive above that median. It aggregates every Site Group within the property's Near-Overflow Radius and is defined separately by market and radius.
 
+### Local Salience
+A cross-sectional property of place describing where a sewage spill does more harm and is therefore more noticeable to buyers and renters: near the coast, at a designated bathing water, or near a heavy-spilling overflow. It is fixed for a property and contrasts with Public Attention, which varies over time and is common to all places. Measured through Site Coast Distance, the Ever-Observed Designated-Water Indicator, and the Property Spill-Intensity Band.
+
+### Salience Stratum
+A mutually exclusive subsample of transactions defined by Local Salience, within which a property-price specification is re-estimated. Heterogeneity by salience compares the same specification across strata rather than adding interaction terms.
+
 ### Spill Exposure
 A property's continuous measure of nearby storm-overflow activity — spill count and spill hours at the overflows within its Near-Overflow Radius — measured over a stated exposure window.
 
