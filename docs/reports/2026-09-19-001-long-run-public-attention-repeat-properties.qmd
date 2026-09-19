@@ -40,8 +40,10 @@ January 2014 through December 2023.
 
 The report first establishes that the inputs are usable: mapping integrity,
 current-address consistency of the repeat mappings, an ordered sample contract
-with an exclusion ledger, and observation diagnostics. Estimation, attention
-measures and the coefficient comparisons follow in later sections.
+with an exclusion ledger, and observation diagnostics. It then fixes exposure
+from overflow locations alone, builds the attention calendar with its coverage
+evidence, and reports the banded repeat panel. Estimation and the coefficient
+comparisons follow in later sections.
 
 **This rendering:** `r if (params$reestimate) "inputs re-validated and analyses re-estimated from the published inputs." else "results loaded from the saved bundle in output/regs."`
 
@@ -78,6 +80,7 @@ CONFIG <- list(
   crosswalk_path = here::here("data", "processed", "matched_events_annual_data", "site_group_crosswalk.parquet"),
   crosswalk_years = 2021:2024,
   articles_path = here::here("data", "processed", "lexis_nexis", "search1_monthly.parquet"),
+  article_records_path = here::here("data", "processed", "lexis_nexis", "search1_articles.parquet"),
   article_pdf_dir = here::here("data", "raw", "lexis_nexis", "search_1"),
   article_origin = as.Date("2014-01-01"),
   event_month = as.Date("2022-08-01"),   # post = month >= event_month (August 2022 inclusive)
@@ -899,6 +902,459 @@ emit_table <- function(x) cat(x, "\n\n")
 #| include: false
 
 # U2: site projection, nearest distance, bands, attention calendar, article evidence.
+
+# ---- Fixed site projection (KTD2, R3) ------------------------------------------
+
+# Columns the projection helper requires. `annual_status` is read only so that
+# derive_site_group_projection() can validate the crosswalk's structure; it never
+# enters eligibility (AE3).
+crosswalk_columns <- function() {
+  c("site_id", "year", "water_company", "annual_status", "ngr", "easting", "northing")
+}
+
+# Latest-valid location per Site Group over `years`, plus `usable` (finite
+# easting and northing). Stops when no site has a usable location.
+project_sites <- function(crosswalk, years = CONFIG$crosswalk_years) {
+  projection <- derive_site_group_projection(crosswalk, years = years, include_availability = FALSE)
+  projection <- dplyr::mutate(
+    projection,
+    site_id = as.integer(.data$site_id),
+    easting = as.numeric(.data$easting), northing = as.numeric(.data$northing),
+    usable = is.finite(.data$easting) & is.finite(.data$northing)
+  )
+  n_usable <- sum(projection$usable)
+  if (n_usable == 0L) {
+    stop("Site projection has zero usable locations; nearest-site matching cannot run.", call. = FALSE)
+  }
+  list(
+    projection = projection,
+    years = as.integer(years),
+    n_sites = nrow(projection),
+    n_usable = n_usable,
+    n_unusable = nrow(projection) - n_usable,
+    unusable_site_ids = projection$site_id[!projection$usable],
+    n_water_companies = dplyr::n_distinct(projection$water_company)
+  )
+}
+
+load_site_projection <- function(path = CONFIG$crosswalk_path, years = CONFIG$crosswalk_years) {
+  cols <- crosswalk_columns()
+  info <- parquet_file_info(path, "site_group_crosswalk")
+  missing <- setdiff(cols, info$columns)
+  if (length(missing) > 0L) {
+    stop("Site Group crosswalk lacks required columns: ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  crosswalk <- arrow::read_parquet(path, col_select = tidyselect::all_of(cols)) |> as.data.frame()
+  out <- project_sites(crosswalk, years)
+  out$n_crosswalk_rows <- nrow(crosswalk)
+  out$provenance <- capture_input_provenance("site_group_crosswalk", path, cols)
+  out
+}
+
+# ---- Nearest usable site through unique coordinates -----------------------------
+
+# `coords`: data.table/data.frame of unique (easting, northing) pairs in BNG metres.
+# Returns a data.table with those coordinates plus `site_id` and `distance_m`
+# (planar metres to the nearest usable Site Group representative location).
+# STRtree-indexed nearest-feature search; never an all-pairs matrix. Ties resolve to
+# the feature sf returns first and are not reported.
+nearest_site_distance <- function(coords, projection) {
+  if (!all(c("easting", "northing") %in% names(coords))) {
+    stop("`coords` must carry easting and northing.", call. = FALSE)
+  }
+  if (!all(c("site_id", "easting", "northing", "usable") %in% names(projection))) {
+    stop("`projection` must carry site_id, easting, northing and usable.", call. = FALSE)
+  }
+  sites <- projection[projection$usable, c("site_id", "easting", "northing")]
+  if (nrow(sites) == 0L) stop("No usable site locations to match against.", call. = FALSE)
+  coords <- data.table::as.data.table(coords)[, .(easting = as.numeric(easting), northing = as.numeric(northing))]
+  if (anyDuplicated(coords) > 0L) stop("`coords` must be unique on (easting, northing).", call. = FALSE)
+  if (any(!is.finite(coords$easting) | !is.finite(coords$northing))) {
+    stop("`coords` must be finite.", call. = FALSE)
+  }
+  pts_sf <- sf::st_as_sf(as.data.frame(coords), coords = c("easting", "northing"), crs = 27700)
+  sites_sf <- sf::st_as_sf(as.data.frame(sites), coords = c("easting", "northing"), crs = 27700)
+  idx <- sf::st_nearest_feature(pts_sf, sites_sf)
+  dist <- sf::st_distance(pts_sf, sites_sf[idx, ], by_element = TRUE)
+  coords[, site_id := as.integer(sites$site_id[idx])]
+  coords[, distance_m := as.numeric(dist)]
+  if (anyNA(coords$site_id) || any(!is.finite(coords$distance_m))) {
+    stop("Nearest-site matching left unmatched coordinates.", call. = FALSE)
+  }
+  coords[]
+}
+
+# ---- KTD5 bands ---------------------------------------------------------------
+
+# near = [near_min, near_max] inclusive -> 1L; far = (far_min, far_max] -> 0L;
+# everything else (including NA) -> NA_integer_ (dropped).
+assign_bands <- function(distance_m, bands = CONFIG$bands) {
+  distance_m <- as.numeric(distance_m)
+  data.table::fcase(
+    !is.na(distance_m) & distance_m >= bands$near_min & distance_m <= bands$near_max, 1L,
+    !is.na(distance_m) & distance_m > bands$far_min & distance_m <= bands$far_max, 0L,
+    default = NA_integer_
+  )
+}
+
+band_label <- function(near) data.table::fifelse(near == 1L, "near", "far")
+
+band_note <- function(bands = CONFIG$bands) {
+  sprintf("near = [%s, %s] m inclusive; far = (%s, %s] m; (%s, %s] m and > %s m dropped",
+          bands$near_min, bands$near_max, bands$far_min, bands$far_max,
+          bands$near_max, bands$far_min, bands$far_max)
+}
+
+# ---- Exposure on a market panel -------------------------------------------------
+
+# Takes the pre-band panel from prepare_market_panel(), attaches one fixed
+# exposure per row (site_id, distance_m, near, band), applies the bands and the
+# two-distinct-dates requirement through the ledger, then freezes the change
+# flags on the eligible long-run panel (KTD6) and joins them without restricting.
+# The input panel is modified by reference (columns added) and then subset.
+apply_exposure <- function(panel, projection, ledger, market, cfg = market_config(market),
+                           bands = CONFIG$bands) {
+  if (!data.table::is.data.table(panel)) stop("`panel` must be a data.table.", call. = FALSE)
+  coords <- unique(panel[, .(easting, northing)])
+  matched <- nearest_site_distance(coords, projection)
+  n_unique_coordinates <- nrow(matched)
+  panel[matched, on = .(easting, northing), `:=`(site_id = i.site_id, distance_m = i.distance_m)]
+  if (anyNA(panel$site_id) || any(!is.finite(panel$distance_m))) {
+    stop("Every retained row must receive exactly one nearest-site distance.", call. = FALSE)
+  }
+  panel[, near := assign_bands(distance_m, bands)]
+  distance_summary_all <- tibble::tibble(
+    n_unique_coordinates = n_unique_coordinates,
+    n_rows = nrow(panel),
+    n_sites_matched = data.table::uniqueN(matched$site_id),
+    distance_min = min(matched$distance_m), distance_median = stats::median(matched$distance_m),
+    distance_max = max(matched$distance_m),
+    share_coordinates_near = mean(assign_bands(matched$distance_m, bands) %in% 1L),
+    share_coordinates_far = mean(assign_bands(matched$distance_m, bands) %in% 0L),
+    share_coordinates_dropped = mean(is.na(assign_bands(matched$distance_m, bands)))
+  )
+  rm(coords, matched)
+  restricted <- restrict_panel(panel, !is.na(panel$near), ledger, market, "distance_bands", band_note(bands))
+  panel <- restricted$panel
+  ledger <- restricted$ledger
+  panel[, band := band_label(near)]
+  restricted <- restrict_panel(panel, panel$repeat_id %chin% repeat_eligible_ids(panel), ledger, market,
+                               "two_distinct_dates",
+                               "at least two distinct surviving dates per property (recomputed; stored repeat_count unused)")
+  panel <- restricted$panel
+  ledger <- restricted$ledger
+  change_flags <- freeze_change_flags(panel, cfg$change_cols)
+  panel <- merge(panel, change_flags, by = "repeat_id", all.x = TRUE, sort = FALSE)
+  if (anyNA(panel$any_change)) stop("Change flags did not cover every eligible property.", call. = FALSE)
+  list(panel = panel[], ledger = ledger, change_flags = change_flags,
+       distance_summary_all = distance_summary_all)
+}
+
+# ---- Exposure summaries (descriptive; no exclusions) ---------------------------
+
+exposure_summaries <- function(panel, market, cfg = market_config(market),
+                               event_month = CONFIG$event_month) {
+  needed <- c("repeat_id", "date", "band", "near", "distance_m", "site_id", "any_change",
+              paste0("change_", cfg$change_cols))
+  missing <- setdiff(needed, names(panel))
+  if (length(missing) > 0L) stop("Exposure summaries lack columns: ", paste(missing, collapse = ", "), call. = FALSE)
+  event_start <- lubridate::floor_date(event_month, "month")
+  band_counts <- panel[, .(
+    n_rows = .N, n_properties = data.table::uniqueN(repeat_id),
+    n_unique_coordinates = nrow(unique(.SD[, .(easting, northing)])),
+    n_sites_matched = data.table::uniqueN(site_id),
+    distance_min = min(distance_m), distance_p10 = stats::quantile(distance_m, 0.10),
+    distance_median = stats::median(distance_m), distance_p90 = stats::quantile(distance_m, 0.90),
+    distance_max = max(distance_m)
+  ), by = band][order(-band)]
+  by_period <- panel[, .(n_rows = .N, n_properties = data.table::uniqueN(repeat_id)),
+                     by = .(band, post = as.integer(date >= event_start))][order(-band, post)]
+  sides <- panel[, .(pre = any(date < event_start), post = any(date >= event_start)), by = .(repeat_id, band)]
+  both_sides <- sides[, .(
+    n_properties = .N, n_pre_only = sum(pre & !post), n_post_only = sum(!pre & post),
+    n_both_sides = sum(pre & post), share_both_sides = mean(pre & post)
+  ), by = band][order(-band)]
+  flag_cols <- c(paste0("change_", cfg$change_cols), "any_change")
+  per_property <- unique(panel[, c("repeat_id", "band", flag_cols), with = FALSE])
+  change_prevalence <- data.table::rbindlist(lapply(flag_cols, function(col) {
+    per_property[, .(change_flag = col, n_properties = .N, n_changed = sum(get(col)),
+                     share_changed = mean(get(col))), by = band]
+  }))[order(change_flag, -band)]
+  change_rows <- panel[, .(n_rows = .N, n_rows_in_changed_properties = sum(any_change),
+                           share_rows_in_changed_properties = mean(any_change)), by = band][order(-band)]
+  list(
+    market = market,
+    n_rows = nrow(panel),
+    n_properties = data.table::uniqueN(panel$repeat_id),
+    n_sites_matched = data.table::uniqueN(panel$site_id),
+    band_counts = tibble::as_tibble(band_counts),
+    by_period = tibble::as_tibble(by_period),
+    both_sides_event = tibble::as_tibble(both_sides),
+    change_prevalence = tibble::as_tibble(change_prevalence),
+    change_rows = tibble::as_tibble(change_rows),
+    diagnostics_by_band = compute_observation_diagnostics(panel, market, "band", cfg)
+  )
+}
+
+# ---- Article input validation ---------------------------------------------------
+
+# One valid row per observed year-month with a finite nonnegative integer count.
+# Returns list(status = "passed" | "failed", reasons, n_rows, ...); never stops.
+validate_article_input <- function(monthly) {
+  reasons <- character()
+  monthly <- as.data.frame(monthly)
+  needed <- c("year", "month", "article_count")
+  missing <- setdiff(needed, names(monthly))
+  if (length(missing) > 0L) {
+    return(list(status = "failed", reasons = paste("missing columns:", paste(missing, collapse = ", ")),
+                n_rows = nrow(monthly), n_months = 0L, n_articles = NA_real_))
+  }
+  year <- monthly$year
+  month <- monthly$month
+  count <- monthly$article_count
+  if (nrow(monthly) == 0L) reasons <- c(reasons, "no rows")
+  if (anyNA(year) || any(!is.finite(year)) || any(year != round(year))) reasons <- c(reasons, "year must be a nonmissing integer")
+  if (anyNA(month) || any(!is.finite(month)) || any(month != round(month)) || any(month < 1 | month > 12)) {
+    reasons <- c(reasons, "month must be a nonmissing integer in 1-12")
+  }
+  key <- paste(year, month)
+  n_dup <- sum(duplicated(key))
+  if (n_dup > 0L) reasons <- c(reasons, sprintf("%d duplicated year-month keys (input problem, not values to sum)", n_dup))
+  if (anyNA(count)) reasons <- c(reasons, sprintf("%d missing article counts (input problem, not zero)", sum(is.na(count))))
+  count_ok <- count[!is.na(count)]
+  if (any(!is.finite(count_ok))) reasons <- c(reasons, "article counts must be finite")
+  if (any(is.finite(count_ok) & count_ok < 0)) reasons <- c(reasons, "negative article counts")
+  if (any(is.finite(count_ok) & count_ok != round(count_ok))) reasons <- c(reasons, "non-integer article counts")
+  list(
+    status = if (length(reasons) == 0L) "passed" else "failed",
+    reasons = reasons,
+    n_rows = nrow(monthly),
+    n_months = length(unique(key)),
+    n_articles = if (length(reasons) == 0L) sum(count) else NA_real_,
+    first_month = if (length(reasons) == 0L && nrow(monthly) > 0L) sprintf("%04d-%02d", as.integer(min(year)), as.integer(month[which.min(year * 12 + month)])) else NA_character_,
+    last_month = if (length(reasons) == 0L && nrow(monthly) > 0L) sprintf("%04d-%02d", as.integer(max(year)), as.integer(month[which.max(year * 12 + month)])) else NA_character_
+  )
+}
+
+load_article_monthly <- function(path = CONFIG$articles_path) {
+  cols <- c("year", "month", "article_count")
+  info <- parquet_file_info(path, "search1_monthly")
+  missing <- setdiff(cols, info$columns)
+  if (length(missing) > 0L) stop("Monthly article file lacks columns: ", paste(missing, collapse = ", "), call. = FALSE)
+  monthly <- arrow::read_parquet(path, col_select = tidyselect::all_of(cols)) |> as.data.frame()
+  list(monthly = monthly, provenance = capture_input_provenance("search1_monthly", path, cols))
+}
+
+# ---- Export evidence and coverage ----------------------------------------------
+
+# Parse one LexisNexis export PDF: cover fields (page 1), first result number on
+# the results list (page 2) and the number of "Date: Mon dd, yyyy" record fields.
+parse_export_pdf <- function(path) {
+  pages <- pdftools::pdf_text(path)
+  cover <- strsplit(pages[[1L]], "\n", fixed = TRUE)[[1L]]
+  field <- function(pattern) {
+    hit <- grep(pattern, cover, value = TRUE)
+    if (length(hit) == 0L) return(NA_character_)
+    trimws(sub(paste0("^.*", pattern, "\\s*=?\\s*"), "", hit[[1L]]))
+  }
+  narrowed_start <- grep("Narrowed by", cover)
+  narrowed <- if (length(narrowed_start) > 0L) {
+    block <- cover[seq(narrowed_start[[1L]], length(cover))]
+    blank <- which(!nzchar(trimws(block)))
+    if (length(blank) > 0L) block <- block[seq_len(blank[[1L]] - 1L)]
+    paste(trimws(block), collapse = " ")
+  } else {
+    NA_character_
+  }
+  results <- if (length(pages) >= 2L) strsplit(pages[[2L]], "\n", fixed = TRUE)[[1L]] else character()
+  numbered <- grep("^\\s*[0-9]+\\.\\s+\\S", results, value = TRUE)
+  first_result <- if (length(numbered) > 0L) as.integer(sub("^\\s*([0-9]+)\\..*$", "\\1", numbered[[1L]])) else NA_integer_
+  date_pattern <- "Date: [A-Z][a-z]{2} [0-9]{2}, [0-9]{4}"
+  n_date_fields <- sum(lengths(regmatches(pages, gregexpr(date_pattern, pages))))
+  tibble::tibble(
+    file = basename(path),
+    pages = length(pages),
+    export_date = field("Date and Time:"),
+    job_number = field("Job Number:"),
+    search_terms = field("Search Terms:"),
+    search_type = field("Search Type:"),
+    narrowed_by = narrowed,
+    date_restriction_detected = !is.na(narrowed) && grepl("Timeline|Date Range|Published", narrowed, ignore.case = TRUE),
+    first_result = first_result,
+    n_date_fields = n_date_fields,
+    content_hash = digest::digest(file = path, algo = "xxhash64")
+  )
+}
+
+# Recomputes, at render time, whether the fixed search corpus's coverage is
+# established: contiguous export segments (1, 501, 1001, ...), per-file record
+# counts summing to the article-level rows, the article-level monthly n()
+# reproducing the monthly file, and one query/cover across files with no date
+# narrowing. "unavailable" when pdftools or the files are missing; observed
+# first/last dates never substitute for evidence.
+article_export_evidence <- function(pdf_dir = CONFIG$article_pdf_dir,
+                                    articles_path = CONFIG$article_records_path,
+                                    monthly_path = CONFIG$articles_path) {
+  out <- list(status = "unavailable", reasons = character(), files = tibble::tibble(),
+              n_records_pdf = NA_integer_, n_articles_file = NA_integer_,
+              segments_contiguous = NA, records_reconciled = NA, monthly_reproduced = NA,
+              query_consistent = NA, date_restriction_detected = NA,
+              n_months_compared = NA_integer_, n_months_mismatched = NA_integer_,
+              search_terms = NA_character_, article_date_min = as.Date(NA), article_date_max = as.Date(NA),
+              export_date_min = as.Date(NA), coverage_end = as.Date(NA), provenance = tibble::tibble())
+  if (!requireNamespace("pdftools", quietly = TRUE)) {
+    out$reasons <- "pdftools is not installed; export PDFs cannot be read"
+    return(out)
+  }
+  pdfs <- if (dir.exists(pdf_dir)) sort(list.files(pdf_dir, pattern = "\\.pdf$", ignore.case = TRUE, full.names = TRUE)) else character()
+  if (length(pdfs) == 0L) {
+    out$reasons <- sprintf("no export PDFs found under %s", pdf_dir)
+    return(out)
+  }
+  if (!file.exists(articles_path) || !file.exists(monthly_path)) {
+    out$reasons <- "article-level or monthly parquet missing"
+    return(out)
+  }
+  files <- dplyr::bind_rows(lapply(pdfs, parse_export_pdf))
+  files <- files[order(files$first_result), ]
+  out$files <- files
+  out$status <- "failed"
+
+  articles <- arrow::read_parquet(articles_path, col_select = tidyselect::all_of(c("search_term", "date"))) |> as.data.frame()
+  monthly <- arrow::read_parquet(monthly_path, col_select = tidyselect::all_of(c("year", "month", "article_count"))) |> as.data.frame()
+  dates <- as.Date(articles$date)
+  out$provenance <- dplyr::bind_rows(
+    capture_input_provenance("search1_articles", articles_path, c("search_term", "date")),
+    tibble::tibble(input = paste0("export_pdf_", sub("\\.pdf$", "", files$file, ignore.case = TRUE)),
+                   path = file.path(pdf_dir, files$file), content_hash = files$content_hash,
+                   generation_id = files$job_number, n_rows = as.numeric(files$pages),
+                   columns_used = "cover fields; result numbering; Date fields",
+                   mtime = format(file.info(file.path(pdf_dir, files$file))$mtime, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
+  )
+  reasons <- character()
+  if (anyNA(dates)) reasons <- c(reasons, sprintf("%d article records lack a date", sum(is.na(dates))))
+  if (anyNA(files$first_result) || anyNA(files$n_date_fields)) reasons <- c(reasons, "could not read result numbering or record fields from every PDF")
+  expected_starts <- 1L + c(0L, cumsum(files$n_date_fields)[-nrow(files)])
+  out$segments_contiguous <- !anyNA(files$first_result) && identical(as.integer(files$first_result), as.integer(expected_starts))
+  if (!isTRUE(out$segments_contiguous)) reasons <- c(reasons, sprintf("export segments are not contiguous (first results %s; expected %s)",
+                                                                       paste(files$first_result, collapse = ", "), paste(expected_starts, collapse = ", ")))
+  out$n_records_pdf <- sum(files$n_date_fields)
+  out$n_articles_file <- nrow(articles)
+  out$records_reconciled <- isTRUE(out$n_records_pdf == out$n_articles_file)
+  if (!out$records_reconciled) reasons <- c(reasons, sprintf("PDF record fields (%d) differ from extracted article rows (%d)", out$n_records_pdf, out$n_articles_file))
+  terms <- unique(trimws(c(files$search_terms, articles$search_term)))
+  out$search_terms <- terms[[1L]]
+  out$query_consistent <- length(terms) == 1L && !is.na(terms[[1L]]) &&
+    dplyr::n_distinct(files$search_type) == 1L && dplyr::n_distinct(files$narrowed_by) == 1L
+  if (!out$query_consistent) reasons <- c(reasons, "search terms or cover narrowing differ across export files or from the extracted records")
+  out$date_restriction_detected <- any(files$date_restriction_detected)
+  if (out$date_restriction_detected) reasons <- c(reasons, "cover page reports a date restriction; the corpus is not the full holding")
+  recomputed <- data.table::data.table(year = lubridate::year(dates), month = lubridate::month(dates))[!is.na(year), .(n = .N), by = .(year, month)]
+  comparison <- merge(recomputed, data.table::as.data.table(monthly), by = c("year", "month"), all = TRUE)
+  out$n_months_compared <- nrow(comparison)
+  out$n_months_mismatched <- sum(is.na(comparison$n) | is.na(comparison$article_count) | comparison$n != comparison$article_count)
+  out$monthly_reproduced <- out$n_months_mismatched == 0L
+  if (!out$monthly_reproduced) reasons <- c(reasons, sprintf("article-level monthly n() differs from the monthly file in %d month(s)", out$n_months_mismatched))
+  out$article_date_min <- suppressWarnings(min(dates, na.rm = TRUE))
+  out$article_date_max <- suppressWarnings(max(dates, na.rm = TRUE))
+  export_dates <- suppressWarnings(as.Date(files$export_date))
+  if (anyNA(export_dates)) reasons <- c(reasons, "export date unreadable on a cover page")
+  out$export_date_min <- suppressWarnings(min(export_dates, na.rm = TRUE))
+  out$reasons <- reasons
+  if (length(reasons) == 0L) {
+    out$status <- "established"
+    # The corpus is the full holding at export time: coverage runs through the
+    # month before the earliest export date (the export month itself is partial).
+    out$coverage_end <- lubridate::floor_date(out$export_date_min, "month") - 1L
+  }
+  out
+}
+
+# ---- Attention calendar (KTD4, KTD5) --------------------------------------------
+
+# Complete monthly calendar from the article origin through the market's end
+# month. `post` is set from CONFIG$event_month alone. Article columns are filled
+# only when validation passes, coverage is established through the calendar end,
+# and the origin-month stock is positive; otherwise they are NA and
+# article_status = "blocked" with an explicit reason.
+build_attention_calendar <- function(market, monthly, evidence, validation = validate_article_input(monthly),
+                                     cfg = CONFIG) {
+  mcfg <- market_config(market)
+  origin <- lubridate::floor_date(cfg$article_origin, "month")
+  end_month <- lubridate::floor_date(mcfg$end, "month")
+  event_start <- lubridate::floor_date(cfg$event_month, "month")
+  months <- seq(origin, end_month, by = "month")
+  calendar <- tibble::tibble(
+    market = market,
+    year = as.integer(lubridate::year(months)),
+    month = as.integer(lubridate::month(months)),
+    month_index = seq_along(months),
+    post = as.integer(months >= event_start),
+    article_count = NA_real_, article_stock = NA_real_, log_articles = NA_real_
+  )
+  reason <- NA_character_
+  if (validation$status != "passed") {
+    reason <- paste("article input validation failed:", paste(validation$reasons, collapse = "; "))
+  } else if (!identical(evidence$status, "established")) {
+    reason <- paste0("article coverage not established (", evidence$status, "): ",
+                     paste(evidence$reasons, collapse = "; "),
+                     "; absent months cannot be distinguished from zero months")
+  } else if (is.na(evidence$coverage_end) || evidence$coverage_end < end_month) {
+    reason <- sprintf("established coverage ends %s, before the calendar end %s", evidence$coverage_end, end_month)
+  } else {
+    monthly <- as.data.frame(monthly)
+    key <- paste(calendar$year, calendar$month)
+    idx <- match(key, paste(monthly$year, monthly$month))
+    counts <- as.numeric(monthly$article_count[idx])
+    counts[is.na(idx)] <- 0
+    calendar$article_count <- counts
+    calendar$article_stock <- cumsum(counts)
+    if (calendar$article_stock[[1L]] <= 0) {
+      reason <- sprintf("stock in the origin month %s is %s, so log(stock) is undefined there; no offset, log1p or later origin is substituted",
+                        format(origin, "%Y-%m"), calendar$article_stock[[1L]])
+    } else {
+      calendar$log_articles <- log(calendar$article_stock)
+    }
+  }
+  calendar$article_status <- if (is.na(reason)) "valid" else "blocked"
+  calendar$article_reason <- reason
+  attr(calendar, "article_reason") <- reason
+  calendar
+}
+
+# Join post and log_articles by month_index; every panel row must match one row.
+attach_attention <- function(panel, calendar) {
+  if (!"month_index" %in% names(panel)) stop("`panel` lacks month_index.", call. = FALSE)
+  idx <- match(panel$month_index, calendar$month_index)
+  if (anyNA(idx)) {
+    stop(sprintf("%d panel rows have no calendar month (month_index outside 1..%d).", sum(is.na(idx)), nrow(calendar)), call. = FALSE)
+  }
+  panel[, post := as.integer(calendar$post[idx])]
+  panel[, log_articles := as.numeric(calendar$log_articles[idx])]
+  panel[]
+}
+
+# ---- Attention history figure --------------------------------------------------
+
+plot_attention_history <- function(calendar, event_month = CONFIG$event_month) {
+  if (!all(calendar$article_status == "valid")) stop("plot_attention_history() needs a valid calendar.", call. = FALSE)
+  plot_data <- dplyr::bind_rows(
+    tibble::tibble(month = as.Date(sprintf("%04d-%02d-01", calendar$year, calendar$month)),
+                   measure = "Monthly article count", value = calendar$article_count),
+    tibble::tibble(month = as.Date(sprintf("%04d-%02d-01", calendar$year, calendar$month)),
+                   measure = "log cumulative stock since January 2014", value = calendar$log_articles)
+  )
+  plot_data$measure <- factor(plot_data$measure, levels = c("Monthly article count", "log cumulative stock since January 2014"))
+  ggplot2::ggplot(plot_data, ggplot2::aes(x = month, y = value)) +
+    ggplot2::geom_vline(xintercept = lubridate::floor_date(event_month, "month"), linetype = "dashed", colour = "#b03a2e") +
+    ggplot2::geom_line(colour = "#2c5f8a") +
+    ggplot2::facet_wrap(~ measure, ncol = 1, scales = "free_y") +
+    ggplot2::scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+    ggplot2::labs(x = NULL, y = NULL,
+                  title = sprintf("Search-1 articles, %s calendar", calendar$market[[1L]]),
+                  subtitle = sprintf("Dashed line: %s (first post-event month)", format(event_month, "%B %Y"))) +
+    ggplot2::theme_minimal(base_size = 11)
+}
 ```
 
 ```{r}
@@ -1255,29 +1711,271 @@ FIXTURE_CHECKS$u1 <- list(
   }
 )
 
+# ---- U2 fixtures ------------------------------------------------------------------
+
+# Two-site crosswalk over the configured years. Site 1 at (400000, 300000), site 2
+# at (403000, 300000); `status_by_year` lets AE3 vary the monitoring history.
+fixture_crosswalk <- function(status_by_year = rep("reported_positive", length(CONFIG$crosswalk_years)),
+                              sites = tibble::tibble(site_id = 1:2, easting = c(400000, 403000), northing = 300000)) {
+  years <- CONFIG$crosswalk_years
+  tidyr::expand_grid(site_id = sites$site_id, year = years) |>
+    dplyr::left_join(sites, by = "site_id") |>
+    dplyr::mutate(
+      water_company = "Fixture Water",
+      annual_status = status_by_year[match(.data$year, years)],
+      ngr = "TQ000000"
+    ) |>
+    as.data.frame()
+}
+
+fixture_monthly <- function(jan_2014 = 2L) {
+  # Sparse positive-count months, as in the real file: Feb 2014 absent, Oct 2014 absent.
+  data.frame(
+    year = c(2013L, 2014L, 2014L, 2014L, 2022L, 2022L, 2024L),
+    month = c(12L, 1L, 3L, 4L, 7L, 8L, 12L),
+    article_count = c(5L, jan_2014, 1L, 2L, 4L, 6L, 3L)
+  )
+}
+
+fixture_evidence <- function(status = "established", coverage_end = as.Date("2025-06-01")) {
+  list(status = status, reasons = if (status == "established") character() else "fixture: coverage unknown",
+       coverage_end = if (status == "established") coverage_end else as.Date(NA))
+}
+
+FIXTURE_CHECKS$u2 <- list(
+
+  band_boundaries_exact = function() {
+    d <- c(0, 250, 500, 500.001, 750, 1000, 1000.001, 1500, 2000, 2000.001, NA)
+    got <- assign_bands(d, CONFIG$bands)
+    want <- c(1L, 1L, 1L, NA, NA, NA, 0L, 0L, 0L, NA, NA)
+    assert_true(identical(got, want), sprintf("KTD5 boundaries: got %s", paste(got, collapse = ",")))
+    assert_true(is.integer(got), "bands are integer")
+    TRUE
+  },
+
+  nearest_matches_exhaustive_distances = function() {
+    sites <- tibble::tibble(site_id = c(11L, 12L, 13L, 14L),
+                            easting = c(400000, 401500, 404000, 399000), northing = c(300000, 300800, 299500, 302500),
+                            usable = TRUE)
+    props <- data.table::data.table(easting = c(400100, 401600, 403950, 399100, 402500, 400750),
+                                    northing = c(300050, 300700, 299600, 302400, 300200, 300400))
+    got <- nearest_site_distance(props, sites)
+    full <- outer(seq_len(nrow(props)), seq_len(nrow(sites)), function(i, j) {
+      sqrt((props$easting[i] - sites$easting[j])^2 + (props$northing[i] - sites$northing[j])^2)
+    })
+    want_site <- sites$site_id[apply(full, 1L, which.min)]
+    want_dist <- apply(full, 1L, min)
+    assert_true(identical(got$site_id, want_site), "nearest site equals the exhaustive minimum")
+    assert_true(max(abs(got$distance_m - want_dist)) < 1e-6, "distance equals the exhaustive minimum")
+    assert_true(nrow(got) == nrow(props), "one row per unique coordinate")
+    TRUE
+  },
+
+  ae3_monitoring_history_leaves_exposure_unchanged = function() {
+    always <- project_sites(fixture_crosswalk(rep("reported_positive", 4L)))
+    late <- project_sites(fixture_crosswalk(c("absent", "absent", "absent", "reported_positive")))
+    assert_true(identical(always$projection, late$projection), "AE3: projection identical when monitoring starts later")
+    assert_true(!any(grepl("available", names(late$projection))), "no availability columns in the projection")
+    props <- data.table::data.table(easting = c(400300, 401500), northing = 300000)
+    a <- nearest_site_distance(props, always$projection)
+    b <- nearest_site_distance(props, late$projection)
+    assert_true(identical(a, b), "AE3: distances identical")
+    assert_true(identical(assign_bands(a$distance_m), c(1L, 0L)), "300 m near; 1500 m far, regardless of monitoring")
+    TRUE
+  },
+
+  unusable_site_counted_and_omitted = function() {
+    sites <- tibble::tibble(site_id = 1:3, easting = c(400000, 403000, NA), northing = c(300000, 300000, NA))
+    out <- project_sites(fixture_crosswalk(sites = sites))
+    assert_true(out$n_sites == 3L && out$n_usable == 2L && out$n_unusable == 1L, "unusable site counted")
+    assert_true(identical(out$unusable_site_ids, 3L), "site 3 is the unusable one")
+    # A property that would sit on site 3 (had it a location) matches site 2 instead.
+    got <- nearest_site_distance(data.table::data.table(easting = 405000, northing = 300000), out$projection)
+    assert_true(got$site_id == 2L && abs(got$distance_m - 2000) < 1e-9, "unusable site omitted from matching")
+    none <- tibble::tibble(site_id = 1:2, easting = NA_real_, northing = NA_real_)
+    assert_error_matching(project_sites(fixture_crosswalk(sites = none)), "zero usable",
+                          "zero usable sites stop matching")
+    TRUE
+  },
+
+  zero_month_within_coverage_carries_stock_forward = function() {
+    cal <- build_attention_calendar("sales", fixture_monthly(2L), fixture_evidence("established"))
+    assert_true(all(cal$article_status == "valid"), "calendar valid under established coverage")
+    feb <- cal[cal$year == 2014L & cal$month == 2L, ]
+    assert_true(feb$article_count == 0 && feb$article_stock == 2 && feb$log_articles == log(2), "absent Feb 2014 is zero and carries the stock")
+    assert_true(cal$article_stock[cal$year == 2014L & cal$month == 4L] == 5, "stock cumulates 2+1+2")
+    assert_true(!any(cal$article_stock > 5 + 4 + 6 + 3), "2013 articles are excluded from the stock")
+    unknown <- build_attention_calendar("sales", fixture_monthly(2L), fixture_evidence("unavailable"))
+    assert_true(all(unknown$article_status == "blocked") && all(is.na(unknown$article_count)) &&
+                  all(is.na(unknown$log_articles)), "unknown coverage blocks rather than zero-fills")
+    assert_true(grepl("coverage not established", attr(unknown, "article_reason")), "reason names coverage")
+    short <- build_attention_calendar("sales", fixture_monthly(2L), fixture_evidence("established", as.Date("2020-12-01")))
+    assert_true(all(short$article_status == "blocked") && grepl("coverage ends", short$article_reason[[1L]]),
+                "coverage ending before the calendar end blocks")
+    TRUE
+  },
+
+  article_input_validation_failures = function() {
+    base <- fixture_monthly(2L)
+    assert_true(validate_article_input(base)$status == "passed", "fixture passes validation")
+    dup <- rbind(base, data.frame(year = 2014L, month = 3L, article_count = 1L))
+    v <- validate_article_input(dup)
+    assert_true(v$status == "failed" && any(grepl("duplicated", v$reasons)), "duplicate keys fail")
+    miss <- base; miss$article_count[2] <- NA
+    v <- validate_article_input(miss)
+    assert_true(v$status == "failed" && any(grepl("missing article counts", v$reasons)), "missing counts fail")
+    neg <- base; neg$article_count[2] <- -1L
+    assert_true(any(grepl("negative", validate_article_input(neg)$reasons)), "negative counts fail")
+    frac <- base; frac$article_count <- as.numeric(frac$article_count); frac$article_count[2] <- 1.5
+    assert_true(any(grepl("non-integer", validate_article_input(frac)$reasons)), "non-integer counts fail")
+    bad_month <- base; bad_month$month[2] <- 13L
+    assert_true(any(grepl("month must be", validate_article_input(bad_month)$reasons)), "invalid month fails")
+    blocked <- build_attention_calendar("sales", dup, fixture_evidence("established"))
+    assert_true(all(blocked$article_status == "blocked") && grepl("validation failed", blocked$article_reason[[1L]]),
+                "validation failure blocks the calendar")
+    TRUE
+  },
+
+  missing_export_evidence_is_not_replaced_by_observed_dates = function() {
+    ev <- article_export_evidence(pdf_dir = file.path(tempdir(), "no-such-export-dir"),
+                                  articles_path = "no-such-articles.parquet", monthly_path = "no-such-monthly.parquet")
+    assert_true(ev$status == "unavailable" && is.na(ev$coverage_end), "missing PDFs give unavailable evidence")
+    # The monthly fixture spans 2013-2024, yet the calendar stays blocked.
+    cal <- build_attention_calendar("sales", fixture_monthly(2L), ev)
+    assert_true(all(cal$article_status == "blocked") && all(is.na(cal$log_articles)),
+                "observed first/last dates do not establish coverage")
+    TRUE
+  },
+
+  positive_initial_stock_required = function() {
+    ok <- build_attention_calendar("sales", fixture_monthly(2L), fixture_evidence())
+    assert_true(ok$article_stock[[1L]] == 2 && ok$log_articles[[1L]] == log(2), "January 2014 stock of two is logged")
+    zero <- build_attention_calendar("sales", fixture_monthly(0L), fixture_evidence())
+    assert_true(all(zero$article_status == "blocked") && grepl("origin month 2014-01", zero$article_reason[[1L]]),
+                "zero initial stock blocks article cells")
+    assert_true(zero$year[[1L]] == 2014L && zero$month[[1L]] == 1L && zero$article_stock[[1L]] == 0 &&
+                  zero$article_stock[[3L]] == 1, "origin and cumulation unchanged; no offset or later origin")
+    assert_true(all(is.na(zero$log_articles)), "no log1p substitute")
+    TRUE
+  },
+
+  event_month_boundary_and_calendar_length = function() {
+    sales <- build_attention_calendar("sales", fixture_monthly(2L), fixture_evidence())
+    rentals <- build_attention_calendar("rentals", fixture_monthly(2L), fixture_evidence())
+    assert_true(nrow(sales) == 132L && nrow(rentals) == 120L, "132 sales months, 120 rental months")
+    assert_true(sales$post[sales$year == 2022L & sales$month == 7L] == 0L, "July 2022 is pre")
+    assert_true(sales$post[sales$year == 2022L & sales$month == 8L] == 1L, "August 2022 is post")
+    assert_true(sales$year[[1L]] == 2014L && sales$month_index[[1L]] == 1L && all(diff(sales$month_index) == 1L),
+                "calendar starts January 2014 with month_index 1 (no 2021-based indexing)")
+    assert_true(sum(sales$post == 0L) == 103L && sum(sales$year < 2021L) == 84L, "earlier months intact")
+    assert_true(sales$year[[132L]] == 2024L && sales$month[[132L]] == 12L && rentals$year[[120L]] == 2023L,
+                "market-specific end months")
+    TRUE
+  },
+
+  coverage_failure_keeps_post_columns_valid = function() {
+    panel <- data.table::data.table(month_index = c(1L, 103L, 104L, 132L))
+    blocked <- build_attention_calendar("sales", fixture_monthly(2L), fixture_evidence("unavailable"))
+    out <- attach_attention(panel, blocked)
+    assert_true(identical(out$post, c(0L, 0L, 1L, 1L)), "post valid when article cells are blocked")
+    assert_true(all(is.na(out$log_articles)), "log_articles NA when blocked")
+    valid <- build_attention_calendar("sales", fixture_monthly(2L), fixture_evidence())
+    out2 <- attach_attention(data.table::data.table(month_index = c(1L, 3L)), valid)
+    assert_true(identical(out2$log_articles, c(log(2), log(3))), "log_articles joined by month_index")
+    assert_error_matching(attach_attention(data.table::data.table(month_index = c(0L, 133L)), valid),
+                          "no calendar month", "rows outside the calendar stop")
+    TRUE
+  },
+
+  apply_exposure_bands_then_repeats_then_flags = function() {
+    cfg <- fixture_sales_cfg()
+    history <- fixture_sales_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    contract <- apply_sample_contract(history, mapping, "sales", cfg)
+    # Fixture eastings run 400000-400070 on one northing, so one site places every
+    # row in the same band: 400000 -> near (0-70 m); 398500 -> far (1500-1570 m);
+    # 399250 -> omitted band (750-820 m).
+    site_at <- function(e) tibble::tibble(site_id = 1L, easting = e, northing = 300000, usable = TRUE)
+    out <- apply_exposure(contract$panel, site_at(400000), contract$ledger, "sales", cfg)
+    steps <- out$ledger$step
+    assert_true(identical(utils::tail(steps, 2L), c("distance_bands", "two_distinct_dates")), "band and repeat steps appended in order")
+    assert_ledger_identity(out$ledger)
+    p <- out$panel
+    assert_true(all(c("site_id", "distance_m", "near", "band", "change_property_type", "any_change") %in% names(p)),
+                "exposure and flag columns present")
+    assert_true(all(is.finite(p$distance_m)) && all(p$near == 1L) && all(p$band == "near"), "every retained row has one exposure; all near")
+    assert_true(out$ledger$n_rows_removed[steps == "distance_bands"] == 0 &&
+                  out$ledger$n_rows_removed[steps == "two_distinct_dates"] == 4 &&
+                  nrow(p) == 6L && data.table::uniqueN(p$repeat_id) == 3L, "bands keep 10 rows; singles D, E, G, H drop at two_distinct_dates")
+    assert_true(!"h10" %in% p$id, "AE1 single drops at two_distinct_dates")
+    assert_true(nrow(out$change_flags) == 3L && all(!p$any_change), "no property changes type; flags joined without restriction")
+    far <- apply_exposure(contract$panel, site_at(398500), contract$ledger, "sales", cfg)
+    assert_true(all(far$panel$near == 0L) && nrow(far$panel) == 6L, "all rows far with the shifted site")
+    omitted <- apply_exposure(contract$panel, site_at(399250), contract$ledger, "sales", cfg)
+    assert_true(omitted$ledger$n_rows_removed[omitted$ledger$step == "distance_bands"] == 10 && nrow(omitted$panel) == 0L,
+                "rows in (500, 1000] leave at distance_bands")
+    # A property whose type changes is flagged but retained.
+    history2 <- data.table::copy(history)[house_id == "h02", property_type := "D"]
+    out2 <- apply_exposure(apply_sample_contract(history2, mapping, "sales", cfg)$panel, site_at(400000), contract$ledger, "sales", cfg)
+    assert_true(all(out2$panel[id %in% c("h01", "h02"), any_change]) && nrow(out2$panel) == nrow(p),
+                "changed property flagged and retained")
+    TRUE
+  }
+)
+
 fixture_results <- run_fixture_checks(FIXTURE_CHECKS)
 ```
 
 ```{r}
-#| label: estimate-inputs
+#| label: estimate
 #| include: false
 #| eval: !expr params$reestimate
 
-# Readiness pass (U1). Later units fold this loop into the `estimate` chunk so
-# that each market's panel is used for exposure and fitting and then released.
+# Per-market loop (U1 readiness -> U2 exposure and attention; U3 adds fitting).
+# Shared inputs are loaded once; each market's pre-band panel is released as
+# soon as the bands are applied.
+site_projection <- load_site_projection(CONFIG$crosswalk_path, CONFIG$crosswalk_years)
+article_input <- load_article_monthly(CONFIG$articles_path)
+article_validation <- validate_article_input(article_input$monthly)
+article_evidence <- article_export_evidence(CONFIG$article_pdf_dir, CONFIG$article_records_path, CONFIG$articles_path)
+attention_calendars <- lapply(MARKETS, function(m) {
+  build_attention_calendar(m, article_input$monthly, article_evidence, article_validation)
+})
+names(attention_calendars) <- MARKETS
+input_provenance <- dplyr::bind_rows(site_projection$provenance, article_input$provenance, article_evidence$provenance)
+
 readiness <- list()
 observation_diagnostics <- list()
 exclusion_ledger <- new_ledger()
-input_provenance <- tibble::tibble()
-market_panels <- list()
+market_data <- list()
 for (market in MARKETS) {
+  started <- Sys.time()
   prepared <- prepare_market_panel(market)
   readiness[[market]] <- prepared$readiness
   observation_diagnostics[[market]] <- prepared$diagnostics
-  exclusion_ledger <- dplyr::bind_rows(exclusion_ledger, prepared$ledger)
   input_provenance <- dplyr::bind_rows(input_provenance, prepared$provenance)
-  market_panels[[market]] <- prepared$panel
-  rm(prepared)
+  entry <- list(market = market, status = prepared$status, reason = prepared$reason, panel = NULL,
+                change_flags = NULL, ledger = prepared$ledger, readiness = prepared$readiness,
+                diagnostics = prepared$diagnostics, exposure_summary = NULL,
+                calendar = attention_calendars[[market]])
+  if (prepared$status == "ready") {
+    exposure <- apply_exposure(prepared$panel, site_projection$projection, prepared$ledger, market)
+    rm(prepared)
+    invisible(gc())
+    panel <- attach_attention(exposure$panel, attention_calendars[[market]])
+    entry$panel <- panel
+    entry$change_flags <- exposure$change_flags
+    entry$ledger <- exposure$ledger
+    entry$distance_summary_all <- exposure$distance_summary_all
+    entry$exposure_summary <- exposure_summaries(panel, market)
+    rm(exposure, panel)
+  } else {
+    rm(prepared)
+  }
+  entry$runtime_seconds <- as.numeric(difftime(Sys.time(), started, units = "secs"))
+  exclusion_ledger <- dplyr::bind_rows(exclusion_ledger, entry$ledger)
+  market_data[[market]] <- entry
+  rm(entry)
   invisible(gc())
 }
 assert_ledger_identity(exclusion_ledger)
@@ -1418,8 +2116,8 @@ if (!is.null(u)) {
 ### Exclusion ledger
 
 Each row is one restriction in the plan's order; consecutive rows chain exactly.
-The distance-band restriction and the two-distinct-dates requirement follow in
-the exposure section.
+The distance-band restriction and the two-distinct-dates requirement are the
+last two rows and are discussed in the exposure section.
 
 ```{r}
 #| label: readiness-ledger
@@ -1427,7 +2125,7 @@ the exposure section.
 #| results: asis
 
 knitr::kable(exclusion_ledger, format = "html", format.args = list(big.mark = ","),
-             caption = "Exclusion ledger through the common requirements (pre-band)")
+             caption = "Exclusion ledger: requested dates through the distance bands and the two-distinct-dates requirement")
 
 coverage_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) readiness[[m]]$coverage))
 if (nrow(coverage_rows) > 0L) {
@@ -1480,7 +2178,188 @@ for (m in MARKETS) {
 
 ## Exposure and attention
 
-Placeholder for U2: fixed site projection, nearest distance, bands, attention calendar.
+Exposure is fixed from overflow locations alone. The Site Group crosswalk for
+2021–2024 is projected to one representative location per Site Group with the
+existing latest-valid rule; `annual_status` is read only so that the projection
+helper can validate the crosswalk's structure, and no monitoring, spill or
+availability information enters eligibility (AE3). Each unique property
+coordinate is matched to its nearest usable Site Group with an STRtree-indexed
+nearest-feature search in British National Grid metres, so no
+coordinate-by-site matrix is ever formed. Near is 0–500 m inclusive, far is
+greater than 1,000 m and at most 2,000 m; the intervening band and everything
+beyond 2 km are dropped. The two-distinct-dates requirement is then recomputed
+on the banded panel, and characteristic-change flags are frozen on that eligible
+long-run panel before any complete-case or short-window restriction.
+
+### Fixed site projection
+
+```{r}
+#| label: exposure-projection
+#| eval: !expr params$reestimate
+#| results: asis
+
+projection_rows <- tibble::tibble(
+  item = c("Crosswalk rows read", "Configured years", "Site Groups", "Usable locations (finite easting and northing)",
+           "Site Groups without a valid location (counted, omitted from matching)", "Water companies",
+           "Location rule", "Property coordinates", "Geography labels", "Postcode lookup (stated cleaning vintage)"),
+  value = c(format_count(site_projection$n_crosswalk_rows),
+            paste(range(site_projection$years), collapse = "-"),
+            format_count(site_projection$n_sites), format_count(site_projection$n_usable),
+            format_count(site_projection$n_unusable), format_count(site_projection$n_water_companies),
+            "latest configured year with nonmissing NGR, easting and northing (derive_site_group_projection)",
+            "postcode-centroid British National Grid coordinates from the ONS postcode lookup attached at cleaning",
+            "2011 LSOA/MSOA codes",
+            sprintf("%s (%s)", sub(paste0("^", here::here(), "/"), "", CONFIG$postcode_lookup_path),
+                    ifelse(file.exists(CONFIG$postcode_lookup_path), "present", "absent")))
+)
+knitr::kable(projection_rows, format = "html", caption = "Fixed Site Group projection")
+```
+
+Distances are postcode-centroid to Site Group representative location, so
+dwellings around a band boundary can be misclassified, and "far" means far from
+a usable mapped representative rather than verified absence of a closer
+unmapped overflow. Unique-coordinate counts relative to property counts (below)
+show how many properties share a postcode centroid.
+
+### Distance bands and repeat support
+
+```{r}
+#| label: exposure-bands
+#| eval: !expr params$reestimate
+#| results: asis
+
+exposure_steps <- exclusion_ledger[exclusion_ledger$step %in% c("distance_bands", "two_distinct_dates"), ]
+emit_table(knitr::kable(exposure_steps, format = "html", format.args = list(big.mark = ","),
+                        caption = "Exclusion ledger: distance bands and the two-distinct-dates requirement"))
+
+for (m in MARKETS) {
+  md <- market_data[[m]]
+  if (md$status != "ready") { cat("\n\n", m, ": exposure unavailable (", md$reason, ")\n\n", sep = ""); next }
+  cat("\n\n#### ", tools::toTitleCase(m), "\n\n", sep = "")
+  s <- md$exposure_summary
+  emit_table(knitr::kable(md$distance_summary_all, format = "html", digits = 3, format.args = list(big.mark = ","),
+                          caption = "Nearest-site matching on the pre-band panel: unique coordinates and band shares"))
+  emit_table(knitr::kable(s$band_counts, format = "html", digits = 1, format.args = list(big.mark = ","),
+                          caption = "Eligible long-run panel by band: rows, properties, unique coordinates, matched Site Groups and distance quantiles (m)"))
+  emit_table(knitr::kable(s$by_period, format = "html", format.args = list(big.mark = ","),
+                          caption = "Rows and properties by band and event period (post = August 2022 onward)"))
+  emit_table(knitr::kable(s$both_sides_event, format = "html", digits = 4, format.args = list(big.mark = ","),
+                          caption = "Properties observed before and after August 2022, by band"))
+  emit_table(knitr::kable(s$change_prevalence, format = "html", digits = 4, format.args = list(big.mark = ","),
+                          caption = "Characteristic-change prevalence by band (frozen on the eligible long-run panel; retained in the headline)"))
+  emit_table(knitr::kable(s$change_rows, format = "html", digits = 4, format.args = list(big.mark = ","),
+                          caption = "Rows belonging to properties with any observed characteristic change"))
+  d <- s$diagnostics_by_band
+  sp <- d$spatial
+  precision <- tibble::tibble(
+    item = c("Rows", "Repeat properties", "Unique coordinates", "Unique postcodes", "Properties per unique coordinate"),
+    value = c(format_count(sp$n_rows), format_count(sp$n_properties), format_count(sp$n_unique_coordinates),
+              format_count(sp$n_unique_postcodes), sprintf("%.2f", sp$n_properties / sp$n_unique_coordinates))
+  )
+  emit_table(knitr::kable(precision, format = "html", caption = "Spatial precision on the eligible long-run panel"))
+  emit_table(knitr::kable(sp$quality_distribution, format = "html", format.args = list(big.mark = ","),
+                          caption = "Coordinate quality (ONS gridind)"))
+  emit_table(knitr::kable(d$group_sizes, format = "html", format.args = list(big.mark = ","),
+                          caption = "Observations per repeat group, by band"))
+  emit_table(knitr::kable(d$gap_summary, format = "html", digits = 3, format.args = list(big.mark = ","),
+                          caption = "Inter-observation gaps (days), by band"))
+  emit_table(knitr::kable(d$same_month, format = "html", digits = 4, format.args = list(big.mark = ","),
+                          caption = "Same-month consecutive repeats, by band"))
+  emit_table(knitr::kable(d$extreme_ratio_total, format = "html", digits = 4, format.args = list(big.mark = ","),
+                          caption = sprintf("Consecutive pairs with annualised price ratio above %s or below 1/%s, by band",
+                                            CONFIG$extreme_annualized_price_ratio, CONFIG$extreme_annualized_price_ratio)))
+  if (!is.null(d$rented_fallback_by_year)) {
+    emit_table(knitr::kable(d$rented_fallback_by_year, format = "html", digits = 4, format.args = list(big.mark = ","),
+                            caption = "rented_est fallback share by band and year"))
+  }
+}
+```
+
+### Attention calendar
+
+The attention measures are a post indicator (August 2022 onward, set from the
+configured event month and independent of any helper's base year) and the log
+of the cumulative count of search-1 LexisNexis articles from January 2014. The
+stock excludes every earlier article. Absent months are filled with zero only
+inside established coverage of this fixed corpus, which is recomputed here from
+the export PDFs: contiguous result segments across the export files, per-file
+record counts that sum to the extracted article rows, an article-level monthly
+`n()` that reproduces the monthly file, and one query with no date narrowing on
+every cover page. Observed first and last article dates never stand in for that
+evidence. When any check fails, the article cells are blocked and the post and
+annual-profile analyses continue.
+
+Established coverage certifies only that the extraction matches the export of
+this one Boolean search at export time. The July 2026 LexisNexis refinement
+plan documents off-topic matches and merged article boundaries with potentially
+misassigned metadata in this corpus; those limits are inherited here without
+filtering or repair, and the counts do not certify comprehensive or
+compositionally constant UK media coverage.
+
+```{r}
+#| label: attention-evidence
+#| eval: !expr params$reestimate
+#| results: asis
+
+validation_rows <- tibble::tibble(
+  item = c("Monthly input status", "Rows (observed positive-count months)", "Articles in observed months",
+           "First and last observed months", "Reasons"),
+  value = c(article_validation$status, format_count(article_validation$n_rows),
+            format_count(article_validation$n_articles),
+            paste(article_validation$first_month, article_validation$last_month, sep = " to "),
+            ifelse(length(article_validation$reasons) == 0L, "none", paste(article_validation$reasons, collapse = "; ")))
+)
+emit_table(knitr::kable(validation_rows, format = "html", caption = "Article input validation (search1_monthly)"))
+
+ev <- article_evidence
+if (nrow(ev$files) > 0L) {
+  files_display <- dplyr::select(ev$files, file, pages, export_date, job_number, search_type, first_result,
+                                 n_date_fields, date_restriction_detected)
+  emit_table(knitr::kable(files_display, format = "html", format.args = list(big.mark = ","),
+                          caption = sprintf("Export PDFs (cover fields and result lists). Search terms on every cover: %s", ev$search_terms)))
+}
+evidence_rows <- tibble::tibble(
+  item = c("Coverage status", "Segments contiguous (first results 1, 501, ...)", "PDF record fields",
+           "Extracted article rows", "Records reconciled", "Article-level monthly n() reproduces the monthly file",
+           "Months compared / mismatched", "Query and cover narrowing consistent across files", "Date restriction on cover",
+           "Article dates in the extraction", "Earliest export date", "Established coverage end", "Reasons"),
+  value = c(ev$status, as.character(ev$segments_contiguous), format_count(ev$n_records_pdf),
+            format_count(ev$n_articles_file), as.character(ev$records_reconciled), as.character(ev$monthly_reproduced),
+            paste(ev$n_months_compared, ev$n_months_mismatched, sep = " / "), as.character(ev$query_consistent),
+            as.character(ev$date_restriction_detected),
+            paste(ev$article_date_min, ev$article_date_max, sep = " to "), as.character(ev$export_date_min),
+            as.character(ev$coverage_end),
+            ifelse(length(ev$reasons) == 0L, "none", paste(ev$reasons, collapse = "; ")))
+)
+emit_table(knitr::kable(evidence_rows, format = "html", caption = "Export reconciliation and coverage evidence (recomputed at render time)"))
+
+calendar_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
+  cal <- attention_calendars[[m]]
+  tibble::tibble(
+    market = m, months = nrow(cal), first = sprintf("%04d-%02d", cal$year[[1L]], cal$month[[1L]]),
+    last = sprintf("%04d-%02d", cal$year[[nrow(cal)]], cal$month[[nrow(cal)]]),
+    post_months = sum(cal$post), article_status = cal$article_status[[1L]],
+    origin_stock = cal$article_stock[[1L]], final_stock = cal$article_stock[[nrow(cal)]],
+    reason = ifelse(is.na(cal$article_reason[[1L]]), "", cal$article_reason[[1L]])
+  )
+}))
+emit_table(knitr::kable(calendar_rows, format = "html", format.args = list(big.mark = ","),
+                        caption = "Attention calendars by market"))
+```
+
+```{r}
+#| label: attention-history
+#| eval: !expr params$reestimate
+#| fig-width: 8
+#| fig-height: 5.5
+
+sales_calendar <- attention_calendars$sales
+if (all(sales_calendar$article_status == "valid")) {
+  plot_attention_history(sales_calendar)
+} else {
+  cat("Attention history not plotted: ", attr(sales_calendar, "article_reason"), "\n")
+}
+```
 
 ## Results
 
