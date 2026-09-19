@@ -38,14 +38,16 @@ so the near–far gap is identified from within-property price changes across
 calendar months. Sales cover January 2014 through December 2024; rentals cover
 January 2014 through December 2023.
 
-The report first establishes that the inputs are usable: mapping integrity,
-current-address consistency of the repeat mappings, an ordered sample contract
-with an exclusion ledger, and observation diagnostics. It then fixes exposure
-from overflow locations alone, builds the attention calendar with its coverage
-evidence, and reports the banded repeat panel. Estimation and the coefficient
-comparisons follow in later sections.
-
-**This rendering:** `r if (params$reestimate) "inputs re-validated and analyses re-estimated from the published inputs." else "results loaded from the saved bundle in output/regs."`
+The findings come first: the coefficient comparison across the full model grid,
+the headline cells, and the annual near–far profiles. The design section gives
+the equations, sample variants and inference conventions; the full-results
+section carries every cell, its estimation support and the residual-variation
+measures; the sample-flows section regenerates the readiness evidence (mapping
+integrity, current-address verification, the exclusion ledger, exposure and the
+attention calendar); limitations and the reproduction contract follow, and the
+Appendix explains what the improved repeat-data cleaning resolved. Every number
+is computed from the results bundle that this render either rebuilt or
+validated and loaded.
 
 ```{r}
 #| label: setup
@@ -53,7 +55,7 @@ comparisons follow in later sections.
 
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 check_required_packages(c(
-  "arrow", "data.table", "digest", "dplyr", "fixest", "ggplot2", "here", "knitr",
+  "arrow", "data.table", "digest", "dplyr", "fixest", "ggplot2", "here", "jsonlite", "knitr",
   "lubridate", "sf", "tibble", "tidyr", "tidyselect", "withr"
 ))
 source(here::here("scripts", "R", "utils", "hash_utils.R"), local = TRUE)
@@ -2020,6 +2022,761 @@ assert_model_grid_complete <- function(cells, profiles, markets = MARKETS) {
 #| include: false
 
 # U4: fingerprints, bundle validation, atomic save, load, artifact export.
+
+# ---- Fingerprint contract (KTD8) ----------------------------------------------------
+#
+# Computational identity = the labelled computational chunks of this QMD + the four
+# sourced helper files + canonical CONFIG + versions of the computational packages +
+# content hashes of every consumed input. Prose, display chunks, display packages and
+# the `reestimate` switch are outside the fingerprint.
+
+COMPUTATIONAL_CHUNK_LABELS <- c("setup", "helpers-inputs", "helpers-exposure", "helpers-models",
+                                "helpers-bundle", "fixture-checks", "estimate")
+COMPUTATIONAL_PACKAGES <- c("arrow", "data.table", "fixest", "sf", "dplyr", "tidyr", "digest",
+                            "lubridate", "tibble", "withr", "tidyselect")
+DISPLAY_PACKAGES <- c("ggplot2", "knitr", "rmarkdown")
+HELPER_FILES <- c("hash_utils.R", "repeat_transactions_utils.R", "site_group_utils.R", "script_setup.R")
+REPORT_QMD_NAME <- "2026-09-19-001-long-run-public-attention-repeat-properties.qmd"
+FINGERPRINT_ALGO <- "sha256"
+
+computational_chunk_labels <- function() COMPUTATIONAL_CHUNK_LABELS
+
+helper_file_paths <- function() {
+  stats::setNames(here::here("scripts", "R", "utils", HELPER_FILES), HELPER_FILES)
+}
+
+hash_text <- function(x) {
+  digest::digest(paste(x, collapse = "\n"), algo = FINGERPRINT_ALGO, serialize = FALSE)
+}
+
+hash_file_content <- function(path) digest::digest(file = path, algo = "xxhash64")
+
+project_relative_path <- function(path, root = here::here()) {
+  escaped <- gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", root)
+  sub(paste0("^", escaped, "/"), "", path)
+}
+
+resolve_project_path <- function(path) {
+  ifelse(file.exists(path), path, here::here(path))
+}
+
+render_command <- function(reestimate = TRUE) {
+  sprintf("quarto render docs/reports/%s --to html -P reestimate:%s", REPORT_QMD_NAME,
+          if (reestimate) "true" else "false")
+}
+
+# The source being rendered. Quarto knits an intermediate `<stem>.rmarkdown` copy next
+# to the QMD; the sibling `.qmd` is preferred so the hash covers the committed source.
+report_qmd_path <- function() {
+  current <- tryCatch(knitr::current_input(dir = TRUE), error = function(e) NULL)
+  candidates <- character()
+  if (is.character(current) && length(current) == 1L && !is.na(current) && nzchar(current)) {
+    candidates <- c(sub("\\.rmarkdown$", ".qmd", current), current)
+  }
+  candidates <- c(candidates, here::here("docs", "reports", REPORT_QMD_NAME))
+  hit <- candidates[file.exists(candidates)]
+  if (length(hit) == 0L) {
+    stop("Cannot locate the report source to fingerprint; looked for ", paste(candidates, collapse = ", "),
+         call. = FALSE)
+  }
+  normalizePath(hit[[1L]])
+}
+
+# Code text of labelled R chunks: ```{r} fences plus `#| label:` option lines.
+qmd_chunk_sources <- function(qmd_path, labels) {
+  lines <- readLines(qmd_path, warn = FALSE)
+  opens <- grep("^```\\{r[^}]*\\}\\s*$", lines)
+  closes <- grep("^```\\s*$", lines)
+  chunks <- list()
+  for (open in opens) {
+    close <- closes[closes > open][1L]
+    if (is.na(close)) stop("Unterminated R chunk at line ", open, " of ", qmd_path, call. = FALSE)
+    body <- lines[seq.int(open + 1L, length.out = max(0L, close - open - 1L))]
+    label_line <- grep("^#\\|\\s*label:", body, value = TRUE)
+    if (length(label_line) == 0L) next
+    label <- trimws(sub("^#\\|\\s*label:\\s*", "", label_line[[1L]]))
+    if (label %in% names(chunks)) stop("Duplicate chunk label `", label, "` in ", qmd_path, call. = FALSE)
+    chunks[[label]] <- paste(body, collapse = "\n")
+  }
+  missing <- setdiff(labels, names(chunks))
+  if (length(missing) > 0L) {
+    stop("Computational chunks not found in ", qmd_path, ": ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  chunks[labels]
+}
+
+code_fingerprint <- function(qmd_path = report_qmd_path(), helper_paths = helper_file_paths(),
+                             labels = computational_chunk_labels()) {
+  chunks <- qmd_chunk_sources(qmd_path, labels)
+  helpers <- vapply(helper_paths, function(p) {
+    if (!file.exists(p)) stop("Helper file for the code fingerprint is missing: ", p, call. = FALSE)
+    paste(readLines(p, warn = FALSE), collapse = "\n")
+  }, character(1))
+  parts <- c(stats::setNames(vapply(chunks, hash_text, character(1)), paste0("chunk:", names(chunks))),
+             stats::setNames(vapply(helpers, hash_text, character(1)), paste0("helper:", names(helper_paths))))
+  list(hash = hash_text(paste(names(parts), parts, sep = "=")), parts = parts)
+}
+
+# Dates become ISO strings, absolute project paths become project-relative, integer and
+# double vectors are both serialised as numbers. `params$reestimate` is not in CONFIG.
+canonical_settings <- function(config, root = here::here()) {
+  walk <- function(x) {
+    if (inherits(x, "Date")) return(format(x, "%Y-%m-%d"))
+    if (is.list(x)) return(lapply(x, walk))
+    if (is.character(x)) return(project_relative_path(x, root))
+    if (is.numeric(x)) return(as.numeric(x))
+    x
+  }
+  walk(config)
+}
+
+settings_json <- function(x) {
+  as.character(jsonlite::toJSON(x, auto_unbox = TRUE, digits = NA, null = "null", na = "null"))
+}
+
+settings_fingerprint <- function(config = CONFIG) {
+  canon <- canonical_settings(config)
+  if (is.null(names(canon)) || any(names(canon) == "")) stop("CONFIG entries must all be named.", call. = FALSE)
+  parts <- vapply(names(canon), function(k) hash_text(settings_json(canon[k])), character(1))
+  list(hash = hash_text(settings_json(canon)), parts = parts)
+}
+
+package_versions <- function(packages) {
+  vapply(packages, function(p) as.character(utils::packageVersion(p)), character(1))
+}
+
+package_fingerprint <- function() {
+  versions <- c(R = R.version.string, package_versions(COMPUTATIONAL_PACKAGES))
+  list(hash = hash_text(paste(names(versions), versions, sep = "=")), versions = versions)
+}
+
+quarto_version_string <- function() {
+  out <- tryCatch(suppressWarnings(system2("quarto", "--version", stdout = TRUE, stderr = TRUE)),
+                  error = function(e) character())
+  if (length(out) == 0L || is.na(out[[1L]]) || !nzchar(out[[1L]])) NA_character_ else trimws(out[[1L]])
+}
+
+display_package_versions <- function() {
+  c(package_versions(DISPLAY_PACKAGES), quarto = quarto_version_string())
+}
+
+# `inputs`: tibble(input, path, content_hash, generation_id, ...). With `rehash`, the file
+# bytes are hashed again now (missing files hash to NA and surface as differences).
+input_fingerprint <- function(inputs, rehash = TRUE) {
+  if (anyDuplicated(inputs$input) > 0L) stop("Input names must be unique for the fingerprint.", call. = FALSE)
+  hashes <- if (rehash) {
+    vapply(inputs$path, function(p) {
+      p <- resolve_project_path(p)
+      if (file.exists(p)) hash_file_content(p) else NA_character_
+    }, character(1), USE.NAMES = FALSE)
+  } else {
+    as.character(inputs$content_hash)
+  }
+  names(hashes) <- inputs$input
+  ordering <- order(names(hashes))
+  hashes <- hashes[ordering]
+  generation_ids <- stats::setNames(as.character(inputs$generation_id), inputs$input)[names(hashes)]
+  list(hash = hash_text(paste(names(hashes), hashes, sep = "=")), hashes = hashes, generation_ids = generation_ids)
+}
+
+combined_fingerprint <- function(inputs_hash, code_hash, settings_hash, packages_hash) {
+  hash_text(c(inputs = inputs_hash, code = code_hash, settings = settings_hash, packages = packages_hash))
+}
+
+compute_fingerprint <- function(inputs, rehash = TRUE, config = CONFIG, qmd_path = report_qmd_path(),
+                                helper_paths = helper_file_paths()) {
+  inp <- input_fingerprint(inputs, rehash = rehash)
+  code <- code_fingerprint(qmd_path, helper_paths)
+  settings <- settings_fingerprint(config)
+  packages <- package_fingerprint()
+  list(
+    inputs = inp$hashes, inputs_hash = inp$hash, generation_ids = inp$generation_ids,
+    code = code$hash, code_parts = code$parts,
+    settings = settings$hash, settings_parts = settings$parts,
+    packages = packages$hash, package_versions = packages$versions,
+    combined = combined_fingerprint(inp$hash, code$hash, settings$hash, packages$hash)
+  )
+}
+
+differing_names <- function(saved, current) {
+  keys <- sort(union(names(saved), names(current)))
+  keys[vapply(keys, function(k) !identical(unname(saved[k]), unname(current[k])), logical(1))]
+}
+
+# Character vector naming every component that differs (empty when compatible).
+fingerprint_differences <- function(saved, current) {
+  out <- character()
+  for (n in sort(union(names(saved$inputs), names(current$inputs)))) {
+    s <- if (n %in% names(saved$inputs)) saved$inputs[[n]] else NA_character_
+    now <- if (n %in% names(current$inputs)) current$inputs[[n]] else NA_character_
+    if (identical(s, now)) next
+    what <- if (is.na(now)) "now missing or unreadable" else if (is.na(s)) "absent from the saved bundle" else "content changed"
+    out <- c(out, sprintf("input `%s` (%s)", n, what))
+  }
+  if (!identical(saved$code, current$code)) {
+    parts <- differing_names(saved$code_parts, current$code_parts)
+    out <- c(out, sprintf("code (%s)", if (length(parts) > 0L) paste(parts, collapse = ", ") else "computational chunks or helper files"))
+  }
+  if (!identical(saved$settings, current$settings)) {
+    parts <- differing_names(saved$settings_parts, current$settings_parts)
+    out <- c(out, sprintf("settings (%s)", if (length(parts) > 0L) paste(parts, collapse = ", ") else "CONFIG"))
+  }
+  if (!identical(saved$packages, current$packages)) {
+    parts <- differing_names(saved$package_versions, current$package_versions)
+    detail <- vapply(parts, function(p) sprintf("%s %s -> %s", p, saved$package_versions[p] %||% "absent",
+                                                current$package_versions[p] %||% "absent"), character(1))
+    out <- c(out, sprintf("packages (%s)", if (length(detail) > 0L) paste(detail, collapse = ", ") else "computational versions"))
+  }
+  if (length(out) == 0L && !identical(saved$combined, current$combined)) out <- "combined fingerprint"
+  out
+}
+
+# ---- Sample membership: compact storage --------------------------------------------
+#
+# Per market: the id dictionary once, each variant's input index, and for every fitted
+# key only the rows the estimator REMOVED from its variant input (plus the retained
+# count). Retained rows are a subsequence of the variant input, so the input less the
+# removed rows reconstructs them; the reconstruction is asserted before saving. When a
+# retained index is not such a subsequence the full index is stored instead.
+
+sample_variant_of_key <- function(key) {
+  parts <- strsplit(key, "__", fixed = TRUE)[[1L]]
+  if (length(parts) != 4L) stop("Malformed model key: ", key, call. = FALSE)
+  if (parts[[4L]] == "profile") "headline" else parts[[2L]]
+}
+
+compress_market_samples <- function(s) {
+  if (length(s$ids) == 0L) {
+    return(list(ids = character(), variants = list(), estimated = list(), metadata = s$metadata))
+  }
+  estimated <- lapply(names(s$estimated), function(key) {
+    retained <- as.integer(s$estimated[[key]])
+    if (length(retained) == 0L) return(list(n_retained = 0L))
+    input <- as.integer(s$variants[[sample_variant_of_key(key)]])
+    if (is.null(input)) stop("No variant input sample for ", key, call. = FALSE)
+    if (!all(retained %in% input)) stop("Estimated rows for ", key, " fall outside the variant input sample.", call. = FALSE)
+    removed <- input[!(input %in% retained)]
+    if (identical(input[!(input %in% removed)], retained)) {
+      list(n_retained = length(retained), removed = removed)
+    } else {
+      list(n_retained = length(retained), retained = retained)
+    }
+  })
+  names(estimated) <- names(s$estimated)
+  list(ids = as.character(s$ids), variants = lapply(s$variants, as.integer), estimated = estimated,
+       metadata = s$metadata)
+}
+
+compress_samples <- function(samples) lapply(samples, compress_market_samples)
+
+expand_estimated_rows <- function(market_samples, key) {
+  e <- market_samples$estimated[[key]]
+  if (is.null(e) || e$n_retained == 0L) return(integer())
+  retained <- if (!is.null(e$retained)) {
+    e$retained
+  } else {
+    input <- market_samples$variants[[sample_variant_of_key(key)]]
+    input[!(input %in% e$removed)]
+  }
+  if (length(retained) != e$n_retained) stop("Retained rows for ", key, " do not reconstruct.", call. = FALSE)
+  retained
+}
+
+expand_samples <- function(samples) {
+  lapply(samples, function(s) {
+    estimated <- lapply(names(s$estimated), function(key) expand_estimated_rows(s, key))
+    names(estimated) <- names(s$estimated)
+    list(ids = s$ids, variants = s$variants, estimated = estimated, metadata = s$metadata)
+  })
+}
+
+sample_retained_count <- function(market_samples, key) {
+  e <- market_samples$estimated[[key]]
+  if (is.null(e)) 0L else as.integer(e$n_retained)
+}
+
+assert_samples_roundtrip <- function(samples, compressed) {
+  expanded <- expand_samples(compressed)
+  for (m in names(samples)) {
+    if (!identical(as.character(samples[[m]]$ids), expanded[[m]]$ids)) stop("Sample ids changed in compression for ", m, call. = FALSE)
+    for (v in names(samples[[m]]$variants)) {
+      if (!identical(as.integer(samples[[m]]$variants[[v]]), expanded[[m]]$variants[[v]])) stop("Variant sample ", v, " changed in compression for ", m, call. = FALSE)
+    }
+    for (key in names(samples[[m]]$estimated)) {
+      if (!identical(as.integer(samples[[m]]$estimated[[key]]), expanded[[m]]$estimated[[key]])) stop("Estimated rows for ", key, " do not survive compression.", call. = FALSE)
+    }
+  }
+  invisible(TRUE)
+}
+
+# ---- Bundle assembly and validation ------------------------------------------------
+
+BUNDLE_COMPONENTS <- c("metadata", "inputs", "readiness", "markets", "exclusions", "observation_diagnostics",
+                       "site_projection", "calendar", "article_evidence", "article_validation",
+                       "change_prevalence", "exposure_summaries", "samples", "cells", "profiles",
+                       "residual_support", "residual_support_by_year", "models", "fit_log",
+                       "fixture_checks", "runtime")
+METADATA_FIELDS <- c("bundle_version", "report_id", "created_at", "r_version", "platform", "packages",
+                     "display_packages", "fingerprint", "status", "runtime_seconds", "qmd_source")
+FINGERPRINT_FIELDS <- c("inputs", "code", "settings", "packages", "combined")
+
+market_status_rows <- function(market_data) {
+  dplyr::bind_rows(lapply(names(market_data), function(m) {
+    md <- market_data[[m]]
+    tibble::tibble(market = m, status = md$status, reason = md$reason %||% NA_character_,
+                   runtime_seconds = as.numeric(md$runtime_seconds %||% NA_real_))
+  }))
+}
+
+assemble_bundle <- function(site_projection, article_validation, article_evidence, attention_calendars,
+                            input_provenance, readiness, observation_diagnostics, exclusion_ledger,
+                            variant_ledger, market_data, cells, profiles, residual_support,
+                            residual_support_by_year, samples, models, fit_log, fixture_checks, runtime,
+                            fingerprint, qmd_path = report_qmd_path(), config = CONFIG) {
+  compressed <- compress_samples(samples)
+  assert_samples_roundtrip(samples, compressed)
+  calendar <- dplyr::bind_rows(lapply(names(attention_calendars), function(m) {
+    cal <- attention_calendars[[m]]
+    cal$article_reason <- attr(cal, "article_reason") %||% cal$article_reason
+    tibble::as_tibble(cal)
+  }))
+  change_prevalence <- dplyr::bind_rows(lapply(names(market_data), function(m) {
+    s <- market_data[[m]]$exposure_summary
+    if (is.null(s)) return(NULL)
+    dplyr::mutate(s$change_prevalence, market = m, .before = 1L)
+  }))
+  exposure_summaries <- lapply(market_data, function(md) md$exposure_summary)
+  spatial_evidence <- lapply(market_data, function(md) md$distance_summary_all)
+  inputs <- dplyr::mutate(input_provenance, path = project_relative_path(path))
+  projection <- site_projection[setdiff(names(site_projection), "provenance")]
+  projection$spatial_evidence <- spatial_evidence
+  list(
+    metadata = list(
+      bundle_version = config$bundle_version, report_id = config$report_id,
+      created_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+      r_version = R.version.string, platform = R.version$platform,
+      packages = fingerprint$package_versions, display_packages = display_package_versions(),
+      fingerprint = fingerprint, status = "pending",
+      runtime_seconds = runtime$total_seconds, peak_memory_note = runtime$peak_memory_note,
+      qmd_source = project_relative_path(qmd_path)
+    ),
+    inputs = inputs,
+    readiness = readiness,
+    markets = market_status_rows(market_data),
+    exclusions = list(ledger = exclusion_ledger, variants = variant_ledger),
+    observation_diagnostics = observation_diagnostics,
+    site_projection = projection,
+    calendar = calendar,
+    article_evidence = article_evidence,
+    article_validation = article_validation,
+    change_prevalence = change_prevalence,
+    exposure_summaries = exposure_summaries,
+    samples = compressed,
+    cells = cells,
+    profiles = profiles,
+    residual_support = residual_support,
+    residual_support_by_year = residual_support_by_year,
+    models = models,
+    fit_log = fit_log,
+    fixture_checks = fixture_checks,
+    runtime = runtime
+  )
+}
+
+validate_bundle <- function(bundle, require_complete = TRUE, config = CONFIG) {
+  fail <- function(...) stop("Bundle validation failed: ", sprintf(...), call. = FALSE)
+  if (!is.list(bundle)) fail("the object is not a list")
+  missing <- setdiff(BUNDLE_COMPONENTS, names(bundle))
+  if (length(missing) > 0L) fail("missing components: %s", paste(missing, collapse = ", "))
+  md <- bundle$metadata
+  missing <- setdiff(METADATA_FIELDS, names(md))
+  if (length(missing) > 0L) fail("metadata lacks: %s", paste(missing, collapse = ", "))
+  if (!identical(md$bundle_version, config$bundle_version)) {
+    fail("bundle_version `%s` does not match the expected `%s`", md$bundle_version, config$bundle_version)
+  }
+  if (!identical(md$report_id, config$report_id)) fail("report_id `%s` is not `%s`", md$report_id, config$report_id)
+  missing <- setdiff(FINGERPRINT_FIELDS, names(md$fingerprint))
+  if (length(missing) > 0L) fail("fingerprint lacks: %s", paste(missing, collapse = ", "))
+  if (require_complete && !identical(md$status, "complete")) {
+    fail("metadata status is `%s`, not `complete` (the run did not finish)", md$status %||% "NULL")
+  }
+  expected <- expected_model_keys()
+  keys <- bundle$cells$model_key
+  describe_keys <- function(keys, expected, what) {
+    dup <- unique(keys[duplicated(keys)]); miss <- setdiff(expected, keys); extra <- setdiff(keys, expected)
+    if (length(dup) + length(miss) + length(extra) > 0L) {
+      fail("%s must carry the %d expected keys exactly once each (duplicated: %s; missing: %s; unexpected: %s)",
+           what, length(expected), paste(c(dup, "none")[1L], collapse = ""), paste(c(miss, "none")[1L], collapse = ""),
+           paste(c(extra, "none")[1L], collapse = ""))
+    }
+  }
+  describe_keys(keys, expected$scalar, "scalar cells")
+  describe_keys(names(bundle$profiles), expected$profile, "profiles")
+  profile_status <- vapply(bundle$profiles, function(p) p$status %||% NA_character_, character(1))
+  bad <- setdiff(unique(c(bundle$cells$status, profile_status)), CELL_STATUSES)
+  if (length(bad) > 0L) fail("statuses outside the vocabulary: %s", paste(bad, collapse = ", "))
+  no_reason <- bundle$cells$status != "estimated" & (is.na(bundle$cells$reason) | bundle$cells$reason == "")
+  if (any(no_reason)) fail("non-estimated cells without a reason: %s", paste(keys[no_reason], collapse = ", "))
+  missing <- setdiff(c(expected$scalar, expected$profile), names(bundle$models))
+  if (length(missing) > 0L) fail("models lack entries for: %s", paste(missing, collapse = ", "))
+  missing <- setdiff(MARKETS, names(bundle$samples))
+  if (length(missing) > 0L) fail("samples lack markets: %s", paste(missing, collapse = ", "))
+  for (i in seq_len(nrow(bundle$cells))) {
+    cell <- bundle$cells[i, ]
+    retained <- sample_retained_count(bundle$samples[[cell$market]], cell$model_key)
+    model <- bundle$models[[cell$model_key]]
+    if (cell$status %in% ESTIMATED_STATUSES) {
+      if (is.null(model)) fail("estimated cell %s has no model", cell$model_key)
+      if (!isTRUE(model$nobs == cell$nobs)) fail("model nobs %s differs from the cell nobs %s for %s", model$nobs, cell$nobs, cell$model_key)
+    }
+    if (!is.na(cell$nobs) && !isTRUE(retained == cell$nobs)) {
+      fail("retained sample rows (%s) do not reconcile with nobs (%s) for %s", retained, cell$nobs, cell$model_key)
+    }
+    if (is.na(cell$nobs) && retained != 0L) fail("cell %s has no nobs but %s retained rows", cell$model_key, retained)
+  }
+  for (key in names(bundle$profiles)) {
+    p <- bundle$profiles[[key]]
+    retained <- sample_retained_count(bundle$samples[[p$market]], key)
+    if (p$status %in% ESTIMATED_STATUSES) {
+      model <- bundle$models[[key]]
+      if (is.null(model) || !isTRUE(model$nobs == p$nobs)) fail("profile %s nobs does not reconcile with its model", key)
+      if (!isTRUE(retained == p$nobs)) fail("profile %s retained rows (%s) do not reconcile with nobs (%s)", key, retained, p$nobs)
+    } else if (retained != 0L) {
+      fail("profile %s is %s but has retained rows", key, p$status)
+    }
+  }
+  invisible(TRUE)
+}
+
+complete_bundle <- function(bundle) {
+  bundle$metadata$status <- "pending"
+  validate_bundle(bundle, require_complete = FALSE)
+  bundle$metadata$status <- "complete"
+  bundle
+}
+
+# ---- Atomic save and guarded load --------------------------------------------------
+
+read_bundle_file <- function(path) {
+  if (!file.exists(path)) {
+    stop("No saved results bundle at ", project_relative_path(path), ". Build it with `", render_command(TRUE),
+         "` (the default `reestimate: true` also builds it).", call. = FALSE)
+  }
+  bundle <- tryCatch(readRDS(path), error = function(e) {
+    stop("The saved results bundle at ", project_relative_path(path), " could not be read (", conditionMessage(e),
+         "); it is partial or corrupted. Regenerate it with `", render_command(TRUE), "`.", call. = FALSE)
+  })
+  bundle
+}
+
+save_bundle_atomic <- function(bundle, path, writer = saveRDS) {
+  validate_bundle(bundle, require_complete = TRUE)
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(pattern = paste0(".", basename(path), "-"), tmpdir = dirname(path), fileext = ".tmp")
+  on.exit(unlink(tmp), add = TRUE)
+  writer(bundle, tmp)
+  reread <- tryCatch(readRDS(tmp), error = function(e) {
+    stop("Staged bundle could not be re-read (", conditionMessage(e), "); the previous bundle is untouched.", call. = FALSE)
+  })
+  validate_bundle(reread, require_complete = TRUE)
+  if (!identical(reread$cells, bundle$cells) || !identical(reread$metadata$fingerprint$combined, bundle$metadata$fingerprint$combined)) {
+    stop("Staged bundle does not reproduce the in-memory cells; the previous bundle is untouched.", call. = FALSE)
+  }
+  if (!file.rename(tmp, path)) stop("Failed to move the staged bundle into place at ", path, call. = FALSE)
+  invisible(path)
+}
+
+# `expected_fingerprint` is a fingerprint list or a function of the bundle's inputs table
+# that computes the current one (so the bundle itself names the files to re-hash).
+load_bundle <- function(path, expected_fingerprint) {
+  bundle <- read_bundle_file(path)
+  tryCatch(validate_bundle(bundle, require_complete = TRUE), error = function(e) {
+    stop(conditionMessage(e), ". The saved bundle at ", project_relative_path(path),
+         " cannot be presented as current results; regenerate it with `", render_command(TRUE), "`.", call. = FALSE)
+  })
+  expected <- if (is.function(expected_fingerprint)) expected_fingerprint(bundle$inputs) else expected_fingerprint
+  differences <- fingerprint_differences(bundle$metadata$fingerprint, expected)
+  if (length(differences) > 0L) {
+    stop("The saved results bundle (created ", bundle$metadata$created_at, ") is stale. Components that differ from the current render: ",
+         paste(differences, collapse = "; "), ". Every model cell depends on these, so the whole model grid needs re-estimation: run `",
+         render_command(TRUE), "`.", call. = FALSE)
+  }
+  bundle
+}
+
+# ---- Artifact export (estimation path only) -----------------------------------------
+
+write_csv_atomic <- function(df, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(pattern = paste0(".", basename(path), "-"), tmpdir = dirname(path), fileext = ".tmp")
+  on.exit(unlink(tmp), add = TRUE)
+  utils::write.csv(as.data.frame(df), tmp, row.names = FALSE, na = "")
+  if (!file.rename(tmp, path)) stop("Failed to write ", path, call. = FALSE)
+  invisible(path)
+}
+
+write_lines_atomic <- function(lines, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(pattern = paste0(".", basename(path), "-"), tmpdir = dirname(path), fileext = ".tmp")
+  on.exit(unlink(tmp), add = TRUE)
+  writeLines(lines, tmp)
+  if (!file.rename(tmp, path)) stop("Failed to write ", path, call. = FALSE)
+  invisible(path)
+}
+
+save_figure_pdf <- function(plot, path, width_cm, height_cm) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(pattern = paste0(".", basename(path), "-"), tmpdir = dirname(path), fileext = ".pdf")
+  on.exit(unlink(tmp), add = TRUE)
+  device <- if (isTRUE(capabilities("cairo"))) grDevices::cairo_pdf else grDevices::pdf
+  ggplot2::ggsave(tmp, plot = plot, device = device, width = width_cm, height = height_cm, units = "cm")
+  if (!file.rename(tmp, path)) stop("Failed to write ", path, call. = FALSE)
+  invisible(path)
+}
+
+sample_support_rows <- function(samples) {
+  dplyr::bind_rows(lapply(names(samples), function(m) {
+    meta <- samples[[m]]$metadata
+    if (length(meta) == 0L) return(tibble::tibble(market = m, variant = NA_character_, n_rows = NA_real_, n_properties = NA_real_))
+    dplyr::bind_rows(lapply(names(meta), function(v) {
+      tibble::tibble(market = m, variant = v, n_rows = as.numeric(meta[[v]]$n_rows), n_properties = as.numeric(meta[[v]]$n_properties))
+    }))
+  }))
+}
+
+FIGURE_EXPORTS <- list(
+  coefficient_comparison = list(file = "coefficient_comparison.pdf", width_cm = 14.5, height_cm = 10),
+  annual_profiles = list(file = "annual_profiles.pdf", width_cm = 14.5, height_cm = 9),
+  attention_history = list(file = "attention_history_sales.pdf", width_cm = 14.5, height_cm = 9)
+)
+
+export_artifacts <- function(bundle, config = CONFIG) {
+  fingerprint <- bundle$metadata$fingerprint$combined
+  stamp <- function(df) dplyr::mutate(tibble::as_tibble(df), fingerprint = fingerprint)
+  tables <- config$output$tables
+  written <- c(
+    write_csv_atomic(stamp(bundle$cells), file.path(tables, "cells.csv")),
+    write_csv_atomic(stamp(profile_rows(bundle$profiles)), file.path(tables, "profile_coefficients.csv")),
+    write_csv_atomic(stamp(joint_test_rows(bundle$profiles)), file.path(tables, "joint_tests.csv")),
+    write_csv_atomic(stamp(bundle$residual_support), file.path(tables, "residual_support.csv")),
+    write_csv_atomic(stamp(bundle$residual_support_by_year), file.path(tables, "residual_support_by_year.csv")),
+    write_csv_atomic(stamp(bundle$exclusions$ledger), file.path(tables, "exclusion_ledger.csv")),
+    write_csv_atomic(stamp(bundle$exclusions$variants), file.path(tables, "variant_ledger.csv")),
+    write_csv_atomic(stamp(sample_support_rows(bundle$samples)), file.path(tables, "sample_support.csv")),
+    write_csv_atomic(stamp(readiness_status_rows(bundle$readiness)), file.path(tables, "readiness_summary.csv")),
+    write_csv_atomic(stamp(bundle$calendar), file.path(tables, "calendar.csv")),
+    write_csv_atomic(stamp(bundle$inputs), file.path(tables, "inputs.csv"))
+  )
+  figures <- config$output$figures
+  spec <- FIGURE_EXPORTS$coefficient_comparison
+  written <- c(written, save_figure_pdf(plot_coefficients(bundle$cells, base_size = 8, point_size = 1.6, text_size = 2.2),
+                                        file.path(figures, spec$file), spec$width_cm, spec$height_cm))
+  profile_plot <- plot_profiles(bundle$profiles, base_size = 8, point_size = 1.5)
+  if (!is.null(profile_plot)) {
+    spec <- FIGURE_EXPORTS$annual_profiles
+    written <- c(written, save_figure_pdf(profile_plot, file.path(figures, spec$file), spec$width_cm, spec$height_cm))
+  }
+  history <- attention_history_display(bundle$calendar[bundle$calendar$market == "sales", ], base_size = 8)
+  if (!is.null(history$plot)) {
+    spec <- FIGURE_EXPORTS$attention_history
+    written <- c(written, save_figure_pdf(history$plot, file.path(figures, spec$file), spec$width_cm, spec$height_cm))
+  }
+  written <- c(written, write_lines_atomic(
+    c(sprintf("run_fingerprint: %s", fingerprint), sprintf("created_at: %s", bundle$metadata$created_at),
+      sprintf("figures: %s", paste(basename(written[grepl("\\.pdf$", written)]), collapse = ", "))),
+    file.path(figures, "run_fingerprint.txt")))
+  written <- c(written, write_lines_atomic(run_log_lines(bundle), file.path(config$output$log, "run_log.txt")))
+  invisible(written)
+}
+
+run_log_lines <- function(bundle) {
+  md <- bundle$metadata
+  fp <- md$fingerprint
+  fit <- as.data.frame(bundle$fit_log)
+  c(
+    sprintf("report_id: %s", md$report_id), sprintf("bundle_version: %s", md$bundle_version),
+    sprintf("status: %s", md$status), sprintf("created_at: %s", md$created_at),
+    sprintf("qmd_source: %s", md$qmd_source), sprintf("r_version: %s", md$r_version), sprintf("platform: %s", md$platform),
+    sprintf("runtime_seconds: %.1f", md$runtime_seconds), sprintf("peak_memory_note: %s", md$peak_memory_note),
+    "", "fingerprint:", sprintf("  combined: %s", fp$combined), sprintf("  inputs: %s", fp$inputs_hash),
+    sprintf("  code: %s", fp$code), sprintf("  settings: %s", fp$settings), sprintf("  packages: %s", fp$packages),
+    "", "input content hashes (xxhash64):", sprintf("  %s: %s", names(fp$inputs), fp$inputs),
+    "", "computational packages:", sprintf("  %s: %s", names(md$packages), md$packages),
+    "", "display packages:", sprintf("  %s: %s", names(md$display_packages), md$display_packages),
+    "", "market runtimes (seconds):",
+    sprintf("  %s: %s (%.1f s)", bundle$markets$market, bundle$markets$status, bundle$markets$runtime_seconds),
+    "", "fit log:", utils::capture.output(print(fit, row.names = FALSE))
+  )
+}
+```
+
+```{r}
+#| label: helpers-display
+#| include: false
+
+# Display helpers: labels, plot builders, and table shapers shared by the report body
+# and the artifact export. Display-only: not part of the code fingerprint.
+
+options(knitr.kable.NA = "")   # empty cells for missing values in HTML tables
+
+MARKET_LABELS <- c(sales = "Sales", rentals = "Rentals")
+VARIANT_LABELS <- c(headline = "Headline", exclude_changes = "Exclude observed changes",
+                    complete_case = "Complete-case comparator", complete_case_controls = "Complete cases with controls",
+                    short_window = "Short window (2021 on)")
+FE_LABELS <- c(property_month = "Property + month", property_month_msoa_year = "Property + month + MSOA x year")
+FE_SHORT_LABELS <- c(property_month = "P+M", property_month_msoa_year = "P+M+MSOAxY")
+ATTENTION_LABELS <- c(post = "Near x Post (August 2022 on)", log_articles = "Near x log article stock")
+
+label_cells <- function(cells) {
+  dplyr::mutate(
+    cells,
+    market_label = factor(MARKET_LABELS[market], levels = MARKET_LABELS),
+    variant_label = factor(VARIANT_LABELS[variant], levels = rev(VARIANT_LABELS)),
+    fe_label = factor(FE_LABELS[fe], levels = FE_LABELS),
+    attention_label = factor(ATTENTION_LABELS[attention], levels = ATTENTION_LABELS)
+  )
+}
+
+percent_change <- function(beta) 100 * (exp(beta) - 1)
+
+format_p <- function(p) {
+  ifelse(is.na(p), NA_character_, ifelse(p < 0.001, "< 0.001", formatC(p, format = "f", digits = 3)))
+}
+
+format_ci <- function(low, high, digits = 4) {
+  ifelse(is.na(low), NA_character_, sprintf(paste0("[%.", digits, "f, %.", digits, "f]"), low, high))
+}
+
+profile_rows <- function(profiles) {
+  rows <- dplyr::bind_rows(lapply(profiles, function(p) {
+    if (nrow(p$coefficients) == 0L) return(NULL)
+    dplyr::mutate(p$coefficients, model_key = p$model_key, market = p$market, fe = p$fe, status = p$status, .before = 1L)
+  }))
+  if (nrow(rows) == 0L) {
+    rows <- tibble::tibble(model_key = character(), market = character(), fe = character(), status = character(),
+                           year = integer(), term = character(), estimate = numeric(), std_error = numeric(),
+                           t_df = numeric(), conf_low = numeric(), conf_high = numeric(), p_value = numeric(),
+                           available = logical())
+  }
+  rows
+}
+
+joint_test_rows <- function(profiles) {
+  dplyr::bind_rows(lapply(profiles, function(p) {
+    j <- p$joint_test
+    tibble::tibble(model_key = p$model_key, market = p$market, fe = p$fe, profile_status = p$status,
+                   profile_reason = p$reason, joint_status = j$status, statistic = j$statistic, df1 = j$df1, df2 = j$df2,
+                   p_value = j$p_value, joint_reason = j$reason, nobs = p$nobs, n_properties = p$n_properties,
+                   n_clusters = p$n_clusters, n_removed_by_estimator = p$n_removed_by_estimator)
+  }))
+}
+
+# Every cell stays in the plot data: `supported` rows draw points, `unsupported` rows draw
+# their status as a label at zero so no planned comparison silently disappears.
+coefficient_plot_data <- function(cells) {
+  labelled <- label_cells(cells)
+  supported <- labelled[!is.na(labelled$estimate), ]
+  unsupported <- labelled[is.na(labelled$estimate), ]
+  unsupported$label <- paste0(FE_SHORT_LABELS[unsupported$fe], ": ", unsupported$status)
+  list(supported = supported, unsupported = unsupported)
+}
+
+plot_coefficients <- function(cells, base_size = 11, point_size = 2.4, text_size = 2.7) {
+  parts <- coefficient_plot_data(cells)
+  dodge <- ggplot2::position_dodge(width = 0.6)
+  p <- ggplot2::ggplot(parts$supported, ggplot2::aes(x = estimate, y = variant_label, colour = fe_label, shape = fe_label)) +
+    ggplot2::geom_vline(xintercept = 0, linetype = "dashed", colour = "grey55") +
+    ggplot2::geom_errorbar(ggplot2::aes(xmin = conf_low, xmax = conf_high), width = 0.25, position = dodge, orientation = "y") +
+    ggplot2::geom_point(size = point_size, position = dodge) +
+    ggplot2::scale_y_discrete(drop = FALSE) +
+    ggplot2::scale_colour_manual(values = c("#2c5f8a", "#b03a2e"), drop = FALSE) +
+    ggplot2::scale_shape_manual(values = c(16, 17), drop = FALSE) +
+    ggplot2::facet_grid(market_label ~ attention_label, scales = "free_x") +
+    ggplot2::labs(x = "Coefficient on Near x attention (log points)", y = NULL, colour = "Fixed effects", shape = "Fixed effects") +
+    ggplot2::theme_minimal(base_size = base_size) +
+    ggplot2::theme(legend.position = "bottom", panel.grid.minor = ggplot2::element_blank(),
+                   legend.margin = ggplot2::margin(0, 0, 0, 0), plot.margin = ggplot2::margin(4, 8, 4, 4))
+  if (nrow(parts$unsupported) > 0L) {
+    p <- p + ggplot2::geom_text(data = parts$unsupported,
+                                ggplot2::aes(x = 0, y = variant_label, label = label, group = fe_label),
+                                inherit.aes = FALSE, size = text_size, colour = "grey30", position = dodge)
+  }
+  p
+}
+
+plot_profiles <- function(profiles, base_size = 11, point_size = 2.2, reference_year = CONFIG$profile_reference_year,
+                          event_month = CONFIG$event_month) {
+  points <- profile_rows(profiles)
+  if (nrow(points) == 0L) return(NULL)
+  points <- dplyr::mutate(points, market_label = factor(MARKET_LABELS[market], levels = MARKET_LABELS),
+                          fe_label = factor(FE_LABELS[fe], levels = FE_LABELS))
+  reference <- dplyr::distinct(points, market_label, fe_label) |>
+    dplyr::mutate(year = reference_year, estimate = 0)
+  event_position <- lubridate::year(event_month) + (lubridate::month(event_month) - 1) / 12
+  ggplot2::ggplot(points, ggplot2::aes(x = year, y = estimate, colour = fe_label)) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey55") +
+    ggplot2::geom_vline(xintercept = event_position, colour = "grey40") +
+    ggplot2::geom_errorbar(ggplot2::aes(ymin = conf_low, ymax = conf_high), width = 0.3) +
+    ggplot2::geom_point(size = point_size) +
+    ggplot2::geom_point(data = reference, shape = 21, fill = "white", size = point_size + 0.4) +
+    ggplot2::scale_colour_manual(values = c("#2c5f8a", "#b03a2e"), drop = FALSE) +
+    ggplot2::facet_grid(market_label ~ fe_label, scales = "free_y") +
+    ggplot2::scale_x_continuous(breaks = seq(2014, 2024, by = 2)) +
+    ggplot2::labs(x = NULL, y = sprintf("Near x year coefficient relative to %d (log points)", reference_year)) +
+    ggplot2::theme_minimal(base_size = base_size) +
+    ggplot2::theme(legend.position = "none", panel.grid.minor = ggplot2::element_blank(),
+                   plot.margin = ggplot2::margin(4, 8, 4, 4))
+}
+
+# A validated attention plot, or NULL with the recorded diagnosis when article cells are blocked.
+attention_history_display <- function(calendar, base_size = 11) {
+  if (nrow(calendar) > 0L && all(calendar$article_status == "valid")) {
+    plot <- plot_attention_history(calendar) + ggplot2::theme_minimal(base_size = base_size)
+    return(list(plot = plot, message = NA_character_))
+  }
+  reason <- attr(calendar, "article_reason") %||% calendar$article_reason[!is.na(calendar$article_reason)][1L]
+  list(plot = NULL, message = paste0("Attention history not plotted: article cells are blocked (",
+                                     reason %||% "no reason recorded", ")."))
+}
+
+readiness_status_rows <- function(readiness) {
+  dplyr::bind_rows(lapply(names(readiness), function(m) {
+    r <- readiness[[m]]
+    tibble::tibble(
+      market = m, status = r$status,
+      blocked_stage = r$blocked_stage %||% NA_character_, reason = r$reason %||% NA_character_,
+      rows_pre_band = r$n_rows_pre_band %||% NA_real_, groups_pre_band = r$n_groups_pre_band %||% NA_real_,
+      rows_repeat_eligible_pre_band = r$n_rows_repeat_eligible_pre_band %||% NA_real_,
+      groups_repeat_eligible_pre_band = r$n_groups_repeat_eligible_pre_band %||% NA_real_,
+      runtime_seconds = round(r$runtime_seconds %||% NA_real_, 1), peak_memory_mb = round(r$peak_memory_mb %||% NA_real_)
+    )
+  }))
+}
+
+# Headline cells only: both markets x both FE structures x both attention measures.
+headline_table <- function(cells) {
+  label_cells(cells[cells$variant == "headline", ]) |>
+    dplyr::arrange(market_label, attention_label, fe_label) |>
+    dplyr::transmute(
+      Market = as.character(market_label), Attention = as.character(attention_label),
+      `Fixed effects` = as.character(fe_label), Status = status,
+      Estimate = round(estimate, 4), `95% CI` = format_ci(conf_low, conf_high),
+      `Ratio change (%)` = ifelse(attention == "post" & !is.na(estimate), round(percent_change(estimate), 2), NA_real_),
+      Observations = nobs, Properties = n_properties, Clusters = n_clusters
+    )
+}
+
+cell_order <- function(labelled) {
+  dplyr::arrange(labelled, market_label, attention_label, factor(variant, levels = MODEL_VARIANTS), fe_label)
+}
+
+format_seconds <- function(seconds) {
+  vapply(as.numeric(seconds), function(s) {
+    if (is.na(s)) "unknown" else if (s < 90) sprintf("%.0f s", s) else sprintf("%.1f min", s / 60)
+  }, character(1))
+}
+
+emit_paragraph <- function(...) cat(paste0(..., collapse = ""), "\n\n")
 ```
 
 ```{r}
@@ -2922,6 +3679,365 @@ FIXTURE_CHECKS$u3 <- list(
   }
 )
 
+# ---- U4 fixtures ------------------------------------------------------------------
+
+# Two tiny binary inputs whose content hashes stand in for the parquet provenance.
+fixture_bundle_inputs <- function(dir) {
+  paths <- file.path(dir, c("input_a.bin", "input_b.bin"))
+  writeBin(as.raw(1:64), paths[[1L]])
+  writeBin(as.raw(101:164), paths[[2L]])
+  tibble::tibble(input = c("fixture_a", "fixture_b"), path = paths,
+                 content_hash = vapply(paths, hash_file_content, character(1), USE.NAMES = FALSE),
+                 generation_id = c("g1", NA_character_), n_rows = c(64, 64), columns_used = "bytes",
+                 mtime = format(file.info(paths)$mtime, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
+}
+
+fixture_market_samples <- function(n = 10L) {
+  ids <- sprintf("t%03d", seq_len(n))
+  variants <- list(headline = seq_len(n), exclude_changes = seq_len(n - 2L), complete_case = seq_len(n),
+                   complete_case_controls = seq_len(n), short_window = seq.int(n - 5L, n))
+  metadata <- lapply(variants, function(idx) list(n_rows = length(idx), n_properties = length(idx) %/% 2L))
+  list(ids = ids, variants = variants, estimated = list(), metadata = metadata)
+}
+
+# A complete synthetic bundle: every scalar key estimated (or the article cells blocked),
+# retained rows = the variant input less its last row, models carrying only nobs.
+fixture_bundle <- function(dir = tempfile("bundle-fixture-"), article_blocked = FALSE) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+  inputs <- fixture_bundle_inputs(dir)
+  grid <- model_grid()
+  samples <- list(); cells <- list(); models <- list(); profiles <- list(); fit_log <- list()
+  calendars <- list()
+  for (m in MARKETS) {
+    s <- fixture_market_samples()
+    calendars[[m]] <- fixture_model_calendar(m, blocked = article_blocked)
+    rows <- grid[grid$market == m, ]
+    for (i in seq_len(nrow(rows))) {
+      key <- rows$model_key[[i]]
+      input <- s$variants[[rows$variant[[i]]]]
+      if (article_blocked && rows$attention[[i]] == "log_articles") {
+        cells[[key]] <- empty_cell(m, rows$variant[[i]], rows$fe[[i]], rows$attention[[i]], "blocked_input",
+                                   "article cells blocked: fixture coverage unavailable")
+        s$estimated[[key]] <- integer()
+        models[key] <- list(NULL)
+      } else {
+        retained <- input[-length(input)]
+        cell <- empty_cell(m, rows$variant[[i]], rows$fe[[i]], rows$attention[[i]], "estimated")
+        cell$estimate <- 0.01 * i; cell$std_error <- 0.004; cell$t_df <- 7
+        cell$conf_low <- cell$estimate - 0.01; cell$conf_high <- cell$estimate + 0.01; cell$p_value <- 0.05
+        cell$nobs <- length(retained); cell$n_properties <- length(retained) %/% 2; cell$n_clusters <- 4
+        cell$n_near_properties <- 2; cell$n_far_properties <- 3; cell$n_properties_both_sides_event <- 2
+        cell$n_removed_by_estimator <- 1; cell$n_controls_absorbed <- 0
+        cells[[key]] <- cell
+        s$estimated[[key]] <- retained
+        models[[key]] <- list(model_key = key, nobs = length(retained), status = "estimated")
+      }
+      fit_log[[key]] <- tibble::tibble(market = m, model_key = key, status = cells[[key]]$status, seconds = 0.1, peak_gc_mb = 1)
+    }
+    for (fe in names(MODEL_FE)) {
+      key <- profile_key(m, fe)
+      retained <- s$variants$headline[-length(s$variants$headline)]
+      p <- empty_profile(m, fe, "estimated")
+      years <- setdiff(2014:2024, CONFIG$profile_reference_year)
+      p$coefficients <- tibble::tibble(year = years, term = sprintf("year::%d:near", years), estimate = 0.001 * seq_along(years),
+                                       std_error = 0.002, t_df = 7, conf_low = 0.001 * seq_along(years) - 0.005,
+                                       conf_high = 0.001 * seq_along(years) + 0.005, p_value = 0.3, available = TRUE)
+      p$joint_test <- list(status = "available", statistic = 1.2, df1 = 5, df2 = 7, p_value = 0.4, reason = NA_character_,
+                           years = CONFIG$profile_joint_years, rank = 5L)
+      p$nobs <- length(retained); p$n_properties <- 4L; p$n_clusters <- 4L; p$n_removed_by_estimator <- 1L
+      profiles[[key]] <- p
+      s$estimated[[key]] <- retained
+      models[[key]] <- list(model_key = key, nobs = length(retained), status = "estimated")
+      fit_log[[key]] <- tibble::tibble(market = m, model_key = key, status = "estimated", seconds = 0.1, peak_gc_mb = 1)
+    }
+    samples[[m]] <- s
+  }
+  cells <- dplyr::bind_rows(cells)
+  readiness <- lapply(MARKETS, function(m) list(market = m, status = "ready", reason = NA_character_, n_rows_pre_band = 10,
+                                                 n_groups_pre_band = 5, runtime_seconds = 1, peak_memory_mb = 1))
+  names(readiness) <- MARKETS
+  market_data <- lapply(MARKETS, function(m) list(
+    market = m, status = "ready", reason = NA_character_, runtime_seconds = 1,
+    exposure_summary = list(change_prevalence = tibble::tibble(band = c("near", "far"), change_flag = "any_change",
+                                                               n_properties = c(2, 3), n_changed = c(0, 1), share_changed = c(0, 1 / 3))),
+    distance_summary_all = tibble::tibble(n_unique_coordinates = 5, n_rows = 10)
+  ))
+  names(market_data) <- MARKETS
+  site_projection <- list(projection = tibble::tibble(site_id = 1:2, easting = c(400000, 403000), northing = 300000, usable = TRUE),
+                          years = CONFIG$crosswalk_years, n_sites = 2L, n_usable = 2L, n_unusable = 0L,
+                          unusable_site_ids = integer(), n_water_companies = 1L, n_crosswalk_rows = 8L,
+                          provenance = tibble::tibble())
+  bundle <- assemble_bundle(
+    site_projection = site_projection, article_validation = list(status = "passed"),
+    article_evidence = list(status = if (article_blocked) "unavailable" else "established", files = tibble::tibble()),
+    attention_calendars = calendars, input_provenance = inputs, readiness = readiness,
+    observation_diagnostics = list(sales = NULL, rentals = NULL),
+    exclusion_ledger = new_ledger(), variant_ledger = new_variant_ledger(), market_data = market_data,
+    cells = cells, profiles = profiles, residual_support = empty_residual_support(),
+    residual_support_by_year = tibble::tibble(model_key = character(), year = integer(), share = numeric()),
+    samples = samples, models = models, fit_log = dplyr::bind_rows(fit_log),
+    fixture_checks = tibble::tibble(unit = "u4", scenario = "fixture", passed = TRUE),
+    runtime = list(total_seconds = 1, peak_memory_note = "fixture"),
+    fingerprint = compute_fingerprint(inputs, rehash = TRUE)
+  )
+  complete_bundle(bundle)
+}
+
+# Copy of the report source with `edit(lines)` applied.
+fixture_qmd_copy <- function(edit) {
+  lines <- readLines(report_qmd_path(), warn = FALSE)
+  path <- tempfile("qmd-copy-", fileext = ".qmd")
+  writeLines(edit(lines), path)
+  path
+}
+
+chunk_label_lines <- function(lines) {
+  labels <- sub("^#\\|\\s*label:\\s*", "", lines)
+  labels[!grepl("^#\\|\\s*label:", lines)] <- NA_character_
+  trimws(labels)
+}
+
+FIXTURE_CHECKS$u4 <- list(
+  fingerprint_input_content_change_with_same_size_and_mtime = function() {
+    dir <- tempfile("inputs-"); dir.create(dir)
+    inputs <- fixture_bundle_inputs(dir)
+    stamp <- as.POSIXct("2026-01-01 00:00:00", tz = "UTC")
+    Sys.setFileTime(inputs$path, stamp)
+    saved <- compute_fingerprint(inputs, rehash = TRUE)
+    writeBin(as.raw(64:1), inputs$path[[1L]])
+    Sys.setFileTime(inputs$path[[1L]], stamp)
+    info <- file.info(inputs$path[[1L]])
+    assert_true(info$size == 64 && abs(as.numeric(info$mtime) - as.numeric(stamp)) < 1, "size and mtime preserved by the replacement")
+    current <- compute_fingerprint(inputs, rehash = TRUE)
+    assert_true(saved$inputs[["fixture_a"]] != current$inputs[["fixture_a"]] && saved$combined != current$combined,
+                "replaced input content changes the fingerprint despite identical size and mtime")
+    assert_true(identical(fingerprint_differences(saved, current), "input `fixture_a` (content changed)"),
+                "the changed input is named")
+    unlink(inputs$path[[2L]])
+    missing <- compute_fingerprint(inputs, rehash = TRUE)
+    assert_true(any(grepl("input `fixture_b` \\(now missing or unreadable\\)", fingerprint_differences(saved, missing))),
+                "a missing input is reported by name")
+    TRUE
+  },
+  fingerprint_code_change_invalidates = function() {
+    saved <- code_fingerprint()
+    edited <- fixture_qmd_copy(function(lines) {
+      at <- which(chunk_label_lines(lines) == "helpers-inputs")[[1L]]
+      append(lines, "fixture_marker <- 1  # computational edit", after = at)
+    })
+    current <- code_fingerprint(edited)
+    assert_true(saved$hash != current$hash, "an edit inside a computational chunk changes the code hash")
+    assert_true(identical(differing_names(saved$parts, current$parts), "chunk:helpers-inputs"), "only the edited chunk differs")
+    helper_copy <- tempfile("hash_utils-", fileext = ".R")
+    writeLines(c(readLines(helper_file_paths()[["hash_utils.R"]], warn = FALSE), "# edited helper"), helper_copy)
+    paths <- helper_file_paths(); paths[["hash_utils.R"]] <- helper_copy
+    helper_changed <- code_fingerprint(helper_paths = paths)
+    assert_true(saved$hash != helper_changed$hash && identical(differing_names(saved$parts, helper_changed$parts), "helper:hash_utils.R"),
+                "an edited sourced helper changes the code hash and is named")
+    dir <- tempfile("inputs-"); dir.create(dir)
+    inputs <- fixture_bundle_inputs(dir)
+    diffs <- fingerprint_differences(compute_fingerprint(inputs), compute_fingerprint(inputs, qmd_path = edited))
+    assert_true(identical(diffs, "code (chunk:helpers-inputs)"), "the difference report names the code component and chunk")
+    TRUE
+  },
+  fingerprint_settings_change_invalidates = function() {
+    baseline <- settings_fingerprint(CONFIG)
+    cfg <- CONFIG; cfg$event_month <- CONFIG$event_month + 31
+    changed <- settings_fingerprint(cfg)
+    assert_true(baseline$hash != changed$hash && identical(differing_names(baseline$parts, changed$parts), "event_month"),
+                "an analysis-setting change alters the settings hash and is named")
+    cfg <- CONFIG; cfg$bands$near_max <- 400
+    assert_true(identical(differing_names(baseline$parts, settings_fingerprint(cfg)$parts), "bands"), "nested settings are attributed to their top-level key")
+    json <- settings_json(canonical_settings(CONFIG))
+    assert_true(!grepl(here::here(), json, fixed = TRUE) && grepl("output/regs/long_run_public_attention", json, fixed = TRUE),
+                "paths are serialised project-relative")
+    assert_true(identical(settings_fingerprint(CONFIG)$hash, baseline$hash), "the settings hash is deterministic")
+    dir <- tempfile("inputs-"); dir.create(dir)
+    inputs <- fixture_bundle_inputs(dir)
+    cfg <- CONFIG; cfg$event_month <- CONFIG$event_month + 31
+    diffs <- fingerprint_differences(compute_fingerprint(inputs), compute_fingerprint(inputs, config = cfg))
+    assert_true(identical(diffs, "settings (event_month)"), "the difference report names the settings key")
+    TRUE
+  },
+  fingerprint_prose_and_reestimate_toggle_keep_reuse = function() {
+    saved <- code_fingerprint()
+    labels <- chunk_label_lines(readLines(report_qmd_path(), warn = FALSE))
+    display_labels <- setdiff(labels[!is.na(labels)], computational_chunk_labels())
+    assert_true(length(display_labels) > 0L, "the report has display chunks")
+    edited <- fixture_qmd_copy(function(lines) {
+      lines <- sub("^params:$", "params:", lines)
+      lines[grepl("^\\s*reestimate:\\s*true\\s*$", lines)] <- "  reestimate: false"
+      prose <- which(grepl("^This report", lines))[[1L]]
+      lines[prose] <- paste(lines[prose], "Edited prose.")
+      at <- which(chunk_label_lines(lines) == display_labels[[1L]])[[1L]]
+      append(lines, "display_marker <- 1  # display-only edit", after = at)
+    })
+    current <- code_fingerprint(edited)
+    assert_true(identical(saved$hash, current$hash), "prose, display-chunk and reestimate edits leave the code hash unchanged")
+    assert_true(!"reestimate" %in% names(CONFIG), "the reestimate switch is not an analysis setting")
+    assert_true(identical(package_fingerprint()$hash, package_fingerprint()$hash) &&
+                  !any(DISPLAY_PACKAGES %in% names(package_fingerprint()$versions)),
+                "display packages are outside the package fingerprint")
+    TRUE
+  },
+  missing_bundle_fails_with_regeneration_instruction = function() {
+    path <- file.path(tempfile("no-bundle-"), "bundle.rds")
+    err <- assert_error_matching(load_bundle(path, list()), "reestimate:true", "a missing bundle names the regeneration command")
+    assert_true(grepl("No saved results bundle", conditionMessage(err)), "the message says the bundle is missing")
+    TRUE
+  },
+  partial_bundle_fails_naming_what_is_missing = function() {
+    bundle <- fixture_bundle()
+    path <- tempfile("partial-", fileext = ".rds")
+    saveRDS(bundle, path)
+    bytes <- readBin(path, "raw", file.size(path))
+    writeBin(bytes[seq_len(length(bytes) %/% 3L)], path)
+    assert_error_matching(load_bundle(path, bundle$metadata$fingerprint), "could not be read.*reestimate:true",
+                          "a truncated bundle is rejected with the regeneration command")
+    saveRDS(bundle[setdiff(names(bundle), c("cells", "models"))], path)
+    assert_error_matching(load_bundle(path, bundle$metadata$fingerprint), "missing components: cells, models",
+                          "missing components are named")
+    pending <- bundle; pending$metadata$status <- "pending"
+    saveRDS(pending, path)
+    assert_error_matching(load_bundle(path, bundle$metadata$fingerprint), "not `complete`", "an unfinished bundle is rejected")
+    incomplete_metadata <- bundle; incomplete_metadata$metadata$fingerprint$code <- NULL
+    assert_error_matching(validate_bundle(incomplete_metadata), "fingerprint lacks: code", "missing fingerprint fields are named")
+    TRUE
+  },
+  duplicated_key_with_total_44_fails = function() {
+    bundle <- fixture_bundle()
+    dup <- bundle
+    dup$cells[2L, ] <- dup$cells[1L, ]
+    assert_true(nrow(dup$cells) == 40L && length(dup$profiles) == 4L, "the total key count is still 44")
+    assert_error_matching(validate_bundle(dup),
+                          "exactly once each \\(duplicated: sales__headline__property_month__post; missing: sales__headline__property_month__log_articles",
+                          "a duplicated scalar key with a missing key fails and both are named")
+    dup <- bundle
+    names(dup$profiles)[[2L]] <- names(dup$profiles)[[1L]]
+    assert_error_matching(validate_bundle(dup), "profiles must carry the 4 expected keys exactly once each",
+                          "a duplicated profile key fails")
+    bad_status <- bundle; bad_status$cells$status[[1L]] <- "converged"
+    assert_error_matching(validate_bundle(bad_status), "statuses outside the vocabulary: converged", "unknown statuses fail")
+    wrong_nobs <- bundle; wrong_nobs$cells$nobs[[1L]] <- wrong_nobs$cells$nobs[[1L]] + 1
+    assert_error_matching(validate_bundle(wrong_nobs), "differs from the cell nobs", "nobs must reconcile with the model")
+    wrong_version <- bundle; wrong_version$metadata$bundle_version <- "0"
+    assert_error_matching(validate_bundle(wrong_version), "bundle_version `0` does not match", "the bundle version is checked")
+    TRUE
+  },
+  interrupted_save_leaves_previous_bundle_intact = function() {
+    bundle <- fixture_bundle()
+    dir <- tempfile("bundle-dir-"); dir.create(dir)
+    path <- file.path(dir, "bundle.rds")
+    save_bundle_atomic(bundle, path)
+    before <- file.info(path)
+    newer <- bundle; newer$cells$estimate[[1L]] <- 99
+    truncating_writer <- function(object, file) writeBin(serialize(object, NULL)[seq_len(200L)], file)
+    assert_error_matching(save_bundle_atomic(newer, path, writer = truncating_writer), "previous bundle is untouched",
+                          "an interrupted write fails before replacement")
+    assert_true(identical(file.info(path)$size, before$size), "the previous bundle file is unchanged")
+    assert_true(length(list.files(dir, all.files = TRUE, no.. = TRUE)) == 1L, "no staged temp file is left behind")
+    reloaded <- load_bundle(path, bundle$metadata$fingerprint)
+    assert_true(identical(reloaded$cells, bundle$cells) && reloaded$cells$estimate[[1L]] != 99, "the previous valid bundle still loads")
+    invalid <- newer; invalid$cells <- invalid$cells[-1L, ]
+    assert_error_matching(save_bundle_atomic(invalid, path), "exactly once each", "an invalid bundle is never staged")
+    assert_true(identical(load_bundle(path, bundle$metadata$fingerprint)$cells, bundle$cells), "the previous bundle survives a rejected save")
+    TRUE
+  },
+  blocked_article_cells_validate_and_display_diagnosis = function() {
+    bundle <- fixture_bundle(article_blocked = TRUE)
+    articles <- bundle$cells[bundle$cells$attention == "log_articles", ]
+    assert_true(identical(bundle$metadata$status, "complete") && all(articles$status == "blocked_input"),
+                "a bundle with blocked article cells is complete")
+    assert_true(all(bundle$cells$status[bundle$cells$attention == "post"] == "estimated"), "post cells remain estimated")
+    parts <- coefficient_plot_data(bundle$cells)
+    assert_true(nrow(parts$unsupported) == 20L && all(grepl("blocked_input", parts$unsupported$label)) &&
+                  nrow(parts$supported) + nrow(parts$unsupported) == 40L, "blocked cells stay in the plot data with a label")
+    built <- ggplot2::ggplot_build(plot_coefficients(bundle$cells))
+    assert_true(length(built$data) >= 4L, "the coefficient plot builds with blocked cells")
+    history <- attention_history_display(bundle$calendar[bundle$calendar$market == "sales", ])
+    assert_true(is.null(history$plot) && grepl("blocked", history$message), "no attention plot; the diagnosis is shown instead")
+    valid <- fixture_bundle(article_blocked = FALSE)
+    history <- attention_history_display(valid$calendar[valid$calendar$market == "sales", ])
+    assert_true(inherits(history$plot, "ggplot") && is.na(history$message), "a valid calendar yields the plot")
+    path <- tempfile("blocked-", fileext = ".rds")
+    save_bundle_atomic(bundle, path)
+    assert_true(identical(load_bundle(path, bundle$metadata$fingerprint)$cells, bundle$cells), "the blocked bundle round-trips")
+    TRUE
+  },
+  saved_bundle_reloads_identically = function() {
+    bundle <- fixture_bundle()
+    path <- tempfile("roundtrip-", fileext = ".rds")
+    save_bundle_atomic(bundle, path)
+    loaded <- load_bundle(path, function(inputs) compute_fingerprint(inputs, rehash = TRUE))
+    assert_true(identical(loaded$cells, bundle$cells) && identical(loaded$profiles, bundle$profiles), "cells and profiles reload identically")
+    assert_true(identical(expand_samples(loaded$samples), expand_samples(bundle$samples)), "sample membership reloads identically")
+    assert_true(identical(loaded$metadata$fingerprint$combined, bundle$metadata$fingerprint$combined), "the fingerprint reloads")
+    stale <- bundle$metadata$fingerprint
+    stale$inputs[["fixture_a"]] <- "0000000000000000"
+    assert_error_matching(load_bundle(path, stale), "stale.*input `fixture_a` \\(content changed\\).*reestimate:true",
+                          "a fingerprint mismatch names the input and the regeneration command")
+    stale <- bundle$metadata$fingerprint
+    stale$packages <- "different"; stale$package_versions[["fixest"]] <- "0.0.0"
+    assert_error_matching(load_bundle(path, stale), "packages \\(fixest", "a package-version mismatch names the package")
+    TRUE
+  },
+  unsupported_cells_stay_visible_in_plot_data = function() {
+    bundle <- fixture_bundle()
+    cells <- bundle$cells
+    key <- "rentals__short_window__property_month__post"
+    row <- cells$model_key == key
+    cells[row, c("estimate", "std_error", "t_df", "conf_low", "conf_high", "p_value", "nobs")] <- NA_real_
+    cells$status[row] <- "unsupported_sample"; cells$reason[row] <- "no rows after the variant restrictions"
+    parts <- coefficient_plot_data(cells)
+    assert_true(key %in% parts$unsupported$model_key && identical(parts$unsupported$label[parts$unsupported$model_key == key], "P+M: unsupported_sample"),
+                "the unsupported cell is in the plot data with its status label")
+    assert_true(nrow(parts$supported) + nrow(parts$unsupported) == nrow(cells), "no cell is dropped from the plot data")
+    built <- ggplot2::ggplot_build(plot_coefficients(cells))
+    text_layer <- built$data[[length(built$data)]]
+    assert_true(any(grepl("unsupported_sample", text_layer$label)), "the status is drawn on the plot")
+    assert_true(key %in% headline_table(cells)$Market | TRUE, "headline table builds")
+    TRUE
+  },
+  samples_compress_and_expand_identically = function() {
+    s <- fixture_market_samples()
+    s$estimated[["sales__headline__property_month__post"]] <- 1:9
+    s$estimated[["sales__short_window__property_month__post"]] <- c(5L, 7L, 9L)
+    s$estimated[["sales__headline__property_month__profile"]] <- c(3L, 1L, 2L)   # not a subsequence
+    s$estimated[["sales__headline__property_month__log_articles"]] <- integer()
+    samples <- list(sales = s)
+    compressed <- compress_samples(samples)
+    assert_samples_roundtrip(samples, compressed)
+    e <- compressed$sales$estimated
+    assert_true(identical(e[["sales__headline__property_month__post"]]$removed, 10L), "removed rows are stored for a subsequence")
+    assert_true(identical(e[["sales__headline__property_month__profile"]]$retained, c(3L, 1L, 2L)), "a non-subsequence keeps the full index")
+    assert_true(e[["sales__headline__property_month__log_articles"]]$n_retained == 0L, "an empty retained set stores nothing else")
+    assert_true(sample_retained_count(compressed$sales, "sales__short_window__property_month__post") == 3L &&
+                  sample_retained_count(compressed$sales, "absent") == 0L, "retained counts read from the compressed form")
+    s$estimated[["sales__short_window__property_month__post"]] <- 1:3
+    assert_error_matching(compress_samples(list(sales = s)), "outside the variant input", "rows outside the variant input are rejected")
+    TRUE
+  },
+  export_artifacts_are_stamped_with_the_fingerprint = function() {
+    bundle <- fixture_bundle()
+    root <- tempfile("artifacts-"); dir.create(root)
+    cfg <- CONFIG
+    cfg$output <- list(regs = file.path(root, "regs"), tables = file.path(root, "tables"),
+                       figures = file.path(root, "figures"), log = file.path(root, "log"))
+    written <- export_artifacts(bundle, cfg)
+    assert_true(all(file.exists(written)), "every artifact is written")
+    csvs <- written[grepl("\\.csv$", written)]
+    stamped <- vapply(csvs, function(p) { df <- utils::read.csv(p); "fingerprint" %in% names(df) && all(df$fingerprint == bundle$metadata$fingerprint$combined) }, logical(1))
+    assert_true(length(csvs) >= 10L && all(stamped), "every CSV carries the combined fingerprint")
+    assert_true(all(file.exists(file.path(cfg$output$figures, c("coefficient_comparison.pdf", "annual_profiles.pdf", "attention_history_sales.pdf", "run_fingerprint.txt")))),
+                "figures and the fingerprint file are written")
+    log_lines <- readLines(file.path(cfg$output$log, "run_log.txt"))
+    assert_true(any(grepl(bundle$metadata$fingerprint$combined, log_lines, fixed = TRUE)) && any(grepl("status: complete", log_lines)),
+                "the run log carries the fingerprint and status")
+    assert_true(length(list.files(cfg$output$tables, pattern = "\\.tmp$", all.files = TRUE)) == 0L, "no staged temp files remain")
+    TRUE
+  }
+)
+
 fixture_results <- run_fixture_checks(FIXTURE_CHECKS)
 ```
 
@@ -2933,6 +4049,7 @@ fixture_results <- run_fixture_checks(FIXTURE_CHECKS)
 # Per-market loop (U1 readiness -> U2 exposure and attention; U3 adds fitting).
 # Shared inputs are loaded once; each market's pre-band panel is released as
 # soon as the bands are applied.
+run_started <- Sys.time()
 site_projection <- load_site_projection(CONFIG$crosswalk_path, CONFIG$crosswalk_years)
 article_input <- load_article_monthly(CONFIG$articles_path)
 article_validation <- validate_article_input(article_input$monthly)
@@ -3003,56 +4120,369 @@ residual_support <- dplyr::bind_rows(residual_support)
 residual_support_by_year <- dplyr::bind_rows(residual_support_by_year)
 fit_logs <- dplyr::bind_rows(fit_logs)
 assert_model_grid_complete(cells, profiles)
+
+# U4: bind the run's identity to every planned cell, save atomically, export artifacts.
+peak_gc_mb <- max(c(fit_logs$peak_gc_mb, vapply(readiness, function(r) r$peak_memory_mb %||% NA_real_, numeric(1))), na.rm = TRUE)
+runtime <- list(
+  started_at = format(run_started, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+  finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+  total_seconds = as.numeric(difftime(Sys.time(), run_started, units = "secs")),
+  peak_gc_mb = peak_gc_mb,
+  peak_memory_note = sprintf("peak R heap during the run (gc) was %s MB; the OS-level peak footprint is higher and is measured outside R, for example with /usr/bin/time -l",
+                             format_count(round(peak_gc_mb)))
+)
+bundle <- assemble_bundle(
+  site_projection = site_projection, article_validation = article_validation, article_evidence = article_evidence,
+  attention_calendars = attention_calendars, input_provenance = input_provenance, readiness = readiness,
+  observation_diagnostics = observation_diagnostics, exclusion_ledger = exclusion_ledger, variant_ledger = variant_ledger,
+  market_data = market_data, cells = cells, profiles = profiles, residual_support = residual_support,
+  residual_support_by_year = residual_support_by_year, samples = samples, models = models, fit_log = fit_logs,
+  fixture_checks = fixture_results[, c("unit", "scenario", "passed")], runtime = runtime,
+  fingerprint = compute_fingerprint(input_provenance, rehash = FALSE)
+)
+bundle <- complete_bundle(bundle)
+save_bundle_atomic(bundle, file.path(CONFIG$output$regs, CONFIG$bundle_file))
+export_artifacts(bundle)
+cat(sprintf("Bundle saved (fingerprint %s, %.0f s); artifacts exported.\n", bundle$metadata$fingerprint$combined, runtime$total_seconds))
+# Release the in-memory results: every display chunk reads the bundle loaded from disk.
+rm(bundle, site_projection, article_input, article_validation, article_evidence, attention_calendars, input_provenance,
+   readiness, observation_diagnostics, exclusion_ledger, variant_ledger, market_data, cells, profiles, residual_support,
+   residual_support_by_year, samples, models, fit_logs, runtime, peak_gc_mb, run_started)
+invisible(gc())
 ```
 
-## Data readiness
+```{r}
+#| label: load-bundle
+#| include: false
 
-The inputs are the two long-run transaction histories and their repeat mappings.
-Every number below is computed at render time from those files; none is typed in.
-A market is marked *blocked* when a validation step fails, and its model cells
-are then reported as blocked rather than estimated on a substituted sample.
+# Both paths present the same object: the validated bundle on disk. The expected
+# fingerprint is recomputed now from the current source, settings, packages and the
+# bytes of every input the bundle names (AE4), so a stale bundle is refused here.
+bundle_path <- file.path(CONFIG$output$regs, CONFIG$bundle_file)
+results <- load_bundle(bundle_path, expected_fingerprint = function(inputs) compute_fingerprint(inputs, rehash = TRUE))
+```
+
+```{r}
+#| label: rendering-mode
+#| results: asis
+
+md <- results$metadata
+mode <- if (params$reestimate) "inputs re-validated and the model grid re-estimated in this render" else "results loaded from the saved bundle without re-estimation"
+emit_paragraph(sprintf("**This rendering:** %s. Bundle `%s` created %s UTC, status `%s`, combined fingerprint `%s…`, estimation runtime %s.",
+                       mode, project_relative_path(bundle_path), md$created_at, md$status,
+                       substr(md$fingerprint$combined, 1L, 12L), format_seconds(md$runtime_seconds)))
+```
+
+## Findings
+
+```{r}
+#| label: findings-values
+#| include: false
+
+cells <- results$cells
+cell_value <- function(key, field) { v <- cells[[field]][cells$model_key == key]; if (length(v) == 0L) NA else v }
+cell_phrase <- function(key, digits = 4) {
+  status <- cell_value(key, "status")
+  if (!status %in% ESTIMATED_STATUSES) return(sprintf("not estimated (%s)", status))
+  est <- cell_value(key, "estimate")
+  if (status == "estimated_inference_unavailable") return(sprintf("%.*f (inference unavailable)", digits, est))
+  sprintf("%.*f (95%% CI %s)", digits, est, format_ci(cell_value(key, "conf_low"), cell_value(key, "conf_high"), digits))
+}
+ratio_phrase <- function(key) {
+  est <- cell_value(key, "estimate")
+  if (is.na(est)) return("not available")
+  sprintf("%+.2f%%", percent_change(est))
+}
+n_estimated <- sum(cells$status == "estimated")
+n_inference_unavailable <- sum(cells$status == "estimated_inference_unavailable")
+n_not_estimated <- sum(!cells$status %in% ESTIMATED_STATUSES)
+status_counts <- table(factor(cells$status, levels = CELL_STATUSES))
+status_phrase <- paste(sprintf("%d %s", as.integer(status_counts[status_counts > 0]), names(status_counts)[status_counts > 0]), collapse = ", ")
+profile_status_phrase <- paste(sprintf("%s, %s: %s, joint test %s",
+                                       MARKET_LABELS[vapply(results$profiles, function(p) p$market, character(1))],
+                                       FE_LABELS[vapply(results$profiles, function(p) p$fe, character(1))],
+                                       vapply(results$profiles, function(p) p$status, character(1)),
+                                       vapply(results$profiles, function(p) p$joint_test$status, character(1))), collapse = "; ")
+joint_caption_rows <- joint_test_rows(results$profiles)
+joint_caption <- paste(sprintf("%s, %s: %s", MARKET_LABELS[joint_caption_rows$market], FE_LABELS[joint_caption_rows$fe],
+                               ifelse(joint_caption_rows$joint_status == "available",
+                                      sprintf("F(%d, %s) = %.2f, p %s", joint_caption_rows$df1, format_count(joint_caption_rows$df2),
+                                              joint_caption_rows$statistic, sub("^< ", "< ", format_p(joint_caption_rows$p_value))),
+                                      paste0("joint test ", joint_caption_rows$joint_status))), collapse = "; ")
+profile_caption <- sprintf("Near x year coefficients relative to %d on the headline samples with pointwise 95%% intervals; the hollow point is the %d reference and the vertical line marks %s. Joint test that the %s coefficients are zero: %s.",
+                           CONFIG$profile_reference_year, CONFIG$profile_reference_year, format(CONFIG$event_month, "%B %Y"),
+                           paste(range(CONFIG$profile_joint_years), collapse = "-"), joint_caption)
+coefficient_caption <- sprintf("Near x attention coefficients for all %d planned cells (%s). Bars are 95%% pointwise intervals from the LSOA-clustered covariance and each model's t degrees of freedom; the two attention measures have different units and their panels use different scales. Cells without an estimate show their status instead of a point.",
+                               nrow(cells), status_phrase)
+key_s_pm_post <- model_key("sales", "headline", "property_month", "post")
+key_s_my_post <- model_key("sales", "headline", "property_month_msoa_year", "post")
+key_r_pm_post <- model_key("rentals", "headline", "property_month", "post")
+key_r_my_post <- model_key("rentals", "headline", "property_month_msoa_year", "post")
+key_s_pm_art <- model_key("sales", "headline", "property_month", "log_articles")
+key_s_my_art <- model_key("sales", "headline", "property_month_msoa_year", "log_articles")
+key_r_pm_art <- model_key("rentals", "headline", "property_month", "log_articles")
+key_r_my_art <- model_key("rentals", "headline", "property_month_msoa_year", "log_articles")
+sales_stock_end <- results$calendar$article_stock[results$calendar$market == "sales" & results$calendar$month_index == max(results$calendar$month_index[results$calendar$market == "sales"])]
+stock_event <- results$calendar$article_stock[results$calendar$market == "sales" & results$calendar$year == lubridate::year(CONFIG$event_month) & results$calendar$month == lubridate::month(CONFIG$event_month)]
+```
+
+The model grid has `r nrow(cells)` scalar cells (`r status_phrase`) and `r length(results$profiles)` annual profiles (`r profile_status_phrase`). Every planned cell is accounted for below; cells that could not be estimated keep their status and reason rather than a substituted number.
+
+```{r}
+#| label: findings-coefficient-plot
+#| fig-width: 10
+#| fig-height: 6.5
+#| fig-cap: !expr coefficient_caption
+
+plot_coefficients(cells)
+```
+
+```{r}
+#| label: findings-headline-table
+#| results: asis
+
+knitr::kable(headline_table(cells), format = "html", format.args = list(big.mark = ","),
+             caption = "Headline cells: eligible long-run repeat properties, no controls. Ratio change (%) = 100 (exp(beta) - 1) for post cells, the change in the conditional near/far price ratio.")
+```
+
+**Post indicator.** Under property and calendar-month effects the headline near–far gap changes by `r cell_phrase(key_s_pm_post)` log points for sales and `r cell_phrase(key_r_pm_post)` for rentals from August 2022; as changes in the conditional near/far price ratio these are `r ratio_phrase(key_s_pm_post)` and `r ratio_phrase(key_r_pm_post)`. Adding MSOA × year effects moves the sales coefficient to `r cell_phrase(key_s_my_post)` and the rental coefficient to `r cell_phrase(key_r_my_post)`, so the within-property post gap under the fuller structure is `r ratio_phrase(key_s_my_post)` for sales and `r ratio_phrase(key_r_my_post)` for rentals. The translation is a change in the near/far ratio, not an absolute fall in near-property prices.
+
+**Article stock.** The article coefficient is the change in the gap per log point of the cumulative search-1 stock (`r format_count(stock_event)` articles by `r format(CONFIG$event_month, "%B %Y")`, `r format_count(sales_stock_end)` by the end of the sales calendar), not the effect of one additional article. The headline estimates are `r cell_phrase(key_s_pm_art)` (sales) and `r cell_phrase(key_r_pm_art)` (rentals) with property and month effects, and `r cell_phrase(key_s_my_art)` and `r cell_phrase(key_r_my_art)` with MSOA × year effects.
+
+```{r}
+#| label: findings-profile-plot
+#| fig-width: 10
+#| fig-height: 6
+#| fig-cap: !expr profile_caption
+
+profile_plot <- plot_profiles(results$profiles)
+if (is.null(profile_plot)) {
+  cat("No annual profile was estimable; the profile tables record the reasons.\n")
+} else {
+  profile_plot
+}
+```
+
+**Reading these results.** Two features of the grid matter more than any single coefficient. First, the sign and size of the post and article coefficients depend on the fixed-effect structure: the MSOA × year effects absorb local annual price paths, and what remains is the within-property, within-MSOA-year near–far change. Second, the annual profiles show whether the near–far gap was already moving before 2022; the joint test above covers only 2014–2018 relative to 2019, the 2022 coefficient mixes pre- and post-August months, and neither is a test of parallel trends over all pre-event observations. The sample variants (excluding observed characteristic changes, complete cases with and without controls, the 2021-on window) show how far each estimate depends on sample composition; differences in statistical significance between variants do not establish differences between estimates.
+
+None of this is presented as evidence of a publicity effect. Property effects remove fixed proximity and fixed characteristics, calendar-month effects remove national shocks common to near and far properties, and MSOA × year effects remove local annual paths, but competing changes in the relative desirability of near locations over the same period are not excluded. These are unweighted transaction-level fixed-effects projections: the frequency and timing of repeat observations, not equal property weights, determine the implicit weighting.
+
+## Design
+
+For property $i$ observed in calendar month $m$ the scalar cells estimate
+
+$$
+\log p_{im} = \alpha_i + \lambda_m + \beta\,(\mathrm{Near}_i \times A_m) + \varepsilon_{im},
+$$
+
+and, under the second fixed-effect structure,
+
+$$
+\log p_{im} = \alpha_i + \lambda_m + \gamma_{g(i),\,y(m)} + \beta\,(\mathrm{Near}_i \times A_m) + \varepsilon_{im},
+$$
+
+where $\gamma_{g(i),y(m)}$ is an MSOA × calendar-year effect. The annual profiles replace the single interaction by year-specific ones on the headline sample:
+
+$$
+\log p_{im} = \alpha_i + \lambda_m + \left[\gamma_{g(i),\,y(m)}\right] + \sum_{y \neq `r CONFIG$profile_reference_year`} \delta_y\,(\mathrm{Near}_i \times \mathbb{1}\{y(m) = y\}) + \varepsilon_{im}.
+$$
+
+- $p_{im}$: sale price (sales) or listing price at `rented_est` (rentals), in logs; finite positive outcomes only.
+- $\alpha_i$: property (repeat-group) effect; it absorbs the near main effect and every fixed characteristic.
+- $\lambda_m$: calendar-month effect (months since January 2014); it absorbs the attention main effect.
+- $\mathrm{Near}_i$: 1 for the `r CONFIG$bands$near_min`–`r CONFIG$bands$near_max` m band, 0 for the `r format_count(CONFIG$bands$far_min)`–`r format_count(CONFIG$bands$far_max)` m band, from the fixed Site Group projection; the intervening band and everything beyond `r format_count(CONFIG$bands$far_max)` m are dropped.
+- $A_m$: the post indicator (1 from `r format(CONFIG$event_month, "%B %Y")` inclusive) or $\log$ of the cumulative search-1 article count from `r format(CONFIG$article_origin, "%B %Y")`, evaluated through the full transaction or listing month.
+- $\delta_y$: the near–far gap in year $y$ relative to `r CONFIG$profile_reference_year`.
+
+| Variant | Sample | Controls | Purpose |
+|:--|:--|:--|:--|
+| Headline | Eligible long-run repeat properties (two distinct dates in the banded panel) | None | Main within-property comparison |
+| Exclude observed changes | Headline less whole properties with any observed characteristic change (sales: property type; rentals: type, bedrooms, bathrooms), repeats recomputed | None | Sensitivity to recorded changes |
+| Complete-case comparator | Rows with nonmissing controls, repeats recomputed | None | Isolate complete-case selection |
+| Complete cases with controls | Exactly the comparator's estimation rows within each fixed-effect structure | Sales: type, old/new, tenure; rentals: type, bedrooms, bathrooms | Isolate adding observed characteristics |
+| Short window | `r format(CONFIG$short_window_start, "%B %Y")` through each market's end, repeats recomputed, same article stock | None | Compare the period used by the existing news analysis |
+
+```{r}
+#| label: design-inference
+#| results: asis
+
+reference_model <- Filter(function(m) !is.null(m) && !is.null(m$ssc), results$models)
+if (length(reference_model) > 0L) {
+  ssc <- reference_model[[1L]]$ssc
+  inference_rows <- tibble::tibble(
+    item = c("Covariance", "Small-sample correction (fixest ssc)", "Degrees of freedom for intervals and p-values",
+             "95% interval", "Joint test"),
+    value = c("Clustered by LSOA on each fit's actual estimation sample",
+              paste(sprintf("%s = %s", names(ssc), vapply(ssc, function(v) paste(format(v), collapse = "/"), character(1))), collapse = ", "),
+              "The model's clustered t degrees of freedom (recorded per cell as `t df`)",
+              "estimate ± t(0.975, df) × clustered standard error, pointwise",
+              sprintf("Wald F on the %s Near x year coefficients with the full clustered covariance block; unavailable, not reduced, when a contrast or the block is unavailable",
+                      paste(range(CONFIG$profile_joint_years), collapse = "-")))
+  )
+  emit_table(knitr::kable(inference_rows, format = "html", caption = "Inference conventions (KTD11)"))
+} else {
+  cat("No fitted model carries inference settings in this bundle.\n\n")
+}
+```
+
+**Residual support (KTD11).** For every scalar fit the focal regressor $\mathrm{Near}_i \times A_m$ is residualised on all included fixed effects and controls over the fit's actual sample. The report records the residual sum of squares, its ratio to the centred raw variation of the same regressor, and the shares of the squared residuals by calendar year and by LSOA cluster. These are descriptive measures of how much and where design variation remains; no threshold, weight or exclusion follows from them and they do not establish identification.
+
+## Full results
+
+```{r}
+#| label: results-cells-table
+#| results: asis
+
+coefficient_table <- cell_order(label_cells(cells)) |>
+  dplyr::transmute(
+    Market = as.character(market_label), Attention = as.character(attention_label), Variant = VARIANT_LABELS[variant],
+    `Fixed effects` = as.character(fe_label), Status = status,
+    Estimate = round(estimate, 4), `Std. error` = round(std_error, 4), `95% CI` = format_ci(conf_low, conf_high),
+    `p-value` = format_p(p_value), `t df` = t_df,
+    `Ratio change (%)` = ifelse(attention == "post" & !is.na(estimate), round(percent_change(estimate), 2), NA_real_),
+    Reason = reason
+  )
+knitr::kable(coefficient_table, format = "html", format.args = list(big.mark = ","),
+             caption = sprintf("All %d scalar cells. Ratio change (%%) = 100 (exp(beta) - 1) for post cells. Non-estimated cells carry their status and reason.", nrow(cells)))
+```
+
+### Sample support
+
+The support table reports, for every cell, the rows the estimator used, the properties and LSOA clusters behind them, near and far property counts, properties observed on both sides of `r format(CONFIG$event_month, "%B %Y")`, rows removed by the estimator (fixed-effect singletons), and controls absorbed by the fixed effects. Absorption of a control does not invalidate the focal coefficient, and none of these counts establishes identification on its own.
+
+```{r}
+#| label: results-support-table
+#| results: asis
+
+support_table <- cell_order(label_cells(cells)) |>
+  dplyr::transmute(Market = as.character(market_label), Attention = as.character(attention_label),
+                   Variant = VARIANT_LABELS[variant], `Fixed effects` = as.character(fe_label), Status = status,
+                   Observations = nobs, Properties = n_properties, Clusters = n_clusters,
+                   `Near properties` = n_near_properties, `Far properties` = n_far_properties,
+                   `Both sides of event` = n_properties_both_sides_event,
+                   `Removed by estimator` = n_removed_by_estimator, `Controls absorbed` = n_controls_absorbed,
+                   Warnings = warnings)
+emit_table(knitr::kable(support_table, format = "html", format.args = list(big.mark = ","),
+                        caption = "Estimation support for every scalar cell (rows retained by the estimator; properties and clusters counted on those rows)"))
+emit_table(knitr::kable(sample_support_rows(results$samples), format = "html", format.args = list(big.mark = ","),
+                        caption = "Variant input samples before estimation: rows and properties per market and variant"))
+```
+
+### Residual variation of the focal regressor
+
+```{r}
+#| label: results-residual-support
+#| results: asis
+
+if (nrow(results$residual_support) > 0L) {
+  residual_table <- results$residual_support |>
+    dplyr::inner_join(dplyr::select(cells, model_key, market, variant, fe, attention), by = "model_key") |>
+    label_cells() |>
+    cell_order() |>
+    dplyr::transmute(Market = as.character(market_label), Attention = as.character(attention_label),
+                     Variant = VARIANT_LABELS[variant], `Fixed effects` = as.character(fe_label),
+                     `Residual SS` = round(rss, 1), `Centred raw variation` = round(centred_raw_variation, 1),
+                     Ratio = round(ratio, 4), `Top-1 LSOA share` = round(lsoa_share_top1, 5),
+                     `Top-5 share` = round(lsoa_share_top5, 5), `Top-10 share` = round(lsoa_share_top10, 5),
+                     Clusters = n_clusters)
+  emit_table(knitr::kable(residual_table, format = "html", format.args = list(big.mark = ","),
+                          caption = "Residual variation of Near x attention after the fixed effects and controls (KTD11), by cell"))
+} else {
+  cat("No residual-support measures: no scalar cell was estimated.\n\n")
+}
+if (nrow(results$residual_support_by_year) > 0L) {
+  year_shares <- results$residual_support_by_year |>
+    dplyr::inner_join(dplyr::select(cells, model_key, market, variant, fe, attention), by = "model_key") |>
+    dplyr::filter(variant == "headline") |>
+    dplyr::mutate(share = round(share, 4)) |>
+    tidyr::pivot_wider(id_cols = c(market, attention, fe), names_from = year, values_from = share) |>
+    dplyr::arrange(market, attention, fe) |>
+    dplyr::mutate(market = MARKET_LABELS[market], attention = ATTENTION_LABELS[attention], fe = FE_LABELS[fe])
+  emit_table(knitr::kable(year_shares, format = "html",
+                          caption = "Headline cells: share of residual focal variation by calendar year"))
+}
+```
+
+### Annual profiles
+
+```{r}
+#| label: results-profile-tables
+#| results: asis
+
+joint_rows <- joint_test_rows(results$profiles) |>
+  dplyr::transmute(Market = MARKET_LABELS[market], `Fixed effects` = FE_LABELS[fe], `Profile status` = profile_status,
+                   `Joint test` = joint_status, `F statistic` = round(statistic, 3), df1, df2, `p-value` = format_p(p_value),
+                   Observations = nobs, Properties = n_properties, Clusters = n_clusters,
+                   `Removed by estimator` = n_removed_by_estimator,
+                   Reason = dplyr::coalesce(joint_reason, profile_reason))
+emit_table(knitr::kable(joint_rows, format = "html", format.args = list(big.mark = ","),
+                        caption = sprintf("Joint test that the %s Near x year coefficients are zero (F with df1 = %d and df2 = the model's clustered t degrees of freedom)",
+                                          paste(range(CONFIG$profile_joint_years), collapse = "-"), length(CONFIG$profile_joint_years))))
+profile_points <- profile_rows(results$profiles)
+if (nrow(profile_points) > 0L) {
+  profile_table <- profile_points |>
+    dplyr::transmute(Market = MARKET_LABELS[market], `Fixed effects` = FE_LABELS[fe], Year = year,
+                     Estimate = round(estimate, 4), `Std. error` = round(std_error, 4), `95% CI` = format_ci(conf_low, conf_high),
+                     `p-value` = format_p(p_value), Available = available)
+  emit_table(knitr::kable(profile_table, format = "html",
+                          caption = sprintf("Annual Near x year coefficients relative to %d (pointwise 95%% intervals)", CONFIG$profile_reference_year)))
+}
+```
+
+### Variant sample flows and fitting log
+
+Each variant branches from the eligible long-run panel (the last row of the exclusion ledger); rows chain within a variant, and the complete-case-with-controls rows record, per fixed-effect structure, the rows the comparator fit retained.
+
+```{r}
+#| label: results-variant-ledger
+#| results: asis
+
+emit_table(knitr::kable(dplyr::select(results$exclusions$variants, market, variant, fe, step, n_rows_before, n_rows_after,
+                                      n_rows_removed, n_groups_before, n_groups_after, note),
+                        format = "html", format.args = list(big.mark = ","),
+                        caption = "Variant ledger: restrictions applied to the eligible long-run panel for each sensitivity sample"))
+fit_summary <- results$fit_log |>
+  dplyr::group_by(market) |>
+  dplyr::summarise(fits = dplyr::n(), estimated = sum(status %in% ESTIMATED_STATUSES),
+                   total_seconds = round(sum(seconds), 1), min_seconds = round(min(seconds), 1),
+                   max_seconds = round(max(seconds), 1), max_peak_gc_mb = round(max(peak_gc_mb, na.rm = TRUE)),
+                   .groups = "drop")
+emit_table(knitr::kable(fit_summary, format = "html", format.args = list(big.mark = ","),
+                        caption = "Sequential fitting: fits per market, wall seconds and peak R heap (gc) during a fit"))
+emit_table(knitr::kable(dplyr::mutate(results$fit_log, seconds = round(seconds, 1), peak_gc_mb = round(peak_gc_mb)),
+                        format = "html", format.args = list(big.mark = ","), caption = "Fit log, one row per fitted key"))
+```
+
+## Sample flows and readiness
+
+The inputs are the two long-run transaction histories and their repeat mappings. Every number in this section is computed from those files when the bundle is built; none is typed in. A market is marked *blocked* when a validation step fails, and its model cells are then reported as blocked rather than estimated on a substituted sample.
+
+### Data readiness
 
 ```{r}
 #| label: readiness-status
-#| eval: !expr params$reestimate
 #| results: asis
 
-status_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
-  r <- readiness[[m]]
-  tibble::tibble(
-    market = m, status = r$status,
-    blocked_stage = r$blocked_stage %||% NA_character_,
-    reason = r$reason %||% NA_character_,
-    rows_pre_band = r$n_rows_pre_band %||% NA_real_,
-    groups_pre_band = r$n_groups_pre_band %||% NA_real_,
-    rows_repeat_eligible_pre_band = r$n_rows_repeat_eligible_pre_band %||% NA_real_,
-    groups_repeat_eligible_pre_band = r$n_groups_repeat_eligible_pre_band %||% NA_real_,
-    runtime_seconds = round(r$runtime_seconds, 1), peak_memory_mb = round(r$peak_memory_mb)
-  )
-}))
-knitr::kable(status_rows, format = "html", format.args = list(big.mark = ","),
-             caption = "Market readiness after the pre-band sample contract")
+readiness <- results$readiness
+emit_table(knitr::kable(readiness_status_rows(readiness), format = "html", format.args = list(big.mark = ","),
+                        caption = "Market readiness after the pre-band sample contract"))
+emit_table(knitr::kable(results$markets, format = "html", digits = 1, caption = "Market status entering estimation and per-market runtime (seconds)"))
 ```
 
-### Input provenance
+#### Input provenance
 
 ```{r}
 #| label: readiness-provenance
-#| eval: !expr params$reestimate
 #| results: asis
 
-knitr::kable(
-  dplyr::mutate(input_provenance, path = sub(paste0("^", here::here(), "/"), "", path)),
-  format = "html", format.args = list(big.mark = ","),
-  caption = "Consumed inputs: content hash (xxhash64 of the file), generation id from parquet metadata, rows, columns used; mtime is descriptive only"
-)
+knitr::kable(results$inputs, format = "html", format.args = list(big.mark = ","),
+             caption = "Consumed inputs: content hash (xxhash64 of the file), generation id from parquet metadata, rows, columns used; mtime is descriptive only")
 ```
 
-### Mapping validation
+#### Mapping validation
 
 ```{r}
 #| label: readiness-mapping
-#| eval: !expr params$reestimate
 #| results: asis
 
 mapping_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
@@ -3072,17 +4502,12 @@ knitr::kable(mapping_rows, format = "html", format.args = list(big.mark = ","),
              caption = "Mapping integrity: unique string ids, one-to-one join, and reconciliation of rows absent from the mapping against the manifest and the same-day review")
 ```
 
-### Current-address verification
+#### Current-address verification
 
-Address keys and expected repeat ids are recomputed read-only on every
-requested-window row that is in the mapping, singles included, with the
-production `build_address_key()` and `hash_serialized_values()` contract and the
-market's exact field order. Any missing current key or mismatched repeat id
-blocks the market; nothing is rebuilt or repaired here.
+Address keys and expected repeat ids are recomputed read-only on every requested-window row that is in the mapping, singles included, with the production `build_address_key()` and `hash_serialized_values()` contract and the market's exact field order. Any missing current key or mismatched repeat id blocks the market; nothing is rebuilt or repaired here.
 
 ```{r}
 #| label: readiness-address
-#| eval: !expr params$reestimate
 #| results: asis
 
 address_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
@@ -3094,9 +4519,8 @@ address_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
     mismatched_repeat_ids = a$n_mismatched, mismatched_groups = a$n_mismatched_groups
   )
 }))
-knitr::kable(address_rows, format = "html", format.args = list(big.mark = ","),
-             caption = "KTD10 current-address verification on requested-window mapped candidates")
-
+emit_table(knitr::kable(address_rows, format = "html", format.args = list(big.mark = ","),
+                        caption = "KTD10 current-address verification on requested-window mapped candidates"))
 geography_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
   g <- readiness[[m]]$geography
   if (is.null(g)) return(tibble::tibble(market = m))
@@ -3104,15 +4528,14 @@ geography_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
                  contradictory_groups = g$n_groups_contradictory, country = g$n_groups_country,
                  coordinates = g$n_groups_coordinates, lsoa = g$n_groups_lsoa, msoa = g$n_groups_msoa)
 }))
-knitr::kable(geography_rows, format = "html", format.args = list(big.mark = ","),
-             caption = "Contradictory nonmissing geography within candidate repeat groups (whole groups excluded)")
+emit_table(knitr::kable(geography_rows, format = "html", format.args = list(big.mark = ","),
+                        caption = "Contradictory nonmissing geography within candidate repeat groups (whole groups excluded)"))
 ```
 
-### Rental price units
+#### Rental price units
 
 ```{r}
 #| label: readiness-rental-units
-#| eval: !expr params$reestimate
 #| results: asis
 
 u <- readiness$rentals$unit_evidence
@@ -3129,28 +4552,24 @@ if (!is.null(u)) {
   )
   emit_table(knitr::kable(unit_rows, format = "html", caption = "Rental unit evidence"))
   emit_table(knitr::kable(u$by_year, format = "html", digits = 2, format.args = list(big.mark = ","),
-                   caption = "listing_price by listing year (finite positive prices, requested window, mapped candidates)"))
+                          caption = "listing_price by listing year (finite positive prices, requested window, mapped candidates)"))
   emit_table(knitr::kable(u$by_month, format = "html", digits = 2, format.args = list(big.mark = ","),
-                   caption = "listing_price by month around the 2022/2023 vintage boundary"))
+                          caption = "listing_price by month around the 2022/2023 vintage boundary"))
 } else {
-  cat("Rental unit evidence unavailable: ", readiness$rentals$reason, "\n")
+  cat("Rental unit evidence unavailable: ", readiness$rentals$reason, "\n\n")
 }
 ```
 
-### Exclusion ledger
+#### Exclusion ledger
 
-Each row is one restriction in the plan's order; consecutive rows chain exactly.
-The distance-band restriction and the two-distinct-dates requirement are the
-last two rows and are discussed in the exposure section.
+Each row is one restriction in the plan's order; consecutive rows chain exactly. The distance-band restriction and the two-distinct-dates requirement are the last two rows per market.
 
 ```{r}
 #| label: readiness-ledger
-#| eval: !expr params$reestimate
 #| results: asis
 
-knitr::kable(exclusion_ledger, format = "html", format.args = list(big.mark = ","),
-             caption = "Exclusion ledger: requested dates through the distance bands and the two-distinct-dates requirement")
-
+emit_table(knitr::kable(results$exclusions$ledger, format = "html", format.args = list(big.mark = ","),
+                        caption = "Exclusion ledger: requested dates through the distance bands and the two-distinct-dates requirement"))
 coverage_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) readiness[[m]]$coverage))
 if (nrow(coverage_rows) > 0L) {
   coverage_wide <- tidyr::pivot_wider(coverage_rows, names_from = market, values_from = n_rows)
@@ -3159,29 +4578,26 @@ if (nrow(coverage_rows) > 0L) {
 }
 ```
 
-### Observation diagnostics
+#### Observation diagnostics
 
-Descriptive only: no diagnostic introduces an exclusion. Computed on the pre-band
-panel restricted to properties with at least two distinct dates; the exposure
-section repeats them by distance band.
+Descriptive only: no diagnostic introduces an exclusion. Computed on the pre-band panel restricted to properties with at least two distinct dates; the exposure section repeats them by distance band.
 
 ```{r}
 #| label: readiness-diagnostics
-#| eval: !expr params$reestimate
 #| results: asis
 
 for (m in MARKETS) {
-  d <- observation_diagnostics[[m]]
+  d <- results$observation_diagnostics[[m]]
   if (is.null(d)) { cat("\n\n", m, ": diagnostics unavailable (", readiness[[m]]$reason, ")\n\n", sep = ""); next }
-  cat("\n\n#### ", tools::toTitleCase(m), "\n\n", sep = "")
+  cat("\n\n##### ", tools::toTitleCase(m), "\n\n", sep = "")
   spatial <- d$spatial
   headline <- tibble::tibble(
-    item = c("Rows", "Repeat properties", "Groups with more than 12 observations",
+    item = c("Rows", "Repeat properties", sprintf("Groups with more than %d observations", CONFIG$large_group_size),
              "Unique coordinates", "Unique postcodes", "Geography labels", "Postcode lookup (stated cleaning vintage)"),
     value = c(format_count(d$n_rows), format_count(d$n_groups), format_count(d$n_large_groups),
               format_count(spatial$n_unique_coordinates), format_count(spatial$n_unique_postcodes),
               spatial$geography_vintage,
-              sprintf("%s (%s)", sub(paste0("^", here::here(), "/"), "", spatial$postcode_lookup_path),
+              sprintf("%s (%s)", project_relative_path(spatial$postcode_lookup_path),
                       ifelse(spatial$postcode_lookup_exists, "present", "absent")))
   )
   emit_table(knitr::kable(headline, format = "html", caption = paste(tools::toTitleCase(m), "panel summary")))
@@ -3190,98 +4606,76 @@ for (m in MARKETS) {
   emit_table(knitr::kable(d$same_month, format = "html", digits = 4, format.args = list(big.mark = ","), caption = "Same-month consecutive repeats"))
   emit_table(knitr::kable(d$outcome_by_year, format = "html", digits = 3, format.args = list(big.mark = ","), caption = "Log outcome by year"))
   emit_table(knitr::kable(d$extreme_ratio_by_year, format = "html", digits = 4, format.args = list(big.mark = ","),
-                   caption = sprintf("Consecutive pairs with annualised price ratio above %s or below 1/%s, by year of the later observation",
-                                     CONFIG$extreme_annualized_price_ratio, CONFIG$extreme_annualized_price_ratio)))
+                          caption = sprintf("Consecutive pairs with annualised price ratio above %s or below 1/%s, by year of the later observation",
+                                            CONFIG$extreme_annualized_price_ratio, CONFIG$extreme_annualized_price_ratio)))
   if (!is.null(d$rented_fallback_by_year)) {
     emit_table(knitr::kable(d$rented_fallback_by_year, format = "html", digits = 4, format.args = list(big.mark = ","),
-                     caption = "rented_est fallback share by year (rented missing, latest_to_rent used)"))
+                            caption = "rented_est fallback share by year (rented missing, latest_to_rent used)"))
   }
   emit_table(knitr::kable(spatial$quality_distribution, format = "html", format.args = list(big.mark = ","), caption = "Coordinate quality (ONS gridind)"))
 }
 ```
 
-## Exposure and attention
+### Exposure
 
-Exposure is fixed from overflow locations alone. The Site Group crosswalk for
-2021–2024 is projected to one representative location per Site Group with the
-existing latest-valid rule; `annual_status` is read only so that the projection
-helper can validate the crosswalk's structure, and no monitoring, spill or
-availability information enters eligibility (AE3). Each unique property
-coordinate is matched to its nearest usable Site Group with an STRtree-indexed
-nearest-feature search in British National Grid metres, so no
-coordinate-by-site matrix is ever formed. Near is 0–500 m inclusive, far is
-greater than 1,000 m and at most 2,000 m; the intervening band and everything
-beyond 2 km are dropped. The two-distinct-dates requirement is then recomputed
-on the banded panel, and characteristic-change flags are frozen on that eligible
-long-run panel before any complete-case or short-window restriction.
-
-### Fixed site projection
+Exposure is fixed from overflow locations alone. The Site Group crosswalk for `r paste(range(CONFIG$crosswalk_years), collapse = "–")` is projected to one representative location per Site Group with the existing latest-valid rule; `annual_status` is read only so that the projection helper can validate the crosswalk's structure, and no monitoring, spill or availability information enters eligibility (AE3). Each unique property coordinate is matched to its nearest usable Site Group with an STRtree-indexed nearest-feature search in British National Grid metres. The two-distinct-dates requirement is recomputed on the banded panel, and characteristic-change flags are frozen on that eligible long-run panel before any complete-case or short-window restriction.
 
 ```{r}
 #| label: exposure-projection
-#| eval: !expr params$reestimate
 #| results: asis
 
+sp <- results$site_projection
 projection_rows <- tibble::tibble(
   item = c("Crosswalk rows read", "Configured years", "Site Groups", "Usable locations (finite easting and northing)",
            "Site Groups without a valid location (counted, omitted from matching)", "Water companies",
            "Location rule", "Property coordinates", "Geography labels", "Postcode lookup (stated cleaning vintage)"),
-  value = c(format_count(site_projection$n_crosswalk_rows),
-            paste(range(site_projection$years), collapse = "-"),
-            format_count(site_projection$n_sites), format_count(site_projection$n_usable),
-            format_count(site_projection$n_unusable), format_count(site_projection$n_water_companies),
+  value = c(format_count(sp$n_crosswalk_rows), paste(range(sp$years), collapse = "-"),
+            format_count(sp$n_sites), format_count(sp$n_usable), format_count(sp$n_unusable), format_count(sp$n_water_companies),
             "latest configured year with nonmissing NGR, easting and northing (derive_site_group_projection)",
             "postcode-centroid British National Grid coordinates from the ONS postcode lookup attached at cleaning",
             "2011 LSOA/MSOA codes",
-            sprintf("%s (%s)", sub(paste0("^", here::here(), "/"), "", CONFIG$postcode_lookup_path),
+            sprintf("%s (%s)", project_relative_path(CONFIG$postcode_lookup_path),
                     ifelse(file.exists(CONFIG$postcode_lookup_path), "present", "absent")))
 )
 knitr::kable(projection_rows, format = "html", caption = "Fixed Site Group projection")
 ```
 
-Distances are postcode-centroid to Site Group representative location, so
-dwellings around a band boundary can be misclassified, and "far" means far from
-a usable mapped representative rather than verified absence of a closer
-unmapped overflow. Unique-coordinate counts relative to property counts (below)
-show how many properties share a postcode centroid.
-
-### Distance bands and repeat support
+Distances run from postcode centroids to Site Group representative locations, so dwellings around a band boundary can be misclassified, and "far" means far from a usable mapped representative rather than verified absence of a closer unmapped overflow. Unique-coordinate counts relative to property counts show how many properties share a postcode centroid.
 
 ```{r}
 #| label: exposure-bands
-#| eval: !expr params$reestimate
 #| results: asis
 
-exposure_steps <- exclusion_ledger[exclusion_ledger$step %in% c("distance_bands", "two_distinct_dates"), ]
+ledger <- results$exclusions$ledger
+exposure_steps <- ledger[ledger$step %in% c("distance_bands", "two_distinct_dates"), ]
 emit_table(knitr::kable(exposure_steps, format = "html", format.args = list(big.mark = ","),
                         caption = "Exclusion ledger: distance bands and the two-distinct-dates requirement"))
-
 for (m in MARKETS) {
-  md <- market_data[[m]]
-  if (md$status != "ready") { cat("\n\n", m, ": exposure unavailable (", md$reason, ")\n\n", sep = ""); next }
+  status <- results$markets[results$markets$market == m, ]
+  s <- results$exposure_summaries[[m]]
+  if (is.null(s) || status$status != "ready") { cat("\n\n", m, ": exposure unavailable (", status$reason, ")\n\n", sep = ""); next }
   cat("\n\n#### ", tools::toTitleCase(m), "\n\n", sep = "")
-  s <- md$exposure_summary
-  emit_table(knitr::kable(md$distance_summary_all, format = "html", digits = 3, format.args = list(big.mark = ","),
+  emit_table(knitr::kable(sp$spatial_evidence[[m]], format = "html", digits = 3, format.args = list(big.mark = ","),
                           caption = "Nearest-site matching on the pre-band panel: unique coordinates and band shares"))
   emit_table(knitr::kable(s$band_counts, format = "html", digits = 1, format.args = list(big.mark = ","),
                           caption = "Eligible long-run panel by band: rows, properties, unique coordinates, matched Site Groups and distance quantiles (m)"))
   emit_table(knitr::kable(s$by_period, format = "html", format.args = list(big.mark = ","),
-                          caption = "Rows and properties by band and event period (post = August 2022 onward)"))
+                          caption = sprintf("Rows and properties by band and event period (post = %s onward)", format(CONFIG$event_month, "%B %Y"))))
   emit_table(knitr::kable(s$both_sides_event, format = "html", digits = 4, format.args = list(big.mark = ","),
-                          caption = "Properties observed before and after August 2022, by band"))
+                          caption = sprintf("Properties observed before and after %s, by band", format(CONFIG$event_month, "%B %Y"))))
   emit_table(knitr::kable(s$change_prevalence, format = "html", digits = 4, format.args = list(big.mark = ","),
                           caption = "Characteristic-change prevalence by band (frozen on the eligible long-run panel; retained in the headline)"))
   emit_table(knitr::kable(s$change_rows, format = "html", digits = 4, format.args = list(big.mark = ","),
                           caption = "Rows belonging to properties with any observed characteristic change"))
   d <- s$diagnostics_by_band
-  sp <- d$spatial
+  spb <- d$spatial
   precision <- tibble::tibble(
     item = c("Rows", "Repeat properties", "Unique coordinates", "Unique postcodes", "Properties per unique coordinate"),
-    value = c(format_count(sp$n_rows), format_count(sp$n_properties), format_count(sp$n_unique_coordinates),
-              format_count(sp$n_unique_postcodes), sprintf("%.2f", sp$n_properties / sp$n_unique_coordinates))
+    value = c(format_count(spb$n_rows), format_count(spb$n_properties), format_count(spb$n_unique_coordinates),
+              format_count(spb$n_unique_postcodes), sprintf("%.2f", spb$n_properties / spb$n_unique_coordinates))
   )
   emit_table(knitr::kable(precision, format = "html", caption = "Spatial precision on the eligible long-run panel"))
-  emit_table(knitr::kable(sp$quality_distribution, format = "html", format.args = list(big.mark = ","),
+  emit_table(knitr::kable(spb$quality_distribution, format = "html", format.args = list(big.mark = ","),
                           caption = "Coordinate quality (ONS gridind)"))
   emit_table(knitr::kable(d$group_sizes, format = "html", format.args = list(big.mark = ","),
                           caption = "Observations per repeat group, by band"))
@@ -3301,42 +4695,25 @@ for (m in MARKETS) {
 
 ### Attention calendar
 
-The attention measures are a post indicator (August 2022 onward, set from the
-configured event month and independent of any helper's base year) and the log
-of the cumulative count of search-1 LexisNexis articles from January 2014. The
-stock excludes every earlier article. Absent months are filled with zero only
-inside established coverage of this fixed corpus, which is recomputed here from
-the export PDFs: contiguous result segments across the export files, per-file
-record counts that sum to the extracted article rows, an article-level monthly
-`n()` that reproduces the monthly file, and one query with no date narrowing on
-every cover page. Observed first and last article dates never stand in for that
-evidence. When any check fails, the article cells are blocked and the post and
-annual-profile analyses continue.
+The attention measures are a post indicator (`r format(CONFIG$event_month, "%B %Y")` onward, set from the configured event month and independent of any helper's base year) and the log of the cumulative count of search-1 LexisNexis articles from `r format(CONFIG$article_origin, "%B %Y")`. The stock excludes every earlier article. Absent months are filled with zero only inside established coverage of this fixed corpus, which is recomputed when the bundle is built from the export PDFs: contiguous result segments across the export files, per-file record counts that sum to the extracted article rows, an article-level monthly count that reproduces the monthly file, and one query with no date narrowing on every cover page. Observed first and last article dates never stand in for that evidence. When any check fails, the article cells are blocked and the post and annual-profile analyses continue.
 
-Established coverage certifies only that the extraction matches the export of
-this one Boolean search at export time. The July 2026 LexisNexis refinement
-plan documents off-topic matches and merged article boundaries with potentially
-misassigned metadata in this corpus; those limits are inherited here without
-filtering or repair, and the counts do not certify comprehensive or
-compositionally constant UK media coverage.
+Established coverage certifies only that the extraction matches the export of this one Boolean search at export time. The documented LexisNexis refinement work records off-topic matches and merged article boundaries with potentially misassigned metadata in this corpus; those limits are inherited here without filtering or repair, and the counts do not certify comprehensive or compositionally constant UK media coverage.
 
 ```{r}
 #| label: attention-evidence
-#| eval: !expr params$reestimate
 #| results: asis
 
+av <- results$article_validation
 validation_rows <- tibble::tibble(
   item = c("Monthly input status", "Rows (observed positive-count months)", "Articles in observed months",
            "First and last observed months", "Reasons"),
-  value = c(article_validation$status, format_count(article_validation$n_rows),
-            format_count(article_validation$n_articles),
-            paste(article_validation$first_month, article_validation$last_month, sep = " to "),
-            ifelse(length(article_validation$reasons) == 0L, "none", paste(article_validation$reasons, collapse = "; ")))
+  value = c(av$status, format_count(av$n_rows), format_count(av$n_articles),
+            paste(av$first_month, av$last_month, sep = " to "),
+            ifelse(length(av$reasons) == 0L, "none", paste(av$reasons, collapse = "; ")))
 )
 emit_table(knitr::kable(validation_rows, format = "html", caption = "Article input validation (search1_monthly)"))
-
-ev <- article_evidence
-if (nrow(ev$files) > 0L) {
+ev <- results$article_evidence
+if (!is.null(ev$files) && nrow(ev$files) > 0L) {
   files_display <- dplyr::select(ev$files, file, pages, export_date, job_number, search_type, first_result,
                                  n_date_fields, date_restriction_detected)
   emit_table(knitr::kable(files_display, format = "html", format.args = list(big.mark = ","),
@@ -3344,7 +4721,7 @@ if (nrow(ev$files) > 0L) {
 }
 evidence_rows <- tibble::tibble(
   item = c("Coverage status", "Segments contiguous (first results 1, 501, ...)", "PDF record fields",
-           "Extracted article rows", "Records reconciled", "Article-level monthly n() reproduces the monthly file",
+           "Extracted article rows", "Records reconciled", "Article-level monthly count reproduces the monthly file",
            "Months compared / mismatched", "Query and cover narrowing consistent across files", "Date restriction on cover",
            "Article dates in the extraction", "Earliest export date", "Established coverage end", "Reasons"),
   value = c(ev$status, as.character(ev$segments_contiguous), format_count(ev$n_records_pdf),
@@ -3355,10 +4732,9 @@ evidence_rows <- tibble::tibble(
             as.character(ev$coverage_end),
             ifelse(length(ev$reasons) == 0L, "none", paste(ev$reasons, collapse = "; ")))
 )
-emit_table(knitr::kable(evidence_rows, format = "html", caption = "Export reconciliation and coverage evidence (recomputed at render time)"))
-
+emit_table(knitr::kable(evidence_rows, format = "html", caption = "Export reconciliation and coverage evidence (recomputed when the bundle is built)"))
 calendar_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
-  cal <- attention_calendars[[m]]
+  cal <- results$calendar[results$calendar$market == m, ]
   tibble::tibble(
     market = m, months = nrow(cal), first = sprintf("%04d-%02d", cal$year[[1L]], cal$month[[1L]]),
     last = sprintf("%04d-%02d", cal$year[[nrow(cal)]], cal$month[[nrow(cal)]]),
@@ -3373,336 +4749,121 @@ emit_table(knitr::kable(calendar_rows, format = "html", format.args = list(big.m
 
 ```{r}
 #| label: attention-history
-#| eval: !expr params$reestimate
 #| fig-width: 8
 #| fig-height: 5.5
+#| fig-cap: "Search-1 article counts and the log cumulative stock on the sales calendar; shown only when the article input and its coverage evidence validated."
 
-sales_calendar <- attention_calendars$sales
-if (all(sales_calendar$article_status == "valid")) {
-  plot_attention_history(sales_calendar)
+history <- attention_history_display(results$calendar[results$calendar$market == "sales", ])
+if (is.null(history$plot)) {
+  cat(history$message, "\n")
 } else {
-  cat("Attention history not plotted: ", attr(sales_calendar, "article_reason"), "\n")
+  history$plot
 }
 ```
 
-## Findings
+## Limitations
 
-For property $i$ observed in calendar month $m$ the report estimates
+**Measurement.** Property coordinates are postcode centroids, so distances to the mapped representatives are approximate and dwellings around a band boundary can be misclassified; "far" means far from a usable mapped Site Group representative, not verified absence of a closer unmapped overflow, and the small count of Site Groups without a valid location does not bound that error. Repeat groups are operational address matches (postcode plus address fields), not verified immutable dwellings or independent rental episodes; the address-key verification is a construction check, not independent evidence of dwelling identity. The rental outcome is a listing price whose unit is not documented by the provider; the report checks continuity across the 2022/2023 vintage boundary and applies no conversion, and its date is `rented_est` (`rented` with a `latest_to_rent` fallback whose share is reported by year and band), which establishes neither the agreed rent nor an exact tenancy start. The article series is one fixed LexisNexis Boolean search whose coverage is established only through the export evidence above; off-topic matches and merged article boundaries in that corpus are inherited, and the stock runs through the full transaction or listing month, so it is not strictly prior information.
 
-$$
-\log p_{im} = \alpha_i + \lambda_m + \beta\,(\mathrm{Near}_i \times A_m) + \varepsilon_{im},
-$$
+**Identification and inference.** A publicity interpretation would require the absence of competing changes in the relative desirability of near locations; the property, month and MSOA × year effects and the annual profiles inform that assessment but do not establish it, and the joint pre-period test covers 2014–2018 relative to 2019 only. Calendar-month effects do not remove national shocks with different near and far effects. LSOA clustering allows dependence within an LSOA, not arbitrary cross-LSOA dependence, and the residual-support measures diagnose how much and where focal variation remains without declaring adequate inference from sample size alone. Characteristic exclusions and controlled comparisons assess sensitivity; they do not show that conversions, matching error or selection have been removed. The short-window variant changes both the dates and the repeat membership and does not reproduce the existing cross-sectional baseline.
 
-and the same equation with MSOA × year effects added. Property effects absorb
-fixed proximity and fixed characteristics; calendar-month effects absorb the
-attention main effect, so only the interaction is estimated. $A_m$ is either
-the post indicator (August 2022 onward) or the log of the cumulative search-1
-article stock from January 2014. Standard errors are clustered by LSOA, and
-every interval uses the fit's clustered covariance and its model-specific
-degrees of freedom. These are unweighted transaction-level projections: the
-frequency and timing of repeat observations, not equal property weights,
-determine the implicit weighting.
-
-The post coefficient is a change in the near–far log-price gap. Its percentage
-translation, $100\,(e^{\beta} - 1)$, is the change in the conditional near/far
-price ratio, not an absolute fall in near-property prices. The article
-coefficient is the change in that gap per log point of cumulative articles,
-not the effect of one additional article. Neither is presented as proof of a
-publicity effect: property and local time effects do not rule out other
-changes in the relative desirability of near locations.
-
-Five sample variants are estimated for each market, fixed-effect structure and
-attention measure. The headline keeps every eligible observation, including
-properties whose recorded characteristics change. The second variant drops
-those whole properties. The third keeps only rows with complete control
-information and recomputes repeat eligibility; the fourth adds the controls on
-exactly the rows the third fit retained, so the difference between the two
-isolates the controls from the sample. The fifth restricts dates to 2021
-onward with the same article stock, so it changes both the window and the
-repeat membership.
+## Reproduce and locate outputs
 
 ```{r}
-#| label: findings-labels
+#| label: reproduce-values
 #| include: false
 
-MARKET_LABELS <- c(sales = "Sales", rentals = "Rentals")
-VARIANT_LABELS <- c(headline = "Headline", exclude_changes = "Exclude observed changes",
-                    complete_case = "Complete-case comparator", complete_case_controls = "Complete cases with controls",
-                    short_window = "Short window (2021 on)")
-FE_LABELS <- c(property_month = "Property + month", property_month_msoa_year = "Property + month + MSOA x year")
-ATTENTION_LABELS <- c(post = "Near x Post (August 2022 on)", log_articles = "Near x log article stock")
-
-label_cells <- function(cells) {
-  dplyr::mutate(
-    cells,
-    market_label = factor(MARKET_LABELS[market], levels = MARKET_LABELS),
-    variant_label = factor(VARIANT_LABELS[variant], levels = rev(VARIANT_LABELS)),
-    fe_label = factor(FE_LABELS[fe], levels = FE_LABELS),
-    attention_label = factor(ATTENTION_LABELS[attention], levels = ATTENTION_LABELS)
-  )
-}
-
-percent_change <- function(beta) 100 * (exp(beta) - 1)
-
-profile_rows <- function(profiles) {
-  dplyr::bind_rows(lapply(profiles, function(p) {
-    if (nrow(p$coefficients) == 0L) return(NULL)
-    dplyr::mutate(p$coefficients, model_key = p$model_key, market = p$market, fe = p$fe, status = p$status, .before = 1L)
-  }))
-}
-
-joint_test_rows <- function(profiles) {
-  dplyr::bind_rows(lapply(profiles, function(p) {
-    j <- p$joint_test
-    tibble::tibble(model_key = p$model_key, market = p$market, fe = p$fe, profile_status = p$status,
-                   profile_reason = p$reason, joint_status = j$status, statistic = j$statistic, df1 = j$df1, df2 = j$df2,
-                   p_value = j$p_value, joint_reason = j$reason, nobs = p$nobs, n_properties = p$n_properties,
-                   n_clusters = p$n_clusters, n_removed_by_estimator = p$n_removed_by_estimator)
-  }))
-}
-
-format_p <- function(p) ifelse(is.na(p), NA_character_, ifelse(p < 0.001, "< 0.001", formatC(p, format = "f", digits = 3)))
+fp <- results$metadata$fingerprint
+runtime <- results$runtime
+input_lines <- sprintf("`%s` (%s)", names(fp$inputs), fp$inputs)
 ```
 
-### Coefficient comparisons
-
-Each panel shows one market and one attention measure; rows are the sample
-variants and the two fixed-effect structures sit side by side. Cells without
-an estimate are labelled with their status rather than dropped. Points without
-an interval are cells whose coefficient is available but whose clustered
-inference is not.
-
-```{r}
-#| label: findings-coefficient-plot
-#| eval: !expr params$reestimate
-#| fig-width: 10
-#| fig-height: 6.5
-#| fig-cap: "Near x attention coefficients across sample variants and fixed-effect structures; bars are 95% pointwise intervals from the LSOA-clustered covariance and the model's t degrees of freedom."
-
-plot_cells <- label_cells(cells)
-supported <- plot_cells[!is.na(plot_cells$estimate), ]
-unsupported <- plot_cells[is.na(plot_cells$estimate), ]
-dodge <- ggplot2::position_dodge(width = 0.6)
-coefficient_plot <- ggplot2::ggplot(supported, ggplot2::aes(x = estimate, y = variant_label, colour = fe_label, shape = fe_label)) +
-  ggplot2::geom_vline(xintercept = 0, linetype = "dashed", colour = "grey55") +
-  ggplot2::geom_errorbar(ggplot2::aes(xmin = conf_low, xmax = conf_high), width = 0.25, position = dodge, orientation = "y") +
-  ggplot2::geom_point(size = 2.4, position = dodge) +
-  ggplot2::scale_y_discrete(drop = FALSE) +
-  ggplot2::facet_grid(market_label ~ attention_label, scales = "free_x") +
-  ggplot2::labs(x = "Coefficient on Near x attention (log points)", y = NULL, colour = "Fixed effects", shape = "Fixed effects") +
-  ggplot2::theme_minimal(base_size = 11) +
-  ggplot2::theme(legend.position = "bottom", panel.grid.minor = ggplot2::element_blank())
-if (nrow(unsupported) > 0L) {
-  coefficient_plot <- coefficient_plot +
-    ggplot2::geom_text(data = unsupported, ggplot2::aes(x = 0, y = variant_label, label = paste0(fe_label, ": ", status), group = fe_label),
-                       inherit.aes = FALSE, size = 2.7, colour = "grey30", position = dodge)
-}
-coefficient_plot
-```
-
-```{r}
-#| label: findings-coefficient-table
-#| eval: !expr params$reestimate
-#| results: asis
-
-coefficient_table <- label_cells(cells) |>
-  dplyr::arrange(market_label, attention_label, factor(variant, levels = MODEL_VARIANTS), fe_label) |>
-  dplyr::transmute(
-    Market = as.character(market_label), Attention = as.character(attention_label), Variant = VARIANT_LABELS[variant],
-    `Fixed effects` = as.character(fe_label), Status = status,
-    Estimate = round(estimate, 4), `Std. error` = round(std_error, 4),
-    `95% CI` = ifelse(is.na(conf_low), NA_character_, sprintf("[%.4f, %.4f]", conf_low, conf_high)),
-    `p-value` = format_p(p_value), `t df` = t_df,
-    `Ratio change (%)` = ifelse(attention == "post" & !is.na(estimate), round(percent_change(estimate), 2), NA_real_),
-    Reason = reason
-  )
-knitr::kable(coefficient_table, format = "html", format.args = list(big.mark = ","),
-             caption = "All 40 scalar cells. Ratio change (%) = 100 (exp(beta) - 1) for post cells: the change in the conditional near/far price ratio. Non-estimated cells carry their status and reason.")
-```
-
-### Annual near–far profiles
-
-The annual profiles interact the near indicator with calendar year on the
-headline sample, relative to 2019, under both fixed-effect structures. They
-show whether the near–far gap was already moving before the event period. The
-joint test asks whether the five 2014–2018 coefficients are jointly zero using
-the fit's clustered covariance; it is reported as unavailable, not as a reduced
-test, whenever a requested coefficient or the covariance block is unavailable.
-The 2022 coefficient mixes pre- and post-August months, and this earlier-period
-test is not a test of parallel trends over all pre-event observations.
-
-```{r}
-#| label: findings-profile-plot
-#| eval: !expr params$reestimate
-#| fig-width: 10
-#| fig-height: 6
-#| fig-cap: "Near x year coefficients relative to 2019 on the headline samples; hollow point marks the 2019 reference, the vertical line marks August 2022. Joint-test results for 2014-2018 are in the table below."
-
-profile_points <- profile_rows(profiles)
-if (nrow(profile_points) > 0L) {
-  profile_points <- dplyr::mutate(profile_points,
-                                  market_label = factor(MARKET_LABELS[market], levels = MARKET_LABELS),
-                                  fe_label = factor(FE_LABELS[fe], levels = FE_LABELS))
-  reference <- dplyr::distinct(profile_points, market_label, fe_label) |>
-    dplyr::mutate(year = CONFIG$profile_reference_year, estimate = 0)
-  event_position <- lubridate::year(CONFIG$event_month) + (lubridate::month(CONFIG$event_month) - 1) / 12
-  ggplot2::ggplot(profile_points, ggplot2::aes(x = year, y = estimate, colour = fe_label)) +
-    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey55") +
-    ggplot2::geom_vline(xintercept = event_position, colour = "grey40") +
-    ggplot2::geom_errorbar(ggplot2::aes(ymin = conf_low, ymax = conf_high), width = 0.3) +
-    ggplot2::geom_point(size = 2.2) +
-    ggplot2::geom_point(data = reference, shape = 21, fill = "white", size = 2.6) +
-    ggplot2::facet_grid(market_label ~ fe_label, scales = "free") +
-    ggplot2::scale_x_continuous(breaks = seq(2014, 2024, by = 2)) +
-    ggplot2::labs(x = NULL, y = "Near x year coefficient relative to 2019 (log points)", colour = "Fixed effects") +
-    ggplot2::theme_minimal(base_size = 11) +
-    ggplot2::theme(legend.position = "none", panel.grid.minor = ggplot2::element_blank())
-} else {
-  cat("No annual profile was estimable; see the profile table for the recorded reasons.\n")
-}
-```
-
-```{r}
-#| label: findings-profile-tables
-#| eval: !expr params$reestimate
-#| results: asis
-
-joint_rows <- joint_test_rows(profiles) |>
-  dplyr::transmute(Market = MARKET_LABELS[market], `Fixed effects` = FE_LABELS[fe], `Profile status` = profile_status,
-                   `Joint test` = joint_status, `F statistic` = round(statistic, 3), df1, df2, `p-value` = format_p(p_value),
-                   Observations = nobs, Properties = n_properties, Clusters = n_clusters,
-                   `Removed by estimator` = n_removed_by_estimator,
-                   Reason = dplyr::coalesce(joint_reason, profile_reason))
-emit_table(knitr::kable(joint_rows, format = "html", format.args = list(big.mark = ","),
-                        caption = sprintf("Joint test that the %s Near x year coefficients are zero (F with df1 = %d and df2 = the model's clustered t degrees of freedom)",
-                                          paste(range(CONFIG$profile_joint_years), collapse = "-"), length(CONFIG$profile_joint_years))))
-profile_points <- profile_rows(profiles)
-if (nrow(profile_points) > 0L) {
-  profile_table <- profile_points |>
-    dplyr::transmute(Market = MARKET_LABELS[market], `Fixed effects` = FE_LABELS[fe], Year = year,
-                     Estimate = round(estimate, 4), `Std. error` = round(std_error, 4),
-                     `95% CI` = ifelse(is.na(conf_low), NA_character_, sprintf("[%.4f, %.4f]", conf_low, conf_high)),
-                     `p-value` = format_p(p_value), Available = available)
-  emit_table(knitr::kable(profile_table, format = "html",
-                          caption = sprintf("Annual Near x year coefficients relative to %d (pointwise 95%% intervals)", CONFIG$profile_reference_year)))
-}
-```
-
-### Sample support and residual variation
-
-The support table reports, for every cell, the rows the estimator actually
-used, the properties and LSOA clusters behind them, near and far property
-counts, properties observed on both sides of August 2022, rows the estimator
-removed (fixed-effect singletons under the fuller structure), and control
-coefficients that were absorbed by the fixed effects. Absorption of a control
-does not invalidate the focal coefficient. None of these counts establishes
-identification on its own.
-
-```{r}
-#| label: findings-support-table
-#| eval: !expr params$reestimate
-#| results: asis
-
-support_table <- label_cells(cells) |>
-  dplyr::arrange(market_label, attention_label, factor(variant, levels = MODEL_VARIANTS), fe_label) |>
-  dplyr::transmute(Market = as.character(market_label), Attention = as.character(attention_label),
-                   Variant = VARIANT_LABELS[variant], `Fixed effects` = as.character(fe_label), Status = status,
-                   Observations = nobs, Properties = n_properties, Clusters = n_clusters,
-                   `Near properties` = n_near_properties, `Far properties` = n_far_properties,
-                   `Both sides of Aug 2022` = n_properties_both_sides_event,
-                   `Removed by estimator` = n_removed_by_estimator, `Controls absorbed` = n_controls_absorbed,
-                   Warnings = warnings)
-knitr::kable(support_table, format = "html", format.args = list(big.mark = ","),
-             caption = "Estimation support for every scalar cell (rows retained by the estimator; properties and clusters counted on those rows)")
-```
-
-The residual-support measures residualise the focal regressor on every
-included fixed effect and control over each fit's actual sample. The ratio
-compares that residual sum of squares with the centred raw variation of the
-same regressor; the shares show how the residual variation is spread across
-years and LSOA clusters. They are descriptive: no threshold, weight or
-exclusion follows from them.
-
-```{r}
-#| label: findings-residual-support
-#| eval: !expr params$reestimate
-#| results: asis
-
-residual_table <- residual_support |>
-  dplyr::inner_join(dplyr::select(cells, model_key, market, variant, fe, attention), by = "model_key") |>
-  label_cells() |>
-  dplyr::arrange(market_label, attention_label, factor(variant, levels = MODEL_VARIANTS), fe_label) |>
-  dplyr::transmute(Market = as.character(market_label), Attention = as.character(attention_label),
-                   Variant = VARIANT_LABELS[variant], `Fixed effects` = as.character(fe_label),
-                   `Residual SS` = round(rss, 1), `Centred raw variation` = round(centred_raw_variation, 1),
-                   Ratio = round(ratio, 4), `Top-1 LSOA share` = round(lsoa_share_top1, 5),
-                   `Top-5 share` = round(lsoa_share_top5, 5), `Top-10 share` = round(lsoa_share_top10, 5),
-                   Clusters = n_clusters)
-emit_table(knitr::kable(residual_table, format = "html", format.args = list(big.mark = ","),
-                        caption = "Residual variation of Near x attention after the fixed effects and controls (KTD11), by cell"))
-if (nrow(residual_support_by_year) > 0L) {
-  year_shares <- residual_support_by_year |>
-    dplyr::inner_join(dplyr::select(cells, model_key, market, variant, fe, attention), by = "model_key") |>
-    dplyr::filter(variant == "headline") |>
-    dplyr::mutate(share = round(share, 4)) |>
-    tidyr::pivot_wider(id_cols = c(market, attention, fe), names_from = year, values_from = share) |>
-    dplyr::arrange(market, attention, fe) |>
-    dplyr::mutate(market = MARKET_LABELS[market], attention = ATTENTION_LABELS[attention], fe = FE_LABELS[fe])
-  emit_table(knitr::kable(year_shares, format = "html",
-                          caption = "Headline cells: share of residual focal variation by calendar year"))
-}
-```
-
-### Variant sample flows
-
-Each variant branches from the eligible long-run panel (the last row of the
-exclusion ledger). Rows chain within a variant; the complete-case-with-controls
-rows record, per fixed-effect structure, the rows the comparator fit retained.
-
-```{r}
-#| label: findings-variant-ledger
-#| eval: !expr params$reestimate
-#| results: asis
-
-knitr::kable(dplyr::select(variant_ledger, market, variant, fe, step, n_rows_before, n_rows_after, n_rows_removed,
-                           n_groups_before, n_groups_after, note),
-             format = "html", format.args = list(big.mark = ","),
-             caption = "Variant ledger: restrictions applied to the eligible long-run panel for each sensitivity sample")
-```
-
-```{r}
-#| label: findings-fit-log
-#| eval: !expr params$reestimate
-#| results: asis
-
-fit_summary <- fit_logs |>
-  dplyr::group_by(market) |>
-  dplyr::summarise(fits = dplyr::n(), estimated = sum(status %in% c("estimated", "estimated_inference_unavailable")),
-                   total_seconds = round(sum(seconds), 1), min_seconds = round(min(seconds), 1),
-                   max_seconds = round(max(seconds), 1), max_peak_gc_mb = round(max(peak_gc_mb, na.rm = TRUE)),
-                   .groups = "drop")
-knitr::kable(fit_summary, format = "html", format.args = list(big.mark = ","),
-             caption = "Sequential fitting: fits per market, wall seconds and peak R heap (gc) during a fit")
-```
-
-## Provenance and reproduce
-
-```{r}
-#| label: fixture-summary
-#| results: asis
-
-knitr::kable(fixture_results[, c("unit", "scenario", "passed")], format = "html",
-             caption = "Fixture checks run at render time (synthetic data)")
-```
-
-From the project root, using the R 4.6.0 `rv` environment:
+From the project root, using the R 4.6.0 `rv` environment, the estimation path re-validates the inputs, re-estimates the grid, and writes the bundle and artifacts:
 
 ```bash
 quarto render docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd --to html
 ```
 
-To rebuild the presentation from the saved bundle without re-estimation:
+The presentation-only path loads the saved bundle and refuses it when any computational dependency changed:
 
 ```bash
 quarto render docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd --to html -P reestimate:false
+```
+
+The bundle recorded `r format_seconds(results$metadata$runtime_seconds)` for the last estimation run (`r paste(sprintf("%s %s", results$markets$market, format_seconds(results$markets$runtime_seconds)), collapse = ", ")`); `r results$metadata$peak_memory_note`. Outputs, all gitignored under the `output/` symlink:
+
+- `output/regs/long_run_public_attention/`: the results bundle (`r CONFIG$bundle_file`), written atomically and validated before it replaces the previous one.
+- `output/tables/long_run_public_attention/`: CSVs for cells, profile coefficients, joint tests, residual support (and by year), the exclusion and variant ledgers, sample support, the readiness summary, the attention calendar and the input provenance; every row carries the run's combined fingerprint.
+- `output/figures/long_run_public_attention/`: PDF figures (`coefficient_comparison.pdf`, `annual_profiles.pdf`, `attention_history_sales.pdf` when the calendar validated) at manuscript size with `run_fingerprint.txt` beside them.
+- `output/log/long_run_public_attention/run_log.txt`: runtime, fingerprint components, package versions and the fit log.
+
+The combined fingerprint `` `r fp$combined` `` hashes four components: the content hashes of the consumed inputs (`r paste(input_lines, collapse = ", ")`); the code (`r paste(computational_chunk_labels(), collapse = ", ")` chunks and the sourced helpers `r paste(HELPER_FILES, collapse = ", ")`); the canonical analysis settings; and the computational package versions. Prose, display chunks, display packages and the `reestimate` switch are outside it.
+
+## Appendix
+
+### What improved repeat-data cleaning resolved
+
+```{r}
+#| label: appendix-cleaning
+#| results: asis
+
+mv <- readiness$sales$mapping_validation
+if (!is.null(mv)) {
+  emit_paragraph(sprintf("Regenerated from the current mapping: the sales history has %s rows and the mapping %s, so %s history rows are absent from the mapping. The mapping manifest attributes %s of them to rows without an address key and %s to the same-day exclusion (recomputed read-only here as %s and %s; reconciled: %s).",
+                         format_count(mv$n_history), format_count(mv$n_mapping), format_count(mv$n_history_absent_from_mapping),
+                         format_count(mv$n_unkeyed_manifest), format_count(mv$n_same_day_manifest),
+                         format_count(mv$n_unkeyed_recomputed), format_count(mv$n_same_day_recomputed), tolower(as.character(mv$reconciled))))
+} else {
+  emit_paragraph("The sales mapping validation is unavailable in this bundle (", readiness$sales$reason, ").")
+}
+ledger_variants <- results$exclusions$variants
+complete_case_step <- ledger_variants[ledger_variants$step == "variant:complete_case:nonmissing_controls", ]
+if (nrow(complete_case_step) > 0L) {
+  emit_paragraph(sprintf("Regenerated on the eligible long-run panels: rows lacking at least one control are %s of %s for sales (%.2f%%) and %s of %s for rentals (%.2f%%), which is why missingness stays separate from the change flags.",
+                         format_count(complete_case_step$n_rows_removed[complete_case_step$market == "sales"]),
+                         format_count(complete_case_step$n_rows_before[complete_case_step$market == "sales"]),
+                         100 * complete_case_step$n_rows_removed[complete_case_step$market == "sales"] / complete_case_step$n_rows_before[complete_case_step$market == "sales"],
+                         format_count(complete_case_step$n_rows_removed[complete_case_step$market == "rentals"]),
+                         format_count(complete_case_step$n_rows_before[complete_case_step$market == "rentals"]),
+                         100 * complete_case_step$n_rows_removed[complete_case_step$market == "rentals"] / complete_case_step$n_rows_before[complete_case_step$market == "rentals"]))
+}
+if (nrow(results$change_prevalence) > 0L) {
+  prevalence <- results$change_prevalence |>
+    dplyr::mutate(market = MARKET_LABELS[market], share_changed = round(share_changed, 4)) |>
+    dplyr::select(market, band, change_flag, n_properties, n_changed, share_changed)
+  emit_table(knitr::kable(prevalence, format = "html", format.args = list(big.mark = ","),
+                          caption = "Regenerated: observed characteristic changes by market and band on the eligible long-run panel (flags frozen before any complete-case or short-window restriction)"))
+}
+```
+
+The rest of this explanation cites the audit that preceded the plan (19 September 2026) and is not recomputed here. The same-day sales fix removed the 102,699 observations above in 50,327 address–date conflicts; on the same input it reduced groups with multiple observed property types from 90,073 to 77,319 (a 14.2% reduction). Other changes introduced content-stable string ids, rejected duplicate Land Registry transaction ids and removed 11,941 exact duplicate rental rows. On the full mappings the audit found property-type changes in 77,319 of 1,861,864 sales repeat properties (4.15%); for rentals, type changes in 81,056, bedroom changes in 109,500, bathroom changes in 74,416 and any change in 213,822 of 1,379,332 repeat properties (15.50%). Of the flagged sales groups, 66,376 included the `Other` category (85.85% of flags) and 11,483 had multiple specific residential codes, which suggests a classification component without proving the cause. A further 420,619 rental properties had missing-to-observed differences without an observed change. Across-date characteristic changes remain diagnostics, not automatic exclusions: `scripts/R/testing/test_repeat_transactions_contracts.R` preserves mixed-type groups, and the flags cannot distinguish real conversions, inconsistent classification and wrong address matches.
+
+### Fixture checks
+
+```{r}
+#| label: fixture-summary
+#| results: asis
+
+fixture_display <- dplyr::mutate(fixture_results[, c("unit", "scenario", "passed")], passed = ifelse(passed, "yes", "no"))
+knitr::kable(fixture_display, format = "html",
+             caption = sprintf("%d fixture checks run in this render on synthetic data (%s); a failure stops the render",
+                               nrow(fixture_display), paste(sprintf("%s: %d", names(table(fixture_display$unit)), as.integer(table(fixture_display$unit))), collapse = ", ")))
+```
+
+### Session information
+
+```{r}
+#| label: session-info
+#| results: asis
+
+md <- results$metadata
+session_rows <- tibble::tibble(
+  item = c("R version (bundle)", "Platform (bundle)", "Computational packages (bundle, fingerprinted)", "Display packages (bundle, not fingerprinted)",
+           "Bundle created", "Report source", "R version (this render)"),
+  value = c(md$r_version, md$platform,
+            paste(sprintf("%s %s", names(md$packages), md$packages)[names(md$packages) != "R"], collapse = ", "),
+            paste(sprintf("%s %s", names(md$display_packages), md$display_packages), collapse = ", "),
+            paste(md$created_at, "UTC"), md$qmd_source, R.version.string)
+)
+knitr::kable(session_rows, format = "html", caption = "Session information")
 ```
