@@ -5,6 +5,7 @@ author: "Jacopo Olivieri"
 date: 2026-09-19
 params:
   reestimate: true
+  fixtures_only: false
 format:
   html:
     toc: true
@@ -146,7 +147,9 @@ history_columns <- function(cfg) {
   ))
 }
 
-mapping_columns <- function(cfg) c(cfg$id_col, "repeat_id", "repeat_count")
+# The stored repeat_count is full-window and never consulted (eligibility is
+# recomputed from surviving dates), so it is not read.
+mapping_columns <- function(cfg) c(cfg$id_col, "repeat_id")
 
 review_path <- function(cfg, suffix) {
   sub("\\.parquet$", paste0("_", suffix, ".parquet"), cfg$mapping_path)
@@ -200,17 +203,52 @@ generation_id_from_metadata <- function(metadata) {
   as.character(metadata[[hit[[1L]]]])
 }
 
-# Content identity is the file hash; mtime/size are descriptive only (KTD8).
-capture_input_provenance <- function(input, path, columns_used, market = NA_character_) {
-  info <- parquet_file_info(path, input, market)
+file_mtime_utc <- function(path) {
+  if (!file.exists(path)) return(NA_character_)
+  format(file.info(path)$mtime, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+}
+
+# One provenance row for a consumed parquet input. Content identity is the file
+# hash; mtime/size are descriptive only (KTD8). Unreadability never stops the
+# capture: the row then carries content_hash = NA and readable = FALSE, so a
+# market blocked at the input stage still names its files in the bundle and the
+# cached render can detect the file appearing later (AE4).
+input_provenance_row <- function(input, path, columns_used) {
+  path <- as.character(path)
+  info <- tryCatch(parquet_file_info(path, input), error = function(e) NULL)
+  readable <- !is.null(info)
   tibble::tibble(
     input = input,
     path = path,
-    content_hash = digest::digest(file = path, algo = "xxhash64"),
-    generation_id = generation_id_from_metadata(info$metadata),
-    n_rows = info$n_rows,
+    content_hash = if (readable) digest::digest(file = path, algo = "xxhash64") else NA_character_,
+    generation_id = if (readable) generation_id_from_metadata(info$metadata) else NA_character_,
+    n_rows = if (readable) info$n_rows else NA_real_,
     columns_used = paste(columns_used, collapse = ";"),
-    mtime = format(file.info(path)$mtime, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+    mtime = if (readable) file_mtime_utc(path) else NA_character_,
+    readable = readable
+  )
+}
+
+# Strict form: an unreadable file stops (or blocks the market when `market` is set).
+capture_input_provenance <- function(input, path, columns_used, market = NA_character_) {
+  assert_readable_input(path, input, market)
+  input_provenance_row(input, path, columns_used)
+}
+
+# Canonical input names of a market's three consumed files.
+market_input_names <- function(market) {
+  c(history = paste0(market, "_history"), mapping = paste0(market, "_mapping"),
+    same_day_review = paste0(market, "_same_day_review"))
+}
+
+# The three per-market inputs, captured before any loading so that a blocked
+# market still records them.
+market_input_provenance <- function(market, cfg = market_config(market)) {
+  names <- market_input_names(market)
+  dplyr::bind_rows(
+    input_provenance_row(names[["history"]], cfg$history_path, history_columns(cfg)),
+    input_provenance_row(names[["mapping"]], cfg$mapping_path, mapping_columns(cfg)),
+    input_provenance_row(names[["same_day_review"]], review_path(cfg, "same_day"), cfg$id_col)
   )
 }
 
@@ -256,7 +294,6 @@ load_mapping <- function(market, path = market_config(market)$mapping_path,
   dt <- read_parquet_columns(path, cols)
   dt[, (cfg$id_col) := as.character(get(cfg$id_col))]
   dt[, repeat_id := as.character(repeat_id)]
-  dt[, repeat_count := as.integer(repeat_count)]
   list(mapping = dt[], manifest = info$metadata)
 }
 
@@ -477,20 +514,27 @@ restrict_panel <- function(panel, keep, ledger, market, step, note = "") {
   list(panel = panel, ledger = ledger)
 }
 
-assert_ledger_identity <- function(ledger) {
-  for (mkt in unique(ledger$market)) {
-    rows <- ledger[ledger$market == mkt, ]
-    rows <- rows[order(rows$step_order), ]
-    if (!all(rows$n_rows_removed == rows$n_rows_before - rows$n_rows_after)) {
-      stop("Ledger removed counts do not equal before minus after for ", mkt, call. = FALSE)
+# The three identities every ledger chain must satisfy, in step order: removed =
+# before - after on each row, and each row's after (rows and groups) equals the
+# next row's before. Returns the ordered rows; `label` names the chain in errors.
+assert_ledger_chain <- function(rows, label) {
+  rows <- rows[order(rows$step_order), ]
+  if (!all(rows$n_rows_removed == rows$n_rows_before - rows$n_rows_after)) {
+    stop("Ledger removed counts do not equal before minus after for ", label, call. = FALSE)
+  }
+  if (nrow(rows) > 1L) {
+    if (!all(rows$n_rows_after[-nrow(rows)] == rows$n_rows_before[-1L])) {
+      stop("Ledger rows do not chain for ", label, call. = FALSE)
     }
-    if (nrow(rows) > 1L && !all(rows$n_rows_after[-nrow(rows)] == rows$n_rows_before[-1L])) {
-      stop("Ledger rows do not chain for ", mkt, call. = FALSE)
-    }
-    if (nrow(rows) > 1L && !all(rows$n_groups_after[-nrow(rows)] == rows$n_groups_before[-1L])) {
-      stop("Ledger group counts do not chain for ", mkt, call. = FALSE)
+    if (!all(rows$n_groups_after[-nrow(rows)] == rows$n_groups_before[-1L])) {
+      stop("Ledger group counts do not chain for ", label, call. = FALSE)
     }
   }
+  invisible(rows)
+}
+
+assert_ledger_identity <- function(ledger) {
+  for (mkt in unique(ledger$market)) assert_ledger_chain(ledger[ledger$market == mkt, ], mkt)
   invisible(TRUE)
 }
 
@@ -825,15 +869,15 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
   started <- Sys.time()
   invisible(gc(reset = TRUE))
   readiness <- list(market = market, status = "ready", reason = NA_character_, blocked_stage = NA_character_)
+  # Provenance is captured before any stage can block, so the bundle names this
+  # market's inputs (hashed when readable) whatever its final status.
   out <- list(market = market, status = "ready", reason = NA_character_, panel = NULL,
               readiness = readiness, ledger = new_ledger(), diagnostics = NULL,
-              provenance = tibble::tibble())
+              provenance = market_input_provenance(market, cfg))
   result <- tryCatch({
-    provenance <- dplyr::bind_rows(
-      capture_input_provenance(paste0(market, "_history"), cfg$history_path, history_columns(cfg), market),
-      capture_input_provenance(paste0(market, "_mapping"), cfg$mapping_path, mapping_columns(cfg), market),
-      capture_input_provenance(paste0(market, "_same_day_review"), review_path(cfg, "same_day"), cfg$id_col, market)
-    )
+    for (i in seq_len(nrow(out$provenance))) {
+      assert_readable_input(out$provenance$path[[i]], out$provenance$input[[i]], market)
+    }
     history <- load_history(market, cfg$history_path, cfg)
     mapping_obj <- load_mapping(market, cfg$mapping_path, cfg)
     same_day_ids <- load_same_day_ids(market, cfg)
@@ -851,7 +895,7 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
     n_eligible_groups <- data.table::uniqueN(eligible$repeat_id)
     rm(eligible)
     invisible(gc())
-    list(provenance = provenance, mapping_validation = mapping_validation, contract = contract,
+    list(mapping_validation = mapping_validation, contract = contract,
          diagnostics = diagnostics, n_eligible_rows = n_eligible_rows, n_eligible_groups = n_eligible_groups)
   }, market_blocked = function(cond) cond)
 
@@ -866,7 +910,6 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
     out$panel <- result$contract$panel
     out$ledger <- result$contract$ledger
     out$diagnostics <- result$diagnostics
-    out$provenance <- result$provenance
     out$readiness$mapping_validation <- result$mapping_validation
     out$readiness$address_verification <- result$contract$address_verification
     out$readiness$geography <- result$contract$geography
@@ -893,10 +936,9 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
   out
 }
 
+# Used by the estimation driver's progress output and the run metadata, so it
+# stays in the computational code.
 format_count <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
-
-# Display helper: emit an HTML table from inside loops/conditionals (not auto-printed).
-emit_table <- function(x) cat(x, "\n\n")
 ```
 
 ```{r}
@@ -1046,7 +1088,9 @@ apply_exposure <- function(panel, projection, ledger, market, cfg = market_confi
   panel <- restricted$panel
   ledger <- restricted$ledger
   change_flags <- freeze_change_flags(panel, cfg$change_cols)
-  panel <- merge(panel, change_flags, by = "repeat_id", all.x = TRUE, sort = FALSE)
+  # Keyed in-place update: no full-panel copy, row order unchanged.
+  flag_cols <- setdiff(names(change_flags), "repeat_id")
+  panel[change_flags, on = "repeat_id", (flag_cols) := mget(paste0("i.", flag_cols))]
   if (anyNA(panel$any_change)) stop("Change flags did not cover every eligible property.", call. = FALSE)
   list(panel = panel[], ledger = ledger, change_flags = change_flags,
        distance_summary_all = distance_summary_all)
@@ -1188,27 +1232,74 @@ parse_export_pdf <- function(path) {
   )
 }
 
+# ---- Export PDF provenance ------------------------------------------------------
+
+EXPORT_PDF_LISTING_INPUT <- "export_pdf_listing"
+
+list_export_pdfs <- function(pdf_dir) {
+  if (!dir.exists(pdf_dir)) return(character())
+  sort(list.files(pdf_dir, pattern = "\\.pdf$", ignore.case = TRUE, full.names = TRUE))
+}
+
+export_pdf_input_name <- function(pdf_path) {
+  paste0("export_pdf_", sub("\\.pdf$", "", basename(pdf_path), ignore.case = TRUE))
+}
+
+# Directory membership is part of the corpus identity: the listing hash covers the
+# sorted PDF basenames, so an added or removed export changes the input fingerprint
+# even when every remaining file is unchanged. A missing directory hashes the
+# empty listing.
+export_pdf_listing_hash <- function(pdf_dir) {
+  digest::digest(paste(basename(list_export_pdfs(pdf_dir)), collapse = "\n"),
+                 algo = "xxhash64", serialize = FALSE)
+}
+
+# Provenance rows for the article corpus: the article-level parquet (tolerant of
+# absence), the listing row and one row per PDF (hashed from the bytes, no parsing).
+export_pdf_provenance <- function(pdf_dir, articles_path, pdfs = list_export_pdfs(pdf_dir)) {
+  listing <- tibble::tibble(
+    input = EXPORT_PDF_LISTING_INPUT, path = as.character(pdf_dir),
+    content_hash = export_pdf_listing_hash(pdf_dir), generation_id = NA_character_,
+    n_rows = as.numeric(length(pdfs)), columns_used = "sorted PDF basenames",
+    mtime = file_mtime_utc(pdf_dir), readable = dir.exists(pdf_dir)
+  )
+  per_file <- tibble::tibble(
+    input = export_pdf_input_name(pdfs), path = pdfs,
+    content_hash = vapply(pdfs, function(p) digest::digest(file = p, algo = "xxhash64"), character(1),
+                          USE.NAMES = FALSE),
+    generation_id = NA_character_, n_rows = NA_real_,
+    columns_used = "cover fields; result numbering; Date fields",
+    mtime = vapply(pdfs, file_mtime_utc, character(1), USE.NAMES = FALSE), readable = TRUE
+  )
+  dplyr::bind_rows(
+    input_provenance_row("search1_articles", articles_path, c("search_term", "date")),
+    listing, per_file
+  )
+}
+
 # Recomputes, at render time, whether the fixed search corpus's coverage is
 # established: contiguous export segments (1, 501, 1001, ...), per-file record
 # counts summing to the article-level rows, the article-level monthly n()
 # reproducing the monthly file, and one query/cover across files with no date
 # narrowing. "unavailable" when pdftools or the files are missing; observed
-# first/last dates never substitute for evidence.
+# first/last dates never substitute for evidence. Provenance is captured before
+# every early return so the bundle always names the corpus it depended on.
 article_export_evidence <- function(pdf_dir = CONFIG$article_pdf_dir,
                                     articles_path = CONFIG$article_records_path,
                                     monthly_path = CONFIG$articles_path) {
+  pdfs <- list_export_pdfs(pdf_dir)
   out <- list(status = "unavailable", reasons = character(), files = tibble::tibble(),
               n_records_pdf = NA_integer_, n_articles_file = NA_integer_,
               segments_contiguous = NA, records_reconciled = NA, monthly_reproduced = NA,
               query_consistent = NA, date_restriction_detected = NA,
               n_months_compared = NA_integer_, n_months_mismatched = NA_integer_,
               search_terms = NA_character_, article_date_min = as.Date(NA), article_date_max = as.Date(NA),
-              export_date_min = as.Date(NA), coverage_end = as.Date(NA), provenance = tibble::tibble())
+              export_date_min = as.Date(NA), coverage_end = as.Date(NA),
+              provenance = export_pdf_provenance(pdf_dir, articles_path, pdfs))
   if (!requireNamespace("pdftools", quietly = TRUE)) {
     out$reasons <- "pdftools is not installed; export PDFs cannot be read"
     return(out)
   }
-  pdfs <- if (dir.exists(pdf_dir)) sort(list.files(pdf_dir, pattern = "\\.pdf$", ignore.case = TRUE, full.names = TRUE)) else character()
   if (length(pdfs) == 0L) {
     out$reasons <- sprintf("no export PDFs found under %s", pdf_dir)
     return(out)
@@ -1221,18 +1312,14 @@ article_export_evidence <- function(pdf_dir = CONFIG$article_pdf_dir,
   files <- files[order(files$first_result), ]
   out$files <- files
   out$status <- "failed"
+  # Parsed cover details enrich the per-file provenance rows (identity is the hash).
+  at <- match(export_pdf_input_name(files$file), out$provenance$input)
+  out$provenance$generation_id[at] <- files$job_number
+  out$provenance$n_rows[at] <- as.numeric(files$pages)
 
   articles <- arrow::read_parquet(articles_path, col_select = tidyselect::all_of(c("search_term", "date"))) |> as.data.frame()
   monthly <- arrow::read_parquet(monthly_path, col_select = tidyselect::all_of(c("year", "month", "article_count"))) |> as.data.frame()
   dates <- as.Date(articles$date)
-  out$provenance <- dplyr::bind_rows(
-    capture_input_provenance("search1_articles", articles_path, c("search_term", "date")),
-    tibble::tibble(input = paste0("export_pdf_", sub("\\.pdf$", "", files$file, ignore.case = TRUE)),
-                   path = file.path(pdf_dir, files$file), content_hash = files$content_hash,
-                   generation_id = files$job_number, n_rows = as.numeric(files$pages),
-                   columns_used = "cover fields; result numbering; Date fields",
-                   mtime = format(file.info(file.path(pdf_dir, files$file))$mtime, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
-  )
   reasons <- character()
   if (anyNA(dates)) reasons <- c(reasons, sprintf("%d article records lack a date", sum(is.na(dates))))
   if (anyNA(files$first_result) || anyNA(files$n_date_fields)) reasons <- c(reasons, "could not read result numbering or record fields from every PDF")
@@ -1377,6 +1464,14 @@ ESTIMATED_STATUSES <- c("estimated", "estimated_inference_unavailable")
 CONTROL_FACTOR_COLS <- c("property_type", "old_new", "duration")   # other controls enter as numeric
 COLLINEAR_FE_PATTERN <- "collinear with the fixed effects"
 INFERENCE_WARNING_PATTERN <- "(?i)variance|covariance|vcov|positive[- ]?(semi-)?definite|singular|infinite"
+# Only a covariance failure whose message matches this pattern becomes the status
+# estimated_inference_unavailable; any other summariser error is a programming or
+# environment fault and stops the run with the model key (KTD7).
+VCOV_UNAVAILABLE_PATTERN <- paste(
+  "singular", "not positive[- ]?(semi-)?definite", "cluster", "degrees of freedom", "vcov", "eigen",
+  "infinite or missing values in 'x'", "NA/NaN/Inf", "non-conformable", "system is exactly singular",
+  sep = "|"
+)
 
 model_key <- function(market, variant, fe, attention) paste(market, variant, fe, attention, sep = "__")
 profile_key <- function(market, fe) paste(market, "headline", fe, "profile", sep = "__")
@@ -1578,8 +1673,48 @@ inference_from_vcov <- function(V, coefs, term) {
        p_value = 2 * stats::pt(-abs(est / unname(se)), df))
 }
 
+cluster_summariser <- function(fit) summary(fit, vcov = ~lsoa)
+
+# Clustered inference shared by fit_cell() and fit_profile(). Returns list(status,
+# reason, V, t_df, inference, summarised, vcov_warnings): `summarised` is the summary
+# object when the summariser succeeded; `inference` holds the focal-term pieces when
+# `term` is given. V and inference are NULL whenever inference is unavailable. A
+# summariser error becomes estimated_inference_unavailable only when its message
+# matches VCOV_UNAVAILABLE_PATTERN; anything else stops the run with the model key.
+resolve_inference <- function(fit, coefs, term, model_key, summariser = cluster_summariser) {
+  vcov_warnings <- character()
+  store <- function(text) vcov_warnings <<- c(vcov_warnings, text)
+  summarised <- tryCatch(capture_conditions(summariser(fit), store), error = function(e) e)
+  unavailable <- function(reason, summarised = NULL) {
+    list(status = "estimated_inference_unavailable", reason = reason, V = NULL, t_df = NA_real_,
+         inference = NULL, summarised = summarised, vcov_warnings = vcov_warnings)
+  }
+  if (inherits(summarised, "error")) {
+    msg <- conditionMessage(summarised)
+    if (!grepl(VCOV_UNAVAILABLE_PATTERN, msg, perl = TRUE, ignore.case = TRUE)) {
+      stop("Inference error for ", model_key, ": ", msg, call. = FALSE)
+    }
+    return(unavailable(paste0("clustered covariance could not be computed: ", msg)))
+  }
+  V <- stats::vcov(summarised)
+  t_df <- as.numeric(attr(V, "df.t"))
+  inference <- if (is.null(term)) NULL else inference_from_vcov(V, coefs, term)
+  finite_inference <- is.null(inference) || (is.finite(inference$std_error) && is.finite(inference$t_df))
+  if (!all(is.finite(V)) || !is.finite(t_df) || t_df < 1 || !finite_inference) {
+    return(unavailable("clustered covariance or its degrees of freedom are not finite", summarised))
+  }
+  if (any(grepl(INFERENCE_WARNING_PATTERN, vcov_warnings, perl = TRUE))) {
+    return(unavailable(paste0("covariance warning invalidates inference: ", paste(vcov_warnings, collapse = "; ")),
+                       summarised))
+  }
+  list(status = "estimated", reason = NA_character_, V = V, t_df = t_df, inference = inference,
+       summarised = summarised, vcov_warnings = vcov_warnings)
+}
+
 # KTD11: focal column residualised on the fixed effects (fixest's demeaned X) and, for
-# controlled fits, projected off the other demeaned columns with a rank-aware qr().
+# controlled fits, projected off the other demeaned columns that carry an estimated
+# coefficient, with a rank-aware qr(). fixest keeps collinearity-removed columns in
+# X_demeaned; they are outside the model and must not enter the projection.
 compute_residual_support <- function(fit, term, raw_focal, year, lsoa, model_key) {
   Xd <- fit$X_demeaned
   if (is.null(dim(Xd))) Xd <- matrix(Xd, ncol = 1L, dimnames = list(NULL, names(stats::coef(fit))))
@@ -1588,8 +1723,11 @@ compute_residual_support <- function(fit, term, raw_focal, year, lsoa, model_key
   if (is.na(j)) stop("Demeaned design lacks the focal column for ", model_key, call. = FALSE)
   if (nrow(Xd) != length(raw_focal)) stop("Demeaned design rows do not match the retained sample for ", model_key, call. = FALSE)
   r <- Xd[, j]
-  if (ncol(Xd) > 1L) {
-    q <- qr(Xd[, -j, drop = FALSE])
+  others <- setdiff(names(stats::coef(fit)), term)
+  if (length(others) > 0L) {
+    at <- match(others, colnames(Xd))
+    if (anyNA(at)) stop("Demeaned design lacks estimated columns for ", model_key, call. = FALSE)
+    q <- qr(Xd[, at, drop = FALSE])
     if (q$rank > 0L) r <- r - qr.fitted(q, r)
   }
   r2 <- r^2
@@ -1661,7 +1799,7 @@ prepare_controls <- function(dt, controls) {
 # seconds). Only the diagnosable conditions become statuses; other errors stop the run.
 fit_cell <- function(data, market, variant, fe, attention, controls = character(),
                      article_status = "valid", article_reason = NA_character_,
-                     event_month = CONFIG$event_month) {
+                     event_month = CONFIG$event_month, summariser = cluster_summariser) {
   key <- model_key(market, variant, fe, attention)
   term <- focal_term(attention)
   out <- list(cell = NULL, retained = integer(), model = NULL, support = NULL, support_by_year = NULL)
@@ -1722,38 +1860,21 @@ fit_cell <- function(data, market, variant, fe, attention, controls = character(
   }
   estimate <- unname(coefs[term])
   if (!is.finite(estimate)) stop("Non-finite focal coefficient for ", key, call. = FALSE)
-  # Inference is computed separately so a covariance failure keeps the coefficient.
-  n_before <- length(captured)
-  summarised <- tryCatch(capture_conditions(summary(fit, vcov = ~lsoa), store), error = function(e) e)
-  vcov_warnings <- captured[seq_along(captured) > n_before]
-  inference <- NULL
-  status <- "estimated"
-  reason <- NA_character_
-  if (inherits(summarised, "error")) {
-    status <- "estimated_inference_unavailable"
-    reason <- paste0("clustered covariance could not be computed: ", conditionMessage(summarised))
-  } else {
-    V <- stats::vcov(summarised)
-    inference <- inference_from_vcov(V, coefs, term)
-    if (!all(is.finite(V)) || !is.finite(inference$std_error) || !is.finite(inference$t_df) || inference$t_df < 1) {
-      status <- "estimated_inference_unavailable"
-      reason <- "clustered covariance or its degrees of freedom are not finite"
-    } else if (any(grepl(INFERENCE_WARNING_PATTERN, vcov_warnings, perl = TRUE))) {
-      status <- "estimated_inference_unavailable"
-      reason <- paste0("covariance warning invalidates inference: ", paste(vcov_warnings, collapse = "; "))
-    }
-    if (status != "estimated") inference[c("std_error", "t_df", "conf_low", "conf_high", "p_value")] <- NA_real_
-  }
+  # Inference is resolved separately so a covariance failure keeps the coefficient.
+  inf <- resolve_inference(fit, coefs, term, key, summariser)
+  captured <- c(captured, inf$vcov_warnings)
+  status <- inf$status
+  reason <- inf$reason
   warnings_text <- if (length(captured) > 0L) paste(captured, collapse = "; ") else NA_character_
-  cell <- fill(empty_cell(market, variant, fe, attention, status, reason), inference)
-  if (is.null(inference)) cell$estimate <- estimate
+  cell <- fill(empty_cell(market, variant, fe, attention, status, reason), inf$inference)
+  cell$estimate <- estimate
   raw_focal <- as.numeric(dt$near[retained]) * as.numeric(dt[[attention]][retained])
   support <- compute_residual_support(fit, term, raw_focal, dt$year[retained], dt$lsoa[retained], key)
-  keep <- if (inherits(summarised, "error")) fit else summarised
+  keep <- inf$summarised %||% fit
   out$model <- list(
     model_key = key, term = term, formula = paste(deparse(fml), collapse = ""), status = status,
-    fit = compact_model(keep), vcov = if (inherits(summarised, "error")) NULL else V,
-    ssc = if (inherits(summarised, "error")) NULL else attr(V, "ssc"), t_df = cell$t_df, nobs = stats::nobs(fit),
+    fit = compact_model(keep), vcov = inf$V, ssc = if (is.null(inf$V)) NULL else attr(inf$V, "ssc"),
+    t_df = cell$t_df, nobs = stats::nobs(fit),
     fixef_sizes = fit$fixef_sizes, collin_var = collin, controls = controls, controls_absorbed = controls_absorbed,
     warnings = captured
   )
@@ -1761,7 +1882,7 @@ fit_cell <- function(data, market, variant, fe, attention, controls = character(
   out$retained <- retained
   out$support <- support$summary
   out$support_by_year <- support$by_year
-  rm(fit, summarised, keep, dt); invisible(gc())
+  rm(fit, inf, keep, dt); invisible(gc())
   out
 }
 
@@ -1805,7 +1926,8 @@ joint_test <- function(coefs, V, t_df, Xd, joint_years) {
 }
 
 fit_profile <- function(data, market, fe, reference_year = CONFIG$profile_reference_year,
-                        joint_years = CONFIG$profile_joint_years, event_month = CONFIG$event_month) {
+                        joint_years = CONFIG$profile_joint_years, event_month = CONFIG$event_month,
+                        summariser = cluster_summariser) {
   key <- profile_key(market, fe)
   out <- list(profile = NULL, retained = integer(), model = NULL)
   finish <- function(status, reason = NA_character_) {
@@ -1834,29 +1956,12 @@ fit_profile <- function(data, market, fe, reference_year = CONFIG$profile_refere
   coefs <- stats::coef(fit)
   collin <- as.character(fit$collin.var %||% character())
   counts <- sample_counts(dt, retained, event_month)
-  n_before <- length(captured)
-  summarised <- tryCatch(capture_conditions(summary(fit, vcov = ~lsoa), store), error = function(e) e)
-  vcov_warnings <- captured[seq_along(captured) > n_before]
-  V <- NULL
-  t_df <- NA_real_
-  status <- "estimated"
-  reason <- NA_character_
-  if (inherits(summarised, "error")) {
-    status <- "estimated_inference_unavailable"
-    reason <- paste0("clustered covariance could not be computed: ", conditionMessage(summarised))
-  } else {
-    V <- stats::vcov(summarised)
-    t_df <- as.numeric(attr(V, "df.t"))
-    if (!all(is.finite(V)) || !is.finite(t_df) || t_df < 1) {
-      status <- "estimated_inference_unavailable"
-      reason <- "clustered covariance or its degrees of freedom are not finite"
-      V <- NULL
-    } else if (any(grepl(INFERENCE_WARNING_PATTERN, vcov_warnings, perl = TRUE))) {
-      status <- "estimated_inference_unavailable"
-      reason <- paste0("covariance warning invalidates inference: ", paste(vcov_warnings, collapse = "; "))
-      V <- NULL
-    }
-  }
+  inf <- resolve_inference(fit, coefs, NULL, key, summariser)
+  captured <- c(captured, inf$vcov_warnings)
+  V <- inf$V
+  t_df <- inf$t_df
+  status <- inf$status
+  reason <- inf$reason
   years <- sort(setdiff(unique(dt$year[retained]), reference_year))
   coefficients <- dplyr::bind_rows(lapply(years, function(y) {
     term <- profile_term(y)
@@ -1873,7 +1978,7 @@ fit_profile <- function(data, market, fe, reference_year = CONFIG$profile_refere
   test <- joint_test(coefs, V, t_df, Xd, joint_years)
   if (test$status == "available") {
     # The manual Wald statistic must reproduce fixest's under the same vcov and df conventions.
-    reference <- fixest::wald(summarised, keep = paste0("^(", paste(profile_term(joint_years), collapse = "|"), ")$"), print = FALSE)
+    reference <- fixest::wald(inf$summarised, keep = paste0("^(", paste(profile_term(joint_years), collapse = "|"), ")$"), print = FALSE)
     if (!isTRUE(all.equal(unname(reference$stat), test$statistic, tolerance = 1e-8)) ||
         !isTRUE(all.equal(as.numeric(reference$df2), test$df2)) || reference$df1 != test$df1) {
       stop("Manual joint test does not reproduce fixest::wald() for ", key, call. = FALSE)
@@ -1883,7 +1988,7 @@ fit_profile <- function(data, market, fe, reference_year = CONFIG$profile_refere
     status <- "unidentified"
     reason <- paste0("no annual interaction estimable (collin.var: ", paste(collin, collapse = ", "), ")")
   }
-  keep <- if (inherits(summarised, "error")) fit else summarised
+  keep <- inf$summarised %||% fit
   out$profile <- list(
     model_key = key, market = market, fe = fe, status = status, reason = reason, reference_year = reference_year,
     coefficients = coefficients, joint_test = test, nobs = counts$nobs, n_properties = counts$n_properties,
@@ -1898,7 +2003,7 @@ fit_profile <- function(data, market, fe, reference_year = CONFIG$profile_refere
     controls_absorbed = character(), warnings = captured
   )
   out$retained <- retained
-  rm(fit, summarised, keep, dt, Xd); invisible(gc())
+  rm(fit, inf, keep, dt, Xd); invisible(gc())
   out
 }
 
@@ -2032,8 +2137,10 @@ assert_model_grid_complete <- function(cells, profiles, markets = MARKETS) {
 
 COMPUTATIONAL_CHUNK_LABELS <- c("setup", "helpers-inputs", "helpers-exposure", "helpers-models",
                                 "helpers-bundle", "fixture-checks", "estimate")
+# pdftools reads the export PDFs for the coverage evidence; when it is not installed
+# its version is recorded as "absent", so installing it later invalidates the bundle.
 COMPUTATIONAL_PACKAGES <- c("arrow", "data.table", "fixest", "sf", "dplyr", "tidyr", "digest",
-                            "lubridate", "tibble", "withr", "tidyselect")
+                            "lubridate", "tibble", "withr", "tidyselect", "pdftools")
 DISPLAY_PACKAGES <- c("ggplot2", "knitr", "rmarkdown")
 HELPER_FILES <- c("hash_utils.R", "repeat_transactions_utils.R", "site_group_utils.R", "script_setup.R")
 REPORT_QMD_NAME <- "2026-09-19-001-long-run-public-attention-repeat-properties.qmd"
@@ -2141,8 +2248,12 @@ settings_fingerprint <- function(config = CONFIG) {
   list(hash = hash_text(settings_json(canon)), parts = parts)
 }
 
+# An uninstalled package records "absent" rather than stopping: its installation
+# state is part of the computational identity.
 package_versions <- function(packages) {
-  vapply(packages, function(p) as.character(utils::packageVersion(p)), character(1))
+  vapply(packages, function(p) {
+    tryCatch(as.character(utils::packageVersion(p)), error = function(e) "absent")
+  }, character(1))
 }
 
 package_fingerprint <- function() {
@@ -2160,15 +2271,21 @@ display_package_versions <- function() {
   c(package_versions(DISPLAY_PACKAGES), quarto = quarto_version_string())
 }
 
+# The hash an input has now: file bytes for a file input, the directory listing for
+# the export-PDF listing row; a missing or unreadable file hashes to NA.
+current_input_hash <- function(input, path) {
+  path <- resolve_project_path(path)
+  if (identical(input, EXPORT_PDF_LISTING_INPUT)) return(export_pdf_listing_hash(path))
+  if (file.exists(path) && !dir.exists(path)) hash_file_content(path) else NA_character_
+}
+
 # `inputs`: tibble(input, path, content_hash, generation_id, ...). With `rehash`, the file
 # bytes are hashed again now (missing files hash to NA and surface as differences).
 input_fingerprint <- function(inputs, rehash = TRUE) {
   if (anyDuplicated(inputs$input) > 0L) stop("Input names must be unique for the fingerprint.", call. = FALSE)
   hashes <- if (rehash) {
-    vapply(inputs$path, function(p) {
-      p <- resolve_project_path(p)
-      if (file.exists(p)) hash_file_content(p) else NA_character_
-    }, character(1), USE.NAMES = FALSE)
+    vapply(seq_len(nrow(inputs)), function(i) current_input_hash(inputs$input[[i]], inputs$path[[i]]),
+           character(1))
   } else {
     as.character(inputs$content_hash)
   }
@@ -2210,7 +2327,15 @@ fingerprint_differences <- function(saved, current) {
     s <- if (n %in% names(saved$inputs)) saved$inputs[[n]] else NA_character_
     now <- if (n %in% names(current$inputs)) current$inputs[[n]] else NA_character_
     if (identical(s, now)) next
-    what <- if (is.na(now)) "now missing or unreadable" else if (is.na(s)) "absent from the saved bundle" else "content changed"
+    what <- if (is.na(now)) {
+      "now missing or unreadable"
+    } else if (!n %in% names(saved$inputs)) {
+      "absent from the saved bundle"
+    } else if (is.na(s)) {
+      "unreadable when the bundle was built, now readable"
+    } else {
+      "content changed"
+    }
     out <- c(out, sprintf("input `%s` (%s)", n, what))
   }
   if (!identical(saved$code, current$code)) {
@@ -2469,31 +2594,78 @@ read_bundle_file <- function(path) {
   bundle
 }
 
+# Stage in the destination directory, then rename into place. `write(tmp)` produces
+# the staged file; any failure leaves the previous file untouched and removes the
+# staged one.
+atomic_write <- function(path, write, fileext = ".tmp") {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(pattern = paste0(".", basename(path), "-"), tmpdir = dirname(path), fileext = fileext)
+  on.exit(unlink(tmp), add = TRUE)
+  write(tmp)
+  if (!file.rename(tmp, path)) stop("Failed to write ", path, call. = FALSE)
+  invisible(path)
+}
+
+# Preflight for the estimation path: every output directory must accept a probe
+# file before the (long) run starts. R signals "cannot open file" as a warning
+# before the error, so a warning counts as failure.
+assert_output_dirs_writable <- function(dirs) {
+  for (d in unlist(dirs, use.names = FALSE)) {
+    dir.create(d, recursive = TRUE, showWarnings = FALSE)
+    probe <- tempfile(pattern = ".write-probe-", tmpdir = d)
+    ok <- tryCatch({ writeLines("probe", probe); TRUE },
+                   warning = function(w) FALSE, error = function(e) FALSE)
+    unlink(probe)
+    if (!ok) {
+      stop("Output directory is not writable: ", d,
+           " (check that output/ resolves to a mounted, writable location before estimating).", call. = FALSE)
+    }
+  }
+  invisible(TRUE)
+}
+
 save_bundle_atomic <- function(bundle, path, writer = saveRDS) {
   validate_bundle(bundle, require_complete = TRUE)
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  tmp <- tempfile(pattern = paste0(".", basename(path), "-"), tmpdir = dirname(path), fileext = ".tmp")
-  on.exit(unlink(tmp), add = TRUE)
-  writer(bundle, tmp)
-  reread <- tryCatch(readRDS(tmp), error = function(e) {
-    stop("Staged bundle could not be re-read (", conditionMessage(e), "); the previous bundle is untouched.", call. = FALSE)
+  atomic_write(path, function(tmp) {
+    writer(bundle, tmp)
+    reread <- tryCatch(readRDS(tmp), error = function(e) {
+      stop("Staged bundle could not be re-read (", conditionMessage(e), "); the previous bundle is untouched.", call. = FALSE)
+    })
+    validate_bundle(reread, require_complete = TRUE)
+    if (!identical(reread$cells, bundle$cells) || !identical(reread$metadata$fingerprint$combined, bundle$metadata$fingerprint$combined)) {
+      stop("Staged bundle does not reproduce the in-memory cells; the previous bundle is untouched.", call. = FALSE)
+    }
   })
-  validate_bundle(reread, require_complete = TRUE)
-  if (!identical(reread$cells, bundle$cells) || !identical(reread$metadata$fingerprint$combined, bundle$metadata$fingerprint$combined)) {
-    stop("Staged bundle does not reproduce the in-memory cells; the previous bundle is untouched.", call. = FALSE)
-  }
-  if (!file.rename(tmp, path)) stop("Failed to move the staged bundle into place at ", path, call. = FALSE)
-  invisible(path)
+}
+
+# Every input name the current configuration consumes: the three files of each
+# market, the crosswalk, the two article files, the export-PDF listing and one row
+# per export PDF present now. A bundle must name them all before its own input
+# table can be trusted to drive the re-hash (a blocked market or an added PDF
+# would otherwise escape the gate).
+expected_input_names <- function(config = CONFIG, markets = MARKETS) {
+  c(unname(unlist(lapply(markets, market_input_names))),
+    "site_group_crosswalk", "search1_monthly", "search1_articles", EXPORT_PDF_LISTING_INPUT,
+    export_pdf_input_name(list_export_pdfs(config$article_pdf_dir)))
 }
 
 # `expected_fingerprint` is a fingerprint list or a function of the bundle's inputs table
 # that computes the current one (so the bundle itself names the files to re-hash).
-load_bundle <- function(path, expected_fingerprint) {
+# `expected_inputs` are the input names the bundle must carry for that re-hash to
+# cover every current dependency.
+load_bundle <- function(path, expected_fingerprint, expected_inputs = expected_input_names()) {
   bundle <- read_bundle_file(path)
   tryCatch(validate_bundle(bundle, require_complete = TRUE), error = function(e) {
     stop(conditionMessage(e), ". The saved bundle at ", project_relative_path(path),
          " cannot be presented as current results; regenerate it with `", render_command(TRUE), "`.", call. = FALSE)
   })
+  missing_inputs <- setdiff(expected_inputs, bundle$inputs$input)
+  if (length(missing_inputs) > 0L) {
+    stop("The saved results bundle (created ", bundle$metadata$created_at, ") does not name input(s) the current ",
+         "configuration consumes: ", paste(missing_inputs, collapse = ", "), ". Their content cannot be verified ",
+         "against the bundle, so the whole model grid needs re-estimation: run `", render_command(TRUE), "`.",
+         call. = FALSE)
+  }
   expected <- if (is.function(expected_fingerprint)) expected_fingerprint(bundle$inputs) else expected_fingerprint
   differences <- fingerprint_differences(bundle$metadata$fingerprint, expected)
   if (length(differences) > 0L) {
@@ -2507,31 +2679,18 @@ load_bundle <- function(path, expected_fingerprint) {
 # ---- Artifact export (estimation path only) -----------------------------------------
 
 write_csv_atomic <- function(df, path) {
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  tmp <- tempfile(pattern = paste0(".", basename(path), "-"), tmpdir = dirname(path), fileext = ".tmp")
-  on.exit(unlink(tmp), add = TRUE)
-  utils::write.csv(as.data.frame(df), tmp, row.names = FALSE, na = "")
-  if (!file.rename(tmp, path)) stop("Failed to write ", path, call. = FALSE)
-  invisible(path)
+  atomic_write(path, function(tmp) utils::write.csv(as.data.frame(df), tmp, row.names = FALSE, na = ""))
 }
 
 write_lines_atomic <- function(lines, path) {
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  tmp <- tempfile(pattern = paste0(".", basename(path), "-"), tmpdir = dirname(path), fileext = ".tmp")
-  on.exit(unlink(tmp), add = TRUE)
-  writeLines(lines, tmp)
-  if (!file.rename(tmp, path)) stop("Failed to write ", path, call. = FALSE)
-  invisible(path)
+  atomic_write(path, function(tmp) writeLines(lines, tmp))
 }
 
 save_figure_pdf <- function(plot, path, width_cm, height_cm) {
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  tmp <- tempfile(pattern = paste0(".", basename(path), "-"), tmpdir = dirname(path), fileext = ".pdf")
-  on.exit(unlink(tmp), add = TRUE)
   device <- if (isTRUE(capabilities("cairo"))) grDevices::cairo_pdf else grDevices::pdf
-  ggplot2::ggsave(tmp, plot = plot, device = device, width = width_cm, height = height_cm, units = "cm")
-  if (!file.rename(tmp, path)) stop("Failed to write ", path, call. = FALSE)
-  invisible(path)
+  atomic_write(path, function(tmp) {
+    ggplot2::ggsave(tmp, plot = plot, device = device, width = width_cm, height = height_cm, units = "cm")
+  }, fileext = ".pdf")
 }
 
 sample_support_rows <- function(samples) {
@@ -2550,23 +2709,34 @@ FIGURE_EXPORTS <- list(
   attention_history = list(file = "attention_history_sales.pdf", width_cm = 14.5, height_cm = 9)
 )
 
+# The CSV tables exported from a bundle, keyed by file name; the export and the
+# cached render's coherence check share this list.
+artifact_tables <- function(bundle) {
+  list(
+    "cells.csv" = bundle$cells,
+    "profile_coefficients.csv" = profile_rows(bundle$profiles),
+    "joint_tests.csv" = joint_test_rows(bundle$profiles),
+    "residual_support.csv" = bundle$residual_support,
+    "residual_support_by_year.csv" = bundle$residual_support_by_year,
+    "exclusion_ledger.csv" = bundle$exclusions$ledger,
+    "variant_ledger.csv" = bundle$exclusions$variants,
+    "sample_support.csv" = sample_support_rows(bundle$samples),
+    "readiness_summary.csv" = readiness_status_rows(bundle$readiness),
+    "calendar.csv" = bundle$calendar,
+    "inputs.csv" = bundle$inputs
+  )
+}
+
+RUN_FINGERPRINT_FILE <- "run_fingerprint.txt"
+RUN_LOG_FILE <- "run_log.txt"
+
 export_artifacts <- function(bundle, config = CONFIG) {
   fingerprint <- bundle$metadata$fingerprint$combined
   stamp <- function(df) dplyr::mutate(tibble::as_tibble(df), fingerprint = fingerprint)
-  tables <- config$output$tables
-  written <- c(
-    write_csv_atomic(stamp(bundle$cells), file.path(tables, "cells.csv")),
-    write_csv_atomic(stamp(profile_rows(bundle$profiles)), file.path(tables, "profile_coefficients.csv")),
-    write_csv_atomic(stamp(joint_test_rows(bundle$profiles)), file.path(tables, "joint_tests.csv")),
-    write_csv_atomic(stamp(bundle$residual_support), file.path(tables, "residual_support.csv")),
-    write_csv_atomic(stamp(bundle$residual_support_by_year), file.path(tables, "residual_support_by_year.csv")),
-    write_csv_atomic(stamp(bundle$exclusions$ledger), file.path(tables, "exclusion_ledger.csv")),
-    write_csv_atomic(stamp(bundle$exclusions$variants), file.path(tables, "variant_ledger.csv")),
-    write_csv_atomic(stamp(sample_support_rows(bundle$samples)), file.path(tables, "sample_support.csv")),
-    write_csv_atomic(stamp(readiness_status_rows(bundle$readiness)), file.path(tables, "readiness_summary.csv")),
-    write_csv_atomic(stamp(bundle$calendar), file.path(tables, "calendar.csv")),
-    write_csv_atomic(stamp(bundle$inputs), file.path(tables, "inputs.csv"))
-  )
+  tables <- artifact_tables(bundle)
+  written <- vapply(names(tables), function(file) {
+    write_csv_atomic(stamp(tables[[file]]), file.path(config$output$tables, file))
+  }, character(1), USE.NAMES = FALSE)
   figures <- config$output$figures
   spec <- FIGURE_EXPORTS$coefficient_comparison
   written <- c(written, save_figure_pdf(plot_coefficients(bundle$cells, base_size = 8, point_size = 1.6, text_size = 2.2),
@@ -2584,9 +2754,54 @@ export_artifacts <- function(bundle, config = CONFIG) {
   written <- c(written, write_lines_atomic(
     c(sprintf("run_fingerprint: %s", fingerprint), sprintf("created_at: %s", bundle$metadata$created_at),
       sprintf("figures: %s", paste(basename(written[grepl("\\.pdf$", written)]), collapse = ", "))),
-    file.path(figures, "run_fingerprint.txt")))
-  written <- c(written, write_lines_atomic(run_log_lines(bundle), file.path(config$output$log, "run_log.txt")))
+    file.path(figures, RUN_FINGERPRINT_FILE)))
+  written <- c(written, write_lines_atomic(run_log_lines(bundle), file.path(config$output$log, RUN_LOG_FILE)))
   invisible(written)
+}
+
+# Whether every exported artifact carries the bundle's combined fingerprint: each
+# CSV's `fingerprint` column, the figure fingerprint file (and the PDFs it lists)
+# and the run log. Returns list(current, reasons).
+artifact_fingerprint_status <- function(bundle, config = CONFIG) {
+  fingerprint <- bundle$metadata$fingerprint$combined
+  reasons <- character()
+  for (file in names(artifact_tables(bundle))) {
+    path <- file.path(config$output$tables, file)
+    if (!file.exists(path)) { reasons <- c(reasons, paste0(file, " missing")); next }
+    df <- tryCatch(utils::read.csv(path, colClasses = "character"), error = function(e) NULL)
+    if (is.null(df) || !"fingerprint" %in% names(df) || !all(df$fingerprint == fingerprint)) {
+      reasons <- c(reasons, paste0(file, " carries a different fingerprint"))
+    }
+  }
+  fp_path <- file.path(config$output$figures, RUN_FINGERPRINT_FILE)
+  fp_lines <- if (file.exists(fp_path)) readLines(fp_path, warn = FALSE) else character()
+  if (!sprintf("run_fingerprint: %s", fingerprint) %in% fp_lines) {
+    reasons <- c(reasons, paste0(RUN_FINGERPRINT_FILE, " missing or carries a different fingerprint"))
+  }
+  figures_line <- grep("^figures: ", fp_lines, value = TRUE)
+  listed <- if (length(figures_line) == 1L) trimws(strsplit(sub("^figures: ", "", figures_line), ",")[[1L]]) else character()
+  absent <- listed[nzchar(listed) & !file.exists(file.path(config$output$figures, listed))]
+  if (length(absent) > 0L) reasons <- c(reasons, paste0("figure(s) missing: ", paste(absent, collapse = ", ")))
+  log_path <- file.path(config$output$log, RUN_LOG_FILE)
+  log_lines <- if (file.exists(log_path)) readLines(log_path, warn = FALSE) else character()
+  if (!sprintf("  combined: %s", fingerprint) %in% log_lines) {
+    reasons <- c(reasons, paste0(RUN_LOG_FILE, " missing or carries a different fingerprint"))
+  }
+  list(current = length(reasons) == 0L, reasons = reasons)
+}
+
+# The bundle is authoritative: when the artifact set on disk is missing, partial or
+# stamped with another fingerprint, every artifact is re-exported from the loaded
+# bundle (each writer is atomic). Returns list(regenerated, reason).
+ensure_artifacts_current <- function(bundle, config = CONFIG) {
+  before <- artifact_fingerprint_status(bundle, config)
+  if (before$current) return(list(regenerated = FALSE, reason = NA_character_))
+  export_artifacts(bundle, config)
+  after <- artifact_fingerprint_status(bundle, config)
+  if (!after$current) {
+    stop("Artifacts are still incoherent after re-export: ", paste(after$reasons, collapse = "; "), call. = FALSE)
+  }
+  list(regenerated = TRUE, reason = paste(before$reasons, collapse = "; "))
 }
 
 run_log_lines <- function(bundle) {
@@ -2615,9 +2830,16 @@ run_log_lines <- function(bundle) {
 #| include: false
 
 # Display helpers: labels, plot builders, and table shapers shared by the report body
-# and the artifact export. Display-only: not part of the code fingerprint.
+# and the artifact export. Display-only: not part of the code fingerprint. Note that
+# export_artifacts() depends on profile_rows(), joint_test_rows(),
+# readiness_status_rows() and the plot builders here, so a change to their shape
+# is picked up by the cached render's artifact coherence check, not by the
+# fingerprint.
 
 options(knitr.kable.NA = "")   # empty cells for missing values in HTML tables
+
+# Emit an HTML table from inside loops/conditionals (not auto-printed).
+emit_table <- function(x) cat(x, "\n\n")
 
 MARKET_LABELS <- c(sales = "Sales", rentals = "Rentals")
 VARIANT_LABELS <- c(headline = "Headline", exclude_changes = "Exclude observed changes",
@@ -2796,14 +3018,25 @@ assert_error_matching <- function(expr, pattern, message) {
   invisible(err)
 }
 
+# Every scenario must end by returning TRUE (a silently truncated scenario is a
+# failure); a duplicated scenario name would run one definition twice, so it is refused.
 run_fixture_checks <- function(checks) {
+  if (length(checks) == 0L || any(lengths(checks) == 0L) || is.null(names(checks))) {
+    stop("The fixture suite has no fixture checks to run.", call. = FALSE)
+  }
   rows <- list()
   for (unit in names(checks)) {
-    for (scenario in names(checks[[unit]])) {
-      outcome <- tryCatch(
-        { checks[[unit]][[scenario]](); list(passed = TRUE, message = "") },
-        error = function(e) list(passed = FALSE, message = conditionMessage(e))
-      )
+    scenarios <- names(checks[[unit]])
+    dup <- unique(scenarios[duplicated(scenarios)])
+    if (is.null(scenarios) || any(!nzchar(scenarios)) || length(dup) > 0L) {
+      stop("Unnamed or duplicated scenario name(s) in ", unit, ": ", paste(dup, collapse = ", "), call. = FALSE)
+    }
+    for (scenario in scenarios) {
+      outcome <- tryCatch({
+        result <- checks[[unit]][[scenario]]()
+        if (!isTRUE(result)) stop("scenario did not return TRUE", call. = FALSE)
+        list(passed = TRUE, message = "")
+      }, error = function(e) list(passed = FALSE, message = conditionMessage(e)))
       rows[[length(rows) + 1L]] <- tibble::tibble(unit = unit, scenario = scenario,
                                                   passed = outcome$passed, message = outcome$message)
     }
@@ -3116,6 +3349,38 @@ FIXTURE_CHECKS$u1 <- list(
     dg <- compute_observation_diagnostics(panel, "sales", "band", cfg)
     assert_true(all(c("near", "far") %in% dg$outcome_by_year$band), "grouping column is honoured")
     TRUE
+  },
+
+  blocked_market_still_records_input_provenance = function() {
+    cfg <- fixture_sales_cfg()
+    dir <- tempfile("provenance-"); dir.create(dir)
+    cfg$history_path <- file.path(dir, "no-such-history.parquet")
+    cfg$mapping_path <- file.path(dir, "mapping.parquet")
+    history <- fixture_sales_history()
+    arrow::write_parquet(fixture_mapping_from_history(history, fixture_sales_cfg()), cfg$mapping_path)
+    prepared <- prepare_market_panel("sales", cfg)
+    assert_true(prepared$status == "blocked" && identical(prepared$readiness$blocked_stage, "input") &&
+                  grepl("no-such-history", prepared$reason), "the missing history blocks the market at the input stage")
+    prov <- prepared$provenance
+    assert_true(identical(prov$input, unname(market_input_names("sales"))), "the blocked market still names its three inputs")
+    hist_row <- prov[prov$input == "sales_history", ]
+    map_row <- prov[prov$input == "sales_mapping", ]
+    assert_true(!hist_row$readable && is.na(hist_row$content_hash) && grepl("no-such-history", hist_row$path),
+                "the unreadable history carries no hash and readable = FALSE")
+    assert_true(map_row$readable && identical(map_row$content_hash, digest::digest(file = cfg$mapping_path, algo = "xxhash64")),
+                "the readable mapping is hashed from its bytes")
+    assert_true(!prov$readable[prov$input == "sales_same_day_review"], "the missing same-day review is unreadable too")
+    # The unreadable input hashes to NA at build time and now; the file appearing later is named.
+    saved <- input_fingerprint(prov, rehash = FALSE)
+    assert_true(identical(saved$hashes, input_fingerprint(prov, rehash = TRUE)$hashes),
+                "NA hashes agree while the file is still missing")
+    arrow::write_parquet(history, cfg$history_path)
+    later <- input_fingerprint(prov, rehash = TRUE)
+    assert_true(saved$hash != later$hash, "the history appearing changes the input fingerprint")
+    diffs <- fingerprint_differences(list(inputs = saved$hashes), list(inputs = later$hashes))
+    assert_true(identical(diffs, "input `sales_history` (unreadable when the bundle was built, now readable)"),
+                "the newly readable input is named")
+    TRUE
   }
 )
 
@@ -3327,6 +3592,50 @@ FIXTURE_CHECKS$u2 <- list(
     out2 <- apply_exposure(apply_sample_contract(history2, mapping, "sales", cfg)$panel, site_at(400000), contract$ledger, "sales", cfg)
     assert_true(all(out2$panel[id %in% c("h01", "h02"), any_change]) && nrow(out2$panel) == nrow(p),
                 "changed property flagged and retained")
+    TRUE
+  },
+
+  export_pdf_directory_membership_is_fingerprinted = function() {
+    dir <- tempfile("pdfs-"); dir.create(dir)
+    writeBin(as.raw(1:32), file.path(dir, "search_1_1.pdf"))
+    ev <- article_export_evidence(pdf_dir = dir, articles_path = file.path(dir, "no-articles.parquet"),
+                                  monthly_path = file.path(dir, "no-monthly.parquet"))
+    assert_true(ev$status == "unavailable" && length(ev$reasons) == 1L, "evidence unavailable without the parquet files")
+    prov <- ev$provenance
+    assert_true(identical(prov$input, c("search1_articles", EXPORT_PDF_LISTING_INPUT, "export_pdf_search_1_1")),
+                "provenance is captured before the early return: articles, listing, one PDF")
+    assert_true(!prov$readable[prov$input == "search1_articles"] && all(prov$readable[prov$input != "search1_articles"]),
+                "the missing parquet is recorded as unreadable")
+    assert_true(identical(prov$content_hash[prov$input == "export_pdf_search_1_1"],
+                          digest::digest(file = file.path(dir, "search_1_1.pdf"), algo = "xxhash64")),
+                "the PDF is hashed from its bytes without parsing")
+    saved <- input_fingerprint(prov, rehash = FALSE)
+    assert_true(identical(saved$hashes, input_fingerprint(prov, rehash = TRUE)$hashes),
+                "re-hashing the listing row from the directory reproduces the saved hash")
+    writeBin(as.raw(33:64), file.path(dir, "search_1_2.pdf"))
+    now <- input_fingerprint(prov, rehash = TRUE)
+    assert_true(saved$hash != now$hash, "adding a PDF changes the input fingerprint")
+    diffs <- fingerprint_differences(list(inputs = saved$hashes), list(inputs = now$hashes))
+    assert_true(identical(diffs, sprintf("input `%s` (content changed)", EXPORT_PDF_LISTING_INPUT)),
+                "the listing row names the change")
+    cfg <- CONFIG; cfg$article_pdf_dir <- dir
+    expected <- expected_input_names(cfg)
+    wanted <- c(market_input_names("sales"), market_input_names("rentals"), "site_group_crosswalk",
+                "search1_monthly", "search1_articles", EXPORT_PDF_LISTING_INPUT,
+                "export_pdf_search_1_1", "export_pdf_search_1_2")
+    assert_true(length(expected) == 12L && all(wanted %in% expected),
+                "expected input names derive from CONFIG and the PDFs present now")
+    unlink(file.path(dir, "search_1_1.pdf"))
+    removed <- input_fingerprint(prov, rehash = TRUE)
+    removed_diffs <- fingerprint_differences(list(inputs = saved$hashes), list(inputs = removed$hashes))
+    assert_true(is.na(removed$hashes[["export_pdf_search_1_1"]]) &&
+                  any(grepl("export_pdf_search_1_1` \\(now missing", removed_diffs)),
+                "a removed PDF is reported missing")
+    empty <- article_export_evidence(pdf_dir = file.path(dir, "absent"), articles_path = file.path(dir, "no.parquet"),
+                                     monthly_path = file.path(dir, "no.parquet"))
+    assert_true(identical(empty$provenance$input, c("search1_articles", EXPORT_PDF_LISTING_INPUT)) &&
+                  !empty$provenance$readable[[2L]] && !is.na(empty$provenance$content_hash[[2L]]),
+                "a missing directory still yields a listing row (empty listing hash)")
     TRUE
   }
 )
@@ -3676,12 +3985,100 @@ FIXTURE_CHECKS$u3 <- list(
     assert_model_grid_complete(market_blocked$cells, market_blocked$profiles, "rentals")
     assert_error_matching(assert_model_grid_complete(out$cells[-1L, ], out$profiles, "sales"), "expected 20 keys", "a missing key fails the grid check")
     TRUE
+  },
+
+  unexpected_inference_error_stops_but_covariance_failure_keeps_coefficient = function() {
+    panel <- fixture_model_panel("sales")
+    boom <- function(fit) stop("boom: unexpected")
+    assert_error_matching(fit_cell(panel, "sales", "headline", "property_month", "post", summariser = boom),
+                          "Inference error for sales__headline__property_month__post: boom: unexpected",
+                          "an unexpected summariser error stops the run with the model key")
+    assert_error_matching(fit_profile(panel, "sales", "property_month", summariser = boom),
+                          "Inference error for sales__headline__property_month__profile: boom", "the profile stops too")
+    vcov_fail <- function(fit) stop("infinite or missing values in 'x'")
+    res <- fit_cell(panel, "sales", "headline", "property_month", "post", summariser = vcov_fail)
+    assert_true(res$cell$status == "estimated_inference_unavailable" && abs(res$cell$estimate - 0.05) < 1e-3 &&
+                  is.na(res$cell$std_error) && is.na(res$cell$conf_low) && is.na(res$cell$p_value) &&
+                  grepl("infinite or missing values", res$cell$reason),
+                "a covariance failure keeps the coefficient and records why inference is unavailable")
+    assert_true(is.null(res$model$vcov) && is.null(res$model$ssc) && !is.null(res$support) && res$cell$nobs == nrow(panel),
+                "no vcov stored; residual support and sample counts still computed")
+    prof <- fit_profile(panel, "sales", "property_month", summariser = vcov_fail)$profile
+    assert_true(prof$status == "estimated_inference_unavailable" && all(prof$coefficients$available) &&
+                  all(is.na(prof$coefficients$std_error)) && prof$joint_test$status == "unavailable" &&
+                  grepl("covariance unavailable", prof$joint_test$reason) && is.null(prof$vcov),
+                "the profile keeps its annual estimates; intervals and the joint test are unavailable")
+    covered <- c("Matrix is singular", "The matrix is not positive definite", "not positive-definite", "only one cluster",
+                 "Degrees of freedom are not finite", "vcov could not be computed", "eigen() failed",
+                 "NA/NaN/Inf in foreign function call", "non-conformable arguments",
+                 "Lapack routine dgesv: system is exactly singular")
+    assert_true(all(grepl(VCOV_UNAVAILABLE_PATTERN, covered, perl = TRUE, ignore.case = TRUE)),
+                "covariance messages are classified")
+    unrelated <- c("boom: unexpected", "object 'lsoa' not found")
+    assert_true(!any(grepl(VCOV_UNAVAILABLE_PATTERN, unrelated, perl = TRUE, ignore.case = TRUE)),
+                "unrelated messages are not classified as covariance failures")
+    TRUE
+  },
+
+  estimator_singleton_removal_reconciles_samples = function() {
+    panel <- fixture_model_panel("sales")
+    # p041: two dates in its own MSOA, one observation per (MSOA, year), so both rows are
+    # singleton cells under msoa^year and the estimator removes them; property + month keeps them.
+    extra <- panel[repeat_id == "p001" & month_index %in% c(61L, 109L)]
+    extra[, `:=`(repeat_id = "p041", id = c("t99991", "t99992"), msoa = "E02000099", lsoa = "E01000099", easting = 400041)]
+    panel <- data.table::rbindlist(list(panel, extra))
+    out <- estimate_market_models(fixture_model_entry(panel, "sales"), "sales", market_config("sales"), verbose = FALSE)
+    for (attention in MODEL_ATTENTION) {
+      loose <- out$cells[out$cells$model_key == model_key("sales", "headline", "property_month", attention), ]
+      tight <- out$cells[out$cells$model_key == model_key("sales", "headline", "property_month_msoa_year", attention), ]
+      assert_true(loose$status == "estimated" && loose$nobs == nrow(panel) && loose$n_removed_by_estimator == 0,
+                  "property + month keeps every row")
+      assert_true(tight$status == "estimated" && tight$nobs == nrow(panel) - 2 && tight$n_removed_by_estimator == 2 &&
+                    tight$n_properties == 40, "MSOA x year drops the two singleton rows")
+      key <- tight$model_key
+      retained <- out$samples$estimated[[key]]
+      assert_true(length(retained) == tight$nobs && !any(out$samples$ids[retained] %in% c("t99991", "t99992")),
+                  "retained rows reconcile with nobs and exclude the removed rows")
+      assert_true(any(grepl("singleton", out$models[[key]]$warnings)), "the estimator's singleton note is recorded")
+      comparator <- model_key("sales", "complete_case", "property_month_msoa_year", attention)
+      controlled <- model_key("sales", "complete_case_controls", "property_month_msoa_year", attention)
+      assert_true(setequal(out$samples$estimated[[comparator]], out$samples$estimated[[controlled]]) &&
+                    out$cells$nobs[out$cells$model_key == controlled] == tight$nobs &&
+                    out$cells$n_removed_by_estimator[out$cells$model_key == controlled] == 0,
+                  "the controlled fit uses exactly the comparator's retained rows and removes nothing further")
+    }
+    step <- out$ledger[out$ledger$step == "variant:complete_case_controls:property_month_msoa_year:comparator_estimation_rows", ]
+    assert_true(nrow(step) == 1L && step$n_rows_removed == 2 && step$n_groups_after == 40,
+                "the comparator-rows ledger step records the estimator's removal")
+    compressed <- compress_samples(list(sales = out$samples))
+    assert_samples_roundtrip(list(sales = out$samples), compressed)
+    assert_true(identical(compressed$sales$estimated[[key]]$removed, which(out$samples$ids %in% c("t99991", "t99992"))),
+                "the compressed sample stores exactly the removed rows")
+    TRUE
+  },
+
+  absorbed_controls_leave_residual_support_unchanged = function() {
+    panel <- fixture_model_panel("sales")
+    plain <- fit_cell(panel, "sales", "complete_case", "property_month", "post")
+    controlled <- fit_cell(panel, "sales", "complete_case_controls", "property_month", "post",
+                           market_config("sales")$control_cols)
+    assert_true(controlled$cell$status == "estimated" && length(controlled$model$controls_absorbed) == 5L &&
+                  identical(controlled$retained, plain$retained), "every control is absorbed on identical rows")
+    assert_true(abs(controlled$support$rss - plain$support$rss) <= 1e-8 * plain$support$rss &&
+                  abs(controlled$support$ratio - plain$support$ratio) <= 1e-10 &&
+                  abs(controlled$support$lsoa_share_top1 - plain$support$lsoa_share_top1) <= 1e-10,
+                "absorbed controls do not change the residual support")
+    assert_true(abs(controlled$cell$estimate - plain$cell$estimate) < 1e-10, "absorbed controls leave the coefficient unchanged")
+    TRUE
   }
 )
 
 # ---- U4 fixtures ------------------------------------------------------------------
 
-# Two tiny binary inputs whose content hashes stand in for the parquet provenance.
+# Two tiny binary inputs whose content hashes stand in for the parquet provenance;
+# `fixture_expected_inputs` is what load_bundle() must expect of a fixture bundle.
+fixture_expected_inputs <- c("fixture_a", "fixture_b")
+
 fixture_bundle_inputs <- function(dir) {
   paths <- file.path(dir, c("input_a.bin", "input_b.bin"))
   writeBin(as.raw(1:64), paths[[1L]])
@@ -3936,11 +4333,12 @@ FIXTURE_CHECKS$u4 <- list(
                           "an interrupted write fails before replacement")
     assert_true(identical(file.info(path)$size, before$size), "the previous bundle file is unchanged")
     assert_true(length(list.files(dir, all.files = TRUE, no.. = TRUE)) == 1L, "no staged temp file is left behind")
-    reloaded <- load_bundle(path, bundle$metadata$fingerprint)
+    reloaded <- load_bundle(path, bundle$metadata$fingerprint, expected_inputs = fixture_expected_inputs)
     assert_true(identical(reloaded$cells, bundle$cells) && reloaded$cells$estimate[[1L]] != 99, "the previous valid bundle still loads")
     invalid <- newer; invalid$cells <- invalid$cells[-1L, ]
     assert_error_matching(save_bundle_atomic(invalid, path), "exactly once each", "an invalid bundle is never staged")
-    assert_true(identical(load_bundle(path, bundle$metadata$fingerprint)$cells, bundle$cells), "the previous bundle survives a rejected save")
+    survivor <- load_bundle(path, bundle$metadata$fingerprint, expected_inputs = fixture_expected_inputs)
+    assert_true(identical(survivor$cells, bundle$cells), "the previous bundle survives a rejected save")
     TRUE
   },
   blocked_article_cells_validate_and_display_diagnosis = function() {
@@ -3961,24 +4359,28 @@ FIXTURE_CHECKS$u4 <- list(
     assert_true(inherits(history$plot, "ggplot") && is.na(history$message), "a valid calendar yields the plot")
     path <- tempfile("blocked-", fileext = ".rds")
     save_bundle_atomic(bundle, path)
-    assert_true(identical(load_bundle(path, bundle$metadata$fingerprint)$cells, bundle$cells), "the blocked bundle round-trips")
+    reloaded <- load_bundle(path, bundle$metadata$fingerprint, expected_inputs = fixture_expected_inputs)
+    assert_true(identical(reloaded$cells, bundle$cells), "the blocked bundle round-trips")
     TRUE
   },
   saved_bundle_reloads_identically = function() {
     bundle <- fixture_bundle()
     path <- tempfile("roundtrip-", fileext = ".rds")
     save_bundle_atomic(bundle, path)
-    loaded <- load_bundle(path, function(inputs) compute_fingerprint(inputs, rehash = TRUE))
+    loaded <- load_bundle(path, function(inputs) compute_fingerprint(inputs, rehash = TRUE),
+                          expected_inputs = fixture_expected_inputs)
     assert_true(identical(loaded$cells, bundle$cells) && identical(loaded$profiles, bundle$profiles), "cells and profiles reload identically")
     assert_true(identical(expand_samples(loaded$samples), expand_samples(bundle$samples)), "sample membership reloads identically")
     assert_true(identical(loaded$metadata$fingerprint$combined, bundle$metadata$fingerprint$combined), "the fingerprint reloads")
     stale <- bundle$metadata$fingerprint
     stale$inputs[["fixture_a"]] <- "0000000000000000"
-    assert_error_matching(load_bundle(path, stale), "stale.*input `fixture_a` \\(content changed\\).*reestimate:true",
+    assert_error_matching(load_bundle(path, stale, expected_inputs = fixture_expected_inputs),
+                          "stale.*input `fixture_a` \\(content changed\\).*reestimate:true",
                           "a fingerprint mismatch names the input and the regeneration command")
     stale <- bundle$metadata$fingerprint
     stale$packages <- "different"; stale$package_versions[["fixest"]] <- "0.0.0"
-    assert_error_matching(load_bundle(path, stale), "packages \\(fixest", "a package-version mismatch names the package")
+    assert_error_matching(load_bundle(path, stale, expected_inputs = fixture_expected_inputs), "packages \\(fixest",
+                          "a package-version mismatch names the package")
     TRUE
   },
   unsupported_cells_stay_visible_in_plot_data = function() {
@@ -3995,7 +4397,19 @@ FIXTURE_CHECKS$u4 <- list(
     built <- ggplot2::ggplot_build(plot_coefficients(cells))
     text_layer <- built$data[[length(built$data)]]
     assert_true(any(grepl("unsupported_sample", text_layer$label)), "the status is drawn on the plot")
-    assert_true(key %in% headline_table(cells)$Market | TRUE, "headline table builds")
+    table <- headline_table(cells)
+    assert_true(nrow(table) == 8L && setequal(table$Market, unname(MARKET_LABELS)) && all(!is.na(table$Estimate)),
+                "the headline table carries the eight headline cells of both markets; the short-window cell is not among them")
+    headline_key <- "rentals__headline__property_month__post"
+    hrow <- cells$model_key == headline_key
+    cells[hrow, c("estimate", "std_error", "t_df", "conf_low", "conf_high", "p_value", "nobs")] <- NA_real_
+    cells$status[hrow] <- "unsupported_sample"; cells$reason[hrow] <- "no rows after the variant restrictions"
+    table <- headline_table(cells)
+    row <- table[table$Market == "Rentals" & table$`Fixed effects` == FE_LABELS[["property_month"]] &
+                   table$Attention == ATTENTION_LABELS[["post"]], ]
+    assert_true(nrow(table) == 8L && nrow(row) == 1L && row$Status == "unsupported_sample" && is.na(row$Estimate) &&
+                  is.na(row$`95% CI`) && is.na(row$`Ratio change (%)`),
+                "an unsupported headline cell stays in the headline table with its status and no substituted number")
     TRUE
   },
   samples_compress_and_expand_identically = function() {
@@ -4035,10 +4449,125 @@ FIXTURE_CHECKS$u4 <- list(
                 "the run log carries the fingerprint and status")
     assert_true(length(list.files(cfg$output$tables, pattern = "\\.tmp$", all.files = TRUE)) == 0L, "no staged temp files remain")
     TRUE
+  },
+  bundle_missing_a_configured_input_is_refused = function() {
+    bundle <- fixture_bundle()
+    path <- tempfile("inputs-", fileext = ".rds")
+    save_bundle_atomic(bundle, path)
+    err <- assert_error_matching(
+      load_bundle(path, bundle$metadata$fingerprint,
+                  expected_inputs = c("fixture_a", "rentals_mapping", EXPORT_PDF_LISTING_INPUT)),
+      "does not name input\\(s\\).*rentals_mapping, export_pdf_listing.*reestimate:true",
+      "a bundle lacking configured inputs is refused with their names and the regeneration command"
+    )
+    assert_true(!grepl("fixture_a", conditionMessage(err)), "inputs the bundle does name are not listed")
+    loaded <- load_bundle(path, bundle$metadata$fingerprint, expected_inputs = fixture_expected_inputs)
+    assert_true(identical(loaded$cells, bundle$cells), "a bundle naming every configured input loads")
+    expected <- expected_input_names()
+    assert_true(all(c(market_input_names("sales"), market_input_names("rentals"), "site_group_crosswalk", "search1_monthly",
+                      "search1_articles", EXPORT_PDF_LISTING_INPUT) %in% expected),
+                "the default expectation covers every configured input")
+    assert_error_matching(load_bundle(path, bundle$metadata$fingerprint), "does not name input\\(s\\).*sales_history",
+                          "the fixture bundle fails the default expectation")
+    assert_true("pdftools" %in% names(package_fingerprint()$versions), "pdftools is part of the package identity")
+    assert_true(identical(unname(package_versions("no.such.package.2026")), "absent"),
+                "an absent package records 'absent' without stopping")
+    TRUE
+  },
+  artifact_coherence_checked_and_regenerated_on_the_cached_path = function() {
+    bundle <- fixture_bundle()
+    root <- tempfile("artifacts-"); dir.create(root)
+    cfg <- CONFIG
+    cfg$output <- list(regs = file.path(root, "regs"), tables = file.path(root, "tables"),
+                       figures = file.path(root, "figures"), log = file.path(root, "log"))
+    written <- export_artifacts(bundle, cfg)
+    stamp <- as.POSIXct("2026-01-01 00:00:00", tz = "UTC")
+    Sys.setFileTime(written, stamp)
+    status <- artifact_fingerprint_status(bundle, cfg)
+    assert_true(status$current && length(status$reasons) == 0L, "a freshly exported set is current")
+    untouched <- ensure_artifacts_current(bundle, cfg)
+    assert_true(!untouched$regenerated && is.na(untouched$reason), "a coherent set is not regenerated")
+    assert_true(all(abs(as.numeric(file.info(written)$mtime) - as.numeric(stamp)) < 1),
+                "a coherent set is left untouched (mtimes unchanged)")
+    cells_csv <- file.path(cfg$output$tables, "cells.csv")
+    df <- utils::read.csv(cells_csv, colClasses = "character")
+    df$fingerprint[[1L]] <- "0000"
+    utils::write.csv(df, cells_csv, row.names = FALSE, na = "")
+    status <- artifact_fingerprint_status(bundle, cfg)
+    assert_true(!status$current && identical(status$reasons, "cells.csv carries a different fingerprint"),
+                "a tampered CSV fingerprint is detected and named")
+    regenerated <- ensure_artifacts_current(bundle, cfg)
+    assert_true(regenerated$regenerated && grepl("cells.csv", regenerated$reason),
+                "the set is re-exported and the reason recorded")
+    assert_true(all(utils::read.csv(cells_csv, colClasses = "character")$fingerprint == bundle$metadata$fingerprint$combined) &&
+                  artifact_fingerprint_status(bundle, cfg)$current, "the re-exported set carries the bundle fingerprint")
+    unlink(file.path(cfg$output$figures, RUN_FINGERPRINT_FILE))
+    unlink(file.path(cfg$output$log, RUN_LOG_FILE))
+    status <- artifact_fingerprint_status(bundle, cfg)
+    assert_true(!status$current && length(status$reasons) == 2L && any(grepl(RUN_FINGERPRINT_FILE, status$reasons)) &&
+                  any(grepl(RUN_LOG_FILE, status$reasons)), "a missing fingerprint file and log are named")
+    other <- bundle; other$metadata$fingerprint$combined <- "ffff"
+    assert_true(!artifact_fingerprint_status(other, cfg)$current, "artifacts of another run are not current")
+    assert_true(ensure_artifacts_current(bundle, cfg)$regenerated && artifact_fingerprint_status(bundle, cfg)$current,
+                "missing files are regenerated")
+    TRUE
+  },
+  unwritable_output_directory_fails_preflight = function() {
+    root <- tempfile("output-"); dir.create(root)
+    writable <- file.path(root, "ok")
+    assert_true(assert_output_dirs_writable(list(tables = writable)), "a writable directory (created on demand) passes")
+    assert_true(dir.exists(writable) && length(list.files(writable, all.files = TRUE, no.. = TRUE)) == 0L,
+                "the probe file is removed")
+    readonly <- file.path(root, "ro"); dir.create(readonly)
+    Sys.chmod(readonly, "0555")
+    on.exit(Sys.chmod(readonly, "0755"), add = TRUE)
+    if (file.access(readonly, 2L) != 0L) {   # not running as a user that ignores permissions
+      assert_error_matching(assert_output_dirs_writable(list(ok = writable, ro = readonly)), "not writable: .*/ro",
+                            "a read-only directory is named")
+      assert_error_matching(assert_output_dirs_writable(list(file.path(readonly, "child"))), "not writable",
+                            "a directory that cannot be created is named")
+    }
+    TRUE
+  },
+  fixture_suite_names_unique_and_scenarios_return_true = function() {
+    assert_true(length(FIXTURE_CHECKS) > 0L && all(lengths(FIXTURE_CHECKS) > 0L), "the suite and every unit are non-empty")
+    for (unit in names(FIXTURE_CHECKS)) {
+      scenarios <- names(FIXTURE_CHECKS[[unit]])
+      assert_true(!is.null(scenarios) && all(nzchar(scenarios)) && anyDuplicated(scenarios) == 0L,
+                  paste("scenario names are unique and non-empty in", unit))
+    }
+    assert_error_matching(run_fixture_checks(list(x = list(silent = function() invisible(NULL)))),
+                          "x / silent: scenario did not return TRUE", "a scenario that does not return TRUE fails")
+    assert_error_matching(run_fixture_checks(list(x = list(dup = function() TRUE, dup = function() stop("never run")))),
+                          "duplicated scenario name\\(s\\) in x: dup", "duplicated scenario names are refused")
+    assert_error_matching(run_fixture_checks(list()), "no fixture checks", "an empty suite is refused")
+    assert_error_matching(run_fixture_checks(list(x = list())), "no fixture checks", "an empty unit is refused")
+    ok <- run_fixture_checks(list(x = list(fine = function() TRUE)))
+    assert_true(nrow(ok) == 1L && isTRUE(ok$passed), "a TRUE-returning scenario passes")
+    TRUE
   }
 )
 
 fixture_results <- run_fixture_checks(FIXTURE_CHECKS)
+```
+
+```{r}
+#| label: fixtures-only-exit
+#| eval: !expr isTRUE(params$fixtures_only)
+#| results: asis
+
+# `-P fixtures_only:true` renders the synthetic checks alone: no data is read and
+# no bundle is loaded or written. Display/control only; not fingerprinted.
+fixture_display <- dplyr::mutate(fixture_results[, c("unit", "scenario", "passed")],
+                                 passed = ifelse(passed, "yes", "no"))
+unit_counts <- table(fixture_display$unit)
+emit_paragraph(sprintf(paste("**Fixtures-only render:** %d synthetic fixture checks passed (%s).",
+                             "No input was read and no bundle was loaded or written; the rest of",
+                             "the report is omitted."),
+                       nrow(fixture_display),
+                       paste(sprintf("%s: %d", names(unit_counts), as.integer(unit_counts)), collapse = ", ")))
+emit_table(knitr::kable(fixture_display, format = "html", caption = "Fixture checks (synthetic data)"))
+knitr::knit_exit()
 ```
 
 ```{r}
@@ -4050,6 +4579,7 @@ fixture_results <- run_fixture_checks(FIXTURE_CHECKS)
 # Shared inputs are loaded once; each market's pre-band panel is released as
 # soon as the bands are applied.
 run_started <- Sys.time()
+assert_output_dirs_writable(CONFIG$output)   # fail before the long run, not after it
 site_projection <- load_site_projection(CONFIG$crosswalk_path, CONFIG$crosswalk_years)
 article_input <- load_article_monthly(CONFIG$articles_path)
 article_validation <- validate_article_input(article_input$monthly)
@@ -4160,6 +4690,9 @@ invisible(gc())
 # bytes of every input the bundle names (AE4), so a stale bundle is refused here.
 bundle_path <- file.path(CONFIG$output$regs, CONFIG$bundle_file)
 results <- load_bundle(bundle_path, expected_fingerprint = function(inputs) compute_fingerprint(inputs, rehash = TRUE))
+# The exported tables, figures and log must carry this bundle's fingerprint; any
+# missing or differently stamped artifact is re-exported from the validated bundle.
+artifacts <- ensure_artifacts_current(results)
 ```
 
 ```{r}
@@ -4168,9 +4701,16 @@ results <- load_bundle(bundle_path, expected_fingerprint = function(inputs) comp
 
 md <- results$metadata
 mode <- if (params$reestimate) "inputs re-validated and the model grid re-estimated in this render" else "results loaded from the saved bundle without re-estimation"
-emit_paragraph(sprintf("**This rendering:** %s. Bundle `%s` created %s UTC, status `%s`, combined fingerprint `%s…`, estimation runtime %s.",
+artifact_note <- if (isTRUE(artifacts$regenerated)) {
+  sprintf(paste("The exported tables, figures and run log under `output/` were regenerated from",
+                "this bundle because they were not current (%s)."), artifacts$reason)
+} else {
+  paste("The exported tables, figures and run log under `output/` were verified to carry",
+        "this fingerprint.")
+}
+emit_paragraph(sprintf("**This rendering:** %s. Bundle `%s` created %s UTC, status `%s`, combined fingerprint `%s…`, estimation runtime %s. %s",
                        mode, project_relative_path(bundle_path), md$created_at, md$status,
-                       substr(md$fingerprint$combined, 1L, 12L), format_seconds(md$runtime_seconds)))
+                       substr(md$fingerprint$combined, 1L, 12L), format_seconds(md$runtime_seconds), artifact_note))
 ```
 
 ## Findings
@@ -4784,10 +5324,16 @@ From the project root, using the R 4.6.0 `rv` environment, the estimation path r
 quarto render docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd --to html
 ```
 
-The presentation-only path loads the saved bundle and refuses it when any computational dependency changed:
+The presentation-only path loads the saved bundle and refuses it when any computational dependency changed, or when the bundle does not name an input the current configuration consumes; it re-exports the tables, figures and log when they do not carry the bundle's fingerprint:
 
 ```bash
 quarto render docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd --to html -P reestimate:false
+```
+
+The fixtures-only path runs the synthetic fixture checks alone (seconds, no data, no bundle) and stops after printing their table:
+
+```bash
+quarto render docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd --to html -P fixtures_only:true
 ```
 
 The bundle recorded `r format_seconds(results$metadata$runtime_seconds)` for the last estimation run (`r paste(sprintf("%s %s", results$markets$market, format_seconds(results$markets$runtime_seconds)), collapse = ", ")`); `r results$metadata$peak_memory_note`. Outputs, all gitignored under the `output/` symlink:
