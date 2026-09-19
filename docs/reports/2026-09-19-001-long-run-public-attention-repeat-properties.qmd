@@ -1362,6 +1362,657 @@ plot_attention_history <- function(calendar, event_month = CONFIG$event_month) {
 #| include: false
 
 # U3: variants, sequential fitting, extraction, residual support, profiles, joint tests.
+
+# ---- Model grid ------------------------------------------------------------------
+
+MODEL_VARIANTS <- c("headline", "exclude_changes", "complete_case", "complete_case_controls", "short_window")
+MODEL_FE <- c(property_month = "repeat_id + month_index",
+              property_month_msoa_year = "repeat_id + month_index + msoa^year")
+MODEL_ATTENTION <- c("post", "log_articles")
+CELL_STATUSES <- c("estimated", "estimated_inference_unavailable", "unidentified", "unsupported_sample",
+                   "blocked_input")
+ESTIMATED_STATUSES <- c("estimated", "estimated_inference_unavailable")
+CONTROL_FACTOR_COLS <- c("property_type", "old_new", "duration")   # other controls enter as numeric
+COLLINEAR_FE_PATTERN <- "collinear with the fixed effects"
+INFERENCE_WARNING_PATTERN <- "(?i)variance|covariance|vcov|positive[- ]?(semi-)?definite|singular|infinite"
+
+model_key <- function(market, variant, fe, attention) paste(market, variant, fe, attention, sep = "__")
+profile_key <- function(market, fe) paste(market, "headline", fe, "profile", sep = "__")
+focal_term <- function(attention) paste0("near:", attention)
+
+# Sequential order: market -> variant -> fe -> attention (attention varies fastest).
+model_grid <- function(markets = MARKETS) {
+  grid <- expand.grid(attention = MODEL_ATTENTION, fe = names(MODEL_FE), variant = MODEL_VARIANTS,
+                      market = markets, stringsAsFactors = FALSE)[, c("market", "variant", "fe", "attention")]
+  grid$model_key <- model_key(grid$market, grid$variant, grid$fe, grid$attention)
+  tibble::as_tibble(grid)
+}
+
+expected_model_keys <- function(markets = MARKETS) {
+  list(scalar = model_grid(markets)$model_key,
+       profile = as.vector(t(outer(markets, names(MODEL_FE), profile_key))))
+}
+
+# ---- Cell and profile skeletons ------------------------------------------------------
+
+empty_cell <- function(market, variant, fe, attention, status, reason = NA_character_) {
+  tibble::tibble(
+    model_key = model_key(market, variant, fe, attention), market = market, variant = variant, fe = fe,
+    attention = attention, status = status, reason = reason, term = focal_term(attention),
+    estimate = NA_real_, std_error = NA_real_, t_df = NA_real_, conf_low = NA_real_, conf_high = NA_real_,
+    p_value = NA_real_, nobs = NA_real_, n_properties = NA_real_, n_clusters = NA_real_,
+    n_near_properties = NA_real_, n_far_properties = NA_real_, n_properties_both_sides_event = NA_real_,
+    n_removed_by_estimator = NA_real_, n_controls_absorbed = NA_real_, warnings = NA_character_
+  )
+}
+
+empty_profile <- function(market, fe, status, reason = NA_character_,
+                          reference_year = CONFIG$profile_reference_year,
+                          joint_years = CONFIG$profile_joint_years) {
+  list(
+    model_key = profile_key(market, fe), market = market, fe = fe, status = status, reason = reason,
+    reference_year = reference_year,
+    coefficients = tibble::tibble(year = integer(), term = character(), estimate = numeric(),
+                                  std_error = numeric(), t_df = numeric(), conf_low = numeric(),
+                                  conf_high = numeric(), p_value = numeric(), available = logical()),
+    joint_test = list(status = "unavailable", statistic = NA_real_, df1 = NA_real_, df2 = NA_real_,
+                      p_value = NA_real_, reason = reason, years = joint_years, rank = NA_integer_),
+    nobs = NA_real_, n_properties = NA_real_, n_clusters = NA_real_, n_removed_by_estimator = NA_real_,
+    warnings = NA_character_, vcov = NULL, ssc = NULL
+  )
+}
+
+# Every scalar and profile key of a market that cannot be estimated (market blocked upstream).
+blocked_cells_for_market <- function(market, reason) {
+  grid <- model_grid(market)
+  cells <- dplyr::bind_rows(Map(function(v, f, a) empty_cell(market, v, f, a, "blocked_input", reason),
+                                grid$variant, grid$fe, grid$attention))
+  profiles <- lapply(names(MODEL_FE), function(fe) empty_profile(market, fe, "blocked_input", reason))
+  names(profiles) <- profile_key(market, names(MODEL_FE))
+  list(cells = cells, profiles = profiles, residual_support = empty_residual_support(),
+       residual_support_by_year = tibble::tibble(model_key = character(), year = integer(), share = numeric()),
+       samples = list(ids = character(), variants = list(), estimated = list()),
+       models = stats::setNames(vector("list", nrow(cells) + length(profiles)), c(cells$model_key, names(profiles))),
+       fit_log = tibble::tibble(model_key = character(), status = character(), seconds = numeric(),
+                                peak_gc_mb = numeric()),
+       ledger = new_variant_ledger())
+}
+
+empty_residual_support <- function() {
+  tibble::tibble(model_key = character(), rss = numeric(), centred_raw_variation = numeric(), ratio = numeric(),
+                 lsoa_share_top1 = numeric(), lsoa_share_top5 = numeric(), lsoa_share_top10 = numeric(),
+                 largest_cluster_share = numeric(), n_clusters = numeric(), n_rows = numeric())
+}
+
+# ---- Variant samples (index vectors into the eligible panel; no panel copies) -------------
+
+# The variant ledger has the exclusion-ledger columns plus `variant` and `fe`. Chains are
+# checked within (market, variant, fe): every variant branches from the headline panel,
+# and complete_case_controls branches (per FE) from the complete_case sample.
+new_variant_ledger <- function() dplyr::mutate(new_ledger(), variant = character(), fe = character())
+
+restrict_rows <- function(panel, idx, keep, ledger, market, step, note = "") {
+  if (length(keep) != length(idx)) stop("`keep` must have one entry per selected row.", call. = FALSE)
+  keep <- !is.na(keep) & keep
+  new_idx <- idx[keep]
+  ledger <- ledger_append(ledger, market, step, length(idx), length(new_idx),
+                          count_groups(panel$repeat_id[idx]), count_groups(panel$repeat_id[new_idx]), note)
+  list(idx = new_idx, ledger = ledger)
+}
+
+recompute_repeat_rows <- function(panel, idx, ledger, market, variant) {
+  eligible <- repeat_eligible_ids(panel[idx, c("repeat_id", "date"), with = FALSE])
+  restrict_rows(panel, idx, panel$repeat_id[idx] %chin% eligible, ledger, market,
+                paste0("variant:", variant, ":recompute_repeats"),
+                "at least two distinct surviving dates per property (recomputed after the restriction)")
+}
+
+assert_variant_ledger_identity <- function(ledger, headline_rows, complete_case_rows = NULL) {
+  if (nrow(ledger) == 0L) return(invisible(TRUE))
+  key <- paste(ledger$market, ledger$variant, ifelse(is.na(ledger$fe), "", ledger$fe))
+  for (k in unique(key)) {
+    rows <- ledger[key == k, ]
+    rows <- rows[order(rows$step_order), ]
+    origin <- if (rows$variant[[1L]] == "complete_case_controls") complete_case_rows else headline_rows
+    if (!is.null(origin) && rows$n_rows_before[[1L]] != origin) {
+      stop("Variant ledger for ", k, " does not branch from its parent sample.", call. = FALSE)
+    }
+    if (!all(rows$n_rows_removed == rows$n_rows_before - rows$n_rows_after)) {
+      stop("Variant ledger removed counts do not reconcile for ", k, call. = FALSE)
+    }
+    if (nrow(rows) > 1L && (!all(rows$n_rows_after[-nrow(rows)] == rows$n_rows_before[-1L]) ||
+                            !all(rows$n_groups_after[-nrow(rows)] == rows$n_groups_before[-1L]))) {
+      stop("Variant ledger rows do not chain for ", k, call. = FALSE)
+    }
+  }
+  invisible(TRUE)
+}
+
+# Returns list(ids, variants = list(<variant> = index into ids), ledger (variant ledger),
+# metadata). `complete_case_controls` shares the complete_case input sample; its per-FE
+# estimation rows are fixed in estimate_market_models() from the comparator fit.
+build_variant_samples <- function(entry, market, cfg = market_config(market), config = CONFIG) {
+  panel <- entry$panel
+  if (!data.table::is.data.table(panel)) stop("`entry$panel` must be a data.table.", call. = FALSE)
+  if (anyDuplicated(panel$id) > 0L) stop("Panel ids must be unique to serve as the sample dictionary.", call. = FALSE)
+  if (!is.logical(panel$any_change) || anyNA(panel$any_change)) stop("`any_change` must be a complete logical column.", call. = FALSE)
+  ids <- as.character(panel$id)
+  all_idx <- seq_len(nrow(panel))
+  variants <- list(headline = all_idx)
+  ledgers <- list()
+
+  step <- restrict_rows(panel, all_idx, !panel$any_change, new_ledger(), market,
+                        "variant:exclude_changes:drop_flagged_groups",
+                        sprintf("drop whole properties with any observed change in %s (flags frozen on the eligible panel)",
+                                paste(cfg$change_cols, collapse = ", ")))
+  step <- recompute_repeat_rows(panel, step$idx, step$ledger, market, "exclude_changes")
+  variants$exclude_changes <- step$idx
+  ledgers$exclude_changes <- step$ledger
+
+  complete <- stats::complete.cases(panel[, cfg$control_cols, with = FALSE])
+  step <- restrict_rows(panel, all_idx, complete, new_ledger(), market,
+                        "variant:complete_case:nonmissing_controls",
+                        sprintf("rows with nonmissing %s", paste(cfg$control_cols, collapse = ", ")))
+  step <- recompute_repeat_rows(panel, step$idx, step$ledger, market, "complete_case")
+  variants$complete_case <- step$idx
+  variants$complete_case_controls <- step$idx
+  ledgers$complete_case <- step$ledger
+
+  step <- restrict_rows(panel, all_idx, panel$date >= config$short_window_start, new_ledger(), market,
+                        "variant:short_window:date_from_start",
+                        sprintf("dates on or after %s (article stock unchanged: KTD4 origin %s)",
+                                format(config$short_window_start), format(config$article_origin)))
+  step <- recompute_repeat_rows(panel, step$idx, step$ledger, market, "short_window")
+  variants$short_window <- step$idx
+  ledgers$short_window <- step$ledger
+  # KTD4: the short window keeps the long-run stock. Compare row values with the calendar.
+  calendar <- entry$calendar
+  expected <- calendar$log_articles[match(panel$month_index[step$idx], calendar$month_index)]
+  observed <- panel$log_articles[step$idx]
+  if (!identical(is.na(expected), is.na(observed)) || !isTRUE(all(expected[!is.na(expected)] == observed[!is.na(observed)]))) {
+    stop("Short-window article values differ from the long-run calendar for the same months.", call. = FALSE)
+  }
+
+  ledger <- dplyr::bind_rows(lapply(names(ledgers), function(v) dplyr::mutate(ledgers[[v]], variant = v, fe = NA_character_)))
+  ledger$step_order <- seq_len(nrow(ledger))
+  assert_variant_ledger_identity(ledger, nrow(panel))
+  metadata <- lapply(variants, function(idx) list(n_rows = length(idx), n_properties = count_groups(panel$repeat_id[idx])))
+  metadata$short_window$article_values_match_long_run <- TRUE
+  metadata$short_window$start <- config$short_window_start
+  list(ids = ids, variants = variants, ledger = ledger, metadata = metadata)
+}
+
+# ---- Fitting one scalar cell -----------------------------------------------------------
+
+capture_conditions <- function(expr, store) {
+  withCallingHandlers(
+    expr,
+    warning = function(w) { store(paste0("warning: ", conditionMessage(w))); invokeRestart("muffleWarning") },
+    message = function(m) { store(paste0("message: ", trimws(conditionMessage(m)))); invokeRestart("muffleMessage") }
+  )
+}
+
+sample_counts <- function(dt, retained, event_month = CONFIG$event_month) {
+  event_start <- lubridate::floor_date(event_month, "month")
+  rid <- dt$repeat_id[retained]
+  near <- dt$near[retained]
+  pre <- dt$date[retained] < event_start
+  sides <- data.table::data.table(rid = rid, pre = pre)[, .(both = any(pre) & any(!pre)), by = rid]
+  list(
+    nobs = length(retained), n_properties = data.table::uniqueN(rid),
+    n_clusters = data.table::uniqueN(dt$lsoa[retained]),
+    n_near_properties = data.table::uniqueN(rid[near == 1L]), n_far_properties = data.table::uniqueN(rid[near == 0L]),
+    n_properties_both_sides_event = sum(sides$both), n_removed_by_estimator = nrow(dt) - length(retained)
+  )
+}
+
+# Model-specific inference pieces from a clustered vcov matrix (fixest attributes).
+inference_from_vcov <- function(V, coefs, term) {
+  se <- sqrt(diag(V))[term]
+  df <- as.numeric(attr(V, "df.t"))
+  est <- unname(coefs[term])
+  list(estimate = est, std_error = unname(se), t_df = df,
+       conf_low = est - stats::qt(0.975, df) * unname(se), conf_high = est + stats::qt(0.975, df) * unname(se),
+       p_value = 2 * stats::pt(-abs(est / unname(se)), df))
+}
+
+# KTD11: focal column residualised on the fixed effects (fixest's demeaned X) and, for
+# controlled fits, projected off the other demeaned columns with a rank-aware qr().
+compute_residual_support <- function(fit, term, raw_focal, year, lsoa, model_key) {
+  Xd <- fit$X_demeaned
+  if (is.null(dim(Xd))) Xd <- matrix(Xd, ncol = 1L, dimnames = list(NULL, names(stats::coef(fit))))
+  if (is.null(colnames(Xd)) && ncol(Xd) == 1L) colnames(Xd) <- term
+  j <- match(term, colnames(Xd))
+  if (is.na(j)) stop("Demeaned design lacks the focal column for ", model_key, call. = FALSE)
+  if (nrow(Xd) != length(raw_focal)) stop("Demeaned design rows do not match the retained sample for ", model_key, call. = FALSE)
+  r <- Xd[, j]
+  if (ncol(Xd) > 1L) {
+    q <- qr(Xd[, -j, drop = FALSE])
+    if (q$rank > 0L) r <- r - qr.fitted(q, r)
+  }
+  r2 <- r^2
+  rss <- sum(r2)
+  centred <- sum((raw_focal - mean(raw_focal))^2)
+  by_year <- tapply(r2, year, sum)
+  by_lsoa <- sort(tapply(r2, lsoa, sum), decreasing = TRUE)
+  share_top <- function(k) if (rss > 0) sum(by_lsoa[seq_len(min(k, length(by_lsoa)))]) / rss else NA_real_
+  list(
+    summary = tibble::tibble(
+      model_key = model_key, rss = rss, centred_raw_variation = centred,
+      ratio = if (centred > 0) rss / centred else NA_real_,
+      lsoa_share_top1 = share_top(1L), lsoa_share_top5 = share_top(5L), lsoa_share_top10 = share_top(10L),
+      largest_cluster_share = share_top(1L), n_clusters = length(by_lsoa), n_rows = length(r)
+    ),
+    by_year = tibble::tibble(model_key = model_key, year = as.integer(names(by_year)),
+                             share = if (rss > 0) as.numeric(by_year) / rss else NA_real_)
+  )
+}
+
+# Formulas inside a fixest object carry the environment of the call that made them
+# (fit_cell's frame, summary()'s frame), which references the working data and fit.
+# Rebinding them to the global environment keeps serialisation small. Closures and
+# environments have no place in a compact model and stop the run.
+strip_environments <- function(x) {
+  if (inherits(x, "formula")) {
+    environment(x) <- globalenv()
+    return(x)
+  }
+  if (is.function(x) || is.environment(x)) stop("Compact model holds a closure or environment.", call. = FALSE)
+  if (is.list(x) && !is.data.frame(x)) {
+    attrs <- attributes(x)
+    x <- lapply(x, strip_environments)
+    attributes(x) <- attrs
+  }
+  x
+}
+
+# Strip the large per-observation elements; keep what reproduces the coefficient table.
+# Size is checked on the serialised object, which counts formula environments.
+compact_model <- function(fit, max_element_bytes = 2e6) {
+  drop <- c("X_demeaned", "y_demeaned", "residuals", "fitted.values", "scores", "fixef_id", "obs_selection",
+            "sumFE", "working_residuals", "irls_weights", "weights", "call_env", "summary_from_fit",
+            "data", "y", "X", "hessian")
+  for (nm in intersect(drop, names(fit))) fit[[nm]] <- NULL
+  fit <- strip_environments(fit)
+  sizes <- vapply(fit, function(e) length(serialize(e, NULL)), numeric(1))
+  big <- names(sizes)[sizes > max_element_bytes]
+  if (length(big) > 0L) stop("Compact model still holds large elements: ", paste(big, collapse = ", "), call. = FALSE)
+  fit
+}
+
+# Controls: factors with fewer than two observed levels cannot enter the design and are
+# recorded as absorbed before fitting; numeric controls without variation likewise.
+prepare_controls <- function(dt, controls) {
+  rhs <- character()
+  absorbed <- character()
+  for (col in controls) {
+    values <- dt[[col]][!is.na(dt[[col]])]
+    if (data.table::uniqueN(values) < 2L) { absorbed <- c(absorbed, col); next }
+    if (col %in% CONTROL_FACTOR_COLS) data.table::set(dt, j = col, value = factor(dt[[col]]))
+    rhs <- c(rhs, col)
+  }
+  list(rhs = rhs, absorbed = absorbed)
+}
+
+# Fits one scalar cell on `data` (a panel subset). Returns list(cell (one-row tibble),
+# retained (row index into `data`), model (compact list or NULL), support, support_by_year,
+# seconds). Only the diagnosable conditions become statuses; other errors stop the run.
+fit_cell <- function(data, market, variant, fe, attention, controls = character(),
+                     article_status = "valid", article_reason = NA_character_,
+                     event_month = CONFIG$event_month) {
+  key <- model_key(market, variant, fe, attention)
+  term <- focal_term(attention)
+  out <- list(cell = NULL, retained = integer(), model = NULL, support = NULL, support_by_year = NULL)
+  finish <- function(status, reason = NA_character_) {
+    out$cell <- empty_cell(market, variant, fe, attention, status, reason)
+    out
+  }
+  if (attention == "log_articles" && !identical(article_status, "valid")) {
+    return(finish("blocked_input", paste0("article cells blocked: ", article_reason)))
+  }
+  if (nrow(data) == 0L) return(finish("unsupported_sample", "no rows after the variant restrictions"))
+  if (length(repeat_eligible_ids(data)) == 0L) {
+    return(finish("unsupported_sample", "no property observed on two distinct dates"))
+  }
+  near_values <- unique(data$near)
+  if (!1L %in% near_values) return(finish("unidentified", "no near properties in the sample (no near/far contrast)"))
+  if (!0L %in% near_values) return(finish("unidentified", "no far properties in the sample (no near/far contrast)"))
+  if (attention == "log_articles" && all(is.na(data$log_articles))) {
+    return(finish("blocked_input", "log_articles missing for every row"))
+  }
+
+  cols <- unique(c("repeat_id", "date", "year", "month_index", "log_price", "lsoa", "msoa", "near", attention, controls))
+  dt <- data[, cols, with = FALSE]
+  ctrl <- prepare_controls(dt, controls)
+  fml <- stats::as.formula(paste("log_price ~", paste(c(term, ctrl$rhs), collapse = " + "), "|", MODEL_FE[[fe]]))
+  captured <- character()
+  store <- function(text) captured <<- c(captured, text)
+  fit <- tryCatch(capture_conditions(fixest::feols(fml, data = dt, demeaned = TRUE, notes = TRUE), store),
+                  error = function(e) e)
+  if (inherits(fit, "error")) {
+    if (grepl(COLLINEAR_FE_PATTERN, conditionMessage(fit), fixed = TRUE)) {
+      return(finish("unidentified", paste0("focal term collinear with the fixed effects (no within-property variation): ",
+                                           gsub("\\s+", " ", conditionMessage(fit)))))
+    }
+    stop("Estimation error for ", key, ": ", conditionMessage(fit), call. = FALSE)
+  }
+  retained <- as.integer(fixest::obs(fit))
+  if (length(retained) != stats::nobs(fit)) stop("Retained rows do not match nobs for ", key, call. = FALSE)
+  coefs <- stats::coef(fit)
+  collin <- as.character(fit$collin.var %||% character())
+  controls_absorbed <- c(ctrl$absorbed, setdiff(collin, term))
+  counts <- sample_counts(dt, retained, event_month)
+  warnings_text <- if (length(captured) > 0L) paste(captured, collapse = "; ") else NA_character_
+  fill <- function(cell, inference = NULL) {
+    cell[names(counts)] <- lapply(counts, as.numeric)
+    cell$n_controls_absorbed <- length(controls_absorbed)
+    cell$warnings <- warnings_text
+    if (!is.null(inference)) cell[names(inference)] <- inference
+    cell
+  }
+  if (!term %in% names(coefs)) {
+    reason <- paste0("focal term removed for collinearity with the fixed effects and controls (collin.var: ",
+                     paste(collin, collapse = ", "), ")")
+    out$cell <- fill(empty_cell(market, variant, fe, attention, "unidentified", reason))
+    out$retained <- retained
+    rm(fit); invisible(gc())
+    return(out)
+  }
+  estimate <- unname(coefs[term])
+  if (!is.finite(estimate)) stop("Non-finite focal coefficient for ", key, call. = FALSE)
+  # Inference is computed separately so a covariance failure keeps the coefficient.
+  n_before <- length(captured)
+  summarised <- tryCatch(capture_conditions(summary(fit, vcov = ~lsoa), store), error = function(e) e)
+  vcov_warnings <- captured[seq_along(captured) > n_before]
+  inference <- NULL
+  status <- "estimated"
+  reason <- NA_character_
+  if (inherits(summarised, "error")) {
+    status <- "estimated_inference_unavailable"
+    reason <- paste0("clustered covariance could not be computed: ", conditionMessage(summarised))
+  } else {
+    V <- stats::vcov(summarised)
+    inference <- inference_from_vcov(V, coefs, term)
+    if (!all(is.finite(V)) || !is.finite(inference$std_error) || !is.finite(inference$t_df) || inference$t_df < 1) {
+      status <- "estimated_inference_unavailable"
+      reason <- "clustered covariance or its degrees of freedom are not finite"
+    } else if (any(grepl(INFERENCE_WARNING_PATTERN, vcov_warnings, perl = TRUE))) {
+      status <- "estimated_inference_unavailable"
+      reason <- paste0("covariance warning invalidates inference: ", paste(vcov_warnings, collapse = "; "))
+    }
+    if (status != "estimated") inference[c("std_error", "t_df", "conf_low", "conf_high", "p_value")] <- NA_real_
+  }
+  warnings_text <- if (length(captured) > 0L) paste(captured, collapse = "; ") else NA_character_
+  cell <- fill(empty_cell(market, variant, fe, attention, status, reason), inference)
+  if (is.null(inference)) cell$estimate <- estimate
+  raw_focal <- as.numeric(dt$near[retained]) * as.numeric(dt[[attention]][retained])
+  support <- compute_residual_support(fit, term, raw_focal, dt$year[retained], dt$lsoa[retained], key)
+  keep <- if (inherits(summarised, "error")) fit else summarised
+  out$model <- list(
+    model_key = key, term = term, formula = paste(deparse(fml), collapse = ""), status = status,
+    fit = compact_model(keep), vcov = if (inherits(summarised, "error")) NULL else V,
+    ssc = if (inherits(summarised, "error")) NULL else attr(V, "ssc"), t_df = cell$t_df, nobs = stats::nobs(fit),
+    fixef_sizes = fit$fixef_sizes, collin_var = collin, controls = controls, controls_absorbed = controls_absorbed,
+    warnings = captured
+  )
+  out$cell <- cell
+  out$retained <- retained
+  out$support <- support$summary
+  out$support_by_year <- support$by_year
+  rm(fit, summarised, keep, dt); invisible(gc())
+  out
+}
+
+assert_identical_estimation_rows <- function(controlled_ids, comparator_ids, key) {
+  if (length(controlled_ids) != length(comparator_ids) || !setequal(controlled_ids, comparator_ids)) {
+    stop("Complete-case controlled fit ", key, " did not retain the comparator's estimation rows (",
+         length(controlled_ids), " vs ", length(comparator_ids), ").", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# ---- Annual profiles and the joint test ---------------------------------------------------
+
+profile_term <- function(year) sprintf("year::%d:near", year)
+
+# Full joint restriction only: every requested coefficient available, full-rank
+# residualised annual-interaction matrix, finite positive-definite covariance block.
+joint_test <- function(coefs, V, t_df, Xd, joint_years) {
+  unavailable <- function(reason, rank = NA_integer_) {
+    list(status = "unavailable", statistic = NA_real_, df1 = length(joint_years), df2 = t_df, p_value = NA_real_,
+         reason = reason, years = joint_years, rank = rank)
+  }
+  terms <- profile_term(joint_years)
+  missing <- setdiff(terms, names(coefs))
+  if (length(missing) > 0L) return(unavailable(paste0("coefficient(s) not estimable: ", paste(missing, collapse = ", "))))
+  if (is.null(V)) return(unavailable("clustered covariance unavailable"))
+  cols <- match(names(coefs), colnames(Xd))
+  if (anyNA(cols)) return(unavailable("demeaned annual-interaction columns missing"))
+  rank <- qr(Xd[, cols, drop = FALSE])$rank
+  if (rank < length(cols)) return(unavailable(sprintf("residualised annual-interaction matrix has rank %d < %d", rank, length(cols)), rank))
+  V5 <- V[terms, terms, drop = FALSE]
+  if (!all(is.finite(V5))) return(unavailable("covariance block of the restricted coefficients is not finite", rank))
+  eig <- eigen((V5 + t(V5)) / 2, symmetric = TRUE, only.values = TRUE)$values
+  if (min(eig) <= 0 || min(eig) <= 1e-12 * max(eig)) return(unavailable("covariance block of the restricted coefficients is not positive definite", rank))
+  if (!is.finite(t_df) || t_df < 1) return(unavailable("clustered degrees of freedom unavailable", rank))
+  b <- coefs[terms]
+  statistic <- as.numeric(crossprod(b, solve(V5, b))) / length(terms)
+  list(status = "available", statistic = statistic, df1 = length(terms), df2 = t_df,
+       p_value = stats::pf(statistic, length(terms), t_df, lower.tail = FALSE), reason = NA_character_,
+       years = joint_years, rank = rank)
+}
+
+fit_profile <- function(data, market, fe, reference_year = CONFIG$profile_reference_year,
+                        joint_years = CONFIG$profile_joint_years, event_month = CONFIG$event_month) {
+  key <- profile_key(market, fe)
+  out <- list(profile = NULL, retained = integer(), model = NULL)
+  finish <- function(status, reason = NA_character_) {
+    out$profile <- empty_profile(market, fe, status, reason, reference_year, joint_years)
+    out
+  }
+  if (nrow(data) == 0L) return(finish("unsupported_sample", "no rows in the headline sample"))
+  if (length(repeat_eligible_ids(data)) == 0L) return(finish("unsupported_sample", "no property observed on two distinct dates"))
+  near_values <- unique(data$near)
+  if (!1L %in% near_values) return(finish("unidentified", "no near properties in the sample (no near/far contrast)"))
+  if (!0L %in% near_values) return(finish("unidentified", "no far properties in the sample (no near/far contrast)"))
+  if (!reference_year %in% data$year) return(finish("unsupported_sample", sprintf("reference year %d absent from the sample", reference_year)))
+  dt <- data[, c("repeat_id", "date", "year", "month_index", "log_price", "lsoa", "msoa", "near"), with = FALSE]
+  fml <- stats::as.formula(sprintf("log_price ~ i(year, near, ref = %d) | %s", reference_year, MODEL_FE[[fe]]))
+  captured <- character()
+  store <- function(text) captured <<- c(captured, text)
+  fit <- tryCatch(capture_conditions(fixest::feols(fml, data = dt, demeaned = TRUE, notes = TRUE), store),
+                  error = function(e) e)
+  if (inherits(fit, "error")) {
+    if (grepl(COLLINEAR_FE_PATTERN, conditionMessage(fit), fixed = TRUE)) {
+      return(finish("unidentified", paste0("annual interactions collinear with the fixed effects: ", gsub("\\s+", " ", conditionMessage(fit)))))
+    }
+    stop("Estimation error for ", key, ": ", conditionMessage(fit), call. = FALSE)
+  }
+  retained <- as.integer(fixest::obs(fit))
+  coefs <- stats::coef(fit)
+  collin <- as.character(fit$collin.var %||% character())
+  counts <- sample_counts(dt, retained, event_month)
+  n_before <- length(captured)
+  summarised <- tryCatch(capture_conditions(summary(fit, vcov = ~lsoa), store), error = function(e) e)
+  vcov_warnings <- captured[seq_along(captured) > n_before]
+  V <- NULL
+  t_df <- NA_real_
+  status <- "estimated"
+  reason <- NA_character_
+  if (inherits(summarised, "error")) {
+    status <- "estimated_inference_unavailable"
+    reason <- paste0("clustered covariance could not be computed: ", conditionMessage(summarised))
+  } else {
+    V <- stats::vcov(summarised)
+    t_df <- as.numeric(attr(V, "df.t"))
+    if (!all(is.finite(V)) || !is.finite(t_df) || t_df < 1) {
+      status <- "estimated_inference_unavailable"
+      reason <- "clustered covariance or its degrees of freedom are not finite"
+      V <- NULL
+    } else if (any(grepl(INFERENCE_WARNING_PATTERN, vcov_warnings, perl = TRUE))) {
+      status <- "estimated_inference_unavailable"
+      reason <- paste0("covariance warning invalidates inference: ", paste(vcov_warnings, collapse = "; "))
+      V <- NULL
+    }
+  }
+  years <- sort(setdiff(unique(dt$year[retained]), reference_year))
+  coefficients <- dplyr::bind_rows(lapply(years, function(y) {
+    term <- profile_term(y)
+    available <- term %in% names(coefs) && is.finite(coefs[[term]])
+    est <- if (available) unname(coefs[term]) else NA_real_
+    inf <- if (available && !is.null(V)) inference_from_vcov(V, coefs, term) else NULL
+    tibble::tibble(year = as.integer(y), term = term, estimate = est,
+                   std_error = inf$std_error %||% NA_real_, t_df = inf$t_df %||% NA_real_,
+                   conf_low = inf$conf_low %||% NA_real_, conf_high = inf$conf_high %||% NA_real_,
+                   p_value = inf$p_value %||% NA_real_, available = available)
+  }))
+  Xd <- fit$X_demeaned
+  if (is.null(dim(Xd))) Xd <- matrix(Xd, ncol = 1L, dimnames = list(NULL, names(coefs)))
+  test <- joint_test(coefs, V, t_df, Xd, joint_years)
+  if (test$status == "available") {
+    # The manual Wald statistic must reproduce fixest's under the same vcov and df conventions.
+    reference <- fixest::wald(summarised, keep = paste0("^(", paste(profile_term(joint_years), collapse = "|"), ")$"), print = FALSE)
+    if (!isTRUE(all.equal(unname(reference$stat), test$statistic, tolerance = 1e-8)) ||
+        !isTRUE(all.equal(as.numeric(reference$df2), test$df2)) || reference$df1 != test$df1) {
+      stop("Manual joint test does not reproduce fixest::wald() for ", key, call. = FALSE)
+    }
+  }
+  if (status == "estimated" && !any(coefficients$available)) {
+    status <- "unidentified"
+    reason <- paste0("no annual interaction estimable (collin.var: ", paste(collin, collapse = ", "), ")")
+  }
+  keep <- if (inherits(summarised, "error")) fit else summarised
+  out$profile <- list(
+    model_key = key, market = market, fe = fe, status = status, reason = reason, reference_year = reference_year,
+    coefficients = coefficients, joint_test = test, nobs = counts$nobs, n_properties = counts$n_properties,
+    n_clusters = counts$n_clusters, n_removed_by_estimator = counts$n_removed_by_estimator,
+    warnings = if (length(captured) > 0L) paste(captured, collapse = "; ") else NA_character_,
+    vcov = V, ssc = if (is.null(V)) NULL else attr(V, "ssc"), t_df = t_df, collin_var = collin
+  )
+  out$model <- list(
+    model_key = key, term = profile_term(years), formula = paste(deparse(fml), collapse = ""), status = status,
+    fit = compact_model(keep), vcov = V, ssc = if (is.null(V)) NULL else attr(V, "ssc"), t_df = t_df,
+    nobs = counts$nobs, fixef_sizes = fit$fixef_sizes, collin_var = collin, controls = character(),
+    controls_absorbed = character(), warnings = captured
+  )
+  out$retained <- retained
+  rm(fit, summarised, keep, dt, Xd); invisible(gc())
+  out
+}
+
+# ---- Driver: one market, sequential, one working fit at a time -----------------------------
+
+estimate_market_models <- function(entry, market, cfg = market_config(market), config = CONFIG,
+                                   verbose = TRUE) {
+  say <- function(...) if (verbose) cat(sprintf(...))
+  if (!identical(entry$status, "ready")) return(blocked_cells_for_market(market, entry$reason))
+  started <- Sys.time()
+  vs <- build_variant_samples(entry, market, cfg, config)
+  panel <- entry$panel
+  ids <- vs$ids
+  calendar <- entry$calendar
+  article_status <- if (all(calendar$article_status == "valid")) "valid" else "blocked"
+  article_reason <- attr(calendar, "article_reason") %||% calendar$article_reason[[1L]]
+  cells <- list(); models <- list(); support <- list(); support_by_year <- list(); estimated <- list(); fit_log <- list()
+  ledger <- vs$ledger
+  controls_rows <- list()   # per FE: the comparator estimation rows fixed for complete_case_controls
+  grid <- model_grid(market)
+  say("[%s] variants: %s\n", market,
+      paste(sprintf("%s=%s", names(vs$variants), format_count(lengths(vs$variants))), collapse = ", "))
+  for (i in seq_len(nrow(grid))) {
+    variant <- grid$variant[[i]]; fe <- grid$fe[[i]]; attention <- grid$attention[[i]]
+    key <- grid$model_key[[i]]
+    controls <- character()
+    if (variant == "complete_case_controls") {
+      comparator_key <- model_key(market, "complete_case", fe, attention)
+      comparator <- cells[[comparator_key]]
+      if (!comparator$status %in% ESTIMATED_STATUSES) {
+        cells[[key]] <- empty_cell(market, variant, fe, attention, comparator$status,
+                                   paste0("comparator ", comparator_key, " not estimated: ", comparator$reason))
+        models[key] <- list(NULL)
+        fit_log[[key]] <- tibble::tibble(model_key = key, status = comparator$status, seconds = 0, peak_gc_mb = NA_real_)
+        say("  %-72s %-32s (comparator)\n", key, comparator$status)
+        next
+      }
+      idx <- estimated[[comparator_key]]
+      if (is.null(controls_rows[[fe]])) {
+        controls_rows[[fe]] <- idx
+        ledger <- dplyr::bind_rows(ledger, dplyr::mutate(
+          ledger_append(new_ledger(), market, paste0("variant:complete_case_controls:", fe, ":comparator_estimation_rows"),
+                        length(vs$variants$complete_case), length(idx),
+                        count_groups(panel$repeat_id[vs$variants$complete_case]), count_groups(panel$repeat_id[idx]),
+                        paste0("rows the complete_case fit retained under ", fe, "; controlled fit uses exactly these")),
+          variant = "complete_case_controls", fe = fe))
+      } else if (!identical(sort(controls_rows[[fe]]), sort(idx))) {
+        stop("complete_case comparator retained different rows across attention measures under ", fe, call. = FALSE)
+      }
+      controls <- cfg$control_cols
+    } else {
+      idx <- vs$variants[[variant]]
+    }
+    data <- if (length(idx) == nrow(panel)) panel else panel[idx]
+    invisible(gc(reset = TRUE))
+    t0 <- Sys.time()
+    res <- fit_cell(data, market, variant, fe, attention, controls, article_status, article_reason, config$event_month)
+    gc_info <- gc()
+    seconds <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    peak_mb <- as.numeric(gc_info["Ncells", "max used"] * 56 + gc_info["Vcells", "max used"] * 8) / 1024^2
+    if (variant == "complete_case_controls" && res$cell$status %in% ESTIMATED_STATUSES) {
+      assert_identical_estimation_rows(ids[idx[res$retained]], ids[idx], key)
+    }
+    cells[[key]] <- res$cell
+    estimated[[key]] <- if (length(res$retained) > 0L) idx[res$retained] else integer()
+    models[key] <- list(res$model)
+    support[[key]] <- res$support
+    support_by_year[[key]] <- res$support_by_year
+    fit_log[[key]] <- tibble::tibble(model_key = key, status = res$cell$status, seconds = seconds, peak_gc_mb = peak_mb)
+    say("  %-72s %-32s %7.1fs %6.0f MB\n", key, res$cell$status, seconds, peak_mb)
+    rm(data, res); invisible(gc())
+  }
+  profiles <- list()
+  for (fe in names(MODEL_FE)) {
+    key <- profile_key(market, fe)
+    invisible(gc(reset = TRUE))
+    t0 <- Sys.time()
+    res <- fit_profile(panel, market, fe, config$profile_reference_year, config$profile_joint_years, config$event_month)
+    gc_info <- gc()
+    seconds <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    peak_mb <- as.numeric(gc_info["Ncells", "max used"] * 56 + gc_info["Vcells", "max used"] * 8) / 1024^2
+    profiles[[key]] <- res$profile
+    estimated[[key]] <- res$retained
+    models[key] <- list(res$model)
+    fit_log[[key]] <- tibble::tibble(model_key = key, status = res$profile$status, seconds = seconds, peak_gc_mb = peak_mb)
+    say("  %-72s %-32s %7.1fs %6.0f MB  joint: %s\n", key, res$profile$status, seconds, peak_mb, res$profile$joint_test$status)
+    rm(res); invisible(gc())
+  }
+  ledger$step_order <- seq_len(nrow(ledger))
+  assert_variant_ledger_identity(ledger, nrow(panel), length(vs$variants$complete_case))
+  say("[%s] fitted in %.0f s\n", market, as.numeric(difftime(Sys.time(), started, units = "secs")))
+  list(
+    cells = dplyr::bind_rows(cells), profiles = profiles,
+    residual_support = if (length(support) > 0L) dplyr::bind_rows(support) else empty_residual_support(),
+    residual_support_by_year = if (length(support_by_year) > 0L) dplyr::bind_rows(support_by_year) else
+      tibble::tibble(model_key = character(), year = integer(), share = numeric()),
+    samples = list(ids = ids, variants = vs$variants, estimated = estimated, metadata = vs$metadata),
+    models = models, fit_log = dplyr::bind_rows(fit_log), ledger = ledger
+  )
+}
+
+assert_model_grid_complete <- function(cells, profiles, markets = MARKETS) {
+  expected <- expected_model_keys(markets)
+  if (!identical(sort(cells$model_key), sort(expected$scalar)) || anyDuplicated(cells$model_key) > 0L) {
+    stop("Scalar cells do not match the expected ", length(expected$scalar), " keys exactly once each.", call. = FALSE)
+  }
+  if (!identical(sort(names(profiles)), sort(expected$profile))) {
+    stop("Profiles do not match the expected ", length(expected$profile), " keys exactly once each.", call. = FALSE)
+  }
+  statuses <- c(cells$status, vapply(profiles, function(p) p$status, character(1)))
+  bad <- setdiff(unique(statuses), CELL_STATUSES)
+  if (length(bad) > 0L) stop("Statuses outside the vocabulary: ", paste(bad, collapse = ", "), call. = FALSE)
+  no_reason <- cells$status != "estimated" & (is.na(cells$reason) | cells$reason == "")
+  if (any(no_reason)) stop("Non-estimated cells without a reason: ", paste(cells$model_key[no_reason], collapse = ", "), call. = FALSE)
+  invisible(TRUE)
+}
 ```
 
 ```{r}
@@ -1923,6 +2574,354 @@ FIXTURE_CHECKS$u2 <- list(
   }
 )
 
+# ---- U3 fixtures ------------------------------------------------------------------
+
+fixture_model_calendar <- function(market = "sales", blocked = FALSE) {
+  evidence <- if (blocked) fixture_evidence(status = "unavailable") else fixture_evidence()
+  build_attention_calendar(market, fixture_monthly(2L), evidence)
+}
+
+# Synthetic eligible panel: properties in 4 MSOAs (8 LSOAs of 5 properties), observed once a
+# year in 2014-2018, four months in 2019, four pre-event months in 2022 and four post months
+# in 2023. log price = property effect + month effect + beta_post * near * post +
+# beta_articles * near * log_articles + small noise. Controls are constant within property
+# unless `varying_controls`; `missing_control_ids` blanks one control on those transactions.
+fixture_model_panel <- function(market = "sales", n_properties = 40L, beta_post = 0.05, beta_articles = 0,
+                                near_rule = c("alternate", "msoa", "all_near", "all_far", "one_lsoa"),
+                                months = c(6L, 18L, 30L, 42L, 54L, 61:64, 100:103, 109:112),
+                                single_lsoa = FALSE, varying_controls = FALSE,
+                                missing_control_ids = character(), noise_sd = 0.001, seed = 1L,
+                                calendar = fixture_model_calendar(market)) {
+  near_rule <- match.arg(near_rule)
+  set.seed(seed)
+  panel <- data.table::CJ(pid = seq_len(n_properties), month_index = months)
+  panel[, repeat_id := sprintf("p%03d", pid)]
+  panel[, id := sprintf("t%05d", seq_len(.N))]
+  panel[, msoa := sprintf("E02%06d", (pid - 1L) %/% 10L + 1L)]
+  panel[, lsoa := if (single_lsoa) "E01000001" else sprintf("E01%06d", (pid - 1L) %/% 5L + 1L)]
+  panel[, near := switch(near_rule,
+                         alternate = as.integer(pid %% 2L == 0L),
+                         msoa = as.integer(((pid - 1L) %/% 10L) %% 2L == 0L),
+                         all_near = 1L, all_far = 0L,
+                         one_lsoa = as.integer(pid <= 2L))]
+  panel[, year := 2014L + (month_index - 1L) %/% 12L]
+  panel[, date := as.Date(sprintf("%d-%02d-15", year, (month_index - 1L) %% 12L + 1L))]
+  idx <- match(panel$month_index, calendar$month_index)
+  panel[, post := as.integer(calendar$post[idx])]
+  panel[, log_articles := as.numeric(calendar$log_articles[idx])]
+  alpha <- stats::rnorm(n_properties)
+  lambda <- stats::rnorm(length(months), sd = 0.2)
+  articles_term <- if (beta_articles != 0) beta_articles * panel$near * panel$log_articles else 0
+  panel[, log_price := alpha[pid] + lambda[match(month_index, months)] + beta_post * near * post +
+          articles_term + stats::rnorm(.N, sd = noise_sd)]
+  panel[, property_type := c("F", "T", "D", "S")[(pid - 1L) %% 4L + 1L]]
+  if (market == "sales") {
+    panel[, old_new := "N"]
+    panel[, duration := c("F", "L")[(pid - 1L) %% 2L + 1L]]
+    if (varying_controls) panel[pid <= 4L & post == 1L, duration := "L"]
+  } else {
+    panel[, bedrooms := as.numeric((pid - 1L) %% 3L + 1L)]
+    panel[, bathrooms := as.numeric((pid - 1L) %/% 20L + 1L)]
+    if (varying_controls) panel[pid <= 4L & post == 1L, bathrooms := bathrooms + 1]
+  }
+  panel[, easting := 400000 + pid]
+  panel[, northing := 300000]
+  panel[, postcode := "AB1 2CD"]
+  panel[, quality := 1L]
+  panel[, site_id := 1L]
+  panel[, distance_m := ifelse(near == 1L, 100, 1500)]
+  panel[, band := band_label(near)]
+  panel[, pid := NULL]
+  control_cols <- market_config(market)$control_cols
+  if (length(missing_control_ids) > 0L) {
+    panel[id %chin% missing_control_ids, (control_cols[[length(control_cols)]]) := NA]
+  }
+  flags <- freeze_change_flags(panel, market_config(market)$change_cols)
+  panel <- merge(panel, flags, by = "repeat_id", all.x = TRUE, sort = FALSE)
+  panel[]
+}
+
+fixture_model_entry <- function(panel, market = "sales", calendar = fixture_model_calendar(market)) {
+  list(market = market, status = "ready", reason = NA_character_, panel = panel, calendar = calendar)
+}
+
+FIXTURE_CHECKS$u3 <- list(
+
+  ae2_missing_to_observed_not_flagged_two_values_excluded = function() {
+    panel <- fixture_model_panel("rentals")
+    # p001: one missing and one observed bathroom value (not a change); p002: two observed values.
+    panel[repeat_id == "p001" & post == 1L, bathrooms := NA]
+    panel[repeat_id == "p002" & post == 1L, bathrooms := bathrooms + 1]
+    cfg <- market_config("rentals")
+    panel[, c("change_property_type", "change_bedrooms", "change_bathrooms", "any_change") := NULL]
+    flags <- freeze_change_flags(panel, cfg$change_cols)
+    assert_true(!flags[repeat_id == "p001", change_bathrooms] && !flags[repeat_id == "p001", any_change],
+                "AE2: missing-to-observed does not flag a change")
+    assert_true(flags[repeat_id == "p002", change_bathrooms] && flags[repeat_id == "p002", any_change],
+                "AE2: two distinct nonmissing values flag the property")
+    panel <- merge(panel, flags, by = "repeat_id", all.x = TRUE, sort = FALSE)
+    vs <- build_variant_samples(fixture_model_entry(panel, "rentals"), "rentals", cfg)
+    kept <- panel$repeat_id[vs$variants$exclude_changes]
+    assert_true(!"p002" %chin% kept && "p001" %chin% kept, "exclude_changes drops the whole flagged group and keeps p001")
+    assert_true(length(vs$variants$exclude_changes) == nrow(panel) - sum(panel$repeat_id == "p002"), "only p002's rows leave")
+    steps <- vs$ledger$step[vs$ledger$variant == "exclude_changes"]
+    assert_true(identical(steps, c("variant:exclude_changes:drop_flagged_groups", "variant:exclude_changes:recompute_repeats")),
+                "exclude_changes ledger steps named and ordered")
+    assert_true(all(panel$repeat_id[vs$variants$complete_case] != "p001" | !is.na(panel$bathrooms[vs$variants$complete_case])),
+                "complete_case drops p001's missing-bathroom rows")
+    TRUE
+  },
+
+  complete_case_identity_within_fe_and_mismatch_rejected = function() {
+    panel <- fixture_model_panel("rentals", varying_controls = TRUE, missing_control_ids = c("t00001", "t00020", "t00300"))
+    out <- estimate_market_models(fixture_model_entry(panel, "rentals"), "rentals", market_config("rentals"), verbose = FALSE)
+    for (fe in names(MODEL_FE)) for (attention in MODEL_ATTENTION) {
+      comparator <- model_key("rentals", "complete_case", fe, attention)
+      controlled <- model_key("rentals", "complete_case_controls", fe, attention)
+      assert_true(out$cells$status[out$cells$model_key == comparator] == "estimated" &&
+                    out$cells$status[out$cells$model_key == controlled] == "estimated",
+                  paste("complete-case pair estimated:", fe, attention))
+      assert_true(setequal(out$samples$estimated[[comparator]], out$samples$estimated[[controlled]]) &&
+                    length(out$samples$estimated[[comparator]]) == length(out$samples$estimated[[controlled]]),
+                  paste("identical estimation rows within", fe, attention))
+      assert_true(out$cells$nobs[out$cells$model_key == comparator] == out$cells$nobs[out$cells$model_key == controlled],
+                  "identical nobs")
+      absorbed <- out$models[[controlled]]$controls_absorbed
+      assert_true(out$cells$n_controls_absorbed[out$cells$model_key == controlled] == length(absorbed) &&
+                    "bedrooms" %in% absorbed && !"bathrooms" %in% absorbed && any(grepl("^property_type", absorbed)),
+                  "type dummies and bedrooms absorbed; bathrooms (varying within property) retained")
+    }
+    missing_rows <- panel$id %chin% c("t00001", "t00020", "t00300")
+    assert_true(!any(missing_rows[out$samples$variants$complete_case]) &&
+                  length(out$samples$variants$complete_case) < nrow(panel), "complete_case excludes missing-control rows")
+    ledger <- out$ledger[out$ledger$variant == "complete_case_controls", ]
+    assert_true(nrow(ledger) == 2L && setequal(ledger$fe, names(MODEL_FE)), "one comparator-rows ledger row per FE")
+    assert_error_matching(assert_identical_estimation_rows(c("a", "b"), c("a", "c"), "k"), "did not retain the comparator",
+                          "a mismatched controlled sample is rejected")
+    assert_error_matching(assert_identical_estimation_rows(c("a", "b", "c"), c("a", "b"), "k"), "did not retain the comparator",
+                          "an extra row is rejected")
+    TRUE
+  },
+
+  known_coefficient_recovered_under_both_fe = function() {
+    beta <- 0.05
+    panel <- fixture_model_panel("sales", beta_post = beta)
+    for (fe in names(MODEL_FE)) {
+      res <- fit_cell(panel, "sales", "headline", fe, "post")
+      assert_true(res$cell$status == "estimated", paste("post cell estimated under", fe))
+      assert_true(abs(res$cell$estimate - beta) < 1e-3, sprintf("near:post recovered under %s (got %.5f)", fe, res$cell$estimate))
+      assert_true(res$cell$term == "near:post" && res$cell$nobs == nrow(panel) && res$cell$n_removed_by_estimator == 0,
+                  "term name and full retention")
+      assert_true(res$cell$n_near_properties == 20 && res$cell$n_far_properties == 20 &&
+                    res$cell$n_properties_both_sides_event == 40 && res$cell$n_clusters == 8, "sample support counts")
+      assert_true(is.finite(res$cell$std_error) && res$cell$conf_low < beta && res$cell$conf_high > beta, "interval covers beta")
+    }
+    gamma <- 0.03
+    panel_articles <- fixture_model_panel("sales", beta_post = 0, beta_articles = gamma)
+    for (fe in names(MODEL_FE)) {
+      res <- fit_cell(panel_articles, "sales", "headline", fe, "log_articles")
+      assert_true(res$cell$status == "estimated" && abs(res$cell$estimate - gamma) < 1e-3,
+                  sprintf("near:log_articles recovered under %s (got %.5f)", fe, res$cell$estimate))
+    }
+    TRUE
+  },
+
+  no_contrast_or_collinear_focal_is_unidentified = function() {
+    all_near <- fit_cell(fixture_model_panel("sales", near_rule = "all_near"), "sales", "headline", "property_month", "post")
+    assert_true(all_near$cell$status == "unidentified" && grepl("no far", all_near$cell$reason) && is.na(all_near$cell$estimate),
+                "all-near sample is unidentified with a cause, not zero")
+    all_far <- fit_cell(fixture_model_panel("sales", near_rule = "all_far"), "sales", "headline", "property_month", "post")
+    assert_true(all_far$cell$status == "unidentified" && grepl("no near", all_far$cell$reason) && is.na(all_far$cell$estimate),
+                "all-far sample is unidentified")
+    pre_only <- fixture_model_panel("sales")[post == 0L]
+    collinear <- fit_cell(pre_only, "sales", "headline", "property_month", "post")
+    assert_true(collinear$cell$status == "unidentified" && grepl("collinear", collinear$cell$reason) && is.na(collinear$cell$estimate),
+                "focal term without variation is unidentified (collinear), not zero")
+    empty <- fit_cell(fixture_model_panel("sales")[0L], "sales", "headline", "property_month", "post")
+    assert_true(empty$cell$status == "unsupported_sample", "empty sample is unsupported")
+    TRUE
+  },
+
+  absorbed_by_full_fe_diagnosed_and_concentration_descriptive = function() {
+    panel <- fixture_model_panel("sales", near_rule = "msoa")
+    loose <- fit_cell(panel, "sales", "headline", "property_month", "post")
+    tight <- fit_cell(panel, "sales", "headline", "property_month_msoa_year", "post")
+    assert_true(loose$cell$status == "estimated" && abs(loose$cell$estimate - 0.05) < 1e-3 &&
+                  loose$cell$n_near_properties == 20 && loose$cell$n_far_properties == 20,
+                "abundant near/far rows: estimated under property + month")
+    assert_true(tight$cell$status == "unidentified" && grepl("collinear", tight$cell$reason),
+                "near varying only across MSOA-years is absorbed by MSOA x year and diagnosed")
+    balanced <- fit_cell(fixture_model_panel("sales"), "sales", "headline", "property_month", "post")
+    concentrated <- fit_cell(fixture_model_panel("sales", near_rule = "one_lsoa"), "sales", "headline", "property_month", "post")
+    assert_true(concentrated$cell$status == "estimated" && abs(concentrated$cell$estimate - 0.05) < 1e-3 &&
+                  concentrated$cell$nobs == nrow(panel),
+                "concentrated contrast is estimated on the full sample (no exclusion)")
+    assert_true(concentrated$support$largest_cluster_share > balanced$support$largest_cluster_share &&
+                  concentrated$support$lsoa_share_top1 == concentrated$support$largest_cluster_share &&
+                  concentrated$support$n_clusters == 8 && concentrated$support$ratio > 0 && concentrated$support$ratio <= 1,
+                "residual support reports the concentration descriptively")
+    by_year <- concentrated$support_by_year
+    assert_true(abs(sum(by_year$share) - 1) < 1e-8 && all(by_year$year %in% panel$year), "year shares sum to one")
+    TRUE
+  },
+
+  absorbed_controls_and_inference_unavailable_distinguished = function() {
+    panel <- fixture_model_panel("sales")
+    controlled <- fit_cell(panel, "sales", "complete_case_controls", "property_month", "post", market_config("sales")$control_cols)
+    assert_true(controlled$cell$status == "estimated" && abs(controlled$cell$estimate - 0.05) < 1e-3,
+                "absorbed controls leave the focal coefficient identified")
+    # Coefficient-level count: old_new (one level, dropped before fitting), three property_type
+    # dummies and durationL are all constant within property.
+    assert_true(controlled$cell$n_controls_absorbed == 5 && "old_new" %in% controlled$model$controls_absorbed &&
+                  "durationL" %in% controlled$model$controls_absorbed && sum(grepl("^property_type", controlled$model$controls_absorbed)) == 3,
+                "old_new, the type dummies and duration are recorded as absorbed")
+    one_cluster <- fit_cell(fixture_model_panel("sales", single_lsoa = TRUE), "sales", "headline", "property_month", "post")
+    assert_true(one_cluster$cell$status == "estimated_inference_unavailable" && abs(one_cluster$cell$estimate - 0.05) < 1e-3 &&
+                  is.na(one_cluster$cell$std_error) && is.na(one_cluster$cell$conf_low) && grepl("covariance", one_cluster$cell$reason),
+                "single cluster: coefficient kept, inference unavailable")
+    assert_true(is.null(one_cluster$model$vcov) && !is.null(one_cluster$support), "no vcov stored; residual support still computed")
+    unidentified <- fit_cell(fixture_model_panel("sales", near_rule = "all_near"), "sales", "headline", "property_month", "post")
+    assert_true(unidentified$cell$status != one_cluster$cell$status, "unidentified is distinct from inference-unavailable")
+    TRUE
+  },
+
+  intervals_and_joint_test_reuse_stored_vcov_and_df = function() {
+    panel <- fixture_model_panel("sales")
+    res <- fit_cell(panel, "sales", "headline", "property_month_msoa_year", "post")
+    V <- res$model$vcov
+    se <- sqrt(V["near:post", "near:post"])
+    df <- attr(V, "df.t")
+    assert_true(identical(as.numeric(df), res$cell$t_df) && res$model$t_df == res$cell$t_df, "stored df matches the cell")
+    assert_true(abs(res$cell$std_error - se) < 1e-12 &&
+                  abs(res$cell$conf_low - (res$cell$estimate - stats::qt(0.975, df) * se)) < 1e-12 &&
+                  abs(res$cell$conf_high - (res$cell$estimate + stats::qt(0.975, df) * se)) < 1e-12,
+                "interval recomputed from the stored vcov and df")
+    assert_true(!is.null(res$model$ssc) && identical(res$model$ssc, attr(V, "ssc")), "ssc recorded with the vcov")
+    assert_true(abs(res$cell$p_value - 2 * stats::pt(-abs(res$cell$estimate / se), df)) < 1e-12, "p-value uses the same df")
+    prof <- fit_profile(panel, "sales", "property_month")$profile
+    assert_true(prof$joint_test$status == "available", "joint test available on the fixture")
+    terms <- profile_term(CONFIG$profile_joint_years)
+    b <- prof$coefficients$estimate[match(terms, prof$coefficients$term)]
+    Vb <- prof$vcov[terms, terms]
+    stat <- as.numeric(crossprod(b, solve(Vb, b))) / 5
+    assert_true(abs(stat - prof$joint_test$statistic) < 1e-10 && prof$joint_test$df1 == 5 &&
+                  prof$joint_test$df2 == prof$t_df &&
+                  abs(prof$joint_test$p_value - stats::pf(stat, 5, prof$t_df, lower.tail = FALSE)) < 1e-12,
+                "joint statistic and p-value recomputed from the stored vcov and df")
+    row <- prof$coefficients[prof$coefficients$year == 2023L, ]
+    assert_true(abs(row$conf_low - (row$estimate - stats::qt(0.975, prof$t_df) * row$std_error)) < 1e-12,
+                "profile intervals use the same df")
+    TRUE
+  },
+
+  short_window_recomputed_with_long_run_articles = function() {
+    panel <- fixture_model_panel("sales")
+    extra <- panel[repeat_id == "p001" & month_index %in% c(61L, 109L)]
+    extra[, repeat_id := "p999"][, id := c("t99991", "t99992")]
+    panel <- data.table::rbindlist(list(panel, extra))
+    entry <- fixture_model_entry(panel, "sales")
+    vs <- build_variant_samples(entry, "sales", market_config("sales"))
+    sw <- vs$variants$short_window
+    assert_true(all(panel$date[sw] >= CONFIG$short_window_start), "short window keeps 2021 onward only")
+    assert_true(!"p999" %chin% panel$repeat_id[sw], "a property with one surviving date drops when repeats are recomputed")
+    assert_true("t99992" %chin% panel$id[which(panel$date >= CONFIG$short_window_start)], "p999 had a row in the window before the recount")
+    steps <- vs$ledger$step[vs$ledger$variant == "short_window"]
+    assert_true(identical(steps, c("variant:short_window:date_from_start", "variant:short_window:recompute_repeats")), "short-window ledger steps")
+    assert_true(vs$ledger$n_rows_removed[vs$ledger$step == "variant:short_window:recompute_repeats"] == 1, "exactly p999's row leaves at the recount")
+    cal <- entry$calendar
+    assert_true(isTRUE(vs$metadata$short_window$article_values_match_long_run) &&
+                  all(panel$log_articles[sw] == cal$log_articles[match(panel$month_index[sw], cal$month_index)]),
+                "short-window article values equal the long-run calendar")
+    tampered <- data.table::copy(panel)
+    tampered[date >= CONFIG$short_window_start, log_articles := log_articles + 0.1]
+    assert_error_matching(build_variant_samples(fixture_model_entry(tampered, "sales"), "sales", market_config("sales")),
+                          "differ from the long-run calendar", "a different article stock in the short window stops the run")
+    res <- fit_cell(panel[sw], "sales", "short_window", "property_month", "post")
+    assert_true(res$cell$status == "estimated" && abs(res$cell$estimate - 0.05) < 1e-3, "short-window cell estimated")
+    TRUE
+  },
+
+  profiles_omit_reference_and_joint_test_full_restriction = function() {
+    panel <- fixture_model_panel("sales")
+    for (fe in names(MODEL_FE)) {
+      prof <- fit_profile(panel, "sales", fe)$profile
+      assert_true(prof$status == "estimated" && !2019L %in% prof$coefficients$year, paste("2019 omitted as reference under", fe))
+      assert_true(setequal(prof$coefficients$year, c(2014:2018, 2022:2023)) && all(prof$coefficients$available),
+                  "every non-reference year reported and available")
+      assert_true(prof$joint_test$status == "available" && identical(prof$joint_test$years, 2014:2018) && prof$joint_test$df1 == 5,
+                  "joint test covers exactly 2014-2018")
+      assert_true(abs(prof$coefficients$estimate[prof$coefficients$year == 2023L] - 0.05) < 1e-3 &&
+                    all(abs(prof$coefficients$estimate[prof$coefficients$year < 2019L]) < 1e-3), "annual contrasts recover the DGP")
+      assert_true(prof$joint_test$p_value > 0.001, "no early gap in the DGP")
+    }
+    # One requested coefficient unavailable: no near observation in 2016.
+    reduced <- panel[!(year == 2016L & near == 1L)]
+    prof <- fit_profile(reduced, "sales", "property_month")$profile
+    assert_true(prof$status == "estimated", "profile still estimated with one year unavailable")
+    assert_true(!prof$coefficients$available[prof$coefficients$year == 2016L] && is.na(prof$coefficients$estimate[prof$coefficients$year == 2016L]),
+                "2016 contrast unavailable")
+    assert_true(all(prof$coefficients$available[prof$coefficients$year != 2016L]), "other contrasts retained")
+    assert_true(prof$joint_test$status == "unavailable" && grepl("year::2016:near", prof$joint_test$reason) && is.na(prof$joint_test$p_value),
+                "full joint test unavailable rather than a reduced test")
+    # Non-positive-definite covariance block makes the full test unavailable.
+    good <- fit_profile(panel, "sales", "property_month")
+    coefs <- stats::coef(good$model$fit)
+    V <- good$model$vcov
+    bad <- V
+    terms <- profile_term(2014:2018)
+    bad[terms[2], ] <- bad[terms[1], ]
+    bad[, terms[2]] <- bad[, terms[1]]
+    Xd <- matrix(stats::rnorm(length(coefs) * 50), ncol = length(coefs), dimnames = list(NULL, names(coefs)))
+    test <- joint_test(coefs, bad, good$profile$t_df, Xd, 2014:2018)
+    assert_true(test$status == "unavailable" && grepl("positive definite", test$reason), "non-PD covariance block is refused")
+    rank_deficient <- Xd
+    rank_deficient[, terms[2]] <- rank_deficient[, terms[1]]
+    test2 <- joint_test(coefs, V, good$profile$t_df, rank_deficient, 2014:2018)
+    assert_true(test2$status == "unavailable" && grepl("rank", test2$reason), "rank-deficient annual matrix is refused")
+    TRUE
+  },
+
+  driver_grid_complete_blocked_articles_and_samples_reconcile = function() {
+    panel <- fixture_model_panel("sales")
+    out <- estimate_market_models(fixture_model_entry(panel, "sales"), "sales", market_config("sales"), verbose = FALSE)
+    assert_model_grid_complete(out$cells, out$profiles, "sales")
+    assert_true(nrow(out$cells) == 20L && length(out$profiles) == 2L && nrow(out$fit_log) == 22L, "20 scalar cells, 2 profiles, 22 log rows")
+    assert_true(all(out$cells$status == "estimated"), "every fixture cell estimated")
+    assert_true(identical(out$cells$model_key, model_grid("sales")$model_key), "sequential variant -> FE -> attention order")
+    for (key in out$cells$model_key) {
+      assert_true(length(out$samples$estimated[[key]]) == out$cells$nobs[out$cells$model_key == key], paste("estimated rows reconcile:", key))
+      assert_true(all(out$samples$estimated[[key]] %in% seq_along(out$samples$ids)), "estimated indices point into the dictionary")
+      assert_true(!is.null(out$models[[key]]$fit) && as.numeric(utils::object.size(out$models[[key]])) < 2e6, "compact model stored")
+      assert_true(is.null(out$models[[key]]$fit$X_demeaned) && is.null(out$models[[key]]$fit$residuals), "large elements stripped")
+      ct <- fixest::coeftable(out$models[[key]]$fit)
+      term <- out$cells$term[out$cells$model_key == key]
+      assert_true(abs(ct[term, "Estimate"] - out$cells$estimate[out$cells$model_key == key]) < 1e-12 &&
+                    abs(ct[term, "Std. Error"] - out$cells$std_error[out$cells$model_key == key]) < 1e-12,
+                  "compact model reproduces the coefficient table")
+    }
+    assert_true(nrow(out$residual_support) == 20L && all(out$residual_support$model_key %in% out$cells$model_key), "residual support for every estimated cell")
+    assert_true(all(out$fit_log$seconds >= 0), "timings recorded")
+    assert_variant_ledger_identity(out$ledger, nrow(panel), length(out$samples$variants$complete_case))
+    # Blocked article calendar: article cells blocked, post cells and profiles unaffected.
+    blocked_calendar <- fixture_model_calendar("sales", blocked = TRUE)
+    blocked_panel <- fixture_model_panel("sales", calendar = blocked_calendar)
+    assert_true(all(is.na(blocked_panel$log_articles)) && all(blocked_panel$post == panel$post), "blocked calendar: articles NA, post intact")
+    blocked <- estimate_market_models(fixture_model_entry(blocked_panel, "sales", blocked_calendar), "sales", market_config("sales"), verbose = FALSE)
+    articles <- blocked$cells[blocked$cells$attention == "log_articles", ]
+    assert_true(all(articles$status == "blocked_input") && all(grepl("article", articles$reason)), "article cells blocked with the calendar reason")
+    assert_true(all(blocked$cells$status[blocked$cells$attention == "post"] == "estimated"), "post cells estimated when articles are blocked")
+    assert_true(all(vapply(blocked$profiles, function(p) p$status, character(1)) == "estimated"), "profiles unaffected by blocked articles")
+    # Blocked market: every key blocked_input.
+    market_blocked <- blocked_cells_for_market("rentals", "mapping validation failed")
+    assert_true(nrow(market_blocked$cells) == 20L && all(market_blocked$cells$status == "blocked_input") &&
+                  length(market_blocked$profiles) == 2L && all(vapply(market_blocked$profiles, function(p) p$status, character(1)) == "blocked_input"),
+                "blocked market yields 20 + 2 blocked keys")
+    assert_model_grid_complete(market_blocked$cells, market_blocked$profiles, "rentals")
+    assert_error_matching(assert_model_grid_complete(out$cells[-1L, ], out$profiles, "sales"), "expected 20 keys", "a missing key fails the grid check")
+    TRUE
+  }
+)
+
 fixture_results <- run_fixture_checks(FIXTURE_CHECKS)
 ```
 
@@ -1947,7 +2946,15 @@ input_provenance <- dplyr::bind_rows(site_projection$provenance, article_input$p
 readiness <- list()
 observation_diagnostics <- list()
 exclusion_ledger <- new_ledger()
+variant_ledger <- new_variant_ledger()
 market_data <- list()
+cells <- list()
+profiles <- list()
+residual_support <- list()
+residual_support_by_year <- list()
+samples <- list()
+models <- list()
+fit_logs <- list()
 for (market in MARKETS) {
   started <- Sys.time()
   prepared <- prepare_market_panel(market)
@@ -1972,6 +2979,18 @@ for (market in MARKETS) {
   } else {
     rm(prepared)
   }
+  # U3: the model grid on this market (blocked markets receive blocked_input cells).
+  fitted <- estimate_market_models(entry, market)
+  cells[[market]] <- fitted$cells
+  profiles <- c(profiles, fitted$profiles)
+  residual_support[[market]] <- fitted$residual_support
+  residual_support_by_year[[market]] <- fitted$residual_support_by_year
+  samples[[market]] <- fitted$samples
+  models <- c(models, fitted$models)
+  fit_logs[[market]] <- dplyr::mutate(fitted$fit_log, market = market, .before = 1L)
+  variant_ledger <- dplyr::bind_rows(variant_ledger, fitted$ledger)
+  rm(fitted)
+  entry$panel <- NULL
   entry$runtime_seconds <- as.numeric(difftime(Sys.time(), started, units = "secs"))
   exclusion_ledger <- dplyr::bind_rows(exclusion_ledger, entry$ledger)
   market_data[[market]] <- entry
@@ -1979,6 +2998,11 @@ for (market in MARKETS) {
   invisible(gc())
 }
 assert_ledger_identity(exclusion_ledger)
+cells <- dplyr::bind_rows(cells)
+residual_support <- dplyr::bind_rows(residual_support)
+residual_support_by_year <- dplyr::bind_rows(residual_support_by_year)
+fit_logs <- dplyr::bind_rows(fit_logs)
+assert_model_grid_complete(cells, profiles)
 ```
 
 ## Data readiness
@@ -2361,9 +3385,305 @@ if (all(sales_calendar$article_status == "valid")) {
 }
 ```
 
-## Results
+## Findings
 
-Placeholder for U3: coefficient comparisons, design, full tables.
+For property $i$ observed in calendar month $m$ the report estimates
+
+$$
+\log p_{im} = \alpha_i + \lambda_m + \beta\,(\mathrm{Near}_i \times A_m) + \varepsilon_{im},
+$$
+
+and the same equation with MSOA × year effects added. Property effects absorb
+fixed proximity and fixed characteristics; calendar-month effects absorb the
+attention main effect, so only the interaction is estimated. $A_m$ is either
+the post indicator (August 2022 onward) or the log of the cumulative search-1
+article stock from January 2014. Standard errors are clustered by LSOA, and
+every interval uses the fit's clustered covariance and its model-specific
+degrees of freedom. These are unweighted transaction-level projections: the
+frequency and timing of repeat observations, not equal property weights,
+determine the implicit weighting.
+
+The post coefficient is a change in the near–far log-price gap. Its percentage
+translation, $100\,(e^{\beta} - 1)$, is the change in the conditional near/far
+price ratio, not an absolute fall in near-property prices. The article
+coefficient is the change in that gap per log point of cumulative articles,
+not the effect of one additional article. Neither is presented as proof of a
+publicity effect: property and local time effects do not rule out other
+changes in the relative desirability of near locations.
+
+Five sample variants are estimated for each market, fixed-effect structure and
+attention measure. The headline keeps every eligible observation, including
+properties whose recorded characteristics change. The second variant drops
+those whole properties. The third keeps only rows with complete control
+information and recomputes repeat eligibility; the fourth adds the controls on
+exactly the rows the third fit retained, so the difference between the two
+isolates the controls from the sample. The fifth restricts dates to 2021
+onward with the same article stock, so it changes both the window and the
+repeat membership.
+
+```{r}
+#| label: findings-labels
+#| include: false
+
+MARKET_LABELS <- c(sales = "Sales", rentals = "Rentals")
+VARIANT_LABELS <- c(headline = "Headline", exclude_changes = "Exclude observed changes",
+                    complete_case = "Complete-case comparator", complete_case_controls = "Complete cases with controls",
+                    short_window = "Short window (2021 on)")
+FE_LABELS <- c(property_month = "Property + month", property_month_msoa_year = "Property + month + MSOA x year")
+ATTENTION_LABELS <- c(post = "Near x Post (August 2022 on)", log_articles = "Near x log article stock")
+
+label_cells <- function(cells) {
+  dplyr::mutate(
+    cells,
+    market_label = factor(MARKET_LABELS[market], levels = MARKET_LABELS),
+    variant_label = factor(VARIANT_LABELS[variant], levels = rev(VARIANT_LABELS)),
+    fe_label = factor(FE_LABELS[fe], levels = FE_LABELS),
+    attention_label = factor(ATTENTION_LABELS[attention], levels = ATTENTION_LABELS)
+  )
+}
+
+percent_change <- function(beta) 100 * (exp(beta) - 1)
+
+profile_rows <- function(profiles) {
+  dplyr::bind_rows(lapply(profiles, function(p) {
+    if (nrow(p$coefficients) == 0L) return(NULL)
+    dplyr::mutate(p$coefficients, model_key = p$model_key, market = p$market, fe = p$fe, status = p$status, .before = 1L)
+  }))
+}
+
+joint_test_rows <- function(profiles) {
+  dplyr::bind_rows(lapply(profiles, function(p) {
+    j <- p$joint_test
+    tibble::tibble(model_key = p$model_key, market = p$market, fe = p$fe, profile_status = p$status,
+                   profile_reason = p$reason, joint_status = j$status, statistic = j$statistic, df1 = j$df1, df2 = j$df2,
+                   p_value = j$p_value, joint_reason = j$reason, nobs = p$nobs, n_properties = p$n_properties,
+                   n_clusters = p$n_clusters, n_removed_by_estimator = p$n_removed_by_estimator)
+  }))
+}
+
+format_p <- function(p) ifelse(is.na(p), NA_character_, ifelse(p < 0.001, "< 0.001", formatC(p, format = "f", digits = 3)))
+```
+
+### Coefficient comparisons
+
+Each panel shows one market and one attention measure; rows are the sample
+variants and the two fixed-effect structures sit side by side. Cells without
+an estimate are labelled with their status rather than dropped. Points without
+an interval are cells whose coefficient is available but whose clustered
+inference is not.
+
+```{r}
+#| label: findings-coefficient-plot
+#| eval: !expr params$reestimate
+#| fig-width: 10
+#| fig-height: 6.5
+#| fig-cap: "Near x attention coefficients across sample variants and fixed-effect structures; bars are 95% pointwise intervals from the LSOA-clustered covariance and the model's t degrees of freedom."
+
+plot_cells <- label_cells(cells)
+supported <- plot_cells[!is.na(plot_cells$estimate), ]
+unsupported <- plot_cells[is.na(plot_cells$estimate), ]
+dodge <- ggplot2::position_dodge(width = 0.6)
+coefficient_plot <- ggplot2::ggplot(supported, ggplot2::aes(x = estimate, y = variant_label, colour = fe_label, shape = fe_label)) +
+  ggplot2::geom_vline(xintercept = 0, linetype = "dashed", colour = "grey55") +
+  ggplot2::geom_errorbar(ggplot2::aes(xmin = conf_low, xmax = conf_high), width = 0.25, position = dodge, orientation = "y") +
+  ggplot2::geom_point(size = 2.4, position = dodge) +
+  ggplot2::scale_y_discrete(drop = FALSE) +
+  ggplot2::facet_grid(market_label ~ attention_label, scales = "free_x") +
+  ggplot2::labs(x = "Coefficient on Near x attention (log points)", y = NULL, colour = "Fixed effects", shape = "Fixed effects") +
+  ggplot2::theme_minimal(base_size = 11) +
+  ggplot2::theme(legend.position = "bottom", panel.grid.minor = ggplot2::element_blank())
+if (nrow(unsupported) > 0L) {
+  coefficient_plot <- coefficient_plot +
+    ggplot2::geom_text(data = unsupported, ggplot2::aes(x = 0, y = variant_label, label = paste0(fe_label, ": ", status), group = fe_label),
+                       inherit.aes = FALSE, size = 2.7, colour = "grey30", position = dodge)
+}
+coefficient_plot
+```
+
+```{r}
+#| label: findings-coefficient-table
+#| eval: !expr params$reestimate
+#| results: asis
+
+coefficient_table <- label_cells(cells) |>
+  dplyr::arrange(market_label, attention_label, factor(variant, levels = MODEL_VARIANTS), fe_label) |>
+  dplyr::transmute(
+    Market = as.character(market_label), Attention = as.character(attention_label), Variant = VARIANT_LABELS[variant],
+    `Fixed effects` = as.character(fe_label), Status = status,
+    Estimate = round(estimate, 4), `Std. error` = round(std_error, 4),
+    `95% CI` = ifelse(is.na(conf_low), NA_character_, sprintf("[%.4f, %.4f]", conf_low, conf_high)),
+    `p-value` = format_p(p_value), `t df` = t_df,
+    `Ratio change (%)` = ifelse(attention == "post" & !is.na(estimate), round(percent_change(estimate), 2), NA_real_),
+    Reason = reason
+  )
+knitr::kable(coefficient_table, format = "html", format.args = list(big.mark = ","),
+             caption = "All 40 scalar cells. Ratio change (%) = 100 (exp(beta) - 1) for post cells: the change in the conditional near/far price ratio. Non-estimated cells carry their status and reason.")
+```
+
+### Annual near–far profiles
+
+The annual profiles interact the near indicator with calendar year on the
+headline sample, relative to 2019, under both fixed-effect structures. They
+show whether the near–far gap was already moving before the event period. The
+joint test asks whether the five 2014–2018 coefficients are jointly zero using
+the fit's clustered covariance; it is reported as unavailable, not as a reduced
+test, whenever a requested coefficient or the covariance block is unavailable.
+The 2022 coefficient mixes pre- and post-August months, and this earlier-period
+test is not a test of parallel trends over all pre-event observations.
+
+```{r}
+#| label: findings-profile-plot
+#| eval: !expr params$reestimate
+#| fig-width: 10
+#| fig-height: 6
+#| fig-cap: "Near x year coefficients relative to 2019 on the headline samples; hollow point marks the 2019 reference, the vertical line marks August 2022. Joint-test results for 2014-2018 are in the table below."
+
+profile_points <- profile_rows(profiles)
+if (nrow(profile_points) > 0L) {
+  profile_points <- dplyr::mutate(profile_points,
+                                  market_label = factor(MARKET_LABELS[market], levels = MARKET_LABELS),
+                                  fe_label = factor(FE_LABELS[fe], levels = FE_LABELS))
+  reference <- dplyr::distinct(profile_points, market_label, fe_label) |>
+    dplyr::mutate(year = CONFIG$profile_reference_year, estimate = 0)
+  event_position <- lubridate::year(CONFIG$event_month) + (lubridate::month(CONFIG$event_month) - 1) / 12
+  ggplot2::ggplot(profile_points, ggplot2::aes(x = year, y = estimate, colour = fe_label)) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey55") +
+    ggplot2::geom_vline(xintercept = event_position, colour = "grey40") +
+    ggplot2::geom_errorbar(ggplot2::aes(ymin = conf_low, ymax = conf_high), width = 0.3) +
+    ggplot2::geom_point(size = 2.2) +
+    ggplot2::geom_point(data = reference, shape = 21, fill = "white", size = 2.6) +
+    ggplot2::facet_grid(market_label ~ fe_label, scales = "free") +
+    ggplot2::scale_x_continuous(breaks = seq(2014, 2024, by = 2)) +
+    ggplot2::labs(x = NULL, y = "Near x year coefficient relative to 2019 (log points)", colour = "Fixed effects") +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(legend.position = "none", panel.grid.minor = ggplot2::element_blank())
+} else {
+  cat("No annual profile was estimable; see the profile table for the recorded reasons.\n")
+}
+```
+
+```{r}
+#| label: findings-profile-tables
+#| eval: !expr params$reestimate
+#| results: asis
+
+joint_rows <- joint_test_rows(profiles) |>
+  dplyr::transmute(Market = MARKET_LABELS[market], `Fixed effects` = FE_LABELS[fe], `Profile status` = profile_status,
+                   `Joint test` = joint_status, `F statistic` = round(statistic, 3), df1, df2, `p-value` = format_p(p_value),
+                   Observations = nobs, Properties = n_properties, Clusters = n_clusters,
+                   `Removed by estimator` = n_removed_by_estimator,
+                   Reason = dplyr::coalesce(joint_reason, profile_reason))
+emit_table(knitr::kable(joint_rows, format = "html", format.args = list(big.mark = ","),
+                        caption = sprintf("Joint test that the %s Near x year coefficients are zero (F with df1 = %d and df2 = the model's clustered t degrees of freedom)",
+                                          paste(range(CONFIG$profile_joint_years), collapse = "-"), length(CONFIG$profile_joint_years))))
+profile_points <- profile_rows(profiles)
+if (nrow(profile_points) > 0L) {
+  profile_table <- profile_points |>
+    dplyr::transmute(Market = MARKET_LABELS[market], `Fixed effects` = FE_LABELS[fe], Year = year,
+                     Estimate = round(estimate, 4), `Std. error` = round(std_error, 4),
+                     `95% CI` = ifelse(is.na(conf_low), NA_character_, sprintf("[%.4f, %.4f]", conf_low, conf_high)),
+                     `p-value` = format_p(p_value), Available = available)
+  emit_table(knitr::kable(profile_table, format = "html",
+                          caption = sprintf("Annual Near x year coefficients relative to %d (pointwise 95%% intervals)", CONFIG$profile_reference_year)))
+}
+```
+
+### Sample support and residual variation
+
+The support table reports, for every cell, the rows the estimator actually
+used, the properties and LSOA clusters behind them, near and far property
+counts, properties observed on both sides of August 2022, rows the estimator
+removed (fixed-effect singletons under the fuller structure), and control
+coefficients that were absorbed by the fixed effects. Absorption of a control
+does not invalidate the focal coefficient. None of these counts establishes
+identification on its own.
+
+```{r}
+#| label: findings-support-table
+#| eval: !expr params$reestimate
+#| results: asis
+
+support_table <- label_cells(cells) |>
+  dplyr::arrange(market_label, attention_label, factor(variant, levels = MODEL_VARIANTS), fe_label) |>
+  dplyr::transmute(Market = as.character(market_label), Attention = as.character(attention_label),
+                   Variant = VARIANT_LABELS[variant], `Fixed effects` = as.character(fe_label), Status = status,
+                   Observations = nobs, Properties = n_properties, Clusters = n_clusters,
+                   `Near properties` = n_near_properties, `Far properties` = n_far_properties,
+                   `Both sides of Aug 2022` = n_properties_both_sides_event,
+                   `Removed by estimator` = n_removed_by_estimator, `Controls absorbed` = n_controls_absorbed,
+                   Warnings = warnings)
+knitr::kable(support_table, format = "html", format.args = list(big.mark = ","),
+             caption = "Estimation support for every scalar cell (rows retained by the estimator; properties and clusters counted on those rows)")
+```
+
+The residual-support measures residualise the focal regressor on every
+included fixed effect and control over each fit's actual sample. The ratio
+compares that residual sum of squares with the centred raw variation of the
+same regressor; the shares show how the residual variation is spread across
+years and LSOA clusters. They are descriptive: no threshold, weight or
+exclusion follows from them.
+
+```{r}
+#| label: findings-residual-support
+#| eval: !expr params$reestimate
+#| results: asis
+
+residual_table <- residual_support |>
+  dplyr::inner_join(dplyr::select(cells, model_key, market, variant, fe, attention), by = "model_key") |>
+  label_cells() |>
+  dplyr::arrange(market_label, attention_label, factor(variant, levels = MODEL_VARIANTS), fe_label) |>
+  dplyr::transmute(Market = as.character(market_label), Attention = as.character(attention_label),
+                   Variant = VARIANT_LABELS[variant], `Fixed effects` = as.character(fe_label),
+                   `Residual SS` = round(rss, 1), `Centred raw variation` = round(centred_raw_variation, 1),
+                   Ratio = round(ratio, 4), `Top-1 LSOA share` = round(lsoa_share_top1, 5),
+                   `Top-5 share` = round(lsoa_share_top5, 5), `Top-10 share` = round(lsoa_share_top10, 5),
+                   Clusters = n_clusters)
+emit_table(knitr::kable(residual_table, format = "html", format.args = list(big.mark = ","),
+                        caption = "Residual variation of Near x attention after the fixed effects and controls (KTD11), by cell"))
+if (nrow(residual_support_by_year) > 0L) {
+  year_shares <- residual_support_by_year |>
+    dplyr::inner_join(dplyr::select(cells, model_key, market, variant, fe, attention), by = "model_key") |>
+    dplyr::filter(variant == "headline") |>
+    dplyr::mutate(share = round(share, 4)) |>
+    tidyr::pivot_wider(id_cols = c(market, attention, fe), names_from = year, values_from = share) |>
+    dplyr::arrange(market, attention, fe) |>
+    dplyr::mutate(market = MARKET_LABELS[market], attention = ATTENTION_LABELS[attention], fe = FE_LABELS[fe])
+  emit_table(knitr::kable(year_shares, format = "html",
+                          caption = "Headline cells: share of residual focal variation by calendar year"))
+}
+```
+
+### Variant sample flows
+
+Each variant branches from the eligible long-run panel (the last row of the
+exclusion ledger). Rows chain within a variant; the complete-case-with-controls
+rows record, per fixed-effect structure, the rows the comparator fit retained.
+
+```{r}
+#| label: findings-variant-ledger
+#| eval: !expr params$reestimate
+#| results: asis
+
+knitr::kable(dplyr::select(variant_ledger, market, variant, fe, step, n_rows_before, n_rows_after, n_rows_removed,
+                           n_groups_before, n_groups_after, note),
+             format = "html", format.args = list(big.mark = ","),
+             caption = "Variant ledger: restrictions applied to the eligible long-run panel for each sensitivity sample")
+```
+
+```{r}
+#| label: findings-fit-log
+#| eval: !expr params$reestimate
+#| results: asis
+
+fit_summary <- fit_logs |>
+  dplyr::group_by(market) |>
+  dplyr::summarise(fits = dplyr::n(), estimated = sum(status %in% c("estimated", "estimated_inference_unavailable")),
+                   total_seconds = round(sum(seconds), 1), min_seconds = round(min(seconds), 1),
+                   max_seconds = round(max(seconds), 1), max_peak_gc_mb = round(max(peak_gc_mb, na.rm = TRUE)),
+                   .groups = "drop")
+knitr::kable(fit_summary, format = "html", format.args = list(big.mark = ","),
+             caption = "Sequential fitting: fits per market, wall seconds and peak R heap (gc) during a fit")
+```
 
 ## Provenance and reproduce
 
