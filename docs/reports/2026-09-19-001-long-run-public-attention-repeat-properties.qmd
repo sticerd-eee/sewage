@@ -1,0 +1,1509 @@
+---
+title: "Long-run public attention with repeat properties"
+subtitle: "Within-property near–far price gaps, January 2014 onward"
+author: "Jacopo Olivieri"
+date: 2026-09-19
+params:
+  reestimate: true
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-fold: true
+    code-tools: true
+    theme: cosmo
+    include-in-header:
+      text: |
+        <style>
+        main table { width: 100%; margin-bottom: 1.5rem; border-collapse: collapse;
+                     font-size: .85rem; font-variant-numeric: tabular-nums; }
+        main th, main td { padding: .45rem .5rem; vertical-align: top; }
+        main thead { border-bottom: 2px solid #b9c4ca; }
+        main tbody tr { border-bottom: 1px solid #dfe5e8; }
+        main tbody tr:nth-child(even) { background: #f5f8f9; }
+        </style>
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: false
+---
+
+This report asks whether the same properties near mapped sewage overflows
+experienced different price changes from farther properties as national sewage
+attention increased. It extends the extensive-margin news analysis with
+repeat-property panels: property fixed effects replace location fixed effects,
+so the near–far gap is identified from within-property price changes across
+calendar months. Sales cover January 2014 through December 2024; rentals cover
+January 2014 through December 2023.
+
+The report first establishes that the inputs are usable: mapping integrity,
+current-address consistency of the repeat mappings, an ordered sample contract
+with an exclusion ledger, and observation diagnostics. Estimation, attention
+measures and the coefficient comparisons follow in later sections.
+
+**This rendering:** `r if (params$reestimate) "inputs re-validated and analyses re-estimated from the published inputs." else "results loaded from the saved bundle in output/regs."`
+
+```{r}
+#| label: setup
+#| include: false
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+check_required_packages(c(
+  "arrow", "data.table", "digest", "dplyr", "fixest", "ggplot2", "here", "knitr",
+  "lubridate", "sf", "tibble", "tidyr", "tidyselect", "withr"
+))
+source(here::here("scripts", "R", "utils", "hash_utils.R"), local = TRUE)
+source(here::here("scripts", "R", "utils", "repeat_transactions_utils.R"), local = TRUE)
+source(here::here("scripts", "R", "utils", "site_group_utils.R"), local = TRUE)
+knitr::opts_knit$set(root.dir = here::here())
+
+CONFIG <- list(
+  report_id = "long_run_public_attention",
+  sales = list(id_col = "house_id", date_col = "date_of_transfer", price_col = "price",
+               start = as.Date("2014-01-01"), end = as.Date("2024-12-31"),
+               address_cols = c("postcode", "paon", "saon", "street"), primary_address_col = "paon",
+               change_cols = "property_type", control_cols = c("property_type", "old_new", "duration"),
+               history_path = here::here("data", "processed", "house_price_long_run.parquet"),
+               mapping_path = here::here("data", "processed", "repeated_transactions", "repeated_sales.parquet")),
+  rentals = list(id_col = "rental_id", date_col = "rented_est", price_col = "listing_price",
+                 start = as.Date("2014-01-01"), end = as.Date("2023-12-31"),
+                 address_cols = c("postcode", "address_line_01", "address_line_02", "address_line_03"),
+                 primary_address_col = "address_line_01",
+                 change_cols = c("property_type", "bedrooms", "bathrooms"),
+                 control_cols = c("property_type", "bedrooms", "bathrooms"),
+                 history_path = here::here("data", "processed", "zoopla", "zoopla_rentals_long_run.parquet"),
+                 mapping_path = here::here("data", "processed", "repeated_transactions", "repeated_rentals.parquet")),
+  crosswalk_path = here::here("data", "processed", "matched_events_annual_data", "site_group_crosswalk.parquet"),
+  crosswalk_years = 2021:2024,
+  articles_path = here::here("data", "processed", "lexis_nexis", "search1_monthly.parquet"),
+  article_pdf_dir = here::here("data", "raw", "lexis_nexis", "search_1"),
+  article_origin = as.Date("2014-01-01"),
+  event_month = as.Date("2022-08-01"),   # post = month >= event_month (August 2022 inclusive)
+  bands = list(near_min = 0, near_max = 500, far_min = 1000, far_max = 2000),  # near: [0,500]; far: (1000,2000]
+  short_window_start = as.Date("2021-01-01"),
+  profile_reference_year = 2019L, profile_joint_years = 2014:2018,
+  large_group_size = 12L, extreme_annualized_price_ratio = 4,
+  postcode_lookup_path = here::here("data", "raw", "uk_postcodes", "2602_uk_postcodes.csv"),
+  rental_unit_tolerance = 1.3,   # multiplicative band around 4.33 (weekly<->monthly) that flags a unit break
+  output = list(regs = here::here("output", "regs", "long_run_public_attention"),
+                tables = here::here("output", "tables", "long_run_public_attention"),
+                figures = here::here("output", "figures", "long_run_public_attention"),
+                log = here::here("output", "log", "long_run_public_attention")),
+  bundle_file = "long_run_public_attention_bundle.rds",
+  bundle_version = "1"
+)
+MARKETS <- c("sales", "rentals")
+```
+
+```{r}
+#| label: helpers-inputs
+#| include: false
+
+`%chin%` <- data.table::`%chin%`
+
+# ---- Market configuration ------------------------------------------------------
+
+market_config <- function(market) {
+  if (!is.character(market) || length(market) != 1L || !market %in% MARKETS) {
+    stop("Unknown market: ", paste(market, collapse = ", "), call. = FALSE)
+  }
+  cfg <- CONFIG[[market]]
+  cfg$market <- market
+  cfg
+}
+
+# The list shape that build_address_key()/validate_repeat_config() expect. Paths
+# other than the input are placeholders: nothing is written and `publish` is unset.
+repeat_key_config <- function(cfg) {
+  list(
+    id_col = cfg$id_col, date_col = cfg$date_col, price_col = cfg$price_col,
+    postcode_col = "postcode", address_cols = cfg$address_cols,
+    primary_address_col = cfg$primary_address_col,
+    input_path = cfg$history_path,
+    output_path = "read-only", log_file = "read-only",
+    large_group_review_path = "read-only", price_ratio_review_path = "read-only",
+    same_day_review_path = "read-only",
+    market = cfg$market,
+    year_min = lubridate::year(cfg$start), year_max = lubridate::year(cfg$end),
+    key_coverage_floor = 0, repeat_share_floor = 0,
+    large_group_size = CONFIG$large_group_size,
+    extreme_annualized_price_ratio = CONFIG$extreme_annualized_price_ratio
+  )
+}
+
+history_columns <- function(cfg) {
+  extra <- if (cfg$market == "rentals") "rented" else character()
+  unique(c(
+    cfg$id_col, cfg$date_col, cfg$price_col, cfg$address_cols, cfg$change_cols,
+    cfg$control_cols, "country", "easting", "northing", "lsoa", "msoa", "quality", extra
+  ))
+}
+
+mapping_columns <- function(cfg) c(cfg$id_col, "repeat_id", "repeat_count")
+
+review_path <- function(cfg, suffix) {
+  sub("\\.parquet$", paste0("_", suffix, ".parquet"), cfg$mapping_path)
+}
+
+# ---- Blocking conditions -------------------------------------------------------
+
+# A validation failure that the plan says should stop the affected market, not
+# the whole run. prepare_market_panel() catches this class and records the market
+# as blocked with `details`; any other error propagates and stops the render.
+block_market <- function(market, stage, message, details = NULL) {
+  cond <- structure(
+    class = c("market_blocked", "error", "condition"),
+    list(
+      message = sprintf("[%s / %s] %s", market, stage, message), call = NULL,
+      market = market, stage = stage, details = details
+    )
+  )
+  stop(cond)
+}
+
+# ---- Input readability and provenance -----------------------------------------
+
+assert_readable_input <- function(path, label, market = NA_character_) {
+  fail <- function(msg) {
+    if (is.na(market)) stop(msg, call. = FALSE)
+    block_market(market, "input", msg)
+  }
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !file.exists(path)) {
+    fail(sprintf("Required input `%s` is unreadable: file not found at %s", label, path))
+  }
+  reader <- tryCatch(
+    arrow::ParquetFileReader$create(path),
+    error = function(e) fail(sprintf(
+      "Required input `%s` is unreadable: %s (%s)", label, path, conditionMessage(e)
+    ))
+  )
+  invisible(reader)
+}
+
+parquet_file_info <- function(path, label, market = NA_character_) {
+  reader <- assert_readable_input(path, label, market)
+  schema <- reader$GetSchema()
+  list(n_rows = as.numeric(reader$num_rows), columns = names(schema), metadata = schema$metadata)
+}
+
+generation_id_from_metadata <- function(metadata) {
+  candidates <- c("cleaning_run_stamp", "run_timestamp")
+  hit <- candidates[candidates %in% names(metadata)]
+  if (length(hit) == 0L) return(NA_character_)
+  as.character(metadata[[hit[[1L]]]])
+}
+
+# Content identity is the file hash; mtime/size are descriptive only (KTD8).
+capture_input_provenance <- function(input, path, columns_used, market = NA_character_) {
+  info <- parquet_file_info(path, input, market)
+  tibble::tibble(
+    input = input,
+    path = path,
+    content_hash = digest::digest(file = path, algo = "xxhash64"),
+    generation_id = generation_id_from_metadata(info$metadata),
+    n_rows = info$n_rows,
+    columns_used = paste(columns_used, collapse = ";"),
+    mtime = format(file.info(path)$mtime, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+  )
+}
+
+# ---- Loading (column-pruned; read_parquet -> as.data.frame -> as.data.table) -----
+
+read_parquet_columns <- function(path, columns) {
+  arrow::read_parquet(path, col_select = tidyselect::all_of(columns)) |>
+    as.data.frame() |>
+    data.table::as.data.table()
+}
+
+load_history <- function(market, path = market_config(market)$history_path,
+                         cfg = market_config(market)) {
+  cols <- history_columns(cfg)
+  info <- parquet_file_info(path, paste0(market, "_history"), market)
+  missing <- setdiff(cols, info$columns)
+  if (length(missing) > 0L) {
+    block_market(market, "input", sprintf(
+      "history %s lacks required columns: %s", path, paste(missing, collapse = ", ")
+    ))
+  }
+  dt <- read_parquet_columns(path, cols)
+  dt[, (cfg$id_col) := as.character(get(cfg$id_col))]
+  dt[, (cfg$date_col) := as_transaction_date(get(cfg$date_col))]
+  dt[, (cfg$price_col) := as.numeric(get(cfg$price_col))]
+  dt[, easting := as.numeric(easting)]
+  dt[, northing := as.numeric(northing)]
+  dt[, quality := as.integer(quality)]
+  for (col in c("country", "lsoa", "msoa")) dt[, (col) := as.character(get(col))]
+  dt[]
+}
+
+load_mapping <- function(market, path = market_config(market)$mapping_path,
+                         cfg = market_config(market)) {
+  cols <- mapping_columns(cfg)
+  info <- parquet_file_info(path, paste0(market, "_mapping"), market)
+  missing <- setdiff(cols, info$columns)
+  if (length(missing) > 0L) {
+    block_market(market, "input", sprintf(
+      "mapping %s lacks required columns: %s", path, paste(missing, collapse = ", ")
+    ))
+  }
+  dt <- read_parquet_columns(path, cols)
+  dt[, (cfg$id_col) := as.character(get(cfg$id_col))]
+  dt[, repeat_id := as.character(repeat_id)]
+  dt[, repeat_count := as.integer(repeat_count)]
+  list(mapping = dt[], manifest = info$metadata)
+}
+
+load_same_day_ids <- function(market, cfg = market_config(market)) {
+  path <- review_path(cfg, "same_day")
+  info <- parquet_file_info(path, paste0(market, "_same_day_review"), market)
+  if (!cfg$id_col %in% info$columns) {
+    block_market(market, "input", sprintf("same-day review %s lacks %s", path, cfg$id_col))
+  }
+  if (info$n_rows == 0) return(character())
+  as.character(read_parquet_columns(path, cfg$id_col)[[cfg$id_col]])
+}
+
+# ---- Mapping validation (KTD10, structural part) -------------------------------
+
+validate_mapping <- function(history, mapping, manifest, same_day_ids, market,
+                             cfg = market_config(market)) {
+  id_col <- cfg$id_col
+  fail <- function(message, details = NULL) block_market(market, "mapping", message, details)
+
+  hist_ids <- history[[id_col]]
+  map_ids <- mapping[[id_col]]
+  if (!is.character(hist_ids) || anyNA(hist_ids) || any(!nzchar(hist_ids))) {
+    fail("history transaction ids must be non-missing character strings")
+  }
+  n_hist_dup <- sum(duplicated(hist_ids))
+  if (n_hist_dup > 0L) fail(sprintf("history contains %d duplicated transaction ids", n_hist_dup))
+  if (!is.character(map_ids) || anyNA(map_ids) || any(!nzchar(map_ids))) {
+    fail("mapping transaction ids must be non-missing character strings")
+  }
+  n_map_dup <- sum(duplicated(map_ids))
+  if (n_map_dup > 0L) {
+    fail(sprintf("mapping contains %d duplicated transaction ids; a join would multiply rows", n_map_dup),
+         details = list(n_duplicated_mapping_ids = n_map_dup))
+  }
+  if (!is.character(mapping$repeat_id) || anyNA(mapping$repeat_id) ||
+      any(!grepl("^[0-9a-f]{16}$", mapping$repeat_id))) {
+    fail("mapping repeat_id values must be 16-character lowercase hex strings")
+  }
+
+  map_in_hist <- map_ids %chin% hist_ids
+  n_absent_from_history <- sum(!map_in_hist)
+  if (n_absent_from_history > 0L) {
+    fail(sprintf("mapping contains %d ids absent from history", n_absent_from_history),
+         details = list(n_mapping_absent_from_history = n_absent_from_history))
+  }
+
+  required_fields <- c("repeat_manifest_version", "input_row_count", "mapped_count",
+                       "excluded_count", "same_day_excluded_count", "run_timestamp")
+  missing_fields <- setdiff(required_fields, names(manifest))
+  if (length(missing_fields) > 0L) {
+    fail(paste("mapping manifest lacks fields:", paste(missing_fields, collapse = ", ")))
+  }
+  manifest_num <- function(field) as.numeric(manifest[[field]])
+  if (manifest_num("input_row_count") != nrow(history)) {
+    fail(sprintf("manifest input_row_count %s differs from history rows %d",
+                 manifest$input_row_count, nrow(history)))
+  }
+  if (manifest_num("mapped_count") != nrow(mapping)) {
+    fail(sprintf("manifest mapped_count %s differs from mapping rows %d",
+                 manifest$mapped_count, nrow(mapping)))
+  }
+
+  # History rows absent from the mapping must be exactly the unkeyed addresses
+  # plus the same-day conflicts. Recompute the key on those rows only (cheap) and
+  # compare with the manifest counts and the same-day review ids.
+  hist_in_map <- hist_ids %chin% map_ids
+  absent_ids <- hist_ids[!hist_in_map]
+  n_absent <- length(absent_ids)
+  same_day_ids <- unique(as.character(same_day_ids))
+  absent_keys <- if (n_absent > 0L) {
+    build_address_key(history[!hist_in_map, cfg$address_cols, with = FALSE], repeat_key_config(cfg))
+  } else {
+    character()
+  }
+  n_unkeyed_recomputed <- sum(is.na(absent_keys))
+  keyed_absent_ids <- absent_ids[!is.na(absent_keys)]
+  n_same_day_not_absent <- sum(!same_day_ids %chin% absent_ids)
+  reconciled <- n_absent == manifest_num("excluded_count") + manifest_num("same_day_excluded_count") &&
+    n_unkeyed_recomputed == manifest_num("excluded_count") &&
+    length(same_day_ids) == manifest_num("same_day_excluded_count") &&
+    n_same_day_not_absent == 0L &&
+    setequal(keyed_absent_ids, same_day_ids)
+
+  result <- list(
+    status = if (reconciled) "passed" else "failed",
+    n_history = nrow(history),
+    n_mapping = nrow(mapping),
+    n_groups_mapping = data.table::uniqueN(mapping$repeat_id),
+    n_mapping_absent_from_history = n_absent_from_history,
+    n_history_absent_from_mapping = n_absent,
+    n_unkeyed_manifest = manifest_num("excluded_count"),
+    n_unkeyed_recomputed = n_unkeyed_recomputed,
+    n_same_day_manifest = manifest_num("same_day_excluded_count"),
+    n_same_day_review = length(same_day_ids),
+    n_same_day_recomputed = length(keyed_absent_ids),
+    n_same_day_not_absent = n_same_day_not_absent,
+    reconciled = reconciled,
+    manifest_version = as.character(manifest$repeat_manifest_version),
+    generation_id = as.character(manifest$run_timestamp),
+    manifest_input_mtime = as.character(manifest$input_mtime %||% NA_character_),
+    manifest_largest_group_size = as.character(manifest$largest_group_size %||% NA_character_)
+  )
+  if (!reconciled) {
+    fail(sprintf(
+      paste("history rows absent from mapping (%d) do not reconcile with manifest unkeyed (%s) +",
+            "same-day (%s); recomputed unkeyed %d, same-day review ids %d (%d not absent)"),
+      n_absent, manifest$excluded_count, manifest$same_day_excluded_count,
+      n_unkeyed_recomputed, length(same_day_ids), n_same_day_not_absent
+    ), details = result)
+  }
+  result
+}
+
+# ---- Current-address verification (KTD10, read-only) ----------------------------
+
+# `candidates` holds the id column plus the market's address columns for every
+# requested-window row that is in the mapping, singles included. Keys and
+# expected repeat ids are recomputed with the production contract and compared
+# with the stored repeat_id. Nothing is rebuilt or repaired.
+verify_current_address_keys <- function(candidates, mapping, market, cfg = market_config(market)) {
+  id_col <- cfg$id_col
+  idx <- match(candidates[[id_col]], mapping[[id_col]])
+  if (anyNA(idx)) {
+    stop("verify_current_address_keys() received rows absent from the mapping.", call. = FALSE)
+  }
+  stored <- mapping$repeat_id[idx]
+  key <- build_address_key(candidates[, cfg$address_cols, with = FALSE], repeat_key_config(cfg))
+  missing_key <- is.na(key)
+  expected <- rep(NA_character_, length(key))
+  if (any(!missing_key)) expected[!missing_key] <- hash_serialized_values(key[!missing_key])
+  mismatched <- !missing_key & expected != stored
+  group_sizes <- data.table::data.table(repeat_id = stored)[, .N, by = repeat_id]
+  result <- list(
+    status = if (any(missing_key) || any(mismatched)) "failed" else "passed",
+    n_candidates = length(key),
+    n_candidate_groups = nrow(group_sizes),
+    n_window_singles = sum(group_sizes$N == 1L),
+    n_missing_keys = sum(missing_key),
+    n_mismatched = sum(mismatched),
+    n_mismatched_groups = data.table::uniqueN(stored[mismatched]),
+    example_missing_ids = utils::head(candidates[[id_col]][missing_key], 5L),
+    example_mismatched_ids = utils::head(candidates[[id_col]][mismatched], 5L)
+  )
+  if (result$status != "passed") {
+    block_market(market, "address_keys", sprintf(
+      paste("current address keys disagree with the stored mapping: %d candidates,",
+            "%d missing current keys, %d mismatched repeat ids (%d groups);",
+            "mapping is stale relative to the history and must be regenerated upstream"),
+      result$n_candidates, result$n_missing_keys, result$n_mismatched, result$n_mismatched_groups
+    ), details = result)
+  }
+  result
+}
+
+# ---- Geography contradictions within candidate groups ---------------------------
+
+# Contradiction = more than one distinct NONMISSING value within a repeat group.
+# Missing-to-observed differences are not contradictions.
+check_group_geography_contradictions <- function(candidates) {
+  needed <- c("repeat_id", "country", "easting", "northing", "lsoa", "msoa")
+  missing <- setdiff(needed, names(candidates))
+  if (length(missing) > 0L) stop("Geography check lacks columns: ", paste(missing, collapse = ", "), call. = FALSE)
+  distinct_nonmissing <- function(cols) {
+    dt <- candidates[, c("repeat_id", cols), with = FALSE]
+    keep <- Reduce(`&`, lapply(cols, function(col) !is.na(dt[[col]])))
+    unique(dt[keep])[, .N, by = repeat_id][N > 1L, repeat_id]
+  }
+  country_ids <- distinct_nonmissing("country")
+  coord_ids <- distinct_nonmissing(c("easting", "northing"))
+  lsoa_ids <- distinct_nonmissing("lsoa")
+  msoa_ids <- distinct_nonmissing("msoa")
+  group_ids <- unique(c(country_ids, coord_ids, lsoa_ids, msoa_ids))
+  list(
+    n_groups_checked = data.table::uniqueN(candidates$repeat_id),
+    n_rows_checked = nrow(candidates),
+    n_groups_contradictory = length(group_ids),
+    n_groups_country = length(country_ids),
+    n_groups_coordinates = length(coord_ids),
+    n_groups_lsoa = length(lsoa_ids),
+    n_groups_msoa = length(msoa_ids),
+    group_ids = group_ids
+  )
+}
+
+# ---- Exclusion ledger ----------------------------------------------------------
+
+count_groups <- function(repeat_ids) data.table::uniqueN(repeat_ids[!is.na(repeat_ids)])
+
+new_ledger <- function() {
+  tibble::tibble(
+    market = character(), step_order = integer(), step = character(),
+    n_rows_before = numeric(), n_rows_after = numeric(), n_rows_removed = numeric(),
+    n_groups_before = numeric(), n_groups_after = numeric(), note = character()
+  )
+}
+
+ledger_append <- function(ledger, market, step, n_rows_before, n_rows_after,
+                          n_groups_before, n_groups_after, note = "") {
+  dplyr::bind_rows(ledger, tibble::tibble(
+    market = market, step_order = nrow(ledger) + 1L, step = step,
+    n_rows_before = as.numeric(n_rows_before), n_rows_after = as.numeric(n_rows_after),
+    n_rows_removed = as.numeric(n_rows_before) - as.numeric(n_rows_after),
+    n_groups_before = as.numeric(n_groups_before), n_groups_after = as.numeric(n_groups_after),
+    note = note
+  ))
+}
+
+# Restrict a panel by a logical vector and append the ledger row (for U2/U3).
+restrict_panel <- function(panel, keep, ledger, market, step, note = "") {
+  if (length(keep) != nrow(panel)) stop("`keep` must have one entry per panel row.", call. = FALSE)
+  keep <- !is.na(keep) & keep
+  before_rows <- nrow(panel)
+  before_groups <- count_groups(panel$repeat_id)
+  panel <- panel[keep]
+  ledger <- ledger_append(ledger, market, step, before_rows, nrow(panel),
+                          before_groups, count_groups(panel$repeat_id), note)
+  list(panel = panel, ledger = ledger)
+}
+
+assert_ledger_identity <- function(ledger) {
+  for (mkt in unique(ledger$market)) {
+    rows <- ledger[ledger$market == mkt, ]
+    rows <- rows[order(rows$step_order), ]
+    if (!all(rows$n_rows_removed == rows$n_rows_before - rows$n_rows_after)) {
+      stop("Ledger removed counts do not equal before minus after for ", mkt, call. = FALSE)
+    }
+    if (nrow(rows) > 1L && !all(rows$n_rows_after[-nrow(rows)] == rows$n_rows_before[-1L])) {
+      stop("Ledger rows do not chain for ", mkt, call. = FALSE)
+    }
+    if (nrow(rows) > 1L && !all(rows$n_groups_after[-nrow(rows)] == rows$n_groups_before[-1L])) {
+      stop("Ledger group counts do not chain for ", mkt, call. = FALSE)
+    }
+  }
+  invisible(TRUE)
+}
+
+# ---- Repeat eligibility and change flags -----------------------------------------
+
+# Eligibility = at least two DISTINCT dates surviving in the group (AE1). Stored
+# repeat_count is full-window and is never consulted.
+repeat_eligible_ids <- function(panel) {
+  distinct_dates <- unique(panel[, .(repeat_id, date)])[, .N, by = repeat_id]
+  distinct_dates[N >= 2L, repeat_id]
+}
+
+recompute_repeats <- function(panel) {
+  panel[repeat_id %chin% repeat_eligible_ids(panel)]
+}
+
+# One logical per change column: more than one distinct nonmissing value within
+# the group. Missing-to-observed is never a change (AE2).
+freeze_change_flags <- function(panel, change_cols) {
+  missing <- setdiff(change_cols, names(panel))
+  if (length(missing) > 0L) stop("Change columns absent from panel: ", paste(missing, collapse = ", "), call. = FALSE)
+  flags <- data.table::data.table(repeat_id = unique(panel$repeat_id))
+  for (col in change_cols) {
+    changed_ids <- unique(panel[!is.na(get(col)), c("repeat_id", col), with = FALSE])[, .N, by = repeat_id][N > 1L, repeat_id]
+    flags[, (paste0("change_", col)) := repeat_id %chin% changed_ids]
+  }
+  flag_cols <- paste0("change_", change_cols)
+  flags[, any_change := Reduce(`|`, lapply(flag_cols, function(col) flags[[col]]))]
+  flags[]
+}
+
+# ---- Requested coverage --------------------------------------------------------
+
+assert_requested_years <- function(dates, market, cfg) {
+  requested <- seq(lubridate::year(cfg$start), lubridate::year(cfg$end))
+  if (length(dates) == 0L) {
+    block_market(market, "coverage", sprintf(
+      "no observations between %s and %s in %s", cfg$start, cfg$end, cfg$history_path
+    ))
+  }
+  present <- unique(lubridate::year(dates))
+  absent <- setdiff(requested, present)
+  if (length(absent) > 0L) {
+    block_market(market, "coverage", sprintf(
+      "requested year(s) %s have no observations in %s",
+      paste(absent, collapse = ", "), cfg$history_path
+    ))
+  }
+  invisible(requested)
+}
+
+# ---- Rental unit evidence ------------------------------------------------------
+
+# The local provider profile does not define the rental listing_price unit. A
+# constant unit is absorbed by property and month effects; a unit break at the
+# 2022/2023 vintage boundary would not be. No conversion is ever applied.
+rental_unit_evidence <- function(prices, dates, repeat_ids, tolerance = CONFIG$rental_unit_tolerance) {
+  dt <- data.table::data.table(price = prices, date = dates, repeat_id = repeat_ids)
+  dt <- dt[is.finite(price) & price > 0]
+  dt[, year := lubridate::year(date)]
+  dt[, month := lubridate::floor_date(date, "month")]
+  by_year <- dt[, .(
+    n = .N, median = stats::median(price), q25 = stats::quantile(price, 0.25),
+    q75 = stats::quantile(price, 0.75), log_mean = mean(log(price))
+  ), by = year][order(year)]
+  by_month <- dt[month >= as.Date("2022-07-01") & month <= as.Date("2023-06-01"), .(
+    n = .N, median = stats::median(price), q25 = stats::quantile(price, 0.25),
+    q75 = stats::quantile(price, 0.75), log_mean = mean(log(price))
+  ), by = month][order(month)]
+  median_2022 <- by_year[year == 2022L, median]
+  median_2023 <- by_year[year == 2023L, median]
+  ratio <- if (length(median_2022) == 1L && length(median_2023) == 1L) median_2023 / median_2022 else NA_real_
+  # Within-property: properties listed in both 2022 and 2023.
+  within <- dt[year %in% c(2022L, 2023L), .(log_mean = mean(log(price))), by = .(repeat_id, year)]
+  within <- data.table::dcast(within, repeat_id ~ year, value.var = "log_mean")
+  within_ratio <- if (all(c("2022", "2023") %in% names(within))) {
+    both <- within[!is.na(`2022`) & !is.na(`2023`)]
+    if (nrow(both) > 0L) exp(stats::median(both[["2023"]] - both[["2022"]])) else NA_real_
+  } else {
+    NA_real_
+  }
+  n_within <- if (all(c("2022", "2023") %in% names(within))) sum(!is.na(within$`2022`) & !is.na(within$`2023`)) else 0L
+  weekly_monthly <- 52 / 12
+  near_conversion <- function(r) {
+    !is.na(r) && (abs(log(r) - log(weekly_monthly)) < log(tolerance) ||
+                    abs(log(r) + log(weekly_monthly)) < log(tolerance))
+  }
+  status <- if (is.na(ratio)) {
+    "blocked"
+  } else if (near_conversion(ratio) || near_conversion(within_ratio)) {
+    "blocked"
+  } else {
+    "consistent_within_property_comparable"
+  }
+  list(
+    status = status,
+    documented_unit = paste(
+      "Not documented locally: data/raw/zoopla/CDRC Data Profile - WFZ Transactions Safeguarded",
+      "20221124.pdf describes the sales-matched dataset, not the rentals file. Existing project",
+      "tables label the outcome 'log weekly asking rent'."
+    ),
+    vintage_proxy = "listing year 2023 (rentals_safeguarded_2023.csv) vs 2014-2022 (rentals_safeguarded_2014-2022.csv); the processed file carries no vintage column",
+    conversion_applied = "none",
+    median_ratio_2023_2022 = ratio,
+    within_property_ratio_2023_2022 = within_ratio,
+    n_within_property_pairs = n_within,
+    weekly_monthly_factor = weekly_monthly,
+    tolerance = tolerance,
+    by_year = tibble::as_tibble(by_year),
+    by_month = tibble::as_tibble(by_month),
+    reason = if (status == "blocked") {
+      sprintf("2023/2022 median ratio %.3f (within-property %.3f) lies within the weekly/monthly conversion band",
+              ratio, within_ratio)
+    } else {
+      NA_character_
+    }
+  )
+}
+
+# ---- Ordered sample contract -----------------------------------------------------
+
+# Steps (plan order): requested dates -> mapped rows -> KTD10 address verification
+# -> geography contradictions on candidate groups -> finite positive outcome ->
+# England -> projected coordinates -> LSOA/MSOA. The panel is returned BEFORE the
+# distance bands (U2) and the two-distinct-dates requirement (U2 applies bands,
+# then calls recompute_repeats() through restrict_panel()).
+# Restrictions are accumulated in one logical vector over the full history so no
+# full-width copy is made until the narrow panel is built.
+apply_sample_contract <- function(history, mapping, market, cfg = market_config(market)) {
+  id_col <- cfg$id_col
+  n_full <- nrow(history)
+  ids <- history[[id_col]]
+  repeat_id <- mapping$repeat_id[match(ids, mapping[[id_col]])]
+  dates <- as_transaction_date(history[[cfg$date_col]])
+  price <- history[[cfg$price_col]]
+  ledger <- new_ledger()
+  groups <- function(keep) count_groups(repeat_id[keep])
+  step <- function(prev, keep, name, note) {
+    ledger <<- ledger_append(ledger, market, name, sum(prev), sum(keep), groups(prev), groups(keep), note)
+    keep
+  }
+
+  # (1) requested dates
+  all_rows <- rep(TRUE, n_full)
+  keep <- !is.na(dates) & dates >= cfg$start & dates <= cfg$end
+  keep <- step(all_rows, keep, "requested_dates",
+               sprintf("%s to %s inclusive", cfg$start, cfg$end))
+  assert_requested_years(dates[keep], market, cfg)
+  coverage <- data.table::data.table(year = lubridate::year(dates[keep]))[, .(n_rows = .N), by = year][order(year)]
+  coverage <- tibble::tibble(market = market, year = coverage$year, n_rows = coverage$n_rows)
+  date_range <- range(dates[keep])
+
+  # (2) rows in the mapping (unkeyed addresses and same-day conflicts are absent;
+  #     they were reconciled in validate_mapping())
+  keep <- step(keep, keep & !is.na(repeat_id), "mapped_rows",
+               "rows absent from the repeat mapping: unkeyed addresses and same-day conflicts")
+
+  # (2b) KTD10 read-only address verification on all mapped window candidates
+  address <- verify_current_address_keys(
+    history[keep, c(id_col, cfg$address_cols), with = FALSE], mapping, market, cfg
+  )
+  keep <- step(keep, keep, "address_key_verification",
+               sprintf("read-only recomputation of address keys and repeat ids on %d candidates (%d singles); no rows removed",
+                       address$n_candidates, address$n_window_singles))
+
+  # (3) contradictory nonmissing geography within candidate groups
+  geography <- check_group_geography_contradictions(data.table::data.table(
+    repeat_id = repeat_id[keep], country = history$country[keep],
+    easting = history$easting[keep], northing = history$northing[keep],
+    lsoa = history$lsoa[keep], msoa = history$msoa[keep]
+  ))
+  keep <- step(keep, keep & !(repeat_id %chin% geography$group_ids), "geography_contradictions",
+               sprintf("whole groups with >1 distinct nonmissing country (%d), coordinates (%d), LSOA (%d) or MSOA (%d)",
+                       geography$n_groups_country, geography$n_groups_coordinates,
+                       geography$n_groups_lsoa, geography$n_groups_msoa))
+
+  # (4) common requirements
+  keep <- step(keep, keep & is.finite(price) & price > 0, "finite_positive_outcome",
+               sprintf("finite positive %s; outcome is log(%s)", cfg$price_col, cfg$price_col))
+  unit_evidence <- if (market == "rentals") {
+    rental_unit_evidence(price[keep], dates[keep], repeat_id[keep])
+  } else {
+    NULL
+  }
+  keep <- step(keep, keep & !is.na(history$country) & history$country == "England", "england",
+               "country == England (Greater London retained; Wales, Scotland and missing country dropped)")
+  keep <- step(keep, keep & is.finite(history$easting) & is.finite(history$northing), "projected_coordinates",
+               "nonmissing British National Grid easting and northing")
+  keep <- step(keep, keep & !is.na(history$lsoa) & nzchar(history$lsoa) & !is.na(history$msoa) & nzchar(history$msoa),
+               "lsoa_msoa_nonmissing", "nonmissing 2011 LSOA and MSOA identifiers")
+
+  # Narrow panel built by column extraction (safe pattern for later data.table keys).
+  panel_dates <- dates[keep]
+  panel <- data.table::data.table(
+    id = ids[keep],
+    repeat_id = repeat_id[keep],
+    date = panel_dates,
+    year = as.integer(lubridate::year(panel_dates)),
+    month_index = as.integer((lubridate::year(panel_dates) - lubridate::year(CONFIG$article_origin)) * 12L +
+                               lubridate::month(panel_dates) - lubridate::month(CONFIG$article_origin) + 1L),
+    log_price = log(price[keep]),
+    lsoa = history$lsoa[keep],
+    msoa = history$msoa[keep],
+    easting = history$easting[keep],
+    northing = history$northing[keep],
+    postcode = as.character(history$postcode[keep]),
+    quality = history$quality[keep]
+  )
+  for (col in unique(c(cfg$change_cols, cfg$control_cols))) panel[, (col) := history[[col]][keep]]
+  if (market == "rentals") panel[, rented_fallback := is.na(history$rented[keep])]
+
+  list(
+    panel = panel[],
+    ledger = ledger,
+    coverage = coverage,
+    date_range = date_range,
+    address_verification = address,
+    geography = geography[setdiff(names(geography), "group_ids")],
+    unit_evidence = unit_evidence
+  )
+}
+
+# ---- Observation diagnostics (no exclusions) ------------------------------------
+
+compute_observation_diagnostics <- function(panel, market, group_col = NULL,
+                                            cfg = market_config(market)) {
+  grp <- if (is.null(group_col)) character() else group_col
+  if (length(grp) > 0L && !all(grp %in% names(panel))) {
+    stop("Grouping column(s) absent from panel: ", paste(setdiff(grp, names(panel)), collapse = ", "), call. = FALSE)
+  }
+  dt <- panel[, c("id", "repeat_id", "date", "year", "log_price", "easting", "northing",
+                  "postcode", "quality", intersect(c("rented_fallback"), names(panel)), grp), with = FALSE]
+  data.table::setorderv(dt, c("repeat_id", "date", "id"))
+
+  # Observations per repeat group (a group sits in one band because location is fixed).
+  per_group <- dt[, .(n_obs = .N), by = c("repeat_id", grp)]
+  per_group[, size_bucket := data.table::fcase(
+    n_obs == 1L, "1", n_obs == 2L, "2", n_obs == 3L, "3", n_obs == 4L, "4",
+    n_obs <= 8L, "5-8", n_obs <= CONFIG$large_group_size, "9-12",
+    default = paste0(">", CONFIG$large_group_size)
+  )]
+  group_sizes <- per_group[, .(n_groups = .N, n_rows = sum(n_obs)), by = c(grp, "size_bucket")]
+  data.table::setorderv(group_sizes, c(grp, "size_bucket"))
+  n_large_groups <- sum(per_group$n_obs > CONFIG$large_group_size)
+
+  # Inter-observation gaps and same-month repeats (consecutive pairs within a group).
+  dt[, prev_date := data.table::shift(date), by = repeat_id]
+  dt[, prev_log_price := data.table::shift(log_price), by = repeat_id]
+  dt[, gap_days := as.numeric(date - prev_date)]
+  pairs <- dt[!is.na(gap_days)]
+  gap_summary <- pairs[, .(
+    n_pairs = .N,
+    min = min(gap_days), p10 = stats::quantile(gap_days, 0.10), p25 = stats::quantile(gap_days, 0.25),
+    median = stats::median(gap_days), p75 = stats::quantile(gap_days, 0.75),
+    p90 = stats::quantile(gap_days, 0.90), max = max(gap_days),
+    share_under_30_days = mean(gap_days < 30),
+    share_under_365_days = mean(gap_days < 365)
+  ), by = grp]
+  pairs[, same_month := lubridate::year(date) == lubridate::year(prev_date) &
+          lubridate::month(date) == lubridate::month(prev_date)]
+  same_month <- pairs[, .(
+    n_pairs = .N, n_same_month_pairs = sum(same_month), share_same_month_pairs = mean(same_month),
+    n_groups_with_same_month_pair = data.table::uniqueN(repeat_id[same_month]),
+    share_groups_with_same_month_pair = data.table::uniqueN(repeat_id[same_month]) / data.table::uniqueN(repeat_id)
+  ), by = grp]
+
+  # Outcome summaries by year (and optional grouping).
+  outcome_by_year <- dt[, .(
+    n = .N, mean_log = mean(log_price), sd_log = stats::sd(log_price),
+    p10 = stats::quantile(log_price, 0.10), median = stats::median(log_price),
+    p90 = stats::quantile(log_price, 0.90)
+  ), by = c(grp, "year")]
+  data.table::setorderv(outcome_by_year, c(grp, "year"))
+
+  # Extreme annualised price ratios (descriptive flag; same definition as the
+  # repeat-transaction review: ratio^(365.25/holding_days) > 4 or < 1/4).
+  threshold <- CONFIG$extreme_annualized_price_ratio
+  pairs[, annualized_ratio := data.table::fifelse(
+    gap_days > 0, exp(log_price - prev_log_price)^(365.25 / gap_days), NA_real_
+  )]
+  pairs[, extreme := !is.na(annualized_ratio) & (annualized_ratio > threshold | annualized_ratio < 1 / threshold)]
+  extreme_by_year <- pairs[, .(n_pairs = .N, n_extreme = sum(extreme), share_extreme = mean(extreme)),
+                           by = c(grp, "year")]
+  data.table::setorderv(extreme_by_year, c(grp, "year"))
+  extreme_total <- pairs[, .(n_pairs = .N, n_extreme = sum(extreme), share_extreme = mean(extreme)), by = grp]
+
+  # Rental rented_est fallback (rented missing, latest_to_rent used) by year.
+  fallback_by_year <- if ("rented_fallback" %in% names(dt)) {
+    out <- dt[, .(n = .N, n_fallback = sum(rented_fallback), share_fallback = mean(rented_fallback)), by = c(grp, "year")]
+    data.table::setorderv(out, c(grp, "year"))
+    tibble::as_tibble(out)
+  } else {
+    NULL
+  }
+
+  # Spatial precision: unique coordinates versus properties; coordinate quality.
+  spatial <- list(
+    n_rows = nrow(dt),
+    n_properties = data.table::uniqueN(dt$repeat_id),
+    n_unique_coordinates = nrow(unique(dt[, .(easting, northing)])),
+    n_unique_postcodes = data.table::uniqueN(dt$postcode),
+    quality_distribution = tibble::as_tibble(dt[, .(n_rows = .N), by = quality][order(quality)]),
+    geography_vintage = "2011 LSOA/MSOA codes from the ONS postcode lookup used at cleaning",
+    postcode_lookup_path = CONFIG$postcode_lookup_path,
+    postcode_lookup_exists = file.exists(CONFIG$postcode_lookup_path)
+  )
+
+  list(
+    market = market,
+    group_col = group_col,
+    n_rows = nrow(dt),
+    n_groups = data.table::uniqueN(dt$repeat_id),
+    n_large_groups = n_large_groups,
+    group_sizes = tibble::as_tibble(group_sizes),
+    gap_summary = tibble::as_tibble(gap_summary),
+    same_month = tibble::as_tibble(same_month),
+    outcome_by_year = tibble::as_tibble(outcome_by_year),
+    extreme_ratio_total = tibble::as_tibble(extreme_total),
+    extreme_ratio_by_year = tibble::as_tibble(extreme_by_year),
+    rented_fallback_by_year = fallback_by_year,
+    spatial = spatial
+  )
+}
+
+# ---- Market preparation (provenance -> load -> validate -> contract -> diagnostics)
+
+# Returns list(market, status, reason, panel, readiness, ledger, diagnostics,
+# provenance). `panel` is the pre-band panel (NULL when blocked). Later units
+# call this inside the per-market estimate loop, then apply bands,
+# recompute_repeats() and freeze_change_flags().
+prepare_market_panel <- function(market, cfg = market_config(market)) {
+  started <- Sys.time()
+  invisible(gc(reset = TRUE))
+  readiness <- list(market = market, status = "ready", reason = NA_character_, blocked_stage = NA_character_)
+  out <- list(market = market, status = "ready", reason = NA_character_, panel = NULL,
+              readiness = readiness, ledger = new_ledger(), diagnostics = NULL,
+              provenance = tibble::tibble())
+  result <- tryCatch({
+    provenance <- dplyr::bind_rows(
+      capture_input_provenance(paste0(market, "_history"), cfg$history_path, history_columns(cfg), market),
+      capture_input_provenance(paste0(market, "_mapping"), cfg$mapping_path, mapping_columns(cfg), market),
+      capture_input_provenance(paste0(market, "_same_day_review"), review_path(cfg, "same_day"), cfg$id_col, market)
+    )
+    history <- load_history(market, cfg$history_path, cfg)
+    mapping_obj <- load_mapping(market, cfg$mapping_path, cfg)
+    same_day_ids <- load_same_day_ids(market, cfg)
+    mapping_validation <- validate_mapping(history, mapping_obj$mapping, mapping_obj$manifest,
+                                           same_day_ids, market, cfg)
+    contract <- apply_sample_contract(history, mapping_obj$mapping, market, cfg)
+    rm(history, mapping_obj, same_day_ids)
+    invisible(gc())
+    # Diagnostics on the pre-band panel restricted to >= 2 distinct dates. This is
+    # informational only; the ledger's two-distinct-dates step is applied after
+    # the bands (U2).
+    eligible <- recompute_repeats(contract$panel)
+    diagnostics <- compute_observation_diagnostics(eligible, market, NULL, cfg)
+    n_eligible_rows <- nrow(eligible)
+    n_eligible_groups <- data.table::uniqueN(eligible$repeat_id)
+    rm(eligible)
+    invisible(gc())
+    list(provenance = provenance, mapping_validation = mapping_validation, contract = contract,
+         diagnostics = diagnostics, n_eligible_rows = n_eligible_rows, n_eligible_groups = n_eligible_groups)
+  }, market_blocked = function(cond) cond)
+
+  if (inherits(result, "market_blocked")) {
+    out$status <- "blocked"
+    out$reason <- conditionMessage(result)
+    out$readiness$status <- "blocked"
+    out$readiness$reason <- conditionMessage(result)
+    out$readiness$blocked_stage <- result$stage
+    out$readiness[[paste0("blocked_", result$stage)]] <- result$details
+  } else {
+    out$panel <- result$contract$panel
+    out$ledger <- result$contract$ledger
+    out$diagnostics <- result$diagnostics
+    out$provenance <- result$provenance
+    out$readiness$mapping_validation <- result$mapping_validation
+    out$readiness$address_verification <- result$contract$address_verification
+    out$readiness$geography <- result$contract$geography
+    out$readiness$coverage <- result$contract$coverage
+    out$readiness$date_range <- result$contract$date_range
+    out$readiness$unit_evidence <- result$contract$unit_evidence
+    out$readiness$n_rows_pre_band <- nrow(result$contract$panel)
+    out$readiness$n_groups_pre_band <- data.table::uniqueN(result$contract$panel$repeat_id)
+    out$readiness$n_rows_repeat_eligible_pre_band <- result$n_eligible_rows
+    out$readiness$n_groups_repeat_eligible_pre_band <- result$n_eligible_groups
+    if (market == "rentals" && identical(result$contract$unit_evidence$status, "blocked")) {
+      out$status <- "blocked"
+      out$reason <- paste("rental unit evidence:", result$contract$unit_evidence$reason)
+      out$readiness$status <- "blocked"
+      out$readiness$reason <- out$reason
+      out$readiness$blocked_stage <- "rental_units"
+      out$panel <- NULL
+    }
+  }
+  gc_info <- gc()
+  out$readiness$runtime_seconds <- as.numeric(difftime(Sys.time(), started, units = "secs"))
+  # Ncells are 56 bytes and Vcells 8 bytes; "max used" is since the gc(reset = TRUE) above.
+  out$readiness$peak_memory_mb <- as.numeric(gc_info["Ncells", "max used"] * 56 + gc_info["Vcells", "max used"] * 8) / 1024^2
+  out
+}
+
+format_count <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+
+# Display helper: emit an HTML table from inside loops/conditionals (not auto-printed).
+emit_table <- function(x) cat(x, "\n\n")
+```
+
+```{r}
+#| label: helpers-exposure
+#| include: false
+
+# U2: site projection, nearest distance, bands, attention calendar, article evidence.
+```
+
+```{r}
+#| label: helpers-models
+#| include: false
+
+# U3: variants, sequential fitting, extraction, residual support, profiles, joint tests.
+```
+
+```{r}
+#| label: helpers-bundle
+#| include: false
+
+# U4: fingerprints, bundle validation, atomic save, load, artifact export.
+```
+
+```{r}
+#| label: fixture-checks
+#| include: false
+
+assert_true <- function(condition, message) {
+  if (!isTRUE(condition)) stop(message, call. = FALSE)
+}
+
+assert_error_matching <- function(expr, pattern, message) {
+  err <- tryCatch({ force(expr); NULL }, error = identity)
+  assert_true(
+    inherits(err, "error") && grepl(pattern, conditionMessage(err)),
+    paste0(message, if (inherits(err, "error")) paste0("\nGot error: ", conditionMessage(err)) else "\nNo error was raised.")
+  )
+  invisible(err)
+}
+
+run_fixture_checks <- function(checks) {
+  rows <- list()
+  for (unit in names(checks)) {
+    for (scenario in names(checks[[unit]])) {
+      outcome <- tryCatch(
+        { checks[[unit]][[scenario]](); list(passed = TRUE, message = "") },
+        error = function(e) list(passed = FALSE, message = conditionMessage(e))
+      )
+      rows[[length(rows) + 1L]] <- tibble::tibble(unit = unit, scenario = scenario,
+                                                  passed = outcome$passed, message = outcome$message)
+    }
+  }
+  results <- dplyr::bind_rows(rows)
+  failed <- results[!results$passed, ]
+  if (nrow(failed) > 0L) {
+    stop("Fixture checks failed:\n", paste(sprintf("  %s / %s: %s", failed$unit, failed$scenario, failed$message),
+                                            collapse = "\n"), call. = FALSE)
+  }
+  results
+}
+
+# ---- U1 fixtures ------------------------------------------------------------------
+
+fixture_sales_cfg <- function(start = "2015-01-01", end = "2018-12-31") {
+  cfg <- market_config("sales")
+  cfg$start <- as.Date(start)
+  cfg$end <- as.Date(end)
+  cfg$history_path <- "synthetic-sales-history.parquet"
+  cfg$mapping_path <- "synthetic-sales-mapping.parquet"
+  cfg
+}
+
+# Properties: A repeat (2015, 2018); B same-month repeat (Mar 2016); C three obs,
+# last with missing country; D single; E one obs outside the window (AE1); F contradictory
+# LSOA with the second row in Wales (a later England restriction would hide it);
+# G missing-to-observed LSOA (not a contradiction); H one nonpositive price.
+fixture_sales_history <- function() {
+  data.table::data.table(
+    house_id = sprintf("h%02d", 1:16),
+    postcode = c("AB1 2CD", "AB1 2CD", "AB1 2CE", "AB1 2CE", "AB1 2CF", "AB1 2CF", "AB1 2CF",
+                 "AB1 2CG", "AB1 2CH", "AB1 2CH", "AB1 2CI", "AB1 2CI", "AB1 2CJ", "AB1 2CJ",
+                 "AB1 2CK", "AB1 2CK"),
+    paon = c("1", "1", "2", "2", "3", "3", "3", "4", "5", "5", "6", "6", "7", "7", "8", "8"),
+    saon = c(NA, NA, "FLAT 1", "FLAT 1", NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+    street = c("HIGH ST", "HIGH ST", "HIGH ST", "HIGH ST", "MILL LANE", "MILL LANE", "MILL LANE",
+               "MILL LANE", "RIVER ROAD", "RIVER ROAD", "RIVER ROAD", "RIVER ROAD",
+               "CHURCH WAY", "CHURCH WAY", "CHURCH WAY", "CHURCH WAY"),
+    date_of_transfer = as.Date(c(
+      "2015-02-01", "2018-06-01", "2016-03-02", "2016-03-20", "2015-05-05", "2017-07-07", "2018-08-08",
+      "2017-01-01", "2014-01-01", "2016-06-06", "2015-09-09", "2018-09-09", "2015-10-10", "2017-10-10",
+      "2016-11-11", "2018-11-11"
+    )),
+    price = c(100000, 150000, 200000, 210000, 300000, 320000, 340000, 400000, 500000, 520000,
+              600000, 620000, 700000, 720000, 0, 820000),
+    property_type = c("T", "T", "F", "F", "D", "D", "D", "S", "T", "T", "T", "T", "S", "S", "D", "D"),
+    old_new = "N", duration = "F",
+    country = c(rep("England", 6), NA, rep("England", 4), "Wales", rep("England", 4)),
+    easting = c(400000, 400000, 400010, 400010, 400020, 400020, 400020, 400030, 400040, 400040,
+                400050, 400050, 400060, 400060, 400070, 400070),
+    northing = 300000,
+    lsoa = c(rep("E01000001", 10), "E01000010", "E01000099", NA, "E01000020", "E01000030", "E01000030"),
+    msoa = "E02000001",
+    quality = 1L
+  )
+}
+
+fixture_mapping_from_history <- function(history, cfg, exclude_ids = character()) {
+  keyed <- history[!house_id %chin% exclude_ids]
+  key <- build_address_key(keyed, repeat_key_config(cfg))
+  keyed <- keyed[!is.na(key)]
+  key <- key[!is.na(key)]
+  mapping <- data.table::data.table(house_id = keyed$house_id, repeat_id = hash_serialized_values(key))
+  mapping[, repeat_count := as.integer(.N), by = repeat_id]
+  mapping[]
+}
+
+fixture_manifest <- function(history, mapping, excluded_count, same_day_count) {
+  list(
+    repeat_manifest_version = "1", input_row_count = as.character(nrow(history)),
+    mapped_count = as.character(nrow(mapping)), excluded_count = as.character(excluded_count),
+    same_day_excluded_count = as.character(same_day_count), run_timestamp = "2026-01-01T00:00:00Z",
+    input_mtime = "2026-01-01T00:00:00Z", largest_group_size = "3"
+  )
+}
+
+FIXTURE_CHECKS <- list()
+FIXTURE_CHECKS$u1 <- list(
+
+  ae1_one_date_after_restriction_drops = function() {
+    cfg <- fixture_sales_cfg()
+    history <- fixture_sales_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    contract <- apply_sample_contract(history, mapping, "sales", cfg)
+    panel <- contract$panel
+    assert_true(!"h09" %in% panel$id, "h09 (2014) must be outside the requested window")
+    assert_true("h10" %in% panel$id, "h10 survives the common requirements before the repeat recount")
+    eligible <- recompute_repeats(panel)
+    assert_true(!"h10" %in% eligible$id, "AE1: property E keeps one distinct date and must drop from the repeat panel")
+    assert_true(all(c("h01", "h02") %in% eligible$id), "property A remains a repeat")
+    assert_true(all(c("h03", "h04") %in% eligible$id), "two dates within one calendar month meet the repeat criterion")
+    assert_true(!"h08" %in% eligible$id, "window single D drops at the repeat recount")
+    # C loses its missing-country row but keeps two dates; G and H lose one row and drop.
+    assert_true(all(c("h05", "h06") %in% eligible$id) && !"h07" %in% eligible$id, "C keeps two England dates")
+    assert_true(!any(c("h13", "h14", "h15", "h16") %in% eligible$id), "G and H retain one date each and drop")
+    assert_ledger_identity(contract$ledger)
+    TRUE
+  },
+
+  ledger_chains_and_names_steps = function() {
+    cfg <- fixture_sales_cfg()
+    history <- fixture_sales_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    ledger <- apply_sample_contract(history, mapping, "sales", cfg)$ledger
+    expected <- c("requested_dates", "mapped_rows", "address_key_verification", "geography_contradictions",
+                  "finite_positive_outcome", "england", "projected_coordinates", "lsoa_msoa_nonmissing")
+    assert_true(identical(ledger$step, expected), "ledger steps follow the plan order")
+    assert_true(ledger$n_rows_before[[1]] == nrow(history), "first ledger row starts from the full history")
+    assert_true(ledger$n_rows_removed[ledger$step == "requested_dates"] == 1, "one row outside the window")
+    assert_true(ledger$n_rows_removed[ledger$step == "geography_contradictions"] == 2, "F's two rows leave as a group")
+    assert_true(ledger$n_rows_removed[ledger$step == "finite_positive_outcome"] == 1, "one nonpositive price")
+    assert_true(ledger$n_rows_removed[ledger$step == "england"] == 1, "one missing-country row remains after F left")
+    assert_true(ledger$n_rows_removed[ledger$step == "lsoa_msoa_nonmissing"] == 1, "one missing LSOA")
+    assert_ledger_identity(ledger)
+    assert_true(all(ledger$market == "sales") && identical(ledger$step_order, seq_len(nrow(ledger))), "ledger keys")
+    TRUE
+  },
+
+  mapping_duplicate_id_fails_without_multiplying = function() {
+    cfg <- fixture_sales_cfg()
+    history <- fixture_sales_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    manifest <- fixture_manifest(history, mapping, 0, 0)
+    n_before <- nrow(history)
+    duplicated_mapping <- rbind(mapping, mapping[house_id == "h01"])
+    err <- assert_error_matching(
+      validate_mapping(history, duplicated_mapping, manifest, character(), "sales", cfg),
+      "duplicated transaction ids", "duplicated mapping id must fail validation"
+    )
+    assert_true(identical(err$details$n_duplicated_mapping_ids, 1L), "duplicate count is reported")
+    assert_true(nrow(history) == n_before, "history rows are untouched")
+    # A clean mapping passes and the candidate count equals the history count (no multiplication).
+    ok <- validate_mapping(history, mapping, manifest, character(), "sales", cfg)
+    assert_true(ok$status == "passed" && ok$n_history == n_before, "clean mapping validates")
+    contract <- apply_sample_contract(history, mapping, "sales", cfg)
+    assert_true(contract$ledger$n_rows_after[[2]] == n_before - 1, "mapped rows equal window rows: no multiplication or silent drop")
+    TRUE
+  },
+
+  mapping_id_absent_from_history_fails = function() {
+    cfg <- fixture_sales_cfg()
+    history <- fixture_sales_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    extra <- rbind(mapping, data.table::data.table(house_id = "h99", repeat_id = mapping$repeat_id[[1]], repeat_count = 1L))
+    manifest <- fixture_manifest(history, extra, 0, 0)
+    err <- assert_error_matching(
+      validate_mapping(history, extra, manifest, character(), "sales", cfg),
+      "absent from history", "mapping id absent from history must fail"
+    )
+    assert_true(identical(err$details$n_mapping_absent_from_history, 1L), "absent count is reported")
+    TRUE
+  },
+
+  stale_repeat_id_after_address_correction = function() {
+    cfg <- fixture_sales_cfg()
+    history <- fixture_sales_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    corrected <- data.table::copy(history)
+    corrected[house_id == "h02", street := "HIGH STREET"]   # id unchanged, key changes
+    err <- assert_error_matching(
+      verify_current_address_keys(corrected, mapping, "sales", cfg),
+      "mismatched repeat ids", "a corrected address must be caught as a stale mapping"
+    )
+    assert_true(identical(err$details$n_mismatched, 1L) && identical(err$details$n_missing_keys, 0L),
+                "exactly one mismatched row, no missing keys")
+    assert_true(identical(err$details$example_mismatched_ids, "h02"), "the corrected id is named")
+    # The mapping object is untouched (read-only verification, no rebuild).
+    assert_true(identical(mapping, fixture_mapping_from_history(history, cfg)), "mapping was not rebuilt")
+    # The uncorrected history passes.
+    ok <- verify_current_address_keys(history, mapping, "sales", cfg)
+    assert_true(ok$status == "passed" && ok$n_mismatched == 0L && ok$n_candidates == nrow(history), "unchanged history verifies")
+    TRUE
+  },
+
+  stale_repeat_id_on_mapped_singleton = function() {
+    cfg <- fixture_sales_cfg()
+    history <- fixture_sales_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    corrected <- data.table::copy(history)
+    corrected[house_id == "h08", paon := "4A"]   # D is a mapped single
+    err <- assert_error_matching(
+      verify_current_address_keys(corrected, mapping, "sales", cfg),
+      "mismatched repeat ids", "a corrected singleton must be caught"
+    )
+    assert_true(identical(err$details$example_mismatched_ids, "h08"), "the singleton id is named")
+    assert_true(err$details$n_window_singles >= 1L, "singles are counted among candidates")
+    # A missing current key (blank postcode) is also a failure.
+    blank <- data.table::copy(history)
+    blank[house_id == "h05", postcode := ""]
+    err2 <- assert_error_matching(
+      verify_current_address_keys(blank, mapping, "sales", cfg),
+      "missing current keys", "a missing current key must be caught"
+    )
+    assert_true(identical(err2$details$n_missing_keys, 1L), "one missing key")
+    # The contract stops at the verification step, before any row-level restriction.
+    assert_error_matching(
+      apply_sample_contract(corrected, mapping, "sales", cfg),
+      "address_keys", "the sample contract blocks the market on a stale mapping"
+    )
+    TRUE
+  },
+
+  geography_contradiction_detected_before_row_restriction = function() {
+    cfg <- fixture_sales_cfg()
+    history <- fixture_sales_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    history[, repeat_id := mapping$repeat_id[match(house_id, mapping$house_id)]]
+    geo <- check_group_geography_contradictions(history)
+    f_id <- history[house_id == "h11", repeat_id]
+    g_id <- history[house_id == "h13", repeat_id]
+    assert_true(identical(geo$group_ids, f_id), "only F is contradictory (distinct nonmissing LSOA and country)")
+    assert_true(geo$n_groups_lsoa == 1L && geo$n_groups_country == 1L && geo$n_groups_coordinates == 0L && geo$n_groups_msoa == 0L,
+                "contradiction types are counted")
+    assert_true(!g_id %in% geo$group_ids, "missing-to-observed LSOA is not a contradiction")
+    history[, repeat_id := NULL]
+    contract <- apply_sample_contract(history, mapping, "sales", cfg)
+    assert_true(!any(c("h11", "h12") %in% contract$panel$id), "F leaves as a whole group")
+    assert_true("h14" %in% contract$panel$id, "G's observed row survives the LSOA step")
+    # Had the England step run first, h12 would have gone and F would look consistent.
+    england_first <- history[country == "England"]
+    england_first[, repeat_id := mapping$repeat_id[match(house_id, mapping$house_id)]]
+    assert_true(length(check_group_geography_contradictions(england_first)$group_ids) == 0L,
+                "the England row restriction would have hidden the contradiction")
+    TRUE
+  },
+
+  same_day_and_unkeyed_reconcile_with_manifest = function() {
+    cfg <- fixture_sales_cfg()
+    history <- fixture_sales_history()
+    # Add an unkeyed row (blank postcode) and a same-day conflict pair at a new address.
+    extra <- history[house_id %in% c("h01", "h03", "h04")]
+    extra[, house_id := c("h90", "h91", "h92")]
+    extra[house_id == "h90", postcode := ""]
+    extra[house_id %in% c("h91", "h92"), `:=`(postcode = "AB1 2CZ", paon = "9", saon = NA_character_,
+                                              date_of_transfer = as.Date("2017-03-03"))]
+    history <- rbind(history, extra)
+    mapping <- fixture_mapping_from_history(history, cfg, exclude_ids = c("h90", "h91", "h92"))
+    manifest <- fixture_manifest(history, mapping, excluded_count = 1, same_day_count = 2)
+    ok <- validate_mapping(history, mapping, manifest, c("h91", "h92"), "sales", cfg)
+    assert_true(ok$reconciled && ok$n_history_absent_from_mapping == 3L && ok$n_unkeyed_recomputed == 1L &&
+                  ok$n_same_day_recomputed == 2L, "absent rows reconcile as unkeyed + same-day")
+    # Wrong manifest count.
+    bad_manifest <- fixture_manifest(history, mapping, excluded_count = 2, same_day_count = 2)
+    assert_error_matching(validate_mapping(history, mapping, bad_manifest, c("h91", "h92"), "sales", cfg),
+                          "do not reconcile", "a manifest count mismatch fails")
+    # Same-day review naming a row that is in the mapping.
+    assert_error_matching(validate_mapping(history, mapping, manifest, c("h91", "h01"), "sales", cfg),
+                          "do not reconcile", "a same-day id present in the mapping fails")
+    # Manifest row count disagreement with the history.
+    short_manifest <- manifest
+    short_manifest$input_row_count <- "5"
+    assert_error_matching(validate_mapping(history, mapping, short_manifest, c("h91", "h92"), "sales", cfg),
+                          "input_row_count", "manifest input_row_count must equal history rows")
+    TRUE
+  },
+
+  unreadable_input_and_missing_year_are_named = function() {
+    missing_path <- file.path(tempdir(), "no-such-history-2026.parquet")
+    err <- assert_error_matching(load_history("sales", path = missing_path),
+                                 "no-such-history-2026", "an unreadable input names the file")
+    assert_true(inherits(err, "market_blocked") && err$stage == "input", "unreadable input blocks the market")
+    assert_error_matching(capture_input_provenance("x", missing_path, "a"), "unreadable", "provenance refuses an unreadable file")
+    cfg <- fixture_sales_cfg(end = "2019-12-31")
+    history <- fixture_sales_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    err2 <- assert_error_matching(apply_sample_contract(history, mapping, "sales", cfg),
+                                  "2019", "a requested year without observations is named")
+    assert_true(grepl("synthetic-sales-history", conditionMessage(err2)), "the history file is named")
+    assert_true(inherits(err2, "market_blocked") && err2$stage == "coverage", "coverage failure blocks the market")
+    TRUE
+  },
+
+  change_flags_ignore_missing_to_observed = function() {
+    panel <- data.table::data.table(
+      repeat_id = c("a", "a", "b", "b", "c", "c"),
+      property_type = c("T", "T", "F", "S", NA, "D"),
+      bedrooms = c(2, NA, 3, 3, 1, 2)
+    )
+    flags <- freeze_change_flags(panel, c("property_type", "bedrooms"))
+    assert_true(identical(flags[repeat_id == "a", any_change], FALSE), "missing-to-observed is not a change")
+    assert_true(identical(flags[repeat_id == "b", change_property_type], TRUE) && identical(flags[repeat_id == "b", change_bedrooms], FALSE),
+                "two distinct observed types flag the type only")
+    assert_true(identical(flags[repeat_id == "c", change_property_type], FALSE) && identical(flags[repeat_id == "c", change_bedrooms], TRUE),
+                "NA-to-D is not a type change; 1-to-2 is a bedroom change")
+    TRUE
+  },
+
+  rental_unit_evidence_flags_conversion_break = function() {
+    dates <- as.Date(c(rep("2022-06-01", 50), rep("2023-06-01", 50)))
+    ids <- rep(sprintf("p%02d", 1:50), 2)
+    steady <- rental_unit_evidence(rep(c(200, 210), each = 50), dates, ids)
+    assert_true(steady$status == "consistent_within_property_comparable", "a 5% shift is not a unit break")
+    broken <- rental_unit_evidence(c(rep(200, 50), rep(200 * 52 / 12, 50)), dates, ids)
+    assert_true(broken$status == "blocked" && abs(broken$median_ratio_2023_2022 - 52 / 12) < 1e-9,
+                "a weekly-to-monthly jump is flagged")
+    TRUE
+  },
+
+  diagnostics_run_with_and_without_grouping = function() {
+    cfg <- fixture_sales_cfg()
+    history <- fixture_sales_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    panel <- recompute_repeats(apply_sample_contract(history, mapping, "sales", cfg)$panel)
+    d <- compute_observation_diagnostics(panel, "sales", NULL, cfg)
+    assert_true(d$n_groups == 3L && d$n_rows == 6L, "diagnostics see the eligible pre-band panel (A, B, C)")
+    assert_true(d$same_month$n_same_month_pairs == 1L, "B is the single same-month pair")
+    assert_true(d$extreme_ratio_total$n_pairs == 3L, "three consecutive pairs")
+    panel[, band := data.table::fifelse(repeat_id == panel$repeat_id[[1]], "near", "far")]
+    dg <- compute_observation_diagnostics(panel, "sales", "band", cfg)
+    assert_true(all(c("near", "far") %in% dg$outcome_by_year$band), "grouping column is honoured")
+    TRUE
+  }
+)
+
+fixture_results <- run_fixture_checks(FIXTURE_CHECKS)
+```
+
+```{r}
+#| label: estimate-inputs
+#| include: false
+#| eval: !expr params$reestimate
+
+# Readiness pass (U1). Later units fold this loop into the `estimate` chunk so
+# that each market's panel is used for exposure and fitting and then released.
+readiness <- list()
+observation_diagnostics <- list()
+exclusion_ledger <- new_ledger()
+input_provenance <- tibble::tibble()
+market_panels <- list()
+for (market in MARKETS) {
+  prepared <- prepare_market_panel(market)
+  readiness[[market]] <- prepared$readiness
+  observation_diagnostics[[market]] <- prepared$diagnostics
+  exclusion_ledger <- dplyr::bind_rows(exclusion_ledger, prepared$ledger)
+  input_provenance <- dplyr::bind_rows(input_provenance, prepared$provenance)
+  market_panels[[market]] <- prepared$panel
+  rm(prepared)
+  invisible(gc())
+}
+assert_ledger_identity(exclusion_ledger)
+```
+
+## Data readiness
+
+The inputs are the two long-run transaction histories and their repeat mappings.
+Every number below is computed at render time from those files; none is typed in.
+A market is marked *blocked* when a validation step fails, and its model cells
+are then reported as blocked rather than estimated on a substituted sample.
+
+```{r}
+#| label: readiness-status
+#| eval: !expr params$reestimate
+#| results: asis
+
+status_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
+  r <- readiness[[m]]
+  tibble::tibble(
+    market = m, status = r$status,
+    blocked_stage = r$blocked_stage %||% NA_character_,
+    reason = r$reason %||% NA_character_,
+    rows_pre_band = r$n_rows_pre_band %||% NA_real_,
+    groups_pre_band = r$n_groups_pre_band %||% NA_real_,
+    rows_repeat_eligible_pre_band = r$n_rows_repeat_eligible_pre_band %||% NA_real_,
+    groups_repeat_eligible_pre_band = r$n_groups_repeat_eligible_pre_band %||% NA_real_,
+    runtime_seconds = round(r$runtime_seconds, 1), peak_memory_mb = round(r$peak_memory_mb)
+  )
+}))
+knitr::kable(status_rows, format = "html", format.args = list(big.mark = ","),
+             caption = "Market readiness after the pre-band sample contract")
+```
+
+### Input provenance
+
+```{r}
+#| label: readiness-provenance
+#| eval: !expr params$reestimate
+#| results: asis
+
+knitr::kable(
+  dplyr::mutate(input_provenance, path = sub(paste0("^", here::here(), "/"), "", path)),
+  format = "html", format.args = list(big.mark = ","),
+  caption = "Consumed inputs: content hash (xxhash64 of the file), generation id from parquet metadata, rows, columns used; mtime is descriptive only"
+)
+```
+
+### Mapping validation
+
+```{r}
+#| label: readiness-mapping
+#| eval: !expr params$reestimate
+#| results: asis
+
+mapping_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
+  v <- readiness[[m]]$mapping_validation
+  if (is.null(v)) return(tibble::tibble(market = m, status = readiness[[m]]$status))
+  tibble::tibble(
+    market = m, status = v$status, history_rows = v$n_history, mapping_rows = v$n_mapping,
+    mapping_groups = v$n_groups_mapping,
+    mapping_ids_absent_from_history = v$n_mapping_absent_from_history,
+    history_rows_absent_from_mapping = v$n_history_absent_from_mapping,
+    unkeyed_manifest = v$n_unkeyed_manifest, unkeyed_recomputed = v$n_unkeyed_recomputed,
+    same_day_manifest = v$n_same_day_manifest, same_day_review_ids = v$n_same_day_review,
+    reconciled = v$reconciled, generation_id = v$generation_id
+  )
+}))
+knitr::kable(mapping_rows, format = "html", format.args = list(big.mark = ","),
+             caption = "Mapping integrity: unique string ids, one-to-one join, and reconciliation of rows absent from the mapping against the manifest and the same-day review")
+```
+
+### Current-address verification
+
+Address keys and expected repeat ids are recomputed read-only on every
+requested-window row that is in the mapping, singles included, with the
+production `build_address_key()` and `hash_serialized_values()` contract and the
+market's exact field order. Any missing current key or mismatched repeat id
+blocks the market; nothing is rebuilt or repaired here.
+
+```{r}
+#| label: readiness-address
+#| eval: !expr params$reestimate
+#| results: asis
+
+address_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
+  a <- readiness[[m]]$address_verification %||% readiness[[m]]$blocked_address_keys
+  if (is.null(a)) return(tibble::tibble(market = m, status = readiness[[m]]$status))
+  tibble::tibble(
+    market = m, status = a$status, candidates = a$n_candidates, candidate_groups = a$n_candidate_groups,
+    window_singles = a$n_window_singles, missing_current_keys = a$n_missing_keys,
+    mismatched_repeat_ids = a$n_mismatched, mismatched_groups = a$n_mismatched_groups
+  )
+}))
+knitr::kable(address_rows, format = "html", format.args = list(big.mark = ","),
+             caption = "KTD10 current-address verification on requested-window mapped candidates")
+
+geography_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
+  g <- readiness[[m]]$geography
+  if (is.null(g)) return(tibble::tibble(market = m))
+  tibble::tibble(market = m, groups_checked = g$n_groups_checked, rows_checked = g$n_rows_checked,
+                 contradictory_groups = g$n_groups_contradictory, country = g$n_groups_country,
+                 coordinates = g$n_groups_coordinates, lsoa = g$n_groups_lsoa, msoa = g$n_groups_msoa)
+}))
+knitr::kable(geography_rows, format = "html", format.args = list(big.mark = ","),
+             caption = "Contradictory nonmissing geography within candidate repeat groups (whole groups excluded)")
+```
+
+### Rental price units
+
+```{r}
+#| label: readiness-rental-units
+#| eval: !expr params$reestimate
+#| results: asis
+
+u <- readiness$rentals$unit_evidence
+if (!is.null(u)) {
+  unit_rows <- tibble::tibble(
+    item = c("Documented unit", "Vintage proxy", "Conversion applied", "Status",
+             "2023/2022 median ratio", "2023/2022 within-property ratio (properties listed in both years)",
+             "Weekly-to-monthly factor and tolerance band", "Reason"),
+    value = c(u$documented_unit, u$vintage_proxy, u$conversion_applied, u$status,
+              sprintf("%.4f", u$median_ratio_2023_2022),
+              sprintf("%.4f (n = %s)", u$within_property_ratio_2023_2022, format_count(u$n_within_property_pairs)),
+              sprintf("%.3f, flagged if the ratio lies within a factor of %.2f of it or its inverse", u$weekly_monthly_factor, u$tolerance),
+              ifelse(is.na(u$reason), "A constant unit is absorbed by property and calendar-month effects; no conversion is applied.", u$reason))
+  )
+  emit_table(knitr::kable(unit_rows, format = "html", caption = "Rental unit evidence"))
+  emit_table(knitr::kable(u$by_year, format = "html", digits = 2, format.args = list(big.mark = ","),
+                   caption = "listing_price by listing year (finite positive prices, requested window, mapped candidates)"))
+  emit_table(knitr::kable(u$by_month, format = "html", digits = 2, format.args = list(big.mark = ","),
+                   caption = "listing_price by month around the 2022/2023 vintage boundary"))
+} else {
+  cat("Rental unit evidence unavailable: ", readiness$rentals$reason, "\n")
+}
+```
+
+### Exclusion ledger
+
+Each row is one restriction in the plan's order; consecutive rows chain exactly.
+The distance-band restriction and the two-distinct-dates requirement follow in
+the exposure section.
+
+```{r}
+#| label: readiness-ledger
+#| eval: !expr params$reestimate
+#| results: asis
+
+knitr::kable(exclusion_ledger, format = "html", format.args = list(big.mark = ","),
+             caption = "Exclusion ledger through the common requirements (pre-band)")
+
+coverage_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) readiness[[m]]$coverage))
+if (nrow(coverage_rows) > 0L) {
+  coverage_wide <- tidyr::pivot_wider(coverage_rows, names_from = market, values_from = n_rows)
+  emit_table(knitr::kable(coverage_wide, format = "html", format.args = list(big.mark = ","),
+                          caption = "Requested-window history rows by year"))
+}
+```
+
+### Observation diagnostics
+
+Descriptive only: no diagnostic introduces an exclusion. Computed on the pre-band
+panel restricted to properties with at least two distinct dates; the exposure
+section repeats them by distance band.
+
+```{r}
+#| label: readiness-diagnostics
+#| eval: !expr params$reestimate
+#| results: asis
+
+for (m in MARKETS) {
+  d <- observation_diagnostics[[m]]
+  if (is.null(d)) { cat("\n\n", m, ": diagnostics unavailable (", readiness[[m]]$reason, ")\n\n", sep = ""); next }
+  cat("\n\n#### ", tools::toTitleCase(m), "\n\n", sep = "")
+  spatial <- d$spatial
+  headline <- tibble::tibble(
+    item = c("Rows", "Repeat properties", "Groups with more than 12 observations",
+             "Unique coordinates", "Unique postcodes", "Geography labels", "Postcode lookup (stated cleaning vintage)"),
+    value = c(format_count(d$n_rows), format_count(d$n_groups), format_count(d$n_large_groups),
+              format_count(spatial$n_unique_coordinates), format_count(spatial$n_unique_postcodes),
+              spatial$geography_vintage,
+              sprintf("%s (%s)", sub(paste0("^", here::here(), "/"), "", spatial$postcode_lookup_path),
+                      ifelse(spatial$postcode_lookup_exists, "present", "absent")))
+  )
+  emit_table(knitr::kable(headline, format = "html", caption = paste(tools::toTitleCase(m), "panel summary")))
+  emit_table(knitr::kable(d$group_sizes, format = "html", format.args = list(big.mark = ","), caption = "Observations per repeat group"))
+  emit_table(knitr::kable(d$gap_summary, format = "html", digits = 3, format.args = list(big.mark = ","), caption = "Inter-observation gaps (days) between consecutive observations"))
+  emit_table(knitr::kable(d$same_month, format = "html", digits = 4, format.args = list(big.mark = ","), caption = "Same-month consecutive repeats"))
+  emit_table(knitr::kable(d$outcome_by_year, format = "html", digits = 3, format.args = list(big.mark = ","), caption = "Log outcome by year"))
+  emit_table(knitr::kable(d$extreme_ratio_by_year, format = "html", digits = 4, format.args = list(big.mark = ","),
+                   caption = sprintf("Consecutive pairs with annualised price ratio above %s or below 1/%s, by year of the later observation",
+                                     CONFIG$extreme_annualized_price_ratio, CONFIG$extreme_annualized_price_ratio)))
+  if (!is.null(d$rented_fallback_by_year)) {
+    emit_table(knitr::kable(d$rented_fallback_by_year, format = "html", digits = 4, format.args = list(big.mark = ","),
+                     caption = "rented_est fallback share by year (rented missing, latest_to_rent used)"))
+  }
+  emit_table(knitr::kable(spatial$quality_distribution, format = "html", format.args = list(big.mark = ","), caption = "Coordinate quality (ONS gridind)"))
+}
+```
+
+## Exposure and attention
+
+Placeholder for U2: fixed site projection, nearest distance, bands, attention calendar.
+
+## Results
+
+Placeholder for U3: coefficient comparisons, design, full tables.
+
+## Provenance and reproduce
+
+```{r}
+#| label: fixture-summary
+#| results: asis
+
+knitr::kable(fixture_results[, c("unit", "scenario", "passed")], format = "html",
+             caption = "Fixture checks run at render time (synthetic data)")
+```
+
+From the project root, using the R 4.6.0 `rv` environment:
+
+```bash
+quarto render docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd --to html
+```
+
+To rebuild the presentation from the saved bundle without re-estimation:
+
+```bash
+quarto render docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd --to html -P reestimate:false
+```
