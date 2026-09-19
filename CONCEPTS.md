@@ -73,6 +73,19 @@ coast-distance threshold, with ever-observed bathing designation: coastal
 bathing, coastal not bathing, inland bathing, and inland not bathing.
 Designation does not determine coastal location.
 
+### Salience Group
+
+A subsample defined by one Local Salience characteristic, within which a
+property-price specification is re-estimated. Salience Groups can overlap and
+need not exhaust the transaction sample. **All Bathing** includes every
+location with positive bathing designation evidence, coastal or inland.
+**All Coastal** includes every location within the coast-distance threshold,
+including bathing locations. **All Inland** includes every location beyond
+that threshold, including bathing locations. Missing evidence cannot establish
+membership in the corresponding group. Group counts must not be added to
+obtain a total sample size. Unlike the exclusive coast/bathing Salience Strata,
+these groups do not form a partition.
+
 ### Spill Exposure
 A property's continuous measure of nearby storm-overflow activity — spill count and spill hours at the overflows within its Near-Overflow Radius — measured over a stated exposure window.
 

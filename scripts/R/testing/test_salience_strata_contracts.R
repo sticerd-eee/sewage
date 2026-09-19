@@ -4,7 +4,7 @@
 # ==============================================================================
 
 suppressPackageStartupMessages(library(dplyr))
-source(here::here("scripts", "R", "09_analysis", "utils_salience_strata.R"))
+source(here::here("scripts", "R", "testing", "salience_report_test_setup.R"))
 
 assert_equal <- function(actual, expected) {
   if (!isTRUE(all.equal(actual, expected, check.attributes = FALSE))) {

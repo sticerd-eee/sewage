@@ -3,8 +3,7 @@
 # Run from the repository root with plain Rscript.
 # ==============================================================================
 
-source(here::here("scripts", "R", "09_analysis", "05_news",
-                  "intensive_margin_salience_utils.R"))
+source(here::here("scripts", "R", "testing", "salience_report_test_setup.R"))
 
 # Preparation retains London until the stratum filter, takes the transaction
 # price, restricts exposure to 250m, and keeps zero exposure but never unknowns.

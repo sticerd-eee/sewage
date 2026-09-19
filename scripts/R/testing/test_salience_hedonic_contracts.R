@@ -1,8 +1,7 @@
 # ==============================================================================
 # Baseline Hedonic Salience Contracts -- run with plain Rscript from the root
 # ==============================================================================
-source(here::here("scripts", "R", "09_analysis", "02_hedonic",
-                  "hedonic_continuous_prior_salience.R"))
+source(here::here("scripts", "R", "testing", "salience_report_test_setup.R"))
 
 # The baseline retains zero exposure, London and missing coordinates. Both
 # count and hours must be observed, as in the parent, even for count models.

@@ -3,8 +3,7 @@
 # Run from the repository root with plain Rscript.
 # ==============================================================================
 
-source(here::here("scripts", "R", "09_analysis", "05_news",
-                  "extensive_margin_salience_utils.R"))
+source(here::here("scripts", "R", "testing", "salience_report_test_setup.R"))
 
 # A balanced design gives known Near and Near x Post effects. The disturbance
 # varies only over location/month and is orthogonal to both treatment regressors.

@@ -2,6 +2,11 @@
 
 Snapshot: 3 September 2026. Sales 2021–2024; rentals 2021–2023. Source analysis commit: `c58fa4cdccaf5efa3f5d0d107713b9d1219643e2` on `jo/site-heterogeneity`.
 
+Historical snapshot: the four-way exploration below now lives in the
+[executable salience report](2026-09-03-003-heterogeneity-by-salience-report.qmd).
+The five paper scripts now estimate overlapping All Bathing, All Coastal and
+All Inland groups and publish separate `_groups` outputs.
+
 ## Results at the 2 km coast rule
 
 - **Extensive Margin.** The sales Near × Post coefficient is -0.01200 (0.00991) for coastal bathing and -0.01245 (0.00532) for coastal not bathing. Both inland sales estimates are close to zero. For coastal not bathing rentals it is -0.00829 (0.00459). Parentheses contain standard errors.

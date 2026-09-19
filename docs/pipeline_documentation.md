@@ -150,185 +150,118 @@ after their parents, in this relative order (other analyses run between pairs):
 | `05_news/did_trends_prior_extensive.R` | `05_news/did_trends_prior_extensive_salience.R` |
 | `05_news/did_articles_prior_extensive.R` | `05_news/did_articles_prior_extensive_salience.R` |
 
-Each salience script can also be run directly with `Rscript` from the root.
-Its optional `--reproduce` flag disables the Salience Stratum filter and retains
-London to check the unrestricted model against the parent's saturated table
-column. This mode writes a separate reproduction model bundle and refreshes the
-reproduction CSV; it does not publish stratum tables or replace their model bundle.
-Normal runs perform this check before publishing the stratum results. The parent
-table must exist; coefficients and standard errors must match at published
-precision and N must match exactly.
+Each salience script also runs directly with `Rscript` from the root.
+The main runner estimates only the selected paper groups. The executable report
+owns historical reproductions and exploratory variants.
 
 ### Heterogeneity by Local Salience
 
-These scripts re-estimate the existing saturated specifications within Salience
-Strata, using the vocabulary in [CONCEPTS.md](../CONCEPTS.md) and the
-[locked plan](plans/2026-09-02-001-feat-heterogeneity-by-salience-regressions-plan.md).
-Sales cover 2021–2024 and rentals 2021–2023. No new data build is required.
+The paper uses **overlapping Salience Groups**, as confirmed in the
+[refactor plan](plans/2026-09-03-001-refactor-salience-report-and-paper-scripts-plan.md)
+and defined in [CONCEPTS.md](../CONCEPTS.md):
 
-| Analysis | Specification and classification |
+- **All Bathing:** positive bathing designation in any year 2021–2024, coastal or inland.
+- **All Coastal:** site coast distance at most 2 km, including bathing locations.
+- **All Inland:** site coast distance above 2 km, including bathing locations.
+
+Group counts must not be added together. Missing coast excludes Coastal/Inland
+membership but does not negate an observed bathing designation. Positive bathing
+evidence prevails over other unknown evidence; unresolved evidence does not
+establish Bathing membership. Coast distance follows the tidal Mean High Water
+line, not the open sea. Greater London is excluded using transaction `region`.
+
+#### Paper specifications and outputs
+
+All five scripts run sales 2021–2024 and rentals 2021–2023. Paths in the first
+column are relative to `scripts/R/09_analysis/`.
+
+| Script | Focal coefficient | Output prefix P |
+|---|---|---|
+| `05_news/did_trends_prior_extensive_salience.R` | Near × Post | `did_trends_prior_extensive_salience_groups` |
+| `05_news/did_articles_prior_extensive_salience.R` | Near × log cumulative articles | `did_articles_prior_extensive_salience_groups` |
+| `05_news/did_trends_prior_salience.R` | Weekly spill count × Post | `did_trends_prior_salience_groups` |
+| `05_news/did_articles_prior_salience.R` | Weekly spill count × log cumulative articles | `did_articles_prior_salience_groups` |
+| `02_hedonic/hedonic_continuous_prior_salience.R` | Weekly spill count | `hedonic_count_continuous_prior_salience_groups` |
+
+Extensive Near is 0–500 m inclusive; Far is >1,000 m and ≤2,000 m.
+Intensive and hedonic use properties within 250 m. Extensive and hedonic groups
+use the nearest Site Group; intensive groups use any bathing site and minimum
+coast distance in the 250 m companion. Attention models include LSOA and month
+FE, with LSOA-clustered SEs. Hedonic includes LSOA FE, no time FE, and
+heteroskedasticity-robust SEs; it retains the parent's joint count/hours
+availability restriction. All models retain parent property controls.
+Post begins in August 2022, inclusive; Articles is log cumulative UK coverage.
+
+For each prefix P:
+
+| Path | Contents |
 |---|---|
-| Extensive Margin, `did_{trends,articles}_prior_extensive_salience.R` | Log price on Near and Near × Public Attention, property controls, LSOA and month fixed effects; LSOA-clustered SEs. Near is 0–500 m inclusive; far is >1,000 m and ≤2,000 m. Coast/bathing uses the nearest Site Group; intensity uses the near property's 500 m companion. |
-| Intensive Margin, `did_{trends,articles}_prior_salience.R` | Log price on average weekly spill count and count × Public Attention within 250 m, property controls, LSOA and month fixed effects; LSOA-clustered SEs. Both classifications use the 250 m companion. |
-| Baseline hedonic, `hedonic_continuous_prior_salience.R` | Log price on average weekly spill count within 250 m, property controls and LSOA fixed effects, no time fixed effects; heteroskedasticity-robust SEs. Coast/bathing uses the nearest Site Group; no intensity split. |
+| `output/tables/P.tex` | Six columns: Inland, Coastal, Bathing water for each market. Same format as `did_trends_prior_extensive.tex`: three decimals, significance stars, SEs in parentheses, controls/FE rows, N and adjusted R-squared. Geography labels retain the overlapping All Inland/All Coastal/All Bathing definitions. |
+| `output/regs/P.rds` | `models[[market]][[group]]`, `counts`, `results` and `settings`. Group keys: `bathing`, `coastal`, `inland`. |
+| `output/logs/P_cell_counts.csv` | Before/after London counts, estimation input, final N, estimator removals and extensive support cells, keyed by market/group. |
+| `output/logs/P_results.csv` | Exposure/attention estimates, SEs, 95% CIs, p-values and N. |
 
-`trends` denotes the Post indicator beginning in August 2022, including that
-month, based on the Google Trends Search Interest peak. `articles` denotes log
-cumulative UK Media Article Count. Both measure Public Attention over time;
-Local Salience defines the cross-sectional subsamples. Spill hours, windowed
-articles and additional near-band or radius sweeps are outside this analysis.
-Controls are property type, new-build status and tenure for sales; property type,
-bedrooms and bathrooms for rentals. The baseline hedonic retains its parent's
-joint count/hours availability restriction even though only spill count is
-estimated. Intensive Margin requires observed spill count and its parent's
-coordinate, month, attention and price filters.
+Each script contains configuration, preparation, estimation, export and execution
+sections. Shared nearest-site selection, companion joins, group membership,
+sample audits and table formatting live in
+`scripts/R/utils/salience_group_utils.R`. Estimation remains in each script.
+No exploratory variants or historical model dependencies remain in these
+entry points. They do not accept the retired `--reproduce` option.
 
-#### Shared utility and input keys
+#### Inputs
 
-`scripts/R/09_analysis/utils_salience_strata.R` owns nearest-Site-Group selection,
-coast/bathing classification, radius-companion joins, London flags, ordered
-stratum filters and cell-count validation. It selects the minimum `distance_m`
-within 2,000 m and breaks ties by `site_id`, without a new spatial match.
-The nearest lookup is also used for the Intensive Margin's coverage audit,
-but does not define its regression strata.
+The data builders remain in layers 03 and 06. Analyses consume:
+`site_group_characteristics.parquet` (coast/designation by `site_id`);
+`spill_house_lookup.parquet` and `zoopla/spill_rental_lookup.parquet` (nearest
+Site Group within 2 km, ties broken by `site_id`); transaction prices, controls
+and regions from `house_price.parquet` and `zoopla/zoopla_rentals.parquet`;
+prior exposure from `cross_section/{sales,rentals}/prior_to_{sale,rental}/`;
+and the 250 m `prior_characteristics/` companions for intensive groups.
+All these paths are under `data/processed/`. Articles use
+`data/processed/lexis_nexis/search1_monthly.parquet`.
 
-Under `scripts/R/09_analysis/05_news/`, `extensive_margin_salience_utils.R` and
-`intensive_margin_salience_utils.R` prepare the parent samples, fit the models,
-and publish results for their two attention entry points.
-`salience_attention_table_utils.R` supplies their common table export and
-parent-reproduction checks. The hedonic entry point reuses the shared stratum
-utility and `utils_table_formatting.R`. Helpers are sourced, not runner entries.
+#### Executable report and historical outputs
 
-| Published input | Key and role |
-|---|---|
-| `data/processed/site_characteristics/site_group_characteristics.parquet` | `site_id`; Site Coast Distance and Ever-Observed Designated-Water Indicator (`bath_ever_2124`, `bath_unknown_2124`). |
-| `data/processed/spill_house_lookup.parquet` | `(house_id, site_id)`; candidate nearest Site Groups and `distance_m`. |
-| `data/processed/zoopla/spill_rental_lookup.parquet` | `(rental_id, site_id)`; candidate nearest Site Groups and `distance_m`. |
-| `data/processed/cross_section/sales/prior_characteristics/` | `(house_id, radius)`; `min_coast_dist_m`, `any_bath_2124`, `bath_unknown_2124`, `spill_count_band`. |
-| `data/processed/cross_section/rentals/prior_characteristics/` | `(rental_id, radius)`; same companion fields. |
-| `data/processed/house_price.parquet` | `house_id`; sales price, controls, location and `region`. |
-| `data/processed/zoopla/zoopla_rentals.parquet` | `rental_id`; asking rent, controls, location and `region`. |
-| `data/processed/cross_section/sales/prior_to_sale/` | `(house_id, radius)`; published Prior-to-Transaction Spill Exposure for the 250 m models. |
-| `data/processed/cross_section/rentals/prior_to_rental/` | `(rental_id, radius)`; corresponding rental exposure. |
-| `data/raw/google_trends/google_trends_uk.xlsx`, sheet `united_kingdom` | Monthly `Date` and `Year`; identifies the August 2022 peak. |
-| `data/processed/lexis_nexis/search1_monthly.parquet` | `month_id`; `article_count` accumulates into log cumulative articles. |
+[The QMD report](reports/2026-09-03-003-heterogeneity-by-salience-report.qmd)
+reruns all five paper scripts and embeds the full historical exploration.
+It renders definitions, coefficient plots, results, sample counts and audits:
 
-#### Stratum definitions and variants
+```bash
+quarto render docs/reports/2026-09-03-003-heterogeneity-by-salience-report.qmd --to html
+```
 
-The coast/bathing family crosses two independent flags, in this fixed order:
-`coastal_bathing`, `coastal_not_bathing`, `inland_bathing`,
-`inland_not_bathing`. Coastal means Site Coast Distance ≤2,000 m (nearest-site
-`distance_to_coast_m`, or companion `min_coast_dist_m`); inland means greater
-than the threshold. Bathing means a positive designation in any year of
-2021–2024 (`bath_ever_2124`, or `any_bath_2124` across nearby Site Groups).
-Inland freshwater bathing locations therefore remain inland bathing.
+For presentation updates, append `-P reestimate:false` to read the saved model
+bundles instead. The rendered report states which mode was used.
 
-Positive designation takes precedence over unknown evidence in other years or
-other nearby Site Groups. Unknown or missing evidence without a positive is
-unresolved (`bath_unresolved`); the headline counts it as not bathing. Published
-unknown flags remain available for audit. Missing coast distance is excluded
-from the coast/bathing family. Properties without a Site Group within 2 km are
-excluded from nearest-site strata.
+The original five prefixes are the paper prefixes with `_groups` removed.
+For those original prefixes, the report preserves:
 
-The intensity family uses the published Property Spill-Intensity Band:
-`spill_le_p50` (positive exposure at or below the positive-exposure median)
-and `spill_gt_p50` (above it). Cutoffs are fixed by the published market/radius
-companion and are not recomputed within the analysis sample. Unknown and zero
-bands enter neither stratum. Extensive Margin splits only the near group by its
-500 m band and uses the full far group in both regressions; those samples overlap
-in the far controls. A far property must have band `no_site`. Intensive Margin
-splits the 250 m sample by its own band, without shared far controls.
+- `output/regs/P.rds`: `models[[variant]][[market]][[stratum]]`, unrestricted
+  models, parent-reproduction checks, counts and variants.
+- `output/tables/P_{coast_bathing,intensity,robust_coast10km,robust_london,robust_dropunknown}.tex`:
+  five tables per attention specification; hedonic omits intensity.
+- `output/logs/P_{cell_counts,nearest_site_coverage,reproduction}.csv`:
+  sample support, characteristic coverage and unrestricted reproduction.
 
-Greater London (`region == "London"`) is dropped in all headline and intensity
-results. Site Coast Distance is measured to the tidal Mean High Water line,
-which makes the tidal Thames through London read as coast. Dropping London
-addresses that specific concern; it does not redefine distance as open-sea
-proximity or remove every tidal-river location elsewhere.
+The four-way family is coastal bathing, coastal not bathing, inland bathing,
+inland not bathing. Intensity uses published positive-exposure median bands at
+500 m for extensive Near and 250 m for intensive; zero and unknown bands are
+excluded. Both extensive intensity comparisons contain the full Far group.
+Robustness changes the coast rule to 10 km, retains London, or drops unresolved
+bathing evidence. Historical strata retain their original common missing-coast
+exclusion. Before/After counts describe the hypothetical London drop; final N
+follows the actual estimation policy.
 
-| Variant key | Coast rule | London | Unresolved bathing evidence | Strata |
-|---|---|---|---|---|
-| `coast_bathing` | 2,000 m | Dropped | Counts as not bathing | Four coast/bathing strata |
-| `intensity` | Not used for selection | Dropped | Not used for selection | Two intensity strata; attention analyses only |
-| `robust_coast10km` | 10,000 m | Dropped | Counts as not bathing | Four coast/bathing strata |
-| `robust_london` | 2,000 m | Retained | Counts as not bathing | Four coast/bathing strata |
-| `robust_dropunknown` | 2,000 m | Dropped | Excluded unless a positive is observed | Four coast/bathing strata |
+The report also preserves `salience_three_way.rds`, five
+`salience_three_way_*.tex` tables and their result/cell-count/reproduction CSVs.
+These use the **earlier exclusive** grouping: pooled Bathing, Coastal
+non-bathing and Inland non-bathing. They are not the overlapping paper groups.
 
-#### Published tables: complete path inventory
-
-Each table contains both markets and one saturated model per Salience Stratum.
-Its column key is `(market, stratum)`; the file identifies analysis, attention
-measure and variant. Markets are ordered sales, rentals; strata use the order
-above. The headline rows are Near × Attention, weekly spill count × Attention,
-or weekly spill count for the baseline hedonic; each column also reports its
-standard error and final estimation N.
-
-| Output path | Variant key |
-|---|---|
-| `output/tables/did_trends_prior_extensive_salience_coast_bathing.tex` | `coast_bathing` |
-| `output/tables/did_trends_prior_extensive_salience_intensity.tex` | `intensity` |
-| `output/tables/did_trends_prior_extensive_salience_robust_coast10km.tex` | `robust_coast10km` |
-| `output/tables/did_trends_prior_extensive_salience_robust_london.tex` | `robust_london` |
-| `output/tables/did_trends_prior_extensive_salience_robust_dropunknown.tex` | `robust_dropunknown` |
-| `output/tables/did_articles_prior_extensive_salience_coast_bathing.tex` | `coast_bathing` |
-| `output/tables/did_articles_prior_extensive_salience_intensity.tex` | `intensity` |
-| `output/tables/did_articles_prior_extensive_salience_robust_coast10km.tex` | `robust_coast10km` |
-| `output/tables/did_articles_prior_extensive_salience_robust_london.tex` | `robust_london` |
-| `output/tables/did_articles_prior_extensive_salience_robust_dropunknown.tex` | `robust_dropunknown` |
-| `output/tables/did_trends_prior_salience_coast_bathing.tex` | `coast_bathing` |
-| `output/tables/did_trends_prior_salience_intensity.tex` | `intensity` |
-| `output/tables/did_trends_prior_salience_robust_coast10km.tex` | `robust_coast10km` |
-| `output/tables/did_trends_prior_salience_robust_london.tex` | `robust_london` |
-| `output/tables/did_trends_prior_salience_robust_dropunknown.tex` | `robust_dropunknown` |
-| `output/tables/did_articles_prior_salience_coast_bathing.tex` | `coast_bathing` |
-| `output/tables/did_articles_prior_salience_intensity.tex` | `intensity` |
-| `output/tables/did_articles_prior_salience_robust_coast10km.tex` | `robust_coast10km` |
-| `output/tables/did_articles_prior_salience_robust_london.tex` | `robust_london` |
-| `output/tables/did_articles_prior_salience_robust_dropunknown.tex` | `robust_dropunknown` |
-| `output/tables/hedonic_count_continuous_prior_salience_coast_bathing.tex` | `coast_bathing` |
-| `output/tables/hedonic_count_continuous_prior_salience_robust_coast10km.tex` | `robust_coast10km` |
-| `output/tables/hedonic_count_continuous_prior_salience_robust_london.tex` | `robust_london` |
-| `output/tables/hedonic_count_continuous_prior_salience_robust_dropunknown.tex` | `robust_dropunknown` |
-
-#### Model bundles and audit outputs
-
-The following five exact prefixes each generate all four normal-run paths in
-the second table (20 files); the fifth path is written only by `--reproduce`.
-
-| Analysis / attention | Prefix `P` |
-|---|---|
-| Extensive Margin / Post | `did_trends_prior_extensive_salience` |
-| Extensive Margin / articles | `did_articles_prior_extensive_salience` |
-| Intensive Margin / Post | `did_trends_prior_salience` |
-| Intensive Margin / articles | `did_articles_prior_salience` |
-| Baseline hedonic | `hedonic_count_continuous_prior_salience` |
-
-| Path, substituting each prefix for `P` | Key and contents |
-|---|---|
-| `output/regs/P.rds` | `models[[variant]][[market]][[stratum]]`: compact `fixest` models with stored inference; also `unrestricted[[market]]`, `reproduction`, `counts`, `variants`. |
-| `output/logs/P_cell_counts.csv` | `(market, variant, stratum)`; stratum family, London policy, before/after counts, estimation input and final N, estimator removals, exclusions and missing-coast share. Attention CSVs also carry `attention`. |
-| `output/logs/P_nearest_site_coverage.csv` | `market`; counts and characteristic-match shares over lookup pairs and properties within 2 km, before analysis-sample filters. |
-| `output/logs/P_reproduction.csv` | `(market, term)`; unrestricted estimate, SE and N compared with the parent reference; attention CSVs also carry `attention`. |
-| `output/regs/P_reproduction.rds` | Reproduction-only bundle; `unrestricted[[market]]` and reproduction audit, with no fitted stratum models. |
-
-`n_before_london_drop` and `n_after_london_drop` always describe the hypothetical
-London exclusion, including for `robust_london`. `n_estimation` follows the
-selected policy, and `nobs` is the model's final N after estimator removals.
-Extensive-margin logs also contain near/far counts and, for Post, all four
-near/far × pre/post cells, separately after dropping London and under the actual
-estimation policy. Empty strata or missing required support are hard failures.
-`nearest_site_missing_coast_share` uses distinct nearest Site Groups represented
-in the prepared market sample before the London drop; it is not a transaction
-share. Exclusion totals such as `n_unclassified` are repeated across stratum
-rows and must not be summed. Intensive-margin logs additionally record missing
-companions/coast, unresolved bathing and unknown/zero/no-site/missing bands;
-hedonic logs additionally record missing nearest coast and unresolved bathing.
-
-The [results memo](reports/2026-09-03-001-heterogeneity-by-salience-results-memo.md)
-collects the 176 headline coefficients, SEs and counts from these 24 tables'
-saved models and logs, including robustness results. It is a dated snapshot,
-not automatically rewritten by the runner. After a new analysis run, refresh it
-from the saved artifacts and reconcile its N and coefficients with the logs and
-tables; do not refit models merely to edit the memo.
+The [four-way memo](reports/2026-09-03-001-heterogeneity-by-salience-results-memo.md)
+and [exclusive three-way memo](reports/2026-09-03-002-salience-three-way-results.md)
+remain dated historical snapshots. Contract tests source the QMD's definition
+chunks through `scripts/R/testing/salience_report_test_setup.R` without fitting
+the full model grid.
 
 ## Detailed Execution Order
 

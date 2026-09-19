@@ -106,7 +106,8 @@ fit_tblr_latex <- function(latex,
     latex <- sub("note\\{\\}=\\{\\s*\\},", notes, latex)
   }
 
-  latex <- gsub("-0\\.000", "0.000", latex)
+  # Strip only rounded negative zero; preserve small negatives at higher precision.
+  latex <- gsub("-(0\\.0+)(?![0-9])", "\\1", latex, perl = TRUE)
 
   latex
 }
