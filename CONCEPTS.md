@@ -177,6 +177,12 @@ The maximal retained span of cleaned transactions (from 2014, the earliest renta
 
 ## Public Attention Area
 
+### Annual Near–Far Price Profile
+A descriptive path of the conditional price gap between properties near and farther from storm overflows, expressed relative to a stated reference year. It describes longer-run relative price changes without assigning them to a single intervention or identifying a causal effect of monitoring or public attention.
+
+### Price-Profile Reference Year
+The calendar year against which an Annual Near–Far Price Profile is expressed, with its contrast normalised to zero. Choosing another reference year changes the comparison benchmark, not the treatment date or the underlying fitted price path when the sample and specification are unchanged.
+
 ### Public Attention
 The project-level construct for how salient sewage spills are to the public over time, proxied by search interest and media coverage rather than by physical spill activity itself.
 

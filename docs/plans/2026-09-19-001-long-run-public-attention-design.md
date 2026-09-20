@@ -433,3 +433,15 @@ Rental geography counts precede explicit country, outcome, control and FE-suppor
 - `docs/solutions/developer-experience/exploratory-extensive-margin-news-notebook-plot-first-comparison-refactor-20260319.md`: plot-first comparisons with audit tables.
 - `docs/solutions/logic-errors/arrow-altrep-data-table-join-nondeterminism.md`: materialize Arrow vectors before mutable joins.
 - User-supplied Overleaf `short_pres.tex`, slide “Does national public attention to sewage widen the near–far price gap?”, and `_main.tex` / `04_causal_impacts.tex`: extensive-margin specification and information-shock motivation. These contextual documents are not execution dependencies.
+
+## Agreed display extension — 20 September 2026
+
+The follow-up design discussion settled on a descriptive view of longer-run near–far price changes. Retain every existing main analysis, sample, fixed-effect specification, 2019-reference profile and joint test. Add two annual-profile figures, referenced to 2014 and 2021, each with the existing four-panel structure (sales/rentals × the two fixed-effect specifications). Use pointwise 95% intervals and matching vertical scales within each market across the two additional figures.
+
+2014 is the beginning of the observed sample, not a pre-policy baseline: the sector-wide monitoring instruction dates to [18 July 2013](https://assets.publishing.service.gov.uk/media/5a7ef106ed915d74e622771a/letter_2013_07_18_RB_to_CEOs_-_CSO_spills__2_.pdf). 2021 is the last full calendar year before August 2022, not an assumed onset of public awareness. The original 2019 figure already supplies the intermediate comparison; no duplicate 2019 figure is needed.
+
+Compute each added view from the saved annual-profile coefficients and full LSOA-clustered covariance matrix: the new contrast is `beta_year - beta_reference`, with variance `V_year,year + V_reference,reference - 2 V_year,reference`. The original omitted year's coefficient and covariance are zero by normalization. Use the saved model-specific t degrees of freedom. The new reference point is normalized to zero; missing coefficients or covariance must remain unavailable. These are display transformations, not new treatment-effect estimates, and require neither a staggered-adoption package nor re-estimation.
+
+Export `annual_profiles_reference_2014.pdf` and `annual_profiles_reference_2021.pdf` alongside the original figures on both fresh and validated cached renders. Check the transformed coefficients and intervals against independent synthetic-data refits, confirm matching figure scales, and render the report from its existing validated bundle.
+
+Validation: `Rscript scripts/R/testing/test_long_run_profile_references.R` checks both fixed-effect structures against direct refits at three reference years, shared scales, profile immutability and unavailable-reference/covariance handling. Pre-existing formatting changes had invalidated the exact-source cache, so the full model grid was refreshed once; all 40 scalar cells, four original annual profiles and joint tests matched the previous bundle (numerical tolerance `1e-8`), with identical input, settings and package fingerprints.
