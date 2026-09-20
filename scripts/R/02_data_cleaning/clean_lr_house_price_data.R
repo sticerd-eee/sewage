@@ -2,12 +2,19 @@
 # HM Land Registry Price Paid Data Cleaner
 # ==============================================================================
 #
-# Purpose: Clean one same-vintage 2014-2024 Land Registry download, enrich it
-#          with postcode attributes, assign content-stable transaction-grain
-#          `house_id` values, and write paired candidate datasets. The
-#          2021-2024 study file is always derived from the long-run table.
+# Purpose: Clean the 1995-2024 Land Registry Price Paid history from an explicit
+#          year-to-source manifest, enrich it with postcode attributes, assign
+#          content-stable transaction-grain `house_id` values, and write paired
+#          candidate datasets. The 2021-2024 study file is always derived from
+#          the long-run table.
+#
+# Source manifest (one validated source set per year; never both):
+#   - 1995-2013: the two split files pp-YYYY-part1.csv and pp-YYYY-part2.csv
+#   - 2014-2024: the exact complete annual files pp-YYYY.csv consumed since the
+#     2026-08-14 vintage. Split files that coexist for 2014-2017 are never read.
 #
 # Inputs:
+#   - data/raw/lr_house_price/pp-1995-part1.csv ... pp-2013-part2.csv
 #   - data/raw/lr_house_price/pp-2014.csv ... pp-2024.csv
 #   - data/raw/uk_postcodes/2602_uk_postcodes.csv
 #
@@ -49,8 +56,13 @@ LOG_FILE <- here::here("output", "log", "clean_lr_house_price_data.log")
 
 check_required_packages(REQUIRED_PACKAGES)
 
-CLEANING_MANIFEST_VERSION <- "1"
-LR_EXPECTED_YEARS <- 2014:2024
+CLEANING_MANIFEST_VERSION <- "2"
+# Years served by the two-part split download and years served by the exact
+# complete annual file. Together they are the locked long-run window.
+LR_SPLIT_YEARS <- 1995:2013
+LR_COMPLETE_YEARS <- 2014:2024
+LR_EXPECTED_YEARS <- c(LR_SPLIT_YEARS, LR_COMPLETE_YEARS)
+LR_SPLIT_PARTS <- c("part1", "part2")
 CLEANING_METADATA_REQUIRED_KEYS <- c(
   "cleaning_manifest_version",
   "cleaning_run_stamp",
@@ -118,29 +130,66 @@ initialise_logging <- function() {
 # Data Loading and Validation
 ############################################################
 
-#' Validate the complete annual LR input set before reading any file
-#' @return Named character vector of input paths in configured year order
+#' The explicit year-to-source manifest for the locked long-run window
+#'
+#' One row per source file. Split years list both parts; complete years list
+#' exactly the complete annual file. A year never appears under both kinds, so
+#' the overlapping 2014-2017 split files can never be consumed alongside their
+#' complete files. Existence is not checked here: see
+#' `validate_expected_lr_files()`.
+#' @return Tibble with year, source_id, kind, file and path
+lr_source_manifest <- function(input_dir, years = LR_EXPECTED_YEARS) {
+  years <- as.integer(years)
+  if (!identical(years, as.integer(LR_EXPECTED_YEARS))) {
+    stop(
+      "Land Registry cleaning requires the exact ",
+      min(LR_EXPECTED_YEARS), "-", max(LR_EXPECTED_YEARS),
+      " long-run window.",
+      call. = FALSE
+    )
+  }
+  rows <- lapply(years, function(year) {
+    if (year %in% LR_SPLIT_YEARS) {
+      files <- sprintf("pp-%d-%s.csv", year, LR_SPLIT_PARTS)
+      kind <- "split_part"
+    } else {
+      files <- sprintf("pp-%d.csv", year)
+      kind <- "complete_annual"
+    }
+    tibble::tibble(
+      year = year,
+      source_id = sub("\\.csv$", "", files),
+      kind = kind,
+      file = files,
+      path = file.path(input_dir, files)
+    )
+  })
+  manifest <- dplyr::bind_rows(rows)
+  if (anyDuplicated(manifest$file) || anyDuplicated(manifest$source_id)) {
+    stop("Land Registry source manifest lists a file twice.", call. = FALSE)
+  }
+  kinds_per_year <- tapply(manifest$kind, manifest$year, function(k) length(unique(k)))
+  if (any(kinds_per_year != 1L)) {
+    stop("A Land Registry year cannot mix split and complete sources.", call. = FALSE)
+  }
+  manifest
+}
+
+#' Validate that every manifest source exists before reading any file
+#' @return The manifest, with rows in configured year (and part) order
 validate_expected_lr_files <- function(input_dir, years) {
-  if (!identical(as.integer(years), as.integer(LR_EXPECTED_YEARS))) {
+  manifest <- lr_source_manifest(input_dir, years)
+  missing <- manifest$file[!file.exists(manifest$path)]
+  if (length(missing) > 0L) {
     stop(
-      "Land Registry cleaning requires the exact 2014-2024 annual window.",
+      "Land Registry source manifest is incomplete. Missing file(s): ",
+      paste(missing, collapse = ", "),
+      ". Expected pp-1995-part1.csv/pp-1995-part2.csv through pp-2013-part2.csv ",
+      "and the complete annual files pp-2014.csv through pp-2024.csv.",
       call. = FALSE
     )
   }
-  expected_names <- sprintf("pp-%d.csv", years)
-  expected_paths <- file.path(input_dir, expected_names)
-  missing_names <- expected_names[!file.exists(expected_paths)]
-
-  if (length(missing_names) > 0L) {
-    stop(
-      "Land Registry same-vintage input is incomplete. Missing exact annual file(s): ",
-      paste(missing_names, collapse = ", "),
-      ". Expected pp-2014.csv through pp-2024.csv from one download session.",
-      call. = FALSE
-    )
-  }
-
-  stats::setNames(expected_paths, as.character(years))
+  manifest
 }
 
 parse_lr_transfer_date <- function(x) {
@@ -177,16 +226,105 @@ load_year_data <- function(year, file_path) {
   rio::import(file_path, setclass = "tbl")
 }
 
-#' Load only a path set already validated by `validate_expected_lr_files`
-load_all_years <- function(input_paths, base_year = CONFIG$base_year) {
-  expected_names <- sprintf("pp-%s.csv", names(input_paths))
-  if (!identical(basename(unname(input_paths)), expected_names)) {
-    stop("Land Registry input paths must be the validated exact annual files.", call. = FALSE)
+#' Load and clean every source of one manifest year
+#'
+#' Each source is cleaned and validated against its own manifest row before
+#' the parts of a split year are stacked, so a wrong-year or duplicated source
+#' is named individually. Returns the cleaned rows of that year only.
+load_manifest_year <- function(manifest, year, base_year = CONFIG$base_year) {
+  rows <- manifest[manifest$year == as.integer(year), , drop = FALSE]
+  if (nrow(rows) == 0L) {
+    stop("Year ", year, " is not in the Land Registry source manifest.", call. = FALSE)
   }
-
-  purrr::map2_dfr(names(input_paths), unname(input_paths), function(year, path) {
-    clean_data(load_year_data(as.integer(year), path), as.integer(year), base_year)
+  parts <- lapply(seq_len(nrow(rows)), function(i) {
+    cleaned <- clean_data(load_year_data(as.integer(year), rows$path[[i]]), as.integer(year), base_year)
+    validate_lr_year_source(cleaned, year, rows$source_id[[i]])
+    cleaned
   })
+  combined <- dplyr::bind_rows(parts)
+  # Split parts of one year must not overlap.
+  duplicate_count <- sum(duplicated(combined$transaction_id))
+  if (duplicate_count > 0L) {
+    stop(
+      "Land Registry sources for ", year, " (", paste(rows$source_id, collapse = ", "),
+      ") share ", duplicate_count, " transaction_id value(s).",
+      call. = FALSE
+    )
+  }
+  combined
+}
+
+#' Distinct cleaned postcodes and row counts across every manifest source
+#'
+#' A cheap first pass over the postcode column alone: the postcode lookup is
+#' resolved once for the union of postcodes (per-postcode enrichment does not
+#' depend on which rows request it), and the per-source row counts give the
+#' long-run source row count before the first full source is read.
+scan_manifest_postcodes <- function(manifest) {
+  postcode_column <- match("postcode", CONFIG$column_name_mapping)
+  scans <- lapply(seq_len(nrow(manifest)), function(i) {
+    column <- data.table::fread(
+      manifest$path[[i]],
+      select = postcode_column,
+      header = FALSE,
+      colClasses = "character",
+      showProgress = FALSE
+    )[[1L]]
+    list(
+      n_rows = length(column),
+      postcodes = unique(stringr::str_remove_all(column, stringr::fixed(" ")))
+    )
+  })
+  list(
+    source_row_counts = stats::setNames(
+      vapply(scans, function(x) x$n_rows, numeric(1)),
+      manifest$source_id
+    ),
+    postcodes = unique(unlist(lapply(scans, function(x) x$postcodes), use.names = FALSE))
+  )
+}
+
+#' Fail hard when one cleaned source disagrees with its manifest year
+#'
+#' Every source file must carry non-missing, non-empty, within-file unique
+#' transaction ids and parseable transfer dates that all fall in the year the
+#' manifest declares for it. Global uniqueness across sources is checked
+#' separately once every source has been read.
+validate_lr_year_source <- function(data, year, source_id) {
+  transaction_id <- as.character(data$transaction_id)
+  if (anyNA(transaction_id) || any(!nzchar(trimws(transaction_id)))) {
+    stop(
+      "Land Registry source ", source_id,
+      " contains missing or empty transaction_id values.",
+      call. = FALSE
+    )
+  }
+  duplicate_count <- sum(duplicated(transaction_id))
+  if (duplicate_count > 0L) {
+    stop(
+      "Land Registry source ", source_id, " contains ", duplicate_count,
+      " duplicated transaction_id value(s).",
+      call. = FALSE
+    )
+  }
+  transfer_year <- lubridate::year(data$date_of_transfer)
+  if (anyNA(transfer_year)) {
+    stop(
+      "Land Registry source ", source_id, " has ", sum(is.na(transfer_year)),
+      " unparseable date_of_transfer value(s).",
+      call. = FALSE
+    )
+  }
+  outside <- transfer_year != as.integer(year)
+  if (any(outside)) {
+    stop(
+      "Land Registry source ", source_id, " has ", sum(outside),
+      " row(s) dated outside its manifest year ", year,
+      " (observed ", min(transfer_year), "-", max(transfer_year), ").",
+      call. = FALSE
+    )
+  }
+  invisible(data)
 }
 
 #' Fail hard on source identity and long-run date-window violations
@@ -408,6 +546,149 @@ write_lr_candidates <- function(
   ))
 }
 
+# The persisted long-run schema. Every yearly table is cast to it before it is
+# appended, so per-file type inference (a year whose secondary address is
+# always empty, say) cannot change the column types of the candidate.
+lr_output_schema <- function() {
+  utf8_cols <- function(names) lapply(stats::setNames(names, names), function(x) arrow::utf8())
+  arrow::schema(c(
+    list(house_id = arrow::utf8(), price = arrow::int32(),
+         date_of_transfer = arrow::timestamp("us", timezone = "UTC")),
+    utf8_cols(c(
+      "postcode", "property_type", "old_new", "duration", "paon", "saon",
+      "street", "locality", "town_city", "district", "county", "ppd_category",
+      "record_status"
+    )),
+    list(qtr_id = arrow::float64(), month_id = arrow::float64(),
+         quality = arrow::int32(), easting = arrow::int32(),
+         northing = arrow::int32(), longitude = arrow::float64(),
+         latitude = arrow::float64()),
+    utf8_cols(c(
+      "country", "nhs_ha", "region", "lsoa", "msoa", "admin_county", "admin_ward"
+    ))
+  ))
+}
+
+#' Cast one cleaned yearly frame to the persisted long-run schema
+cast_lr_output <- function(data, schema = lr_output_schema()) {
+  missing <- setdiff(names(schema), names(data))
+  extra <- setdiff(names(data), names(schema))
+  if (length(missing) > 0L || length(extra) > 0L) {
+    stop(
+      "Cleaned Land Registry columns do not match the long-run schema",
+      if (length(missing) > 0L) paste0("; missing: ", paste(missing, collapse = ", ")),
+      if (length(extra) > 0L) paste0("; unexpected: ", paste(extra, collapse = ", ")),
+      ".",
+      call. = FALSE
+    )
+  }
+  arrow::Table$create(as.data.frame(data)[names(schema)])$cast(schema)
+}
+
+#' Open the paired streaming candidate writers
+#'
+#' Yearly tables are appended in manifest order to staged files beside the
+#' candidate paths; `close()` promotes the staged files onto the candidate
+#' paths only after every year was written, and `abandon()` removes them.
+open_lr_candidate_writers <- function(
+    long_run_path,
+    study_path,
+    source_row_count,
+    run_stamp = new_cleaning_run_stamp(),
+    long_run_years = CONFIG$years,
+    study_years = CONFIG$study_years) {
+  assert_candidate_output_path(long_run_path)
+  assert_candidate_output_path(study_path)
+  if (identical(normalizePath(long_run_path, mustWork = FALSE),
+                normalizePath(study_path, mustWork = FALSE))) {
+    stop("Long-run and study candidates must use distinct paths.", call. = FALSE)
+  }
+  metadata <- list(
+    long_run = cleaning_metadata(run_stamp, "sales", "long_run", long_run_years,
+                                 source_row_count, "raw_annual_files"),
+    study = cleaning_metadata(run_stamp, "sales", "study", study_years,
+                              source_row_count, "long_run")
+  )
+  targets <- c(long_run = long_run_path, study = study_path)
+  schema <- lr_output_schema()
+  staged <- vapply(names(targets), function(role) {
+    dir.create(dirname(targets[[role]]), recursive = TRUE, showWarnings = FALSE)
+    tempfile(
+      pattern = paste0(".", basename(targets[[role]]), "-"),
+      tmpdir = dirname(targets[[role]]),
+      fileext = ".parquet"
+    )
+  }, character(1))
+  sinks <- lapply(staged, arrow::FileOutputStream$create)
+  writers <- lapply(names(targets), function(role) {
+    arrow::ParquetFileWriter$create(
+      schema$WithMetadata(metadata[[role]]),
+      sinks[[role]],
+      properties = arrow::ParquetWriterProperties$create(names(schema))
+    )
+  })
+  names(writers) <- names(targets)
+  state <- new.env()
+  state$rows <- c(long_run = 0, study = 0)
+  state$open <- TRUE
+  write_year <- function(outputs, year) {
+    if (!isTRUE(state$open)) stop("Candidate writers are closed.", call. = FALSE)
+    long_table <- cast_lr_output(outputs$long_run, schema)
+    writers$long_run$WriteTable(long_table, chunk_size = 1000000L)
+    state$rows[["long_run"]] <- state$rows[["long_run"]] + long_table$num_rows
+    if (as.integer(year) %in% study_years) {
+      study_table <- cast_lr_output(outputs$study, schema)
+      if (study_table$num_rows != long_table$num_rows) {
+        stop("Study rows for ", year, " must equal the long-run rows of that year.", call. = FALSE)
+      }
+      writers$study$WriteTable(study_table, chunk_size = 1000000L)
+      state$rows[["study"]] <- state$rows[["study"]] + study_table$num_rows
+    } else if (nrow(outputs$study) != 0L) {
+      stop("Study rows outside the study years for ", year, ".", call. = FALSE)
+    }
+    invisible(state$rows)
+  }
+  finish <- function() {
+    for (role in names(writers)) {
+      writers[[role]]$Close()
+      sinks[[role]]$close()
+    }
+    state$open <- FALSE
+  }
+  abandon <- function() {
+    if (isTRUE(state$open)) try(finish(), silent = TRUE)
+    unlink(staged)
+    invisible(NULL)
+  }
+  close <- function() {
+    finish()
+    if (state$rows[["long_run"]] != source_row_count) {
+      unlink(staged)
+      stop(
+        "Long-run candidate rows (", state$rows[["long_run"]],
+        ") differ from the manifest source rows (", source_row_count, ").",
+        call. = FALSE
+      )
+    }
+    for (role in names(targets)) {
+      if (!file.rename(staged[[role]], targets[[role]])) {
+        unlink(staged)
+        stop("Failed to promote staged cleaning candidate to ", targets[[role]], ".", call. = FALSE)
+      }
+    }
+    logger::log_info(
+      "Wrote paired LR candidates with run stamp {run_stamp}: long_run={state$rows[['long_run']]}, study={state$rows[['study']]}"
+    )
+    invisible(list(
+      long_run_path = long_run_path,
+      study_path = study_path,
+      run_stamp = run_stamp,
+      row_counts = state$rows
+    ))
+  }
+  list(write_year = write_year, close = close, abandon = abandon, run_stamp = run_stamp)
+}
+
 # Main Execution
 ############################################################
 
@@ -420,13 +701,16 @@ main <- function(refresh_postcodes = FALSE) {
     "`refresh_postcodes` is ignored for LR builds; local postcode files are used instead."
   )
 
-  # This is intentionally the first data operation: an incomplete annual set
+  # This is intentionally the first data operation: an incomplete manifest
   # stops before rio reads even one large source file.
-  input_paths <- validate_expected_lr_files(CONFIG$input_dir, CONFIG$years)
-  raw_data <- load_all_years(input_paths, CONFIG$base_year)
-  validate_lr_transactions(raw_data, CONFIG$years)
+  manifest <- validate_expected_lr_files(CONFIG$input_dir, CONFIG$years)
   logger::log_info(
-    "Validated {nrow(raw_data)} LR rows: transaction_id is complete and globally unique; dates lie within {min(CONFIG$years)}-{max(CONFIG$years)}."
+    "Source manifest: {nrow(manifest)} files for {length(unique(manifest$year))} years ({sum(manifest$kind == 'split_part')} split parts, {sum(manifest$kind == 'complete_annual')} complete annual files)."
+  )
+  scan <- scan_manifest_postcodes(manifest)
+  source_row_count <- sum(scan$source_row_counts)
+  logger::log_info(
+    "Postcode scan: {source_row_count} source rows, {length(scan$postcodes)} distinct postcodes."
   )
 
   source(
@@ -434,19 +718,59 @@ main <- function(refresh_postcodes = FALSE) {
     local = TRUE
   )
   postcode_result <- get_local_postcode_data_for_sales(
-    raw_data,
+    tibble::tibble(postcode = scan$postcodes),
     lookup_path = CONFIG$local_postcode_lookup_path
   )
-  final_data <- enrich_lr_postcodes(raw_data, postcode_result$postcode_data)
-  outputs <- build_lr_output_pair(final_data, CONFIG$years, CONFIG$study_years)
-  publication <- write_lr_candidates(outputs)
+  postcode_data <- postcode_result$postcode_data
+  rm(scan)
+
+  # One year in memory at a time; ids are kept for the global uniqueness check.
+  writers <- open_lr_candidate_writers(
+    CONFIG$long_run_candidate_path,
+    CONFIG$study_candidate_path,
+    source_row_count = source_row_count
+  )
+  on.exit(writers$abandon(), add = TRUE)
+  house_ids <- vector("list", length(CONFIG$years))
+  row_counts <- stats::setNames(numeric(length(CONFIG$years)), CONFIG$years)
+  for (i in seq_along(CONFIG$years)) {
+    year <- CONFIG$years[[i]]
+    year_data <- load_manifest_year(manifest, year, CONFIG$base_year)
+    enriched <- enrich_lr_postcodes(year_data, postcode_data)
+    rm(year_data)
+    outputs <- build_lr_output_pair(enriched, year, CONFIG$study_years)
+    rm(enriched)
+    writers$write_year(outputs, year)
+    house_ids[[i]] <- outputs$long_run$house_id
+    row_counts[[i]] <- nrow(outputs$long_run)
+    logger::log_info("Cleaned {year}: {nrow(outputs$long_run)} rows ({nrow(outputs$study)} study rows).")
+    rm(outputs)
+    invisible(gc())
+  }
+  all_ids <- unlist(house_ids, use.names = FALSE)
+  rm(house_ids)
+  duplicate_count <- sum(duplicated(all_ids))
+  if (duplicate_count > 0L) {
+    stop(
+      "Hashed Land Registry house_id values repeat across years (", duplicate_count,
+      " duplicate row(s)); the source manifest is not a valid transaction set.",
+      call. = FALSE
+    )
+  }
+  logger::log_info(
+    "Validated {length(all_ids)} LR rows: house_id is globally unique; every source lies within its manifest year ({min(CONFIG$years)}-{max(CONFIG$years)})."
+  )
+  rm(all_ids)
+  publication <- writers$close()
+  on.exit(NULL)
 
   logger::log_info("Script finished at {Sys.time()}")
 
   invisible(list(
     output_paths = publication[c("long_run_path", "study_path")],
     run_stamp = publication$run_stamp,
-    row_counts = c(long_run = nrow(outputs$long_run), study = nrow(outputs$study)),
+    row_counts = publication$row_counts,
+    rows_by_year = row_counts,
     diagnostics = postcode_result$diagnostics
   ))
 }

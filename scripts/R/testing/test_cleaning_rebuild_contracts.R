@@ -65,25 +65,89 @@ years <- 2014:2024
 raw_dir <- file.path(test_dir, "raw")
 dir.create(raw_dir)
 
-# LR input discovery must reject the incomplete vintage before any file is read.
-invisible(file.create(file.path(raw_dir, sprintf("pp-%d.csv", years[-1]))))
-assert_error_matching(
-  cleaner_env$validate_expected_lr_files(raw_dir, years),
-  "pp-2014.csv",
-  "The exact eleven-file LR vintage must be present before loading starts."
-)
-invisible(file.create(file.path(raw_dir, "pp-2014.csv")))
-expected_paths <- cleaner_env$validate_expected_lr_files(raw_dir, years)
+# The year-to-source manifest lists both split parts for 1995-2013 and exactly
+# the complete annual file for 2014-2024; a coexisting split file for a
+# complete year is never listed, and a year cannot be served by both kinds.
+manifest_years <- cleaner_env$LR_EXPECTED_YEARS
+assert_identical(manifest_years, c(1995:2013, 2014:2024), "The locked long-run window must be 1995-2024.")
+manifest <- cleaner_env$lr_source_manifest(raw_dir, manifest_years)
+assert_identical(nrow(manifest), 19L * 2L + 11L, "The manifest must list two parts per split year and one complete file per recent year.")
 assert_identical(
-  basename(expected_paths),
-  sprintf("pp-%d.csv", years),
-  "LR input discovery must return exact annual filenames in configured order."
+  manifest$file[manifest$year == 1995L],
+  c("pp-1995-part1.csv", "pp-1995-part2.csv"),
+  "Split years must list part1 and part2."
 )
+assert_identical(manifest$file[manifest$year == 2014L], "pp-2014.csv", "Complete years must list only the complete annual file.")
+assert_true(!any(grepl("pp-201[4-7]-part", manifest$file)), "Overlapping 2014-2017 split files must never be in the manifest.")
 assert_error_matching(
-  cleaner_env$validate_expected_lr_files(raw_dir, 2021:2024),
-  "exact 2014-2024",
+  cleaner_env$lr_source_manifest(raw_dir, 2014:2024),
+  "exact 1995-2024",
   "The LR cleaner must not silently shrink its locked long-run window."
 )
+
+# Input discovery must name the missing source before any file is read.
+invisible(file.create(manifest$path[-1]))
+assert_error_matching(
+  cleaner_env$validate_expected_lr_files(raw_dir, manifest_years),
+  "pp-1995-part1.csv",
+  "A missing split part must be named before loading starts."
+)
+invisible(file.create(manifest$path[1]))
+validated <- cleaner_env$validate_expected_lr_files(raw_dir, manifest_years)
+assert_identical(validated$file, manifest$file, "Validated input discovery must return the manifest in configured order.")
+unlink(manifest$path[manifest$file == "pp-2020.csv"])
+assert_error_matching(
+  cleaner_env$validate_expected_lr_files(raw_dir, manifest_years),
+  "pp-2020.csv",
+  "A missing complete annual file must be named."
+)
+invisible(file.create(manifest$path[manifest$file == "pp-2020.csv"]))
+
+# Per-source validation: wrong-year dates and duplicated ids name the source.
+lr_csv_row <- function(id, date, postcode = "AB1 2CD", price = "100000") {
+  paste0(
+    sprintf('"%s","%s","%s","%s"', id, price, date, postcode),
+    ',"T","N","F","1","","HIGH STREET","","TOWN","DISTRICT","COUNTY","A","A"'
+  )
+}
+source_dir <- file.path(test_dir, "sources")
+dir.create(source_dir)
+writeLines(c(lr_csv_row("{S1}", "1995-01-05 00:00"), lr_csv_row("{S2}", "1995-06-05 00:00")), file.path(source_dir, "pp-1995-part1.csv"))
+writeLines(c(lr_csv_row("{S3}", "1995-12-31 00:00")), file.path(source_dir, "pp-1995-part2.csv"))
+source_manifest <- cleaner_env$lr_source_manifest(source_dir, manifest_years)
+year_1995 <- cleaner_env$load_manifest_year(source_manifest, 1995L)
+assert_identical(nrow(year_1995), 3L, "Both parts of a split year must be stacked once.")
+assert_identical(year_1995$transaction_id, c("{S1}", "{S2}", "{S3}"), "Split parts must load in manifest order.")
+assert_true(inherits(year_1995$date_of_transfer, "POSIXct"), "Cleaned transfer dates must be POSIXct.")
+writeLines(c(lr_csv_row("{S4}", "1996-03-01 00:00"), lr_csv_row("{S5}", "1995-03-01 00:00")), file.path(source_dir, "pp-1996-part1.csv"))
+writeLines(c(lr_csv_row("{S6}", "1996-07-01 00:00")), file.path(source_dir, "pp-1996-part2.csv"))
+assert_error_matching(
+  cleaner_env$load_manifest_year(source_manifest, 1996L),
+  "pp-1996-part1.*outside its manifest year 1996",
+  "A source with a wrong-year date must fail naming that source."
+)
+writeLines(c(lr_csv_row("{S7}", "1997-03-01 00:00"), lr_csv_row("{S7}", "1997-04-01 00:00")), file.path(source_dir, "pp-1997-part1.csv"))
+writeLines(c(lr_csv_row("{S8}", "1997-07-01 00:00")), file.path(source_dir, "pp-1997-part2.csv"))
+assert_error_matching(
+  cleaner_env$load_manifest_year(source_manifest, 1997L),
+  "pp-1997-part1 contains 1 duplicated",
+  "A duplicated id within one source must fail naming that source."
+)
+writeLines(c(lr_csv_row("{S9}", "1998-03-01 00:00")), file.path(source_dir, "pp-1998-part1.csv"))
+writeLines(c(lr_csv_row("{S9}", "1998-07-01 00:00")), file.path(source_dir, "pp-1998-part2.csv"))
+assert_error_matching(
+  cleaner_env$load_manifest_year(source_manifest, 1998L),
+  "1998.*share 1 transaction_id",
+  "Split parts sharing an id must fail."
+)
+writeLines(c(lr_csv_row("{S10}", "2014-03-01 00:00")), file.path(source_dir, "pp-2014.csv"))
+writeLines(c(lr_csv_row("{S11}", "2014-03-01 00:00")), file.path(source_dir, "pp-2014-part1.csv"))
+writeLines(c(lr_csv_row("{S12}", "2014-03-01 00:00")), file.path(source_dir, "pp-2014-part2.csv"))
+year_2014 <- cleaner_env$load_manifest_year(source_manifest, 2014L)
+assert_identical(year_2014$transaction_id, "{S10}", "A complete year must read only its complete file even when split files coexist.")
+scan <- cleaner_env$scan_manifest_postcodes(source_manifest[source_manifest$year %in% c(1995L, 2014L), ])
+assert_identical(unname(scan$source_row_counts), c(2, 1, 1), "The postcode scan must count rows per source.")
+assert_identical(scan$postcodes, "AB12CD", "The postcode scan must return distinct space-free postcodes.")
 
 raw_fixture <- tibble(
   transaction_id = c("{A}", "{B}", "{C}"),
@@ -265,6 +329,62 @@ assert_true(nrow(duplicates$old_duplicate_ids) == 1L, "Historical duplicate tran
 vintage_report <- reconcile_env$build_file_vintage_report(c(long_path, study_path), "fixture")
 assert_true(all(c("vintage", "path", "basename", "size_bytes", "mtime", "sha256") %in% names(vintage_report)), "Vintage reports must include checksums and file facts.")
 assert_true(all(grepl("^[0-9a-f]{64}$", vintage_report$sha256)), "Vintage reports must carry SHA-256 checksums.")
+
+# Streaming candidate writers: yearly tables are cast to the persisted schema,
+# appended in order, the study file mirrors the study years, and a row-count
+# shortfall against the manifest refuses to publish the candidates.
+full_lookup <- tibble(
+  postcode = c("AB12CD", "XY98ZT"),
+  quality = 1L, easting = c(400000L, 401000L), northing = c(300000L, 301000L),
+  longitude = c(-1, -2), latitude = c(51, 52),
+  country = "England", nhs_ha = NA_character_, region = "R",
+  lsoa = c("E01", "E02"), msoa = c("E02A", "E02B"),
+  admin_county = NA_character_, admin_ward = "W"
+)
+full_enriched <- cleaner_env$enrich_lr_postcodes(raw_fixture, full_lookup)
+full_pair <- cleaner_env$build_lr_output_pair(full_enriched, years, 2021:2024)
+cast_table <- cleaner_env$cast_lr_output(full_pair$long_run)
+assert_identical(names(cast_table$schema), names(cleaner_env$lr_output_schema()), "Cast tables must follow the persisted column order.")
+assert_identical(cast_table$schema$price$type$ToString(), "int32", "price must be persisted as int32.")
+assert_error_matching(
+  cleaner_env$cast_lr_output(pair$long_run),
+  "missing: quality",
+  "A frame lacking persisted columns must be refused by name."
+)
+stream_long <- file.path(test_dir, "stream_long_run_candidate.parquet")
+stream_study <- file.path(test_dir, "stream_candidate.parquet")
+writers <- cleaner_env$open_lr_candidate_writers(stream_long, stream_study, source_row_count = 3, run_stamp = run_stamp)
+by_year <- split(full_enriched, lubridate::year(full_enriched$date_of_transfer))
+for (year in names(by_year)) {
+  writers$write_year(cleaner_env$build_lr_output_pair(by_year[[year]], as.integer(year), 2021:2024), as.integer(year))
+}
+streamed <- writers$close()
+assert_identical(unname(streamed$row_counts), c(3, 2), "Streaming writers must count long-run and study rows.")
+stream_long_table <- arrow::read_parquet(stream_long, as_data_frame = FALSE)
+stream_study_table <- arrow::read_parquet(stream_study, as_data_frame = FALSE)
+assert_identical(stream_long_table$num_rows, 3L, "The streamed long-run candidate must hold every year.")
+assert_identical(stream_study_table$num_rows, 2L, "The streamed study candidate must hold the study years only.")
+assert_identical(stream_long_table$metadata$cleaning_run_stamp, run_stamp, "Streamed candidates must carry the cleaning metadata.")
+assert_identical(stream_long_table$metadata$cleaning_year_min, "1995", "Streamed long-run metadata must declare the 1995 start.")
+assert_identical(stream_long_table$metadata$cleaning_source_row_count, "3", "Streamed metadata must carry the manifest source row count.")
+assert_identical(stream_study_table$metadata$cleaning_parent_role, "long_run", "The streamed study candidate must declare derivation from the superset.")
+assert_identical(
+  as.data.frame(stream_study_table)$house_id,
+  as.data.frame(stream_long_table)$house_id[lubridate::year(as.data.frame(stream_long_table)$date_of_transfer) %in% 2021:2024],
+  "The streamed study candidate must be the study-year filter of the streamed superset."
+)
+short_writers <- cleaner_env$open_lr_candidate_writers(
+  file.path(test_dir, "short_long_run_candidate.parquet"),
+  file.path(test_dir, "short_candidate.parquet"),
+  source_row_count = 4, run_stamp = run_stamp
+)
+short_writers$write_year(cleaner_env$build_lr_output_pair(by_year[["2014"]], 2014L, 2021:2024), 2014L)
+assert_error_matching(
+  short_writers$close(),
+  "differ from the manifest source rows",
+  "A row-count shortfall against the manifest must refuse to publish the candidates."
+)
+assert_true(!file.exists(file.path(test_dir, "short_long_run_candidate.parquet")), "A refused candidate must not exist on disk.")
 
 message("Cleaning rebuild contract tests passed (LR/U2 slice).")
 
