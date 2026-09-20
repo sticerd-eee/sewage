@@ -34,8 +34,9 @@ execute:
 This report asks whether the relationship between sewage spills, public attention
 and property values differs across bathing, coastal and inland locations.
 The paper comparison uses **overlapping groups**. The later sections preserve
-the full exploration: four coast/bathing strata, intensity splits, three
-robustness checks, and the earlier exclusive three-way comparison.
+the full exploration: four coast/bathing strata, intensity splits, and three
+robustness checks. The earlier exclusive three-way comparison was removed from
+this report; its results remain in the dated three-way memo.
 
 By default, rendering loads the saved model bundles in `output/regs`. Explicit
 `reestimate:true` reruns the analyses from the published inputs. The
@@ -130,7 +131,7 @@ if (!isTRUE(params$reestimate)) {
     "did_trends_prior_salience", "did_articles_prior_salience",
     "hedonic_count_continuous_prior_salience")
   required <- here::here("output", "regs",
-    paste0(c(prefixes, paste0(prefixes, "_groups"), "salience_three_way"), ".rds"))
+    paste0(c(prefixes, paste0(prefixes, "_groups")), ".rds"))
   missing <- required[!file.exists(required)]
   if (length(missing)) stop("Saved salience results missing: ", paste(missing, collapse = ", "),
     ". Restore the saved bundles or explicitly request reestimate:true.", call. = FALSE)
@@ -1188,266 +1189,6 @@ run_salience_hedonic <- function(reproduce_only = FALSE) {
 
 
 ```{r}
-#| label: exploratory-exclusive-three-way-models
-#| include: false
-
-# These aliases expose this report's historical definitions to the preserved
-# exclusive three-way exercise. They never source the paper group scripts.
-extensive <- environment()
-intensive <- environment()
-hedonic <- environment()
-parent_extensive <- new.env(parent = environment())
-sys.source(here::here("scripts", "R", "09_analysis", "05_news",
-                      "did_trends_prior_extensive.R"), parent_extensive)
-
-STRATA <- c("coastal", "bathing", "inland")
-REFERENCE_PREFIXES <- c(
-  extensive_post = "did_trends_prior_extensive_salience",
-  extensive_articles = "did_articles_prior_extensive_salience",
-  intensive_post = "did_trends_prior_salience",
-  intensive_articles = "did_articles_prior_salience",
-  hedonic = "hedonic_count_continuous_prior_salience"
-)
-
-#' Collapse the existing classification, preserving its missing-coast exclusions
-classify_three_way <- function(data) {
-  data |>
-    dplyr::mutate(three_way = dplyr::case_when(
-      .data$salience_class == "coastal_not_bathing" ~ "coastal",
-      .data$salience_class %in% c("coastal_bathing", "inland_bathing") ~ "bathing",
-      .data$salience_class == "inland_not_bathing" ~ "inland",
-      TRUE ~ NA_character_
-    ))
-}
-
-#' Extract uncertainty using the fitted model's own covariance and t degrees of freedom
-model_results <- function(model) {
-  table <- model$coeftable
-  df <- attr(model$cov.scaled, "df.t")
-  if (is.null(df) || !is.finite(df) || df <= 0) {
-    stop("Saved inference must include positive t degrees of freedom.", call. = FALSE)
-  }
-  critical <- stats::qt(0.975, df)
-  tibble::tibble(
-    term = rownames(table), estimate = table[, 1L], std.error = table[, 2L],
-    statistic = table[, 3L], p.value = table[, 4L],
-    conf.low = table[, 1L] - critical * table[, 2L],
-    conf.high = table[, 1L] + critical * table[, 2L]
-  )
-}
-
-#' Fit three disjoint subsamples and verify the unchanged non-bathing estimates
-fit_three_way <- function(data, market, analysis, attention = NULL) {
-  data <- classify_three_way(data)
-  reference <- readRDS(here::here("output", "regs",
-                                 paste0(REFERENCE_PREFIXES[[analysis]], ".rds")))
-  fitted <- counts <- reproduction <- results <- list()
-  for (stratum in STRATA) {
-    original <- switch(stratum,
-      coastal = "coastal_not_bathing", inland = "inland_not_bathing",
-      bathing = c("coastal_bathing", "inland_bathing"))
-    selected <- data$three_way %in% stratum
-    estimation <- selected & !data$london
-    sample <- data[estimation, ]
-    if (!nrow(sample)) stop("Empty stratum: ", analysis, "/", market, "/", stratum)
-    prior_counts <- reference$counts |>
-      dplyr::filter(.data$variant == "coast_bathing", .data$market == .env$market,
-                    .data$stratum %in% original)
-    stopifnot(nrow(prior_counts) == length(original),
-              sum(selected) == sum(prior_counts$n_before_london_drop),
-              nrow(sample) == sum(prior_counts$n_after_london_drop))
-    support <- c(near_pre = NA_integer_, near_post = NA_integer_,
-                 far_pre = NA_integer_, far_post = NA_integer_)
-    if (startsWith(analysis, "extensive")) {
-      support <- c(
-        near_pre = sum(sample$near_bin == 1L & sample$post == 0L),
-        near_post = sum(sample$near_bin == 1L & sample$post == 1L),
-        far_pre = sum(sample$near_bin == 0L & sample$post == 0L),
-        far_post = sum(sample$near_bin == 0L & sample$post == 1L)
-      )
-      if (any(support == 0L)) stop("Missing near/far x pre/post support.", call. = FALSE)
-      model <- extensive$fit_salience_extensive(sample, market, attention)
-      term <- paste0("near_bin:", attention)
-    } else if (startsWith(analysis, "intensive")) {
-      model <- intensive$fit_salience_intensive(sample, market, attention)
-      term <- paste0("spill_count_weekly_avg:", attention)
-    } else {
-      model <- hedonic$fit_salience_hedonic(sample, market)
-      term <- "spill_count_weekly_avg"
-    }
-    if (stratum != "bathing") {
-      prior <- reference$models$coast_bathing[[market]][[original]]
-      same_coef <- isTRUE(all.equal(model$coefficients, prior$coefficients, tolerance = 1e-10))
-      same_se <- isTRUE(all.equal(model$se, prior$se, tolerance = 1e-10))
-      same_n <- model$nobs == prior$nobs
-      if (!all(same_coef, same_se, same_n)) {
-        stop("Unchanged-stratum reproduction failed: ", analysis, "/", market, "/", stratum)
-      }
-      reproduction[[stratum]] <- tibble::tibble(
-        analysis, market, stratum, same_coef, same_se, same_n, passed = TRUE
-      )
-    }
-    counts[[stratum]] <- tibble::tibble(
-      analysis, market, stratum, n_input = nrow(data),
-      n_unclassified = sum(is.na(data$three_way)),
-      n_before_london_drop = sum(selected), n_after_london_drop = nrow(sample),
-      nobs = model$nobs, n_removed_by_estimator = nrow(sample) - model$nobs,
-      n_lsoas = unname(model$fixef_sizes["lsoa"]),
-      near_pre = support[["near_pre"]], near_post = support[["near_post"]],
-      far_pre = support[["far_pre"]], far_post = support[["far_post"]]
-    )
-    results[[stratum]] <- model_results(model) |>
-      dplyr::filter(.data$term == .env$term) |>
-      dplyr::mutate(analysis, market, stratum, nobs = model$nobs, .before = 1L)
-    fitted[[stratum]] <- model
-  }
-  list(models = fitted, counts = dplyr::bind_rows(counts),
-       reproduction = dplyr::bind_rows(reproduction), results = dplyr::bind_rows(results))
-}
-
-# === 2. Publication with 95% confidence intervals ==============================
-#' Publish model coefficients and confidence intervals, retaining the exact inference
-export_three_way <- function(models, analysis) {
-  panels <- lapply(models, function(market_models) {
-    lapply(market_models, function(model) {
-      structure(list(tidy = model_results(model), glance = data.frame(nobs = model$nobs)),
-                class = "modelsummary_list")
-    })
-  })
-  names(panels) <- c("House Sales", "House Rentals")
-  panels <- lapply(panels, function(panel) {
-    stats::setNames(panel, c("Coastal non-bathing", "Bathing", "Inland non-bathing"))
-  })
-  is_extensive <- startsWith(analysis, "extensive")
-  is_hedonic <- analysis == "hedonic"
-  is_post <- endsWith(analysis, "post")
-  exposure <- if (is_extensive) "near_bin" else "spill_count_weekly_avg"
-  exposure_label <- if (is_extensive) "Near" else "Spills per week (avg.)"
-  coefficient_map <- stats::setNames(exposure_label, exposure)
-  if (!is_hedonic) {
-    attention <- if (is_post) "post" else "log_cumulative_articles"
-    coefficient_map[paste0(exposure, ":", attention)] <- paste0(
-      exposure_label, if (is_post) " x Post" else " x log(Articles)"
-    )
-  }
-  notes <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} Sales 2021--2024 and rentals 2021--2023; ",
-    "Greater London excluded. Outcomes are log sale price and log weekly asking rent. ",
-    "Bathing pools coastal and inland ever-designated bathing locations (2021--2024); ",
-    "coastal and inland contain non-bathing locations only, using a 2000m coast threshold. ",
-    "Positive bathing evidence takes precedence; unresolved evidence counts as non-bathing. ",
-    "Missing coast distances are excluded. ",
-    if (is_extensive || is_hedonic) "Classification uses the nearest Site Group. " else
-      "Classification uses any bathing site and minimum site coast distance within 250m. ",
-    if (is_extensive) "Near is 0--500m; far is over 1000m and at most 2000m. " else
-      "Properties are within 250m; exposure is average weekly spill count from January 2021 to the transaction. ",
-    "All models include property controls and LSOA fixed effects. ",
-    if (is_hedonic) "No time fixed effects; heteroskedasticity-robust inference. " else
-      "Month fixed effects and LSOA-clustered inference. Post starts in August 2022; Articles is log cumulative UK coverage. ",
-    "Brackets report pointwise 95 percent confidence intervals using model-specific t degrees of freedom. ",
-    "Coefficients are in original log units.}},"
-  )
-  latex <- modelsummary::modelsummary(
-    panels, shape = "cbind", output = "latex", escape = FALSE,
-    estimate = "{estimate}", statistic = "[{conf.low}, {conf.high}]", stars = FALSE,
-    fmt = 5, coef_map = coefficient_map,
-    gof_map = tibble::tribble(~raw, ~clean, ~fmt, "nobs", "Observations", 0),
-    notes = " ", title = paste("Three-Way Local Salience:", gsub("_", " ", analysis))
-  )
-  path <- here::here("output", "tables", paste0("salience_three_way_", analysis, ".tex"))
-  latex <- extensive$fit_tblr_latex(latex,
-    label = paste0("tbl:salience-three-way-", gsub("_", "-", analysis)), notes = notes)
-  writeLines(latex, path)
-  path
-}
-
-# === 3. Load published inputs, estimate, and save ==============================
-run_exclusive_three_way <- function() {
-  parent_extensive$initialise_environment()
-  comparison <- parent_extensive$validate_comparison_config(parent_extensive$CONFIG$comparison)
-  peak <- parent_extensive$load_google_trends_peak(
-    parent_extensive$CONFIG$google_trends_path,
-    parent_extensive$CONFIG$google_trends_sheet, parent_extensive$CONFIG$base_year)
-  stopifnot(peak$peak_month_id == 20L)
-  articles <- parent_extensive$load_articles_data(
-    here::here("data", "processed", "lexis_nexis", "search1_monthly.parquet"), 1L, 48L)
-  attention <- tibble::tibble(month_id = 1:48, post = as.integer(month_id >= 20L)) |>
-    dplyr::left_join(dplyr::select(articles, "month_id", "log_cumulative_articles"),
-                     by = "month_id", relationship = "one-to-one")
-  stopifnot(all(is.finite(attention$log_cumulative_articles)))
-  characteristics <- arrow::read_parquet(here::here(
-    "data", "processed", "site_characteristics", "site_group_characteristics.parquet"))
-  output <- stats::setNames(vector("list", length(REFERENCE_PREFIXES)), names(REFERENCE_PREFIXES))
-  for (market in c("sales", "rentals")) {
-    id_col <- if (market == "sales") "house_id" else "rental_id"
-    lookup_path <- if (market == "sales") parent_extensive$CONFIG$sales_lookup_path else
-      parent_extensive$CONFIG$rental_lookup_path
-    nearest <- extensive$nearest_salience_sites(arrow::open_dataset(lookup_path), characteristics, id_col)
-    data <- if (market == "sales") parent_extensive$prepare_sales_analysis_data(comparison, peak) else
-      parent_extensive$prepare_rental_analysis_data(comparison, peak)
-    data <- extensive$join_nearest_salience(data, nearest, id_col) |>
-      dplyr::left_join(dplyr::select(attention, "month_id", "log_cumulative_articles"),
-                       by = "month_id", relationship = "many-to-one")
-    stopifnot(all(is.finite(data$log_cumulative_articles)))
-    for (measure in c("post", "articles")) {
-      analysis <- paste0("extensive_", measure)
-      message("Estimating ", analysis, " / ", market)
-      output[[analysis]][[market]] <- fit_three_way(data, market, analysis,
-        if (measure == "post") "post" else "log_cumulative_articles")
-    }
-    rm(data)
-    invisible(gc())
-    transaction_path <- if (market == "sales") parent_extensive$CONFIG$sales_path else
-      parent_extensive$CONFIG$rental_path
-    transactions <- arrow::read_parquet(transaction_path)
-    exposure <- arrow::open_dataset(here::here("data", "processed", "cross_section", market,
-      if (market == "sales") "prior_to_sale" else "prior_to_rental"))
-    data <- intensive$prepare_salience_intensive(transactions, exposure, attention, market, "post")
-    data <- extensive$join_radius_salience(data, arrow::open_dataset(here::here(
-      "data", "processed", "cross_section", market, "prior_characteristics")), id_col, 250L)
-    stopifnot(all(is.finite(data$log_cumulative_articles)))
-    for (measure in c("post", "articles")) {
-      analysis <- paste0("intensive_", measure)
-      message("Estimating ", analysis, " / ", market)
-      output[[analysis]][[market]] <- fit_three_way(data, market, analysis,
-        if (measure == "post") "post" else "log_cumulative_articles")
-    }
-    data <- hedonic$prepare_salience_hedonic(transactions, exposure, market)
-    data <- extensive$join_nearest_salience(data, nearest, id_col)
-    message("Estimating hedonic / ", market)
-    output$hedonic[[market]] <- fit_three_way(data, market, "hedonic")
-    rm(data, transactions, exposure, nearest)
-    invisible(gc())
-  }
-  models <- lapply(output, function(markets) lapply(markets, `[[`, "models"))
-  collect <- function(field) dplyr::bind_rows(lapply(output, function(markets) {
-    dplyr::bind_rows(lapply(markets, `[[`, field))
-  }))
-  counts <- collect("counts")
-  results <- collect("results")
-  reproduction <- collect("reproduction")
-  stopifnot(nrow(results) == 30L, nrow(reproduction) == 20L, all(reproduction$passed))
-  for (folder in c("regs", "tables", "logs")) {
-    dir.create(here::here("output", folder), recursive = TRUE, showWarnings = FALSE)
-  }
-  saveRDS(list(models = models, results = results, counts = counts, reproduction = reproduction,
-    settings = list(coast_rule_m = 2000L, drop_london = TRUE, unknown_policy = "not_designated",
-      classification = "Bathing takes precedence; coastal and inland are non-bathing only",
-      created_at = Sys.time(), r_version = R.version.string)),
-    here::here("output", "regs", "salience_three_way.rds"))
-  for (field in c("results", "counts", "reproduction")) {
-    suffix <- if (field == "counts") "cell_counts" else field
-    utils::write.csv(get(field), here::here("output", "logs",
-      paste0("salience_three_way_", suffix, ".csv")), row.names = FALSE)
-  }
-  for (analysis in names(models)) export_three_way(models[[analysis]], analysis)
-  message("Published 30 models, five tables, results with 95% CIs and audit logs.")
-  invisible(results)
-}
-```
-
-
-```{r}
 #| label: report-display-functions
 #| include: false
 
@@ -1457,6 +1198,14 @@ PAPER_SCRIPTS <- c(
   intensive_post = "05_news/did_trends_prior_salience.R",
   intensive_articles = "05_news/did_articles_prior_salience.R",
   hedonic = "02_hedonic/hedonic_continuous_prior_salience.R"
+)
+# Historical (pre-paper-group) output prefixes, used by the reproduction audit.
+REFERENCE_PREFIXES <- c(
+  extensive_post = "did_trends_prior_extensive_salience",
+  extensive_articles = "did_articles_prior_extensive_salience",
+  intensive_post = "did_trends_prior_salience",
+  intensive_articles = "did_articles_prior_salience",
+  hedonic = "hedonic_count_continuous_prior_salience"
 )
 GROUP_LABELS <- c(bathing = "All Bathing", coastal = "All Coastal", inland = "All Inland")
 VARIANT_LABELS <- c(coast_bathing = "2 km", intensity = "Intensity",
@@ -1708,8 +1457,8 @@ Code for every exploratory estimate is embedded in this QMD.
 Before and After count observations before and after the London exclusion,
 before estimator removals. The London-retained variant estimates from Before;
 other variants estimate from After. N is the final regression sample. The
-original four-way and exclusive three-way comparisons retain their original
-common missing-coast exclusion, including for bathing strata.
+original four-way comparison retains its original common missing-coast
+exclusion, including for bathing strata.
 
 ## Extensive-margin exploration
 
@@ -1797,39 +1546,6 @@ hedonic_results <- historical_results("hedonic_count_continuous_prior_salience",
 show_historical_table(hedonic_results)
 ```
 
-# Earlier exclusive three-way comparison
-
-This historical exercise pools coastal and inland bathing locations into one
-Bathing stratum, then leaves **non-bathing** locations in Coastal and Inland.
-It is preserved for comparison; it is **not** the paper's All Coastal/All Inland
-definition. Its output prefix remains `salience_three_way`.
-
-```{r}
-#| label: estimate-exclusive-three-way
-#| include: false
-#| purl: false
-
-if (params$reestimate) run_exclusive_three_way()
-exclusive <- readRDS(here::here("output", "regs", "salience_three_way.rds"))
-```
-
-
-```{r}
-#| label: show-exclusive-three-way
-#| purl: false
-#| results: asis
-
-exclusive_table <- exclusive$results |>
-  dplyr::transmute(
-    Analysis = .data$analysis, Market = .data$market,
-    Stratum = dplyr::recode(.data$stratum, bathing = "Bathing (coastal + inland)",
-                           coastal = "Coastal non-bathing", inland = "Inland non-bathing"),
-    N = .data$nobs,
-    `Coefficient [95% CI]` = format_interval(.data$estimate, .data$conf.low, .data$conf.high)
-  )
-knitr::kable(exclusive_table, format = "html", format.args = list(big.mark = ","))
-```
-
 # Sample and reproduction audits
 
 All extensive models require both near and far observations; Post models require
@@ -1843,7 +1559,7 @@ unrestricted reproductions check the parent tables with London retained.
 #| results: asis
 
 historical <- dplyr::bind_rows(extensive_results, intensive_results, hedonic_results)
-stopifnot(nrow(historical) == 176L, nrow(exclusive$results) == 30L)
+stopifnot(nrow(historical) == 176L)
 reproduction <- dplyr::bind_rows(lapply(names(REFERENCE_PREFIXES), function(analysis) {
   bundle <- readRDS(here::here("output", "regs", paste0(REFERENCE_PREFIXES[[analysis]], ".rds")))
   stopifnot(all(bundle$reproduction$passed))
@@ -1894,8 +1610,7 @@ Rscript docs/reports/2026-09-03-003-heterogeneity-by-salience-report/map_coastal
 ```
 
 With re-estimation enabled, the report writes the original five model bundles and 24 exploratory tables,
-the historical exclusive-three-way bundle and five tables, and the five new
-paper-group bundles and tables. Paper output prefixes are the five historical
+and the five new paper-group bundles and tables. Paper output prefixes are the five historical
 analysis prefixes with `_groups` appended. Model bundles are in `output/regs`,
 LaTeX tables in `output/tables`, and audit/result CSVs in `output/logs`.
 

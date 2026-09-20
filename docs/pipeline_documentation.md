@@ -267,16 +267,17 @@ bathing evidence. Historical strata retain their original common missing-coast
 exclusion. Before/After counts describe the hypothetical London drop; final N
 follows the actual estimation policy.
 
-The report also preserves `salience_three_way.rds`, five
-`salience_three_way_*.tex` tables and their result/cell-count/reproduction CSVs.
-These use the **earlier exclusive** grouping: pooled Bathing, Coastal
-non-bathing and Inland non-bathing. They are not the overlapping paper groups.
+The earlier **exclusive** three-way comparison (pooled Bathing, Coastal
+non-bathing, Inland non-bathing) was removed from the report; the
+[exclusive three-way memo](reports/2026-09-03-002-salience-three-way-results.md)
+is the retained record of its definitions and results, and its saved
+`salience_three_way` artifacts under `output/` are no longer rewritten.
 
 The [four-way memo](reports/2026-09-03-001-heterogeneity-by-salience-results-memo.md)
-and [exclusive three-way memo](reports/2026-09-03-002-salience-three-way-results.md)
-remain dated historical snapshots. Contract tests source the QMD's definition
-chunks through `scripts/R/testing/salience_report_test_setup.R` without fitting
-the full model grid.
+and the exclusive three-way memo remain dated historical snapshots. Contract
+tests source the QMD's definition chunks through
+`scripts/R/testing/salience_report_test_setup.R` without fitting the full
+model grid.
 
 ## Detailed Execution Order
 

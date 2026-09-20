@@ -3,8 +3,10 @@
 Date: 3 September 2026. Requested follow-up to the four-way salience review.
 
 Historical snapshot: this memo uses the **exclusive** three-way definition.
-The paper now uses overlapping All Bathing, All Coastal and All Inland groups.
-Both comparisons are reproduced in the [executable salience report](2026-09-03-003-heterogeneity-by-salience-report.qmd).
+The paper now uses overlapping All Bathing, All Coastal and All Inland groups,
+reproduced in the [executable salience report](2026-09-03-003-heterogeneity-by-salience-report.qmd).
+The exclusive three-way section was later removed from that report; this memo
+is the retained record of the three-way results.
 
 Bathing takes precedence: all ever-designated bathing locations are pooled; coastal and inland contain non-bathing locations only. The coast threshold is 2 km, Greater London is excluded, and unresolved bathing evidence counts as non-bathing. Missing coast evidence remains excluded. Sales cover 2021–2024 and rentals 2021–2023.
 
@@ -55,9 +57,10 @@ Pooling changes estimation weights and allows shared controls/time effects acros
 
 All 20 coastal/inland non-bathing models reproduce the prior coefficients, standard errors and Ns at numerical tolerance 1e-10. Before/after London counts match the corresponding old cells; all extensive near/far × pre/post support cells are nonempty. All 30 reported Ns and 54 coefficient/CI entries in the five LaTeX tables were checked against saved models. Classification and small-negative formatting regression checks passed.
 
-Reproduce by rendering the executable salience report from the project root in the rv environment. Its earlier-exclusive-comparison section writes these three-way artifacts without rebuilding input data.
+The three-way estimation code was removed from the executable salience report
+when this comparison was superseded; it remains available in the repository
+history of that report. The saved artifacts it produced are:
 
-- [Executable analysis report](2026-09-03-003-heterogeneity-by-salience-report.qmd)
 - [Saved models](../../output/regs/salience_three_way.rds)
 - [Results including N, coefficient and 95% CI](../../output/logs/salience_three_way_results.csv)
 - [Sample audit](../../output/logs/salience_three_way_cell_counts.csv)
