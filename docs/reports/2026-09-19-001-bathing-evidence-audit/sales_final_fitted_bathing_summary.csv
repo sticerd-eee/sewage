@@ -1,0 +1,6 @@
+sample,n_bathing_final_fitted,n_first_positive_2024_only_final_fitted,affected_share_final,n_removed_by_saved_fixed_effect_levels,saved_model_nobs
+did_articles_prior_extensive_salience_groups,193843,14435,0.07446748141537224,51,193843
+did_articles_prior_salience_groups,15630,1513,0.09680102367242482,47,15630
+did_trends_prior_extensive_salience_groups,193843,14435,0.07446748141537224,51,193843
+did_trends_prior_salience_groups,15630,1513,0.09680102367242482,47,15630
+hedonic_count_continuous_prior_salience_groups,15384,1513,0.09834893395735829,49,15384
