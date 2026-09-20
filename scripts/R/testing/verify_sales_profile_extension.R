@@ -610,10 +610,11 @@ numeric_equal <- function(a, b, tolerance = EVIDENCE_TOLERANCE) {
   ok
 }
 
-# Sample ids retained by a fitted key, expanded from the compact bundle storage.
-bundle_retained_ids <- function(bundle, market, key, expand) {
+# Sample ids retained by a fitted key, expanded from the compact bundle storage
+# and resolved against the dictionary that key indexes.
+bundle_retained_ids <- function(bundle, market, key, expand, dictionary = function(ms, key) ms$ids) {
   ms <- bundle$samples[[market]]
-  ms$ids[expand(ms, key)]
+  dictionary(ms, key)[expand(ms, key)]
 }
 
 cmd_bundle <- function(dir = BASELINE_DIR) {
@@ -625,13 +626,23 @@ cmd_bundle <- function(dir = BASELINE_DIR) {
   }
   # The report's expansion helper is defined in the QMD; reimplement the storage
   # contract locally so this script does not depend on knitting the report.
+  # Bundle version 1 stored profile rows beside scalar keys against the scalar
+  # dictionary; version 2 stores them under `profile` (own dictionary when the
+  # panel is separate). Both are read so the baseline bundle stays comparable.
+  is_profile <- function(key) endsWith(key, "__profile")
   expand <- function(ms, key) {
-    e <- ms$estimated[[key]]
+    e <- if (is_profile(key) && !is.null(ms$profile)) ms$profile$estimated[[key]] else ms$estimated[[key]]
     if (is.null(e) || e$n_retained == 0L) return(integer())
     if (!is.null(e$retained)) return(e$retained)
-    variant <- strsplit(key, "__", fixed = TRUE)[[1L]][[2L]]
-    input <- ms$variants[[variant]]
+    input <- if (is_profile(key)) {
+      if (!is.null(ms$profile)) seq_len(ms$profile$n_rows) else ms$variants[["headline"]]
+    } else {
+      ms$variants[[strsplit(key, "__", fixed = TRUE)[[1L]][[2L]]]]
+    }
     input[!(input %in% e$removed)]
+  }
+  dictionary <- function(ms, key) {
+    if (is_profile(key) && !is.null(ms$profile) && identical(ms$profile$panel, "separate")) ms$profile$ids else ms$ids
   }
   findings <- list()
   note <- function(check, passed, detail = "") {
@@ -659,7 +670,7 @@ cmd_bundle <- function(dir = BASELINE_DIR) {
       note(sprintf("scalar_sample_ids:%s:%s", m, v), ok, sprintf("%d vs %d rows", length(os$variants[[v]]), length(ns$variants[[v]])))
     }
     for (key in oc$model_key[oc$market == m]) {
-      ok <- identical(bundle_retained_ids(old, m, key, expand), bundle_retained_ids(new, m, key, expand))
+      ok <- identical(bundle_retained_ids(old, m, key, expand, dictionary), bundle_retained_ids(new, m, key, expand, dictionary))
       note(paste0("scalar_retained_ids:", key), ok)
     }
     for (v in names(os$metadata)) {
@@ -699,7 +710,7 @@ cmd_bundle <- function(dir = BASELINE_DIR) {
     note(paste0("rental_joint_test:", key),
          identical(oj$status, nj$status) && identical(oj$years, nj$years) && numeric_equal(oj$statistic, nj$statistic) &&
            numeric_equal(oj$p_value, nj$p_value) && numeric_equal(oj$df2, nj$df2) && identical(oj$df1, nj$df1))
-    ok <- identical(bundle_retained_ids(old, "rentals", key, expand), bundle_retained_ids(new, "rentals", key, expand))
+    ok <- identical(bundle_retained_ids(old, "rentals", key, expand, dictionary), bundle_retained_ids(new, "rentals", key, expand, dictionary))
     note(paste0("rental_profile_retained_ids:", key), ok)
   }
   # 5. Sales profiles are expected to change: recorded, not asserted.
@@ -716,7 +727,6 @@ cmd_bundle <- function(dir = BASELINE_DIR) {
   # 6. Exclusion ledger: scalar-panel rows identical for both markets.
   ol <- old$exclusions$ledger
   nl <- new$exclusions$ledger
-  if ("panel" %in% names(nl)) nl <- nl[is.na(nl$panel) | nl$panel == "scalar", ]
   ledger_cols <- c("market", "step", "n_rows_before", "n_rows_after", "n_rows_removed", "n_groups_before", "n_groups_after")
   note("scalar_exclusion_ledger", nrow(ol) == nrow(nl) && all(vapply(ledger_cols, function(c) all(values_match(ol[[c]], nl[[c]])), logical(1))),
        sprintf("%d vs %d rows", nrow(ol), nrow(nl)))

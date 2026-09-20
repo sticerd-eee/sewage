@@ -607,4 +607,55 @@ assert_true(
   "The repeat-rentals entry script must leave no staged candidate behind."
 )
 
+# The sales mapping script must accept 1995-2024 input, stage a candidate from a
+# candidate history without publishing, and default to the canonical input.
+sales_env <- new.env(parent = globalenv())
+sys.source(
+  here::here("scripts", "R", "06_analysis_datasets", "repeat_sales.R"),
+  envir = sales_env
+)
+default_config <- sales_env$repeat_sales_config()
+assert_identical(default_config$year_min, 1995L, "The sales mapping must accept the 1995 start of the extended history.")
+assert_identical(default_config$year_max, 2024L, "The sales mapping must keep its 2024 end.")
+assert_true(isTRUE(default_config$publish), "The default sales configuration must publish.")
+assert_identical(
+  default_config$input_path,
+  here::here("data", "processed", "house_price_long_run.parquet"),
+  "The default sales input must remain the canonical long-run history."
+)
+candidate_config <- sales_env$repeat_sales_config(
+  output_dir = file.path(test_dir, "sales_candidate"),
+  input_path = file.path(test_dir, "house_price_long_run_candidate.parquet"),
+  publish = FALSE
+)
+assert_identical(candidate_config$publish, FALSE, "A candidate run must not publish.")
+assert_true(grepl("_candidate\\.parquet$", candidate_config$output_path), "Candidate runs must still stage candidate paths.")
+assert_identical(
+  candidate_config$previous_manifest_path,
+  file.path(test_dir, "sales_candidate", "repeated_sales.parquet"),
+  "The manifest delta must still be logged against the canonical mapping."
+)
+early_history <- data.table(
+  house_id = c("11aaa", "22bbb", "33ccc"),
+  postcode = c("SW1A 1AA", "SW1A 1AA", "E1 6AN"),
+  paon = c("10", "10", "7"),
+  saon = NA_character_,
+  street = c("ST JOHNS ROAD", "ST JOHNS ROAD", "BRICK LANE"),
+  date_of_transfer = as.Date(c("1995-01-01", "2022-01-01", "2013-03-15")),
+  price = c(50000, 120000, 450000),
+  property_type = c("T", "T", "F")
+)
+early_result <- run_repeat_transactions(candidate_config, data = early_history)
+assert_identical(nrow(early_result$mapping), 3L, "A 1995 transaction must be mapped under the extended window.")
+assert_identical(
+  sort(unique(early_result$mapping$repeat_count)),
+  c(1L, 2L),
+  "Full-history repeat counts must span the 1995-2024 history."
+)
+assert_true(
+  file.exists(candidate_config$output_path) &&
+    !file.exists(sub("_candidate\\.parquet$", ".parquet", candidate_config$output_path)),
+  "A candidate run must stage its mapping without promoting it."
+)
+
 cat("Repeat transaction contract tests passed.\n")

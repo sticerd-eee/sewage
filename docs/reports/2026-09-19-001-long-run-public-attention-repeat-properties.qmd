@@ -1,6 +1,6 @@
 ---
 title: "Long-run public attention with repeat properties"
-subtitle: "Within-property near–far price gaps, January 2014 onward"
+subtitle: "Within-property near–far price gaps: attention regressions from 2014, sales price profiles from 1995"
 author: "Jacopo Olivieri"
 date: 2026-09-19
 params:
@@ -36,8 +36,12 @@ experienced different price changes from farther properties as national sewage
 attention increased. It extends the extensive-margin news analysis with
 repeat-property panels: property fixed effects replace location fixed effects,
 so the near–far gap is identified from within-property price changes across
-calendar months. Sales cover January 2014 through December 2024; rentals cover
-January 2014 through December 2023.
+calendar months. The attention regressions use sales from January 2014 through
+December 2024 and rentals from January 2014 through December 2023. The sales
+annual near–far price profiles use a separate, wider panel: every property with
+two eligible sale dates between January 1995 and December 2024, so the longer
+history of relative prices can be inspected; the rental profiles keep the
+2014–2023 panel.
 
 The findings come first: the coefficient comparison across the full model grid,
 the headline cells, and the annual near–far profiles. The design section gives
@@ -88,6 +92,9 @@ CONFIG <- list(
     price_col = "price",
     start = as.Date("2014-01-01"),
     end = as.Date("2024-12-31"),
+    # Annual profiles use their own sales window (KTD1): every property with
+    # two eligible dates in the 1995-2024 history. Scalar cells keep `start`.
+    profile_start = as.Date("1995-01-01"),
     address_cols = c("postcode", "paon", "saon", "street"),
     primary_address_col = "paon",
     change_cols = "property_type",
@@ -110,6 +117,7 @@ CONFIG <- list(
     price_col = "listing_price",
     start = as.Date("2014-01-01"),
     end = as.Date("2023-12-31"),
+    profile_start = as.Date("2014-01-01"), # rental profiles share the scalar panel
     address_cols = c(
       "postcode",
       "address_line_01",
@@ -174,7 +182,7 @@ CONFIG <- list(
     log = here::here("output", "log", "long_run_public_attention")
   ),
   bundle_file = "long_run_public_attention_bundle.rds",
-  bundle_version = "1"
+  bundle_version = "2" # 2: separate annual-profile panel membership (sales 1995-2024)
 )
 MARKETS <- c("sales", "rentals")
 ```
@@ -193,7 +201,42 @@ market_config <- function(market) {
   }
   cfg <- CONFIG[[market]]
   cfg$market <- market
+  cfg$panel <- "scalar"
   cfg
+}
+
+# The annual-profile window of a market: the scalar configuration with `start`
+# replaced by `profile_start` (the end is shared). Every sample rule is reused
+# through this configuration rather than reinterpreted (KTD1).
+profile_config <- function(cfg) {
+  if (is.null(cfg$profile_start)) {
+    stop("Market configuration lacks `profile_start`.", call. = FALSE)
+  }
+  if (cfg$profile_start > cfg$start) {
+    stop("`profile_start` cannot be later than the scalar `start`.", call. = FALSE)
+  }
+  cfg$start <- cfg$profile_start
+  cfg$panel <- "profile"
+  cfg
+}
+
+# TRUE when the annual profiles need their own panel (a wider window than the
+# scalar cells); FALSE when they share the scalar headline panel unchanged.
+separate_profile_window <- function(cfg) {
+  !identical(as.Date(cfg$profile_start), as.Date(cfg$start))
+}
+
+# Months since the article origin, origin month = 1. Earlier months are zero or
+# negative: the index is a calendar-month identifier for fixed effects and is
+# valid for any date; only the attention join (scalar panels) requires it to
+# fall inside the article calendar.
+calendar_month_index <- function(dates, origin = CONFIG$article_origin) {
+  as.integer(
+    (lubridate::year(dates) - lubridate::year(origin)) * 12L +
+      lubridate::month(dates) -
+      lubridate::month(origin) +
+      1L
+  )
 }
 
 # The list shape that build_address_key()/validate_repeat_config() expect. Paths
@@ -1174,13 +1217,7 @@ apply_sample_contract <- function(
     repeat_id = repeat_id[keep],
     date = panel_dates,
     year = as.integer(lubridate::year(panel_dates)),
-    month_index = as.integer(
-      (lubridate::year(panel_dates) - lubridate::year(CONFIG$article_origin)) *
-        12L +
-        lubridate::month(panel_dates) -
-        lubridate::month(CONFIG$article_origin) +
-        1L
-    ),
+    month_index = calendar_month_index(panel_dates),
     log_price = log(price[keep]),
     lsoa = history$lsoa[keep],
     msoa = history$msoa[keep],
@@ -1386,9 +1423,12 @@ compute_observation_diagnostics <- function(
 # ---- Market preparation (provenance -> load -> validate -> contract -> diagnostics)
 
 # Returns list(market, status, reason, panel, readiness, ledger, diagnostics,
-# provenance). `panel` is the pre-band panel (NULL when blocked). Later units
-# call this inside the per-market estimate loop, then apply bands,
-# recompute_repeats() and freeze_change_flags().
+# provenance, profile_panel, profile_ledger). `panel` is the pre-band scalar
+# panel (NULL when blocked); `profile_panel` is the pre-band annual-profile
+# panel when the market's profile window is wider than its scalar window (NULL
+# when the profiles share the scalar panel). Both panels come from one load of
+# the full history and one mapping validation against the full generation.
+# Later units apply bands, recompute_repeats() and freeze_change_flags().
 prepare_market_panel <- function(market, cfg = market_config(market)) {
   started <- Sys.time()
   invisible(gc(reset = TRUE))
@@ -1408,7 +1448,9 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
     readiness = readiness,
     ledger = new_ledger(),
     diagnostics = NULL,
-    provenance = market_input_provenance(market, cfg)
+    provenance = market_input_provenance(market, cfg),
+    profile_panel = NULL,
+    profile_ledger = new_ledger()
   )
   result <- tryCatch(
     {
@@ -1436,6 +1478,18 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
         market,
         cfg
       )
+      # The annual-profile panel: the same sample rules over the wider window,
+      # prepared from the full history rather than by widening the scalar panel.
+      profile_contract <- if (separate_profile_window(cfg)) {
+        apply_sample_contract(
+          history,
+          mapping_obj$mapping,
+          market,
+          profile_config(cfg)
+        )
+      } else {
+        NULL
+      }
       rm(history, mapping_obj, same_day_ids)
       invisible(gc())
       # Diagnostics on the pre-band panel restricted to >= 2 distinct dates. This is
@@ -1455,6 +1509,7 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
       list(
         mapping_validation = mapping_validation,
         contract = contract,
+        profile_contract = profile_contract,
         diagnostics = diagnostics,
         n_eligible_rows = n_eligible_rows,
         n_eligible_groups = n_eligible_groups
@@ -1486,6 +1541,16 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
     )
     out$readiness$n_rows_repeat_eligible_pre_band <- result$n_eligible_rows
     out$readiness$n_groups_repeat_eligible_pre_band <- result$n_eligible_groups
+    out$readiness$profile <- profile_readiness(
+      market,
+      cfg,
+      result$profile_contract,
+      result$contract
+    )
+    if (!is.null(result$profile_contract)) {
+      out$profile_panel <- result$profile_contract$panel
+      out$profile_ledger <- result$profile_contract$ledger
+    }
     if (
       market == "rentals" &&
         identical(result$contract$unit_evidence$status, "blocked")
@@ -1499,6 +1564,7 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
       out$readiness$reason <- out$reason
       out$readiness$blocked_stage <- "rental_units"
       out$panel <- NULL
+      out$profile_panel <- NULL
     }
   }
   gc_info <- gc()
@@ -1512,6 +1578,28 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
     gc_info["Ncells", "max used"] * 56 + gc_info["Vcells", "max used"] * 8
   ) /
     1024^2
+  out
+}
+
+# Readiness record of the annual-profile panel: its window, whether it is the
+# scalar panel or a separate one, requested-window coverage by year and the
+# pre-band counts (recomputed eligibility, as for the scalar panel).
+profile_readiness <- function(market, cfg, profile_contract, scalar_contract) {
+  pcfg <- profile_config(cfg)
+  contract <- profile_contract %||% scalar_contract
+  eligible <- recompute_repeats(contract$panel)
+  out <- list(
+    panel = if (is.null(profile_contract)) "shared" else "separate",
+    start = pcfg$start,
+    end = pcfg$end,
+    coverage = contract$coverage,
+    date_range = contract$date_range,
+    n_rows_pre_band = nrow(contract$panel),
+    n_groups_pre_band = data.table::uniqueN(contract$panel$repeat_id),
+    n_rows_repeat_eligible_pre_band = nrow(eligible),
+    n_groups_repeat_eligible_pre_band = data.table::uniqueN(eligible$repeat_id)
+  )
+  rm(eligible)
   out
 }
 
@@ -2619,7 +2707,12 @@ blocked_cells_for_market <- function(market, reason) {
       year = integer(),
       share = numeric()
     ),
-    samples = list(ids = character(), variants = list(), estimated = list()),
+    samples = list(
+      ids = character(),
+      variants = list(),
+      estimated = list(),
+      profile = empty_profile_samples()
+    ),
     models = stats::setNames(
       vector("list", nrow(cells) + length(profiles)),
       c(cells$model_key, names(profiles))
@@ -3383,6 +3476,48 @@ assert_identical_estimation_rows <- function(
 
 profile_term <- function(year) sprintf("year::%d:near", year)
 
+is_profile_key <- function(key) endsWith(key, "__profile")
+
+# Membership record of a market's annual-profile panel (KTD5). `panel` says
+# whether the profiles were fitted on the scalar headline panel ("shared": the
+# ids are the scalar dictionary) or on a separate wider-window panel
+# ("separate": `ids` is its own dictionary). Profile retained rows always index
+# this record, never the scalar variants.
+empty_profile_samples <- function() {
+  list(
+    panel = "shared",
+    ids = NULL,
+    n_rows = 0L,
+    start = NA_character_,
+    end = NA_character_,
+    estimated = list(),
+    metadata = list()
+  )
+}
+
+# Annual support of a banded panel: rows and properties per year and band, so
+# the report can show where the expanded profiles draw their near-far contrast.
+profile_support_by_year <- function(panel) {
+  if (nrow(panel) == 0L) {
+    return(tibble::tibble(
+      year = integer(),
+      band = character(),
+      n_rows = numeric(),
+      n_properties = numeric()
+    ))
+  }
+  out <- panel[,
+    .(n_rows = .N, n_properties = data.table::uniqueN(repeat_id)),
+    by = .(year, band)
+  ][order(year, band)]
+  tibble::tibble(
+    year = as.integer(out$year),
+    band = as.character(out$band),
+    n_rows = as.numeric(out$n_rows),
+    n_properties = as.numeric(out$n_properties)
+  )
+}
+
 # Full joint restriction only: every requested coefficient available, full-rank
 # residualised annual-interaction matrix, finite positive-definite covariance block.
 joint_test <- function(coefs, V, t_df, Xd, joint_years) {
@@ -3685,6 +3820,21 @@ estimate_market_models <- function(
   vs <- build_variant_samples(entry, market, cfg, config)
   panel <- entry$panel
   ids <- vs$ids
+  # KTD1: the annual profiles fit their own panel when the market has a wider
+  # profile window; otherwise they fit the scalar headline panel unchanged.
+  separate_profile <- !is.null(entry$profile_panel)
+  profile_panel <- if (separate_profile) entry$profile_panel else panel
+  if (!data.table::is.data.table(profile_panel)) {
+    stop("`entry$profile_panel` must be a data.table.", call. = FALSE)
+  }
+  if (separate_profile && anyDuplicated(profile_panel$id) > 0L) {
+    stop(
+      "Profile panel ids must be unique to serve as the profile dictionary.",
+      call. = FALSE
+    )
+  }
+  profile_window <- profile_config(cfg)
+  profile_estimated <- list()
   calendar <- entry$calendar
   article_status <- if (all(calendar$article_status == "valid")) {
     "valid"
@@ -3703,12 +3853,16 @@ estimate_market_models <- function(
   controls_rows <- list() # per FE: the comparator estimation rows fixed for complete_case_controls
   grid <- model_grid(market)
   say(
-    "[%s] variants: %s\n",
+    "[%s] variants: %s; profile panel: %s (%s rows, %s-%s)\n",
     market,
     paste(
       sprintf("%s=%s", names(vs$variants), format_count(lengths(vs$variants))),
       collapse = ", "
-    )
+    ),
+    if (separate_profile) "separate" else "shared",
+    format_count(nrow(profile_panel)),
+    format(profile_window$start),
+    format(profile_window$end)
   )
   for (i in seq_len(nrow(grid))) {
     variant <- grid$variant[[i]]
@@ -3839,7 +3993,7 @@ estimate_market_models <- function(
     invisible(gc(reset = TRUE))
     t0 <- Sys.time()
     res <- fit_profile(
-      panel,
+      profile_panel,
       market,
       fe,
       config$profile_reference_year,
@@ -3853,7 +4007,7 @@ estimate_market_models <- function(
     ) /
       1024^2
     profiles[[key]] <- res$profile
-    estimated[[key]] <- res$retained
+    profile_estimated[[key]] <- res$retained
     models[key] <- list(res$model)
     fit_log[[key]] <- tibble::tibble(
       model_key = key,
@@ -3904,7 +4058,20 @@ estimate_market_models <- function(
       ids = ids,
       variants = vs$variants,
       estimated = estimated,
-      metadata = vs$metadata
+      metadata = vs$metadata,
+      profile = list(
+        panel = if (separate_profile) "separate" else "shared",
+        ids = if (separate_profile) as.character(profile_panel$id) else NULL,
+        n_rows = nrow(profile_panel),
+        start = format(profile_window$start, "%Y-%m-%d"),
+        end = format(profile_window$end, "%Y-%m-%d"),
+        estimated = profile_estimated,
+        metadata = list(
+          n_rows = nrow(profile_panel),
+          n_properties = count_groups(profile_panel$repeat_id),
+          support_by_year = profile_support_by_year(profile_panel)
+        )
+      )
     ),
     models = models,
     fit_log = dplyr::bind_rows(fit_log),
@@ -4421,7 +4588,80 @@ sample_variant_of_key <- function(key) {
   if (length(parts) != 4L) {
     stop("Malformed model key: ", key, call. = FALSE)
   }
-  if (parts[[4L]] == "profile") "headline" else parts[[2L]]
+  if (parts[[4L]] == "profile") {
+    stop(
+      "Profile key ",
+      key,
+      " indexes the profile membership, not a scalar variant.",
+      call. = FALSE
+    )
+  }
+  parts[[2L]]
+}
+
+# The input rows a fitted key was estimated from: a scalar variant index for
+# scalar keys, every row of the profile panel for profile keys.
+sample_input_rows <- function(market_samples, key) {
+  if (is_profile_key(key)) {
+    return(seq_len(as.integer(market_samples$profile$n_rows %||% 0L)))
+  }
+  input <- market_samples$variants[[sample_variant_of_key(key)]]
+  if (is.null(input)) {
+    stop("No variant input sample for ", key, call. = FALSE)
+  }
+  as.integer(input)
+}
+
+# The dictionary a fitted key's row indices refer to.
+sample_dictionary <- function(market_samples, key) {
+  if (!is_profile_key(key)) {
+    return(as.character(market_samples$ids))
+  }
+  pr <- market_samples$profile
+  if (identical(pr$panel, "separate")) as.character(pr$ids) else as.character(market_samples$ids)
+}
+
+compress_estimated_rows <- function(retained, input, key) {
+  retained <- as.integer(retained)
+  if (length(retained) == 0L) {
+    return(list(n_retained = 0L))
+  }
+  if (!all(retained %in% input)) {
+    stop(
+      "Estimated rows for ",
+      key,
+      " fall outside the ",
+      if (is_profile_key(key)) "profile panel." else "variant input sample.",
+      call. = FALSE
+    )
+  }
+  removed <- input[!(input %in% retained)]
+  if (identical(input[!(input %in% removed)], retained)) {
+    list(n_retained = length(retained), removed = removed)
+  } else {
+    list(n_retained = length(retained), retained = retained)
+  }
+}
+
+compress_profile_samples <- function(s) {
+  pr <- s$profile %||% empty_profile_samples()
+  input <- seq_len(as.integer(pr$n_rows %||% 0L))
+  estimated <- lapply(names(pr$estimated), function(key) {
+    if (!is_profile_key(key)) {
+      stop("Non-profile key in the profile membership: ", key, call. = FALSE)
+    }
+    compress_estimated_rows(pr$estimated[[key]], input, key)
+  })
+  names(estimated) <- names(pr$estimated)
+  list(
+    panel = pr$panel,
+    ids = if (is.null(pr$ids)) NULL else as.character(pr$ids),
+    n_rows = as.integer(pr$n_rows %||% 0L),
+    start = pr$start,
+    end = pr$end,
+    estimated = estimated,
+    metadata = pr$metadata
+  )
 }
 
 compress_market_samples <- function(s) {
@@ -4430,53 +4670,41 @@ compress_market_samples <- function(s) {
       ids = character(),
       variants = list(),
       estimated = list(),
-      metadata = s$metadata
+      metadata = s$metadata,
+      profile = compress_profile_samples(s)
     ))
   }
   estimated <- lapply(names(s$estimated), function(key) {
-    retained <- as.integer(s$estimated[[key]])
-    if (length(retained) == 0L) {
-      return(list(n_retained = 0L))
+    if (is_profile_key(key)) {
+      stop("Profile key in the scalar membership: ", key, call. = FALSE)
     }
-    input <- as.integer(s$variants[[sample_variant_of_key(key)]])
-    if (is.null(input)) {
-      stop("No variant input sample for ", key, call. = FALSE)
-    }
-    if (!all(retained %in% input)) {
-      stop(
-        "Estimated rows for ",
-        key,
-        " fall outside the variant input sample.",
-        call. = FALSE
-      )
-    }
-    removed <- input[!(input %in% retained)]
-    if (identical(input[!(input %in% removed)], retained)) {
-      list(n_retained = length(retained), removed = removed)
-    } else {
-      list(n_retained = length(retained), retained = retained)
-    }
+    compress_estimated_rows(s$estimated[[key]], sample_input_rows(s, key), key)
   })
   names(estimated) <- names(s$estimated)
   list(
     ids = as.character(s$ids),
     variants = lapply(s$variants, as.integer),
     estimated = estimated,
-    metadata = s$metadata
+    metadata = s$metadata,
+    profile = compress_profile_samples(s)
   )
 }
 
 compress_samples <- function(samples) lapply(samples, compress_market_samples)
 
 expand_estimated_rows <- function(market_samples, key) {
-  e <- market_samples$estimated[[key]]
+  e <- if (is_profile_key(key)) {
+    market_samples$profile$estimated[[key]]
+  } else {
+    market_samples$estimated[[key]]
+  }
   if (is.null(e) || e$n_retained == 0L) {
     return(integer())
   }
   retained <- if (!is.null(e$retained)) {
     e$retained
   } else {
-    input <- market_samples$variants[[sample_variant_of_key(key)]]
+    input <- sample_input_rows(market_samples, key)
     input[!(input %in% e$removed)]
   }
   if (length(retained) != e$n_retained) {
@@ -4491,18 +4719,34 @@ expand_samples <- function(samples) {
       expand_estimated_rows(s, key)
     })
     names(estimated) <- names(s$estimated)
+    profile <- s$profile
+    profile_estimated <- lapply(names(profile$estimated), function(key) {
+      expand_estimated_rows(s, key)
+    })
+    names(profile_estimated) <- names(profile$estimated)
+    profile$estimated <- profile_estimated
     list(
       ids = s$ids,
       variants = s$variants,
       estimated = estimated,
-      metadata = s$metadata
+      metadata = s$metadata,
+      profile = profile
     )
   })
 }
 
 sample_retained_count <- function(market_samples, key) {
-  e <- market_samples$estimated[[key]]
+  e <- if (is_profile_key(key)) {
+    market_samples$profile$estimated[[key]]
+  } else {
+    market_samples$estimated[[key]]
+  }
   if (is.null(e)) 0L else as.integer(e$n_retained)
+}
+
+# The transaction ids a fitted key retained, resolved against the right dictionary.
+sample_retained_ids <- function(market_samples, key) {
+  sample_dictionary(market_samples, key)[expand_estimated_rows(market_samples, key)]
 }
 
 assert_samples_roundtrip <- function(samples, compressed) {
@@ -4536,6 +4780,28 @@ assert_samples_roundtrip <- function(samples, compressed) {
       ) {
         stop(
           "Estimated rows for ",
+          key,
+          " do not survive compression.",
+          call. = FALSE
+        )
+      }
+    }
+    pr <- samples[[m]]$profile %||% empty_profile_samples()
+    ex <- expanded[[m]]$profile
+    if (
+      !identical(pr$panel, ex$panel) ||
+        !identical(
+          if (is.null(pr$ids)) NULL else as.character(pr$ids),
+          ex$ids
+        ) ||
+        !identical(as.integer(pr$n_rows %||% 0L), ex$n_rows)
+    ) {
+      stop("Profile membership changed in compression for ", m, call. = FALSE)
+    }
+    for (key in names(pr$estimated)) {
+      if (!identical(as.integer(pr$estimated[[key]]), ex$estimated[[key]])) {
+        stop(
+          "Profile rows for ",
           key,
           " do not survive compression.",
           call. = FALSE
@@ -4619,6 +4885,7 @@ assemble_bundle <- function(
   fixture_checks,
   runtime,
   fingerprint,
+  profile_ledger = new_ledger(),
   qmd_path = report_qmd_path(),
   config = CONFIG
 ) {
@@ -4659,7 +4926,11 @@ assemble_bundle <- function(
     inputs = inputs,
     readiness = readiness,
     markets = market_status_rows(market_data),
-    exclusions = list(ledger = exclusion_ledger, variants = variant_ledger),
+    exclusions = list(
+      ledger = exclusion_ledger,
+      variants = variant_ledger,
+      profile_ledger = profile_ledger
+    ),
     observation_diagnostics = observation_diagnostics,
     site_projection = projection,
     calendar = calendar,
@@ -4758,6 +5029,39 @@ validate_bundle <- function(bundle, require_complete = TRUE, config = CONFIG) {
   missing <- setdiff(MARKETS, names(bundle$samples))
   if (length(missing) > 0L) {
     fail("samples lack markets: %s", paste(missing, collapse = ", "))
+  }
+  # KTD5: every market carries an explicit profile membership. A separate panel
+  # brings its own dictionary; a shared panel points at the scalar dictionary.
+  # Distinct memberships cannot be confused because profile keys are never
+  # stored beside scalar keys.
+  for (m in MARKETS) {
+    ms <- bundle$samples[[m]]
+    pr <- ms$profile
+    if (is.null(pr) || !identical(pr$panel %||% NA_character_, "shared") && !identical(pr$panel %||% NA_character_, "separate")) {
+      fail(
+        "samples for %s lack the annual-profile membership (profile$panel must be `shared` or `separate`); this bundle predates the separate profile window",
+        m
+      )
+    }
+    if (identical(pr$panel, "separate")) {
+      if (is.null(pr$ids) || length(pr$ids) != as.integer(pr$n_rows) || anyDuplicated(pr$ids) > 0L) {
+        fail("profile dictionary for %s must hold %s unique ids", m, pr$n_rows)
+      }
+      if (is.na(pr$start) || is.na(pr$end)) {
+        fail("separate profile panel for %s lacks its window", m)
+      }
+    } else if (!is.null(pr$ids)) {
+      fail("shared profile panel for %s must not carry its own dictionary", m)
+    } else if (length(ms$ids) > 0L && !identical(as.integer(pr$n_rows), length(ms$ids))) {
+      fail("shared profile panel for %s must have the scalar dictionary size", m)
+    }
+    misplaced <- c(
+      names(ms$estimated)[vapply(names(ms$estimated), is_profile_key, logical(1))],
+      names(pr$estimated)[!vapply(names(pr$estimated), is_profile_key, logical(1))]
+    )
+    if (length(misplaced) > 0L) {
+      fail("sample membership for %s stores keys in the wrong dictionary: %s", m, paste(misplaced, collapse = ", "))
+    }
   }
   for (i in seq_len(nrow(bundle$cells))) {
     cell <- bundle$cells[i, ]
@@ -5044,7 +5348,7 @@ sample_support_rows <- function(samples) {
         n_properties = NA_real_
       ))
     }
-    dplyr::bind_rows(lapply(names(meta), function(v) {
+    rows <- dplyr::bind_rows(lapply(names(meta), function(v) {
       tibble::tibble(
         market = m,
         variant = v,
@@ -5052,6 +5356,19 @@ sample_support_rows <- function(samples) {
         n_properties = as.numeric(meta[[v]]$n_properties)
       )
     }))
+    pr <- samples[[m]]$profile
+    if (!is.null(pr) && length(pr$metadata) > 0L) {
+      rows <- dplyr::bind_rows(
+        rows,
+        tibble::tibble(
+          market = m,
+          variant = paste0("annual_profile_", pr$panel),
+          n_rows = as.numeric(pr$metadata$n_rows),
+          n_properties = as.numeric(pr$metadata$n_properties)
+        )
+      )
+    }
+    rows
   }))
 }
 
@@ -5523,6 +5840,56 @@ plot_coefficients <- function(
   p
 }
 
+# Year ticks for one panel: every fifth year over a long history, every second
+# year over a short one, always including the reference year (and dropping a
+# neighbour that would collide with it at manuscript size).
+profile_year_breaks <- function(reference_year) {
+  function(limits) {
+    years <- seq(ceiling(limits[[1L]]), floor(limits[[2L]]))
+    by <- if (length(years) > 16L) 5L else 2L
+    breaks <- years[years %% by == 0L]
+    sort(unique(c(breaks[abs(breaks - reference_year) > 1], reference_year)))
+  }
+}
+
+# Blank rows that fix each market's year domain (its actual supported history
+# plus the reference year) and its vertical bounds across both specifications,
+# so the two panels of a market share axes while markets keep their own.
+profile_panel_domain <- function(points, reference_year, limits = NULL) {
+  domain <- points |>
+    dplyr::group_by(market_label) |>
+    dplyr::summarise(
+      start = min(c(year, reference_year)),
+      end = max(c(year, reference_year)),
+      .groups = "drop"
+    ) |>
+    tidyr::pivot_longer(c(start, end), values_to = "year")
+  bounds <- limits %||% (points |>
+    dplyr::group_by(market_label) |>
+    dplyr::summarise(
+      lower = min(c(0, estimate, conf_low), na.rm = TRUE),
+      upper = max(c(0, estimate, conf_high), na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    tidyr::pivot_longer(c(lower, upper), values_to = "bound"))
+  domain |>
+    dplyr::inner_join(
+      bounds[, c("market_label", "bound")],
+      by = "market_label",
+      relationship = "many-to-many"
+    ) |>
+    dplyr::cross_join(tibble::tibble(fe_label = factor(FE_LABELS, levels = FE_LABELS)))
+}
+
+profile_facets <- function() {
+  ggplot2::facet_wrap(
+    ggplot2::vars(market_label, fe_label),
+    nrow = length(MARKET_LABELS),
+    scales = "free",
+    labeller = ggplot2::labeller(.multi_line = FALSE)
+  )
+}
+
 plot_profiles <- function(
   profiles,
   base_size = 11,
@@ -5547,6 +5914,11 @@ plot_profiles <- function(
     points,
     ggplot2::aes(x = year, y = estimate, colour = fe_label)
   ) +
+    ggplot2::geom_blank(
+      data = profile_panel_domain(points, reference_year),
+      ggplot2::aes(x = year, y = bound),
+      inherit.aes = FALSE
+    ) +
     ggplot2::geom_hline(
       yintercept = 0,
       linetype = "dashed",
@@ -5568,8 +5940,11 @@ plot_profiles <- function(
       values = c("#2c5f8a", "#b03a2e"),
       drop = FALSE
     ) +
-    ggplot2::facet_grid(market_label ~ fe_label, scales = "free_y") +
-    ggplot2::scale_x_continuous(breaks = seq(2014, 2024, by = 2)) +
+    profile_facets() +
+    ggplot2::scale_x_continuous(
+      breaks = profile_year_breaks(reference_year),
+      expand = ggplot2::expansion(mult = 0.02)
+    ) +
     ggplot2::labs(
       x = NULL,
       y = sprintf(
@@ -5748,15 +6123,19 @@ profile_reference_limits <- function(rows) {
 
 plot_profile_reference <- function(rows, reference_year, limits, base_size = 11) {
   points <- dplyr::filter(rows, .data$reference_year == .env$reference_year)
-  year_breaks <- seq(2014, 2024, 2)
-  # Leave room around an odd-numbered reference tick at manuscript size.
-  year_breaks <- sort(unique(c(year_breaks[abs(year_breaks - reference_year) > 1], reference_year)))
+  # Year domains come from every reference view of the same profiles, so both
+  # alternative figures share each market's horizontal and vertical scales.
+  domain <- profile_panel_domain(
+    dplyr::mutate(rows, year = as.integer(year)),
+    reference_year,
+    limits
+  )
   unavailable <- points |>
     dplyr::filter(!baseline_available) |>
     dplyr::distinct(market_label, fe_label)
   ggplot2::ggplot(points, ggplot2::aes(year, estimate, colour = fe_label)) +
     ggplot2::geom_blank(
-      data = limits, ggplot2::aes(x = 2014, y = bound), inherit.aes = FALSE
+      data = domain, ggplot2::aes(x = year, y = bound), inherit.aes = FALSE
     ) +
     ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey55") +
     ggplot2::geom_vline(
@@ -5781,8 +6160,11 @@ plot_profile_reference <- function(rows, reference_year, limits, base_size = 11)
       inherit.aes = FALSE, colour = "grey30", size = 3
     )) +
     ggplot2::scale_colour_manual(values = c("#2c5f8a", "#b03a2e"), drop = FALSE) +
-    ggplot2::facet_grid(market_label ~ fe_label, scales = "free_y") +
-    ggplot2::scale_x_continuous(breaks = year_breaks) +
+    profile_facets() +
+    ggplot2::scale_x_continuous(
+      breaks = profile_year_breaks(reference_year),
+      expand = ggplot2::expansion(mult = 0.02)
+    ) +
     ggplot2::labs(
       x = NULL,
       y = sprintf("Near x year contrast relative to %d (log points)", reference_year)
@@ -6097,8 +6479,154 @@ fixture_manifest <- function(history, mapping, excluded_count, same_day_count) {
   )
 }
 
+# A 1995-2024 history for the separate profile window: the base fixture, one
+# filler single per requested year (every year must be observed), property P
+# sold in 1998 and 2023 only (AE1), and property Q sold in 1998 (type D), 2015
+# and 2023 (type T), so its type change is confined to 1998 (AE2).
+fixture_cross_window_history <- function() {
+  base <- fixture_sales_history()
+  years <- 1995:2024
+  filler <- data.table::data.table(
+    house_id = sprintf("f%02d", seq_along(years)),
+    postcode = sprintf("ZZ%d 1AA", seq_along(years)),
+    paon = as.character(100L + seq_along(years)),
+    saon = NA_character_,
+    street = "FILLER ROW",
+    date_of_transfer = as.Date(sprintf("%d-03-03", years)),
+    price = 100000,
+    property_type = "T",
+    old_new = "N",
+    duration = "F",
+    country = "England",
+    easting = 400000,
+    northing = 300000,
+    lsoa = "E01000001",
+    msoa = "E02000001",
+    quality = 1L
+  )
+  extra <- data.table::data.table(
+    house_id = c("h17", "h18", "h19", "h20", "h21"),
+    postcode = c("AB1 2CL", "AB1 2CL", "AB1 2CM", "AB1 2CM", "AB1 2CM"),
+    paon = c("9", "9", "10", "10", "10"),
+    saon = NA_character_,
+    street = "BROOK ST",
+    date_of_transfer = as.Date(c(
+      "1998-05-05", "2023-05-05", "1998-06-06", "2015-06-06", "2023-06-06"
+    )),
+    price = c(60000, 400000, 70000, 250000, 420000),
+    property_type = c("T", "T", "D", "T", "T"),
+    old_new = "N",
+    duration = "F",
+    country = "England",
+    easting = 400000,
+    northing = 300000,
+    lsoa = "E01000001",
+    msoa = "E02000001",
+    quality = 1L
+  )
+  data.table::rbindlist(list(base, filler, extra), use.names = TRUE)
+}
+
+fixture_cross_window_cfg <- function() {
+  cfg <- fixture_sales_cfg(start = "2014-01-01", end = "2024-12-31")
+  cfg$profile_start <- as.Date("1995-01-01")
+  cfg
+}
+
+fixture_site_at <- function(e) {
+  tibble::tibble(site_id = 1L, easting = e, northing = 300000, usable = TRUE)
+}
+
 FIXTURE_CHECKS <- list()
 FIXTURE_CHECKS$u1 <- list(
+  ae1_ae2_cross_window_histories_keep_the_scalar_sample = function() {
+    cfg <- fixture_cross_window_cfg()
+    history <- fixture_cross_window_history()
+    mapping <- fixture_mapping_from_history(history, cfg)
+    shared_cfg <- cfg
+    shared_cfg$profile_start <- shared_cfg$start
+    assert_true(
+      separate_profile_window(cfg) && !separate_profile_window(shared_cfg),
+      "a wider profile_start marks a separate profile window"
+    )
+    scalar <- apply_sample_contract(history, mapping, "sales", cfg)
+    profile <- apply_sample_contract(history, mapping, "sales", profile_config(cfg))
+    assert_true(
+      scalar$ledger$note[[1L]] == "2014-01-01 to 2024-12-31 inclusive" &&
+        profile$ledger$note[[1L]] == "1995-01-01 to 2024-12-31 inclusive",
+      "each panel records its own requested window"
+    )
+    assert_true(
+      min(profile$panel$year) == 1995L && min(scalar$panel$year) == 2014L,
+      "the profile panel reaches 1995; the scalar panel starts in 2014"
+    )
+    s_out <- apply_exposure(scalar$panel, fixture_site_at(400000), scalar$ledger, "sales", cfg)
+    p_out <- apply_exposure(profile$panel, fixture_site_at(400000), profile$ledger, "sales", profile_config(cfg))
+    # AE1: P (h17 1998, h18 2023) is a profile repeat and a scalar single.
+    assert_true(
+      all(c("h17", "h18") %in% p_out$panel$id) && !any(c("h17", "h18") %in% s_out$panel$id),
+      "AE1: a 1998/2023 property enters the profile sample only"
+    )
+    # AE2: Q contributes three dates to the profiles and two to the scalar panel;
+    # the 1998 type change does not flag the scalar property.
+    assert_true(
+      all(c("h19", "h20", "h21") %in% p_out$panel$id) &&
+        all(c("h20", "h21") %in% s_out$panel$id) && !"h19" %in% s_out$panel$id,
+      "AE2: three profile dates, two scalar dates"
+    )
+    assert_true(
+      !any(s_out$panel[id %in% c("h20", "h21"), any_change]) &&
+        all(p_out$panel[id %in% c("h19", "h20", "h21"), any_change]),
+      "AE2: the type change confined to 1998 flags the profile property, not the scalar one"
+    )
+    # R2: the scalar panel is what a 2014-2024-only history would give.
+    recent <- history[lubridate::year(date_of_transfer) >= 2014L]
+    recent_mapping <- fixture_mapping_from_history(recent, cfg)
+    recent_out <- apply_exposure(
+      apply_sample_contract(recent, recent_mapping, "sales", cfg)$panel,
+      fixture_site_at(400000), new_ledger(), "sales", cfg
+    )
+    assert_true(
+      identical(sort(s_out$panel$id), sort(recent_out$panel$id)) &&
+        identical(
+          s_out$panel[order(id), .(id, repeat_id, any_change, change_property_type)],
+          recent_out$panel[order(id), .(id, repeat_id, any_change, change_property_type)]
+        ),
+      "R2: scalar ids, repeat ids and change flags do not depend on the earlier history"
+    )
+    assert_ledger_identity(s_out$ledger)
+    assert_ledger_identity(p_out$ledger)
+    assert_true(
+      nrow(p_out$panel) > nrow(s_out$panel) &&
+        all(s_out$panel$id %in% p_out$panel$id),
+      "the profile sample is a superset of the scalar sample here"
+    )
+    # A property losing its second distinct date after banding drops from that panel only.
+    site_far_for_p <- tibble::tibble(site_id = 1L, easting = 400000, northing = 300000, usable = TRUE)
+    history2 <- data.table::copy(history)[house_id == "h18", easting := 399250] # h18 falls in the omitted band
+    mapping2 <- fixture_mapping_from_history(history2, cfg)
+    profile2 <- apply_sample_contract(history2, mapping2, "sales", profile_config(cfg))
+    p2 <- apply_exposure(profile2$panel, site_far_for_p, profile2$ledger, "sales", profile_config(cfg))
+    assert_true(
+      !any(c("h17", "h18") %in% p2$panel$id) && all(c("h19", "h20", "h21") %in% p2$panel$id),
+      "P loses its second banded date and leaves the profile panel; Q stays"
+    )
+    # Manifest totals validate against the full history, not either panel.
+    manifest <- fixture_manifest(history, mapping, nrow(history) - nrow(mapping), 0L)
+    assert_true(
+      validate_mapping(history, mapping, manifest, character(), "sales", cfg)$status == "passed",
+      "full-generation manifest reconciles"
+    )
+    corrupt <- manifest
+    corrupt$input_row_count <- as.character(sum(lubridate::year(history$date_of_transfer) >= 2014L))
+    assert_error_matching(
+      validate_mapping(history, mapping, corrupt, character(), "sales", cfg),
+      "input_row_count",
+      "a manifest describing only the scalar window fails against the full history"
+    )
+    TRUE
+  },
+
   ae1_one_date_after_restriction_drops = function() {
     cfg <- fixture_sales_cfg()
     history <- fixture_sales_history()
@@ -7384,7 +7912,124 @@ fixture_model_entry <- function(
   )
 }
 
+# The scalar fixture panel plus one early observation per property (June 1995,
+# month index -227), with fresh ids, as a separate annual-profile panel.
+fixture_profile_panel <- function(panel, early_year = 1995L) {
+  early <- data.table::copy(panel[month_index == 6L])
+  early[, year := early_year]
+  early[, date := as.Date(sprintf("%d-06-15", early_year))]
+  early[, month_index := calendar_month_index(date)]
+  early[, id := sprintf("e%05d", seq_len(.N))]
+  early[, log_price := log_price - 0.5]
+  early[, post := NA_integer_]
+  early[, log_articles := NA_real_]
+  data.table::rbindlist(list(early, panel), use.names = TRUE)
+}
+
 FIXTURE_CHECKS$u3 <- list(
+  ae3_pre_2014_months_accepted_by_profile_preparation = function() {
+    assert_true(
+      calendar_month_index(as.Date("1995-01-15")) == -227L &&
+        calendar_month_index(as.Date("2014-01-15")) == 1L &&
+        calendar_month_index(as.Date("2013-12-31")) == 0L &&
+        calendar_month_index(as.Date("2024-12-01")) == 132L,
+      "month indices are consecutive calendar months with January 2014 = 1"
+    )
+    calendar <- fixture_model_calendar("sales")
+    assert_true(
+      calendar$month_index[[1L]] == 1L && calendar$year[[1L]] == 2014L &&
+        min(calendar$month_index) == 1L,
+      "the scalar calendar still starts at the January 2014 article origin"
+    )
+    panel <- fixture_model_panel("sales")
+    profile_panel <- fixture_profile_panel(panel)
+    early <- profile_panel[year == 1995L]
+    assert_error_matching(
+      attach_attention(data.table::copy(early), calendar),
+      "no calendar month",
+      "a 1995 month has no place in the attention calendar"
+    )
+    fit <- fit_profile(profile_panel, "sales", "property_month")$profile
+    assert_true(
+      fit$status == "estimated" && 1995L %in% fit$coefficients$year &&
+        isTRUE(fit$coefficients$available[fit$coefficients$year == 1995L]),
+      "a 1995 sale receives a calendar-month effect and an annual contrast without any article record"
+    )
+    assert_true(
+      identical(sort(unique(profile_panel$year)), c(1995L, 2014:2019, 2022L, 2023L)),
+      "the profile panel spans 1995 and the scalar years"
+    )
+    TRUE
+  },
+
+  separate_profile_panel_fits_its_own_dictionary = function() {
+    panel <- fixture_model_panel("sales")
+    cfg <- market_config("sales")
+    baseline <- estimate_market_models(fixture_model_entry(panel, "sales"), "sales", cfg, verbose = FALSE)
+    assert_true(
+      baseline$samples$profile$panel == "shared" && is.null(baseline$samples$profile$ids) &&
+        baseline$samples$profile$n_rows == nrow(panel) &&
+        !any(vapply(names(baseline$samples$estimated), is_profile_key, logical(1))) &&
+        all(vapply(names(baseline$samples$profile$estimated), is_profile_key, logical(1))),
+      "without a profile panel the profiles share the scalar dictionary and keep their own key list"
+    )
+    entry <- fixture_model_entry(panel, "sales")
+    entry$profile_panel <- fixture_profile_panel(panel)
+    out <- estimate_market_models(entry, "sales", cfg, verbose = FALSE)
+    pr <- out$samples$profile
+    assert_true(
+      pr$panel == "separate" && identical(pr$ids, entry$profile_panel$id) &&
+        pr$n_rows == nrow(entry$profile_panel) && pr$start == "1995-01-01",
+      "a separate profile panel brings its own dictionary and window"
+    )
+    for (key in names(pr$estimated)) {
+      assert_true(
+        length(pr$estimated[[key]]) == out$profiles[[key]]$nobs &&
+          all(pr$estimated[[key]] %in% seq_len(pr$n_rows)),
+        paste("profile rows index the profile dictionary:", key)
+      )
+      assert_true(
+        1995L %in% out$profiles[[key]]$coefficients$year &&
+          identical(out$profiles[[key]]$joint_test$years, CONFIG$profile_joint_years),
+        paste("expanded profile with the unchanged 2014-2018 joint restriction:", key)
+      )
+    }
+    assert_true(
+      isTRUE(all.equal(out$cells, baseline$cells)) &&
+        identical(out$samples$ids, baseline$samples$ids) &&
+        identical(out$samples$variants, baseline$samples$variants) &&
+        identical(out$samples$estimated, baseline$samples$estimated),
+      "scalar cells and their samples are unchanged by the separate profile panel"
+    )
+    support <- pr$metadata$support_by_year
+    assert_true(
+      all(c("near", "far") %in% support$band[support$year == 1995L]) &&
+        sum(support$n_rows) == nrow(entry$profile_panel),
+      "annual near/far support covers the whole profile panel"
+    )
+    compressed <- compress_samples(list(sales = out$samples))
+    assert_samples_roundtrip(list(sales = out$samples), compressed)
+    key <- profile_key("sales", "property_month")
+    assert_true(
+      identical(
+        sample_retained_ids(compressed$sales, key),
+        entry$profile_panel$id[pr$estimated[[key]]]
+      ),
+      "retained profile ids resolve through the profile dictionary"
+    )
+    # An empty profile panel leaves the scalar cells intact and records the
+    # profiles as unsupported rather than erasing the market.
+    entry$profile_panel <- entry$profile_panel[0L]
+    empty <- estimate_market_models(entry, "sales", cfg, verbose = FALSE)
+    assert_true(
+      all(vapply(empty$profiles, function(p) p$status, character(1)) == "unsupported_sample") &&
+        isTRUE(all.equal(empty$cells, baseline$cells)) &&
+        empty$samples$profile$n_rows == 0L && empty$samples$profile$panel == "separate",
+      "an unsupported profile panel does not erase valid scalar cells"
+    )
+    TRUE
+  },
+
   ae2_missing_to_observed_not_flagged_two_values_excluded = function() {
     panel <- fixture_model_panel("rentals")
     # p001: one missing and one observed bathroom value (not a change); p002: two observed values.
@@ -8370,7 +9015,30 @@ fixture_market_samples <- function(n = 10L) {
   metadata <- lapply(variants, function(idx) {
     list(n_rows = length(idx), n_properties = length(idx) %/% 2L)
   })
-  list(ids = ids, variants = variants, estimated = list(), metadata = metadata)
+  profile <- empty_profile_samples()
+  profile$n_rows <- n
+  profile$start <- "2014-01-01"
+  profile$end <- "2024-12-31"
+  profile$metadata <- list(n_rows = n, n_properties = n %/% 2L)
+  list(
+    ids = ids,
+    variants = variants,
+    estimated = list(),
+    metadata = metadata,
+    profile = profile
+  )
+}
+
+# A separate profile membership over `n` rows whose first ids coincide with the
+# scalar dictionary positions (row positions overlap, ids do not all match).
+fixture_separate_profile_samples <- function(s, n = 14L) {
+  s$profile$panel <- "separate"
+  s$profile$ids <- c(sprintf("t%03d", seq_len(3L)), sprintf("e%03d", seq_len(n - 3L)))
+  s$profile$n_rows <- n
+  s$profile$start <- "1995-01-01"
+  s$profile$end <- "2024-12-31"
+  s$profile$metadata <- list(n_rows = n, n_properties = n %/% 2L)
+  s
 }
 
 # A complete synthetic bundle: every scalar key estimated (or the article cells blocked),
@@ -8476,7 +9144,7 @@ fixture_bundle <- function(
       p$n_clusters <- 4L
       p$n_removed_by_estimator <- 1L
       profiles[[key]] <- p
-      s$estimated[[key]] <- retained
+      s$profile$estimated[[key]] <- retained
       models[[key]] <- list(
         model_key = key,
         nobs = length(retained),
@@ -9080,11 +9748,64 @@ FIXTURE_CHECKS$u4 <- list(
     )
     TRUE
   },
+  bundle_requires_profile_membership_and_current_version = function() {
+    bundle <- fixture_bundle()
+    assert_true(validate_bundle(bundle), "the fixture bundle validates")
+    no_membership <- bundle
+    no_membership$samples$sales$profile <- NULL
+    assert_error_matching(
+      validate_bundle(no_membership),
+      "annual-profile membership",
+      "a bundle without profile membership is refused with the reason"
+    )
+    old_version <- bundle
+    old_version$metadata$bundle_version <- "1"
+    assert_error_matching(
+      validate_bundle(old_version),
+      "bundle_version `1` does not match the expected `2`",
+      "a version-1 bundle cannot be accepted as carrying extended profiles"
+    )
+    separate <- bundle
+    separate$samples$sales <- fixture_separate_profile_samples(separate$samples$sales, n = 10L)
+    separate$samples$sales$profile$estimated <- bundle$samples$sales$profile$estimated
+    assert_true(validate_bundle(separate), "a separate profile dictionary validates")
+    profile <- profile_key("sales", "property_month")
+    assert_true(
+      identical(sample_retained_ids(separate$samples$sales, profile), c("t001", "t002", "t003", sprintf("e%03d", 1:6))) &&
+        identical(
+          sample_retained_ids(separate$samples$sales, model_key("sales", "headline", "property_month", "post")),
+          sprintf("t%03d", 1:9)
+        ),
+      "overlapping row positions resolve to different dictionaries"
+    )
+    duplicated_ids <- separate
+    duplicated_ids$samples$sales$profile$ids[2L] <- "t001"
+    assert_error_matching(
+      validate_bundle(duplicated_ids),
+      "unique ids",
+      "a profile dictionary with duplicated ids is refused"
+    )
+    misplaced <- bundle
+    misplaced$samples$sales$estimated[[profile]] <- misplaced$samples$sales$profile$estimated[[profile]]
+    assert_error_matching(
+      validate_bundle(misplaced),
+      "wrong dictionary",
+      "a profile key beside scalar keys is refused"
+    )
+    shared_with_ids <- bundle
+    shared_with_ids$samples$rentals$profile$ids <- shared_with_ids$samples$rentals$ids
+    assert_error_matching(
+      validate_bundle(shared_with_ids),
+      "must not carry its own dictionary",
+      "a shared panel with a dictionary is refused"
+    )
+    TRUE
+  },
   samples_compress_and_expand_identically = function() {
     s <- fixture_market_samples()
     s$estimated[["sales__headline__property_month__post"]] <- 1:9
     s$estimated[["sales__short_window__property_month__post"]] <- c(5L, 7L, 9L)
-    s$estimated[["sales__headline__property_month__profile"]] <- c(3L, 1L, 2L) # not a subsequence
+    s$profile$estimated[["sales__headline__property_month__profile"]] <- c(3L, 1L, 2L) # not a subsequence
     s$estimated[["sales__headline__property_month__log_articles"]] <- integer()
     samples <- list(sales = s)
     compressed <- compress_samples(samples)
@@ -9096,10 +9817,40 @@ FIXTURE_CHECKS$u4 <- list(
     )
     assert_true(
       identical(
-        e[["sales__headline__property_month__profile"]]$retained,
+        compressed$sales$profile$estimated[["sales__headline__property_month__profile"]]$retained,
         c(3L, 1L, 2L)
       ),
-      "a non-subsequence keeps the full index"
+      "a non-subsequence keeps the full index (profile membership)"
+    )
+    # A separate profile dictionary: profile rows resolve to their own ids even
+    # where the row positions coincide with scalar positions.
+    sep <- fixture_separate_profile_samples(s)
+    sep$profile$estimated[["sales__headline__property_month__profile"]] <- c(1L, 2L, 4L, 14L)
+    sep_compressed <- compress_samples(list(sales = sep))
+    assert_samples_roundtrip(list(sales = sep), sep_compressed)
+    assert_true(
+      identical(
+        sample_retained_ids(sep_compressed$sales, "sales__headline__property_month__profile"),
+        c("t001", "t002", "e001", "e011")
+      ) &&
+        identical(
+          sample_retained_ids(sep_compressed$sales, "sales__headline__property_month__post"),
+          sprintf("t%03d", 1:9)
+        ),
+      "profile rows resolve against the profile dictionary, scalar rows against the scalar one"
+    )
+    misplaced <- s
+    misplaced$estimated[["sales__headline__property_month__profile"]] <- 1:3
+    assert_error_matching(
+      compress_samples(list(sales = misplaced)),
+      "Profile key in the scalar membership",
+      "a profile key cannot be stored beside scalar keys"
+    )
+    sep$profile$estimated[["sales__headline__property_month__profile"]] <- c(1L, 15L)
+    assert_error_matching(
+      compress_samples(list(sales = sep)),
+      "outside the profile panel",
+      "profile rows outside the profile panel are rejected"
     )
     assert_true(
       e[["sales__headline__property_month__log_articles"]]$n_retained == 0L,
@@ -9468,6 +10219,7 @@ input_provenance <- dplyr::bind_rows(
 readiness <- list()
 observation_diagnostics <- list()
 exclusion_ledger <- new_ledger()
+profile_exclusion_ledger <- new_ledger()
 variant_ledger <- new_variant_ledger()
 market_data <- list()
 cells <- list()
@@ -9493,7 +10245,9 @@ for (market in MARKETS) {
     readiness = prepared$readiness,
     diagnostics = prepared$diagnostics,
     exposure_summary = NULL,
-    calendar = attention_calendars[[market]]
+    calendar = attention_calendars[[market]],
+    profile_panel = NULL,
+    profile_ledger = prepared$profile_ledger
   )
   if (prepared$status == "ready") {
     exposure <- apply_exposure(
@@ -9502,6 +10256,8 @@ for (market in MARKETS) {
       prepared$ledger,
       market
     )
+    profile_panel <- prepared$profile_panel
+    profile_ledger <- prepared$profile_ledger
     rm(prepared)
     invisible(gc())
     panel <- attach_attention(exposure$panel, attention_calendars[[market]])
@@ -9511,6 +10267,22 @@ for (market in MARKETS) {
     entry$distance_summary_all <- exposure$distance_summary_all
     entry$exposure_summary <- exposure_summaries(panel, market)
     rm(exposure, panel)
+    # The separate annual-profile panel takes the same fixed exposure and the
+    # same band and two-distinct-dates steps, but no attention join: its
+    # earlier months lie outside the article calendar by design (AE3).
+    if (!is.null(profile_panel)) {
+      profile_exposure <- apply_exposure(
+        profile_panel,
+        site_projection$projection,
+        profile_ledger,
+        market
+      )
+      entry$profile_panel <- profile_exposure$panel
+      entry$profile_ledger <- profile_exposure$ledger
+      rm(profile_exposure)
+    }
+    rm(profile_panel, profile_ledger)
+    invisible(gc())
   } else {
     rm(prepared)
   }
@@ -9530,17 +10302,23 @@ for (market in MARKETS) {
   variant_ledger <- dplyr::bind_rows(variant_ledger, fitted$ledger)
   rm(fitted)
   entry$panel <- NULL
+  entry$profile_panel <- NULL
   entry$runtime_seconds <- as.numeric(difftime(
     Sys.time(),
     started,
     units = "secs"
   ))
   exclusion_ledger <- dplyr::bind_rows(exclusion_ledger, entry$ledger)
+  profile_exclusion_ledger <- dplyr::bind_rows(
+    profile_exclusion_ledger,
+    entry$profile_ledger
+  )
   market_data[[market]] <- entry
   rm(entry)
   invisible(gc())
 }
 assert_ledger_identity(exclusion_ledger)
+assert_ledger_identity(profile_exclusion_ledger)
 cells <- dplyr::bind_rows(cells)
 residual_support <- dplyr::bind_rows(residual_support)
 residual_support_by_year <- dplyr::bind_rows(residual_support_by_year)
@@ -9585,7 +10363,8 @@ bundle <- assemble_bundle(
   fit_log = fit_logs,
   fixture_checks = fixture_results[, c("unit", "scenario", "passed")],
   runtime = runtime,
-  fingerprint = compute_fingerprint(input_provenance, rehash = FALSE)
+  fingerprint = compute_fingerprint(input_provenance, rehash = FALSE),
+  profile_ledger = profile_exclusion_ledger
 )
 bundle <- complete_bundle(bundle)
 save_bundle_atomic(bundle, file.path(CONFIG$output$regs, CONFIG$bundle_file))
@@ -9607,6 +10386,7 @@ rm(
   readiness,
   observation_diagnostics,
   exclusion_ledger,
+  profile_exclusion_ledger,
   variant_ledger,
   market_data,
   cells,
@@ -9753,11 +10533,19 @@ joint_caption <- paste(
   ),
   collapse = "; "
 )
+profile_windows <- vapply(MARKETS, function(m) {
+  pr <- results$samples[[m]]$profile
+  sprintf("%s %s to %s (%s rows, %s properties)", MARKET_LABELS[[m]],
+          format(as.Date(pr$start), "%B %Y"), format(as.Date(pr$end), "%B %Y"),
+          format_count(pr$metadata$n_rows), format_count(pr$metadata$n_properties))
+}, character(1))
 profile_caption <- sprintf(
-  "Near x year coefficients relative to %d on the headline samples with pointwise 95%% intervals; the hollow point is the %d reference and the vertical line marks %s. Joint test that the %s coefficients are zero: %s.",
+  "Near x year coefficients relative to %d with pointwise 95%% intervals; the hollow point is the %d reference and the vertical line marks %s, while the annual %d coefficient covers that whole year. Profile samples: %s; the sales profile panel is separate from the 2014-onward scalar sample. Each market keeps its own year axis. Joint test that the %s coefficients are zero: %s.",
   CONFIG$profile_reference_year,
   CONFIG$profile_reference_year,
   format(CONFIG$event_month, "%B %Y"),
+  lubridate::year(CONFIG$event_month),
+  paste(profile_windows, collapse = "; "),
   paste(range(CONFIG$profile_joint_years), collapse = "-"),
   joint_caption
 )
@@ -9811,7 +10599,7 @@ stock_event <- results$calendar$article_stock[
 ]
 ```
 
-The model grid has `r nrow(cells)` scalar cells (`r status_phrase`) and `r length(results$profiles)` annual profiles (`r profile_status_phrase`). Every planned cell is accounted for below; cells that could not be estimated keep their status and reason rather than a substituted number.
+The model grid has `r nrow(cells)` scalar cells (`r status_phrase`) and `r length(results$profiles)` annual profiles (`r profile_status_phrase`). The scalar cells use the 2014-onward samples; the sales profiles use the separate 1995–2024 profile panel and the rental profiles the 2014–2023 panel. Every planned cell is accounted for below; cells that could not be estimated keep their status and reason rather than a substituted number.
 
 ```{r}
 #| label: findings-coefficient-plot
@@ -9854,7 +10642,7 @@ if (is.null(profile_plot)) {
 }
 ```
 
-**Reading these results.** Two features of the grid matter more than any single coefficient. First, the sign and size of the post and article coefficients depend on the fixed-effect structure: the MSOA × year effects absorb local annual price paths, and what remains is the within-property, within-MSOA-year near–far change. Second, the annual profiles show whether the near–far gap was already moving before 2022; the joint test above covers only 2014–2018 relative to 2019, the 2022 coefficient mixes pre- and post-August months, and neither is a test of parallel trends over all pre-event observations. The sample variants (excluding observed characteristic changes, complete cases with and without controls, the 2021-on window) show how far each estimate depends on sample composition; differences in statistical significance between variants do not establish differences between estimates.
+**Reading these results.** Two features of the grid matter more than any single coefficient. First, the sign and size of the post and article coefficients depend on the fixed-effect structure: the MSOA × year effects absorb local annual price paths, and what remains is the within-property, within-MSOA-year near–far change. Second, the annual profiles show how the near–far gap moved before 2022, for sales over the full 1995–2024 history; the joint test above covers only 2014–2018 relative to 2019 (computed on the expanded sales fit's covariance for sales), the 2022 coefficient mixes pre- and post-August months, and neither is a test of parallel trends over all pre-event observations. Sales coefficients from 2014 onward in the profiles are not the scalar-sample coefficients re-expressed: the expanded panel adds properties whose histories connect through earlier sales, so they may differ from a 2014-only profile. The sample variants (excluding observed characteristic changes, complete cases with and without controls, the 2021-on window) show how far each estimate depends on sample composition; differences in statistical significance between variants do not establish differences between estimates.
 
 None of this is presented as evidence of a publicity effect. Property effects remove fixed proximity and fixed characteristics, calendar-month effects remove national shocks common to near and far properties, and MSOA × year effects remove local annual paths, but competing changes in the relative desirability of near locations over the same period are not excluded. These are unweighted transaction-level fixed-effects projections: the frequency and timing of repeat observations, not equal property weights, determine the implicit weighting.
 
@@ -9872,7 +10660,7 @@ $$
 \log p_{im} = \alpha_i + \lambda_m + \gamma_{g(i),\,y(m)} + \beta\,(\mathrm{Near}_i \times A_m) + \varepsilon_{im},
 $$
 
-where $\gamma_{g(i),y(m)}$ is an MSOA × calendar-year effect. The annual profiles replace the single interaction by year-specific ones on the headline sample:
+where $\gamma_{g(i),y(m)}$ is an MSOA × calendar-year effect. The annual profiles replace the single interaction by year-specific ones, on the rental headline sample and on the separate 1995–2024 sales profile panel (the same sample and exposure rules applied to the longer sales history, repeats recomputed within it):
 
 $$
 \log p_{im} = \alpha_i + \lambda_m + \left[\gamma_{g(i),\,y(m)}\right] + \sum_{y \neq `r CONFIG$profile_reference_year`} \delta_y\,(\mathrm{Near}_i \times \mathbb{1}\{y(m) = y\}) + \varepsilon_{im}.
@@ -9880,7 +10668,7 @@ $$
 
 - $p_{im}$: sale price (sales) or listing price at `rented_est` (rentals), in logs; finite positive outcomes only.
 - $\alpha_i$: property (repeat-group) effect; it absorbs the near main effect and every fixed characteristic.
-- $\lambda_m$: calendar-month effect (months since January 2014); it absorbs the attention main effect.
+- $\lambda_m$: calendar-month effect, indexed as consecutive calendar months with January 2014 = 1 (the sales profile panel uses indices from January 1995; no article record is needed for a month); it absorbs the attention main effect.
 - $\mathrm{Near}_i$: 1 for the `r CONFIG$bands$near_min`–`r CONFIG$bands$near_max` m band, 0 for the `r format_count(CONFIG$bands$far_min)`–`r format_count(CONFIG$bands$far_max)` m band, from the fixed Site Group projection; the intervening band and everything beyond `r format_count(CONFIG$bands$far_max)` m are dropped.
 - $A_m$: the post indicator (1 from `r format(CONFIG$event_month, "%B %Y")` inclusive) or $\log$ of the cumulative search-1 article count from `r format(CONFIG$article_origin, "%B %Y")`, evaluated through the full transaction or listing month.
 - $\delta_y$: the near–far gap in year $y$ relative to `r CONFIG$profile_reference_year`.
@@ -10132,16 +10920,56 @@ if (nrow(profile_points) > 0L) {
     profile_table,
     format = "html",
     caption = sprintf(
-      "Annual Near x year coefficients relative to %d (pointwise 95%% intervals)",
+      "Annual Near x year coefficients relative to %d (pointwise 95%% intervals); sales from the 1995-2024 profile panel, rentals from the 2014-2023 panel",
       CONFIG$profile_reference_year
     )
+  ))
+}
+profile_sample_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
+  pr <- results$samples[[m]]$profile
+  r <- results$readiness[[m]]$profile
+  tibble::tibble(
+    Market = MARKET_LABELS[[m]],
+    Panel = pr$panel,
+    Window = sprintf("%s to %s", pr$start, pr$end),
+    `Rows pre-band` = r$n_rows_pre_band %||% NA_real_,
+    `Properties pre-band` = r$n_groups_pre_band %||% NA_real_,
+    `Rows (banded, two dates)` = pr$metadata$n_rows %||% NA_real_,
+    `Properties (banded, two dates)` = pr$metadata$n_properties %||% NA_real_
+  )
+}))
+emit_table(knitr::kable(
+  profile_sample_rows,
+  format = "html",
+  format.args = list(big.mark = ","),
+  caption = "Annual-profile samples by market: `separate` means the profiles were fitted on their own wider-window panel, `shared` that they use the scalar headline panel"
+))
+support_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
+  sup <- results$samples[[m]]$profile$metadata$support_by_year
+  if (is.null(sup) || nrow(sup) == 0L) return(NULL)
+  dplyr::mutate(sup, market = MARKET_LABELS[[m]], .before = 1L)
+}))
+if (nrow(support_rows) > 0L) {
+  support_wide <- support_rows |>
+    tidyr::pivot_wider(
+      id_cols = c(market, year),
+      names_from = band,
+      values_from = c(n_rows, n_properties),
+      values_fill = 0
+    ) |>
+    dplyr::arrange(market, year)
+  emit_table(knitr::kable(
+    support_wide,
+    format = "html",
+    format.args = list(big.mark = ","),
+    caption = "Annual near/far support of the profile panels: rows and properties per year and band (the near-far contrast of a year requires both bands)"
   ))
 }
 ```
 
 ### Annual profiles with alternative reference years
 
-These two additional views describe the same annual near–far price paths using different comparison years. The 2014 reference shows changes since the beginning of the observed sample; it is not a pre-monitoring-policy baseline. The 2021 reference compares each year with the last full calendar year before the August 2022 attention spike. Neither reference assigns a causal effect to monitoring or publicity.
+These two additional views describe the same annual near–far price paths using different comparison years. The 2014 reference is a comparison year: the first year of the scalar samples and the year after the 2013 sector-wide monitoring instruction, not the start of the sales profile sample (which begins in 1995) and not a pre-monitoring-policy baseline. The 2021 reference compares each year with the last full calendar year before the August 2022 attention spike. Neither reference assigns a causal effect to monitoring or publicity.
 
 Each contrast is the difference between two coefficients from the original model. Its pointwise 95% interval uses the full LSOA-clustered covariance, including the covariance between those coefficients, and the original model's t degrees of freedom. The hollow point fixes the reference year at zero; it is a normalization, not an estimate with no uncertainty. Each market uses matching vertical scales across the two figures. The original 2019 profiles, joint tests, samples and main analyses are unchanged.
 
@@ -10172,7 +11000,7 @@ for (year in c(2014L, 2021L)) {
 #| label: fig-annual-profiles-reference-2014
 #| fig-width: 10
 #| fig-height: 6
-#| fig-cap: "Annual near–far price profiles relative to 2014, the start of the observed sample. Bars are pointwise 95% intervals. The hollow point is the reference-year normalization; the vertical line marks August 2022, while the 2022 estimate covers the full calendar year."
+#| fig-cap: "Annual near–far price profiles relative to 2014, a comparison year (sales profile panel 1995–2024; rental panel 2014–2023). Bars are pointwise 95% intervals. The hollow point is the reference-year normalization; the vertical line marks August 2022, while the 2022 estimate covers the full calendar year."
 
 reference_profile_plots[["2014"]]
 ```
@@ -10181,7 +11009,7 @@ reference_profile_plots[["2014"]]
 #| label: fig-annual-profiles-reference-2021
 #| fig-width: 10
 #| fig-height: 6
-#| fig-cap: "Annual near–far price profiles relative to 2021, the last full calendar year before August 2022. Bars are pointwise 95% intervals. The hollow point is the reference-year normalization; the vertical line marks August 2022, while the 2022 estimate covers the full calendar year."
+#| fig-cap: "Annual near–far price profiles relative to 2021, the last full calendar year before August 2022 (sales profile panel 1995–2024; rental panel 2014–2023). Bars are pointwise 95% intervals. The hollow point is the reference-year normalization; the vertical line marks August 2022, while the 2022 estimate covers the full calendar year."
 
 reference_profile_plots[["2021"]]
 ```
@@ -10256,7 +11084,27 @@ emit_table(knitr::kable(
   readiness_status_rows(readiness),
   format = "html",
   format.args = list(big.mark = ","),
-  caption = "Market readiness after the pre-band sample contract"
+  caption = "Market readiness after the pre-band sample contract (scalar panels)"
+))
+profile_readiness_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
+  r <- readiness[[m]]$profile
+  if (is.null(r)) return(tibble::tibble(market = m, panel = NA_character_))
+  tibble::tibble(
+    market = m,
+    panel = r$panel,
+    start = format(r$start),
+    end = format(r$end),
+    rows_pre_band = r$n_rows_pre_band,
+    groups_pre_band = r$n_groups_pre_band,
+    rows_repeat_eligible_pre_band = r$n_rows_repeat_eligible_pre_band,
+    groups_repeat_eligible_pre_band = r$n_groups_repeat_eligible_pre_band
+  )
+}))
+emit_table(knitr::kable(
+  profile_readiness_rows,
+  format = "html",
+  format.args = list(big.mark = ","),
+  caption = "Annual-profile panel readiness: window and pre-band counts (`shared` panels repeat the scalar counts)"
 ))
 emit_table(knitr::kable(
   results$markets,
@@ -10448,11 +11296,26 @@ emit_table(knitr::kable(
   results$exclusions$ledger,
   format = "html",
   format.args = list(big.mark = ","),
-  caption = "Exclusion ledger: requested dates through the distance bands and the two-distinct-dates requirement"
+  caption = "Exclusion ledger (scalar panels, 2014 onward): requested dates through the distance bands and the two-distinct-dates requirement"
 ))
+profile_ledger <- results$exclusions$profile_ledger
+if (!is.null(profile_ledger) && nrow(profile_ledger) > 0L) {
+  emit_table(knitr::kable(
+    profile_ledger,
+    format = "html",
+    format.args = list(big.mark = ","),
+    caption = "Exclusion ledger of the separate annual-profile panel (sales, 1995 onward): the same steps applied to the full history"
+  ))
+}
 coverage_rows <- dplyr::bind_rows(lapply(MARKETS, function(m) {
   readiness[[m]]$coverage
 }))
+profile_coverage <- dplyr::bind_rows(lapply(MARKETS, function(m) {
+  r <- readiness[[m]]$profile
+  if (is.null(r) || !identical(r$panel, "separate")) return(NULL)
+  dplyr::mutate(r$coverage, market = paste0(m, " (profile panel)"))
+}))
+coverage_rows <- dplyr::bind_rows(coverage_rows, profile_coverage)
 if (nrow(coverage_rows) > 0L) {
   coverage_wide <- tidyr::pivot_wider(
     coverage_rows,
@@ -10463,7 +11326,7 @@ if (nrow(coverage_rows) > 0L) {
     coverage_wide,
     format = "html",
     format.args = list(big.mark = ","),
-    caption = "Requested-window history rows by year"
+    caption = "Requested-window history rows by year (scalar panels, and the separate sales profile panel)"
   ))
 }
 ```
@@ -10903,7 +11766,9 @@ if (is.null(history$plot)) {
 
 **Measurement.** Property coordinates are postcode centroids, so distances to the mapped representatives are approximate and dwellings around a band boundary can be misclassified; "far" means far from a usable mapped Site Group representative, not verified absence of a closer unmapped overflow, and the small count of Site Groups without a valid location does not bound that error. Repeat groups are operational address matches (postcode plus address fields), not verified immutable dwellings or independent rental episodes; the address-key verification is a construction check, not independent evidence of dwelling identity. The rental outcome is a listing price whose unit is not documented by the provider; the report checks continuity across the 2022/2023 vintage boundary and applies no conversion, and its date is `rented_est` (`rented` with a `latest_to_rent` fallback whose share is reported by year and band), which establishes neither the agreed rent nor an exact tenancy start. The article series is one fixed LexisNexis Boolean search whose coverage is established only through the export evidence above; off-topic matches and merged article boundaries in that corpus are inherited, and the stock runs through the full transaction or listing month, so it is not strictly prior information.
 
-**Identification and inference.** A publicity interpretation would require the absence of competing changes in the relative desirability of near locations; the property, month and MSOA × year effects and the annual profiles inform that assessment but do not establish it, and the joint pre-period test covers 2014–2018 relative to 2019 only. Calendar-month effects do not remove national shocks with different near and far effects. LSOA clustering allows dependence within an LSOA, not arbitrary cross-LSOA dependence, and the residual-support measures diagnose how much and where focal variation remains without declaring adequate inference from sample size alone. Characteristic exclusions and controlled comparisons assess sensitivity; they do not show that conversions, matching error or selection have been removed. The short-window variant changes both the dates and the repeat membership and does not reproduce the existing cross-sectional baseline.
+**Earlier sales history.** The sales profile panel extends to 1995 under the same fixed 2021–2024 Site Group projection: proximity is measured to the mapped overflow representatives as located in the study years, not to the assets, monitoring status or sewer network as they stood at the time of an earlier sale. No historical asset dating is attempted, so the earlier annual contrasts describe relative price paths of properties that are near today's mapped overflows. Address-based repeat matching over a 30-year history links more sales per property and is more exposed to redevelopment or re-addressing than the 2014-onward matching; the annual near/far support table shows where each year's contrast is drawn from.
+
+**Identification and inference.** A publicity interpretation would require the absence of competing changes in the relative desirability of near locations; the property, month and MSOA × year effects and the annual profiles inform that assessment but do not establish it, and the joint pre-period test covers 2014–2018 relative to 2019 only, also on the expanded sales profile fit. Calendar-month effects do not remove national shocks with different near and far effects. LSOA clustering allows dependence within an LSOA, not arbitrary cross-LSOA dependence, and the residual-support measures diagnose how much and where focal variation remains without declaring adequate inference from sample size alone. Characteristic exclusions and controlled comparisons assess sensitivity; they do not show that conversions, matching error or selection have been removed. The short-window variant changes both the dates and the repeat membership and does not reproduce the existing cross-sectional baseline.
 
 ## Reproduce and locate outputs
 
@@ -10916,7 +11781,9 @@ runtime <- results$runtime
 input_lines <- sprintf("`%s` (%s)", names(fp$inputs), fp$inputs)
 ```
 
-From the project root, using the R 4.6.0 `rv` environment, the estimation path re-validates the inputs, re-estimates the grid, and writes the bundle and artifacts:
+The sales inputs are the 1995–2024 history and mapping. Regenerating them upstream follows a gated order, each step from the project root in the R 4.6.0 `rv` environment: `Rscript scripts/R/testing/verify_sales_profile_extension.R baseline` (once; refuses to overwrite a frozen baseline) and `sources` (validates the year-to-source manifest: both split parts for 1995–2013, the exact complete annual files for 2014–2024); `Rscript scripts/R/02_data_cleaning/clean_lr_house_price_data.R` (writes the paired candidates); `verify_sales_profile_extension.R overlap` (2014–2024 values and ids and the 2021–2024 study table must equal the baseline); a candidate mapping run, `Rscript -e 'source("scripts/R/06_analysis_datasets/repeat_sales.R"); main(repeat_sales_config(input_path = here::here("data", "processed", "house_price_long_run_candidate.parquet"), publish = FALSE))'`; `verify_sales_profile_extension.R mapping` (every baseline transaction keeps its repeat id); `verify_sales_profile_extension.R promote` (replaces the six sales artifacts as one unit; `rollback` restores the baseline). After the estimation render below, `verify_sales_profile_extension.R bundle` checks that the 40 scalar cells, their samples and settings and both rental profiles reproduce the baseline bundle at tolerance 1e-8.
+
+The estimation path re-validates the inputs, re-estimates the grid, and writes the bundle and artifacts:
 
 ```bash
 quarto render docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd --to html
@@ -10938,8 +11805,8 @@ The bundle recorded `r format_seconds(results$metadata$runtime_seconds)` for the
 
 - `output/regs/long_run_public_attention/`: the results bundle (`r CONFIG$bundle_file`), written atomically and validated before it replaces the previous one.
 - `output/tables/long_run_public_attention/`: CSVs for cells, profile coefficients, joint tests, residual support (and by year), the exclusion and variant ledgers, sample support, the readiness summary, the attention calendar and the input provenance; every row carries the run's combined fingerprint.
-- `output/figures/long_run_public_attention/`: PDF figures (`coefficient_comparison.pdf`, `annual_profiles.pdf`, `attention_history_sales.pdf` when the calendar validated) at manuscript size with `run_fingerprint.txt` beside them.
-- The additional `annual_profiles_reference_2014.pdf` and `annual_profiles_reference_2021.pdf` views are regenerated from the validated bundle during each full report render, including cached renders.
+- `output/figures/long_run_public_attention/`: PDF figures (`coefficient_comparison.pdf`, `annual_profiles.pdf`, `attention_history_sales.pdf` when the calendar validated) at manuscript size with `run_fingerprint.txt` beside them. The sales panels of `annual_profiles.pdf` span 1995–2024 and the rental panels 2014–2023.
+- The `annual_profiles_reference_2014.pdf` and `annual_profiles_reference_2021.pdf` views are regenerated from the validated bundle during each full report render, including cached renders, from the same expanded sales coefficients and covariance.
 - `output/log/long_run_public_attention/run_log.txt`: runtime, fingerprint components, package versions and the fit log.
 
 The combined fingerprint `` `r fp$combined` `` hashes four components: the content hashes of the consumed inputs (`r paste(input_lines, collapse = ", ")`); the code (`r paste(computational_chunk_labels(), collapse = ", ")` chunks and the sourced helpers `r paste(HELPER_FILES, collapse = ", ")`); the canonical analysis settings; and the computational package versions. Prose, display chunks, display packages and the `reestimate` switch are outside it.

@@ -173,7 +173,7 @@ All Keyable Transactions in one dataset that share an Address Key — the projec
 The transaction-grain artifact assigning every Keyable Transaction to its Repeat Group, singles included, with the group size recorded. It is a census of keyable transactions — exclusions are auditable by subtraction — and the sole bridge between cleaned transactions and repeat-based analyses. Group membership and group size are defined over the Long-Run Transaction History; a consumer restricting to a narrower window must regroup rather than trust the recorded size.
 
 ### Long-Run Transaction History
-The maximal retained span of cleaned transactions (from 2014, the earliest rental coverage), wider than the spill study window. Repeat identification runs over the long-run history; the study-window transaction tables are derived from it by filtering, never built independently, so both views agree row-for-row where they overlap.
+The maximal retained span of cleaned transactions, defined by market: sales from January 1995 (the start of the Land Registry Price Paid record, extended on 20 September 2026 from the earlier 2014 start) and rentals from 2014 (the earliest rental coverage). Both are wider than the spill study window. Repeat identification runs over each market's long-run history; the study-window transaction tables are derived from it by filtering, never built independently, so both views agree row-for-row where they overlap. Analyses choose their own windows within the history and regroup after restricting: the scalar attention regressions keep January 2014 onward for both markets, while the sales Annual Near–Far Price Profiles use the full 1995–2024 history.
 
 ## Public Attention Area
 
