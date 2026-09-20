@@ -30,7 +30,6 @@ source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 REQUIRED_PACKAGES <- c("arrow", "dplyr", "fixest", "forcats", "here", "modelsummary", "tibble")
 check_required_packages(REQUIRED_PACKAGES)
 source(here::here("scripts", "R", "utils", "salience_group_utils.R"), local = TRUE)
-source(here::here("scripts", "R", "utils", "salience_publication_utils.R"), local = TRUE)
 source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
 
 
@@ -39,10 +38,6 @@ source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), lo
 # ==============================================================================
 
 CONFIG <- list(
-  profile = "open_coast",
-  exclude_london = FALSE,
-  bathing_policy = "ever_2124",
-  site_path = here::here("data", "processed", "site_characteristics", "site_group_characteristics.parquet"),
   coast_rule_m = 2000L,
   output_prefix = "hedonic_count_continuous_prior_salience_groups",
   title = "Baseline Hedonic by Salience Group",
@@ -104,14 +99,12 @@ prepare_analysis_data <- function(market, characteristics) {
     arrow::read_parquet(spec$transactions), arrow::open_dataset(spec$exposure), market
   )
   nearest <- nearest_salience_sites(
-    arrow::open_dataset(spec$lookup), characteristics, spec$id, profile = CONFIG$profile
+    arrow::open_dataset(spec$lookup), characteristics, spec$id
   )
-  if (CONFIG$profile == "open_coast" && any(!data[[spec$id]] %in% nearest[[spec$id]]))
-    stop("Missing required nearest Site Group for exposure-positive property.")
   data |>
     dplyr::left_join(dplyr::select(nearest, -"min_distance"), by = spec$id,
                      relationship = "many-to-one") |>
-    classify_salience_groups(CONFIG$coast_rule_m, profile = CONFIG$profile, bathing_policy = CONFIG$bathing_policy)
+    classify_salience_groups(CONFIG$coast_rule_m)
 }
 
 
@@ -133,17 +126,17 @@ fit_salience_hedonic <- function(data, market = c("sales", "rentals")) {
 }
 
 estimate_groups <- function(data, market) {
-  counts <- audit_salience_groups(data, market, exclude_london = CONFIG$exclude_london, allow_unavailable = TRUE)
+  counts <- audit_salience_groups(data, market)
   masks <- salience_group_masks(data)
   models <- lapply(CONFIG$groups, function(group) {
-    sample <- data[masks[[group]] & (!CONFIG$exclude_london | !data$london), ]
+    sample <- data[masks[[group]] & !data$london, ]
     cat(sprintf("  %s / %s: %s observations before estimator removals\n",
                 market, group, format(nrow(sample), big.mark = ",")))
-    fit_salience_group(sample, function(sample) fit_salience_hedonic(sample, market),
-      terms = "spill_count_weekly_avg", id = MARKETS[[market]]$id)
+    fit_salience_hedonic(sample, market)
   })
   names(models) <- CONFIG$groups
-  counts <- salience_fit_counts(counts, models)
+  counts$nobs <- vapply(models, stats::nobs, numeric(1))
+  counts$n_removed_by_estimator <- counts$n_estimation - counts$nobs
   results <- dplyr::bind_rows(lapply(names(models), function(group) {
     salience_group_results(models[[group]]) |>
       dplyr::filter(.data$term %in% "spill_count_weekly_avg") |>
@@ -157,17 +150,17 @@ estimate_groups <- function(data, market) {
 # 4. Table and Model Export
 # ==============================================================================
 
-export_table <- function(result, path = here::here("output", "tables", paste0(CONFIG$output_prefix, ".tex"))) {
+export_table <- function(result) {
   coefficient_map <- c(spill_count_weekly_avg = "Spills per week (avg.)")
   notes <- paste0(
     "This table presents hedonic estimates of the relationship between sewage spill exposure ",
     "and property values, estimated separately within each salience group. The sample ",
-    "includes all properties within 250m of a storm overflow in the study area, including Greater ",
+    "includes all properties within 250m of a storm overflow in England, excluding Greater ",
     "London, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are ",
     "available). Properties are excluded where any overflow within the radius has an ",
     "incomplete spill record over the exposure window, since measured spill exposure would ",
     "otherwise be understated. ",
-    salience_group_notes("nearest", CONFIG$coast_rule_m, CONFIG$profile),
+    salience_group_notes("nearest", CONFIG$coast_rule_m),
     "The dependent variable is the log transaction price for sales or the log weekly ",
     "asking rent for rentals. ",
     "Spill exposure is measured as the average number of spill events per week (12/24 count) ",
@@ -181,20 +174,31 @@ export_table <- function(result, path = here::here("output", "tables", paste0(CO
   )
   export_salience_group_table(
     result$models, coefficient_map, CONFIG$title, notes,
-    path
+    here::here("output", "tables", paste0(CONFIG$output_prefix, ".tex"))
   )
 }
 
-export_results <- function(result, output_root = here::here("output")) {
-  publish_salience_result(result, CONFIG$output_prefix, output_root, export_table)
+export_results <- function(result) {
+  export_table(result)
+  for (folder in c("regs", "logs")) {
+    dir.create(here::here("output", folder), recursive = TRUE, showWarnings = FALSE)
+  }
+  saveRDS(result, here::here("output", "regs", paste0(CONFIG$output_prefix, ".rds")))
+  utils::write.csv(result$counts, here::here(
+    "output", "logs", paste0(CONFIG$output_prefix, "_cell_counts.csv")
+  ), row.names = FALSE)
+  utils::write.csv(result$results, here::here(
+    "output", "logs", paste0(CONFIG$output_prefix, "_results.csv")
+  ), row.names = FALSE)
+  invisible(result)
 }
+
 
 # ==============================================================================
 # 5. Execution
 # ==============================================================================
 
 main <- function() {
-  provenance <- salience_input_provenance()
   characteristics <- arrow::read_parquet(here::here(
     "data", "processed", "site_characteristics", "site_group_characteristics.parquet"
   ))
@@ -207,9 +211,7 @@ main <- function() {
     models = lapply(output, function(x) x$models),
     counts = dplyr::bind_rows(lapply(output, function(x) x$counts)),
     results = dplyr::bind_rows(lapply(output, function(x) x$results)),
-    settings = list(config = CONFIG, london = if (CONFIG$exclude_london) "excluded" else "included",
-                    profile = CONFIG$profile, bathing_policy = CONFIG$bathing_policy, provenance = provenance,
-                    groups_overlap = TRUE,
+    settings = list(config = CONFIG, london = "excluded", groups_overlap = TRUE,
                     created_at = Sys.time(), r_version = R.version.string)
   )
   export_results(result)

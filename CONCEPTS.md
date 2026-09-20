@@ -43,27 +43,30 @@ A Record-Linkage Component containing more than one Annual-Return Site from the 
 The straight-line distance threshold within which a property is treated as exposed to a storm overflow, used to build the near-property cross-sections. The main analyses are run at several such thresholds, with the others serving as robustness checks. In regression specifications it is written generically as the radius buffer **B**, which takes the values 250, 500, and 1000 m across the sweep; each individual result table still reports its specific radius.
 
 ### Site Coast Distance
-The straight-line distance from a Site Group's overflow location to the coastline. It describes geographic proximity to the coast, not whether the overflow discharges into coastal or transitional water.
+The straight-line distance from a Site Group's representative overflow location to the tidal Mean High Water coastline, including estuarine and tidal-river banks. It describes geographic proximity to that shoreline, not receiving-water type or direct recreational use.
 
 ### Annual Designated-Water Status
-The reporting-year classification of a Site Group's bathing-water or shellfish-water evidence as designated, not designated, or unknown. Bathing-water and shellfish-water statuses are distinct and may change or conflict across reporting years.
+The reporting-year classification of a Site Group's bathing-water or shellfish-water association evidence as positive, no reported association, or unknown. These statuses describe annual-return evidence and do not establish a water's legal designation date or prove that an unreported association was absent.
 
 ### Ever-Observed Designated-Water Indicator
-A Site Group indicator that positive bathing-water or shellfish-water designation evidence appears in at least one Annual Return EDM from 2021 through 2024. It does not imply continuous designation throughout that period.
+A Site Group indicator that positive bathing-water or shellfish-water association evidence appears in at least one Annual Return EDM from 2021 through 2024. It does not imply a continuous association throughout that period.
 
-For bathing salience, an observed positive establishes ever-designation even
-when other years have unknown evidence. Designation remains unresolved only
+For bathing salience, an observed positive establishes an ever-observed association even
+when other years have unknown evidence. Association evidence remains unresolved only
 when evidence is unknown or missing and no positive is observed; at property
-radius, any positively designated nearby Site Group establishes bathing.
+radius, any nearby Site Group with a positive association establishes bathing.
+
+### Ever-Observed Bathing-Water Association
+A reported association between a Site Group and a designated bathing water in at least one year during 2021–2024, used as a fixed characteristic of place. It can reflect a discharge affecting the bathing water from elsewhere and does not imply designation or association at the transaction date.
 
 ### Property Designated-Water Proximity
-A property-radius classification derived from the Ever-Observed Designated-Water Indicators of every nearby Site Group. Its primary flag records whether any nearby Site Group is designated; all-designated, mixed, unknown, and designated-site-count fields preserve the radius composition.
+A property-radius classification derived from the Ever-Observed Designated-Water Indicators of every nearby Site Group. Its primary flag records whether any nearby Site Group has a positive association; composition measures distinguish all-positive, mixed, unknown evidence, and counts of associated sites.
 
 ### Property Spill-Intensity Band
 A property-radius classification of total nearby Prior-to-Transaction Spill Exposure as unknown, zero, positive at or below the positive-exposure median, or positive above that median. It aggregates every Site Group within the property's Near-Overflow Radius and is defined separately by market and radius.
 
 ### Local Salience
-A cross-sectional property of place describing where a sewage spill does more harm and is therefore more noticeable to buyers and renters: near the coast, at a designated bathing water, or near a heavy-spilling overflow. It is fixed for a property and contrasts with Public Attention, which varies over time and is common to all places. Measured through Site Coast Distance, the Ever-Observed Designated-Water Indicator, and the Property Spill-Intensity Band.
+A characteristic of place associated with how much local people notice and care about sewage pollution. Recreational use and the value of nearby water are hypothesised mechanisms; shoreline proximity, reported bathing-water association and spill intensity are proxies, not observations of individual recreational behaviour or proof of greater harm. It is fixed for a property in these analyses, unlike Public Attention, which varies over time and is common to all places.
 
 ### Salience Stratum
 A mutually exclusive subsample of transactions defined by Local Salience, within which a property-price specification is re-estimated. Heterogeneity by salience compares the same specification across strata rather than adding interaction terms.
@@ -78,7 +81,7 @@ Designation does not determine coastal location.
 A subsample defined by one Local Salience characteristic, within which a
 property-price specification is re-estimated. Salience Groups can overlap and
 need not exhaust the transaction sample. **All Bathing** includes every
-location with positive bathing designation evidence, coastal or inland.
+location with an Ever-Observed Bathing-Water Association, coastal or inland.
 **All Coastal** includes every location within the coast-distance threshold,
 including bathing locations. **All Inland** includes every location beyond
 that threshold, including bathing locations. Missing evidence cannot establish

@@ -160,18 +160,18 @@ The paper uses **overlapping Salience Groups**, as confirmed in the
 [refactor plan](plans/2026-09-03-001-refactor-salience-report-and-paper-scripts-plan.md)
 and defined in [CONCEPTS.md](../CONCEPTS.md):
 
-- **All Bathing:** positive reported bathing-water association in any year 2021–2024, independently of coast evidence.
-- **All Coastal:** validated overflow distance to physical open-coast shoreline at most 2 km, including bathing locations.
-- **All Inland:** complete open-coast evidence, with every relevant overflow farther than 2 km, including bathing locations.
+- **All Bathing:** positive reported bathing-water association in any year 2021–2024, coastal or inland.
+- **All Coastal:** site coast distance at most 2 km, including bathing locations.
+- **All Inland:** site coast distance above 2 km, including bathing locations.
 
 Group counts must not be added together. Missing coast excludes Coastal/Inland
-membership but does not negate an observed bathing designation. Positive bathing
+membership but does not negate an observed bathing-water association. Positive bathing
 evidence prevails over other unknown evidence; unresolved evidence does not
-establish Bathing membership. The refined profile selects physical high-water
-shoreline adjoining officially coastal water, including coastal bays and excluding
-estuarine/tidal-river banks. London is included in headline estimates. The explicit
-`legacy_tidal` profile retains the old tidal measurement; shared helpers keep this
-legacy default for historical definitions. Paper scripts explicitly select `open_coast`.
+establish Bathing membership. Coast distance follows the tidal Mean High Water
+line, including estuarine and tidal-river banks. Greater London is excluded using
+transaction `region == "London"`. Recreational use and the value of nearby water
+are hypothesised salience mechanisms. These proxies do not establish individual
+swimming, direct discharge, continuous designation or designation at transaction date.
 
 #### Paper specifications and outputs
 
@@ -189,8 +189,7 @@ column are relative to `scripts/R/09_analysis/`.
 Extensive Near is 0–500 m inclusive; Far is >1,000 m and ≤2,000 m.
 Intensive and hedonic use properties within 250 m. Extensive and hedonic groups
 use the nearest Site Group; intensive groups use any bathing site and minimum
-open-coast distance in the 250 m companion. A known coastal site suffices even
-with other unknown sites; Inland requires zero missing distances. Attention models include LSOA and month
+coast distance in the 250 m companion. Attention models include LSOA and month
 FE, with LSOA-clustered SEs. Hedonic includes LSOA FE, no time FE, and
 heteroskedasticity-robust SEs; it retains the parent's joint count/hours
 availability restriction. All models retain parent property controls.
@@ -224,112 +223,30 @@ and the 250 m `prior_characteristics/` companions for intensive groups.
 All these paths are under `data/processed/`. Articles use
 `data/processed/lexis_nexis/search1_monthly.parquet`.
 
-#### Refined evidence, rebuild and publication
-
-Raw OS OpenMap Local high-water geometry and EA/NRW/SEPA classifications are pinned
-under `data/raw/geography/open_coast/`. Acquisition and geography review diagnostics
-live beside the salience report. Classification year and cartographic vintage are
-recorded separately. Only physical OS lines may enter the distance reference;
-water-body offshore edges, administrative seams and mouth separators may not.
-
-`build_open_coast_reference.R` accepts a candidate RDS and a matching approved
-geography-review JSON. It checks source hashes, a zero unresolved-relevant-segment
-review and the candidate hash before staged publication to
-`data/processed/geography/open_coast/reference.rds`. An initial overlay or finite
-distance is insufficient for this gate. The reference records its reviewed search
-extent, source evidence and representative-location hash.
-
-To replay the reviewed September 2026 geography from the project root, use R
-4.6.0 with the rv startup profile and the pinned acquisition scripts. Downloads
-are immutable: a changed provider response fails its recorded hash check.
-The OS archive is retrieved by ZIP ranges; each component has CRC and SHA-256
-verification, while the provider's whole-archive MD5 is recorded, not recomputed.
-
-```bash
-report_dir=docs/reports/2026-09-03-003-heterogeneity-by-salience-report
-python3 "$report_dir/acquire_open_coast_sources.py"
-python3 "$report_dir/acquire_sepa_sources.py"
-python3 "$report_dir/acquire_river_source.py"
-python3 "$report_dir/acquire_shore_review_sources.py"
-Rscript -e 'source("docs/reports/2026-09-03-003-heterogeneity-by-salience-report/audit_open_coast_geometry.R"); audit_open_coast_geometry(50, "geometry-alignment-50-sepa", TRUE)'
-Rscript "$report_dir/review_inland_shore_extensions.R"
-Rscript "$report_dir/review_mouth_alignment.R"
-Rscript "$report_dir/apply_shore_review.R"
-Rscript "$report_dir/finalize_geography_review.R"
-Rscript -e 'source("docs/reports/2026-09-03-003-heterogeneity-by-salience-report/report_storage.R"); write_geography_evidence_manifest()'
-Rscript scripts/R/03_data_enrichment/build_open_coast_reference.R \
-  "$report_dir/geometry-alignment-50-sepa/private/reviewed_reference.rds" \
-  "$report_dir/geometry-alignment-50-sepa/geography_review.json"
-```
-
-The committed `manual_shore_decisions.csv` and `mouth_separator_extensions.csv`
-are part of this replay, not optional edits. Review the six final maps and the
-coverage/threshold tables before publishing a changed source generation.
-`finalize_geography_review.R` rejects unresolved nearest-shore coverage and sites
-within the 1 m mouth-endpoint resolution of 2,000 m. This interval resolution
-selects physical segments; classification still uses the unrounded inclusive
-2,000 m distance. A new review date creates a new provenance generation even when
-the replayed geometry is unchanged. Initial unaligned maps are historical
-source diagnostics, not the production reference.
-
-Rebuild in this order, after the geography review:
-
-1. Publish the reviewed physical reference with `build_open_coast_reference.R`.
-   Run the report-local `audit_cross_border_shores.R` to save country-labelled
-   nearest-shore examples without restricting the distance search.
-2. Run `build_site_group_characteristics.R` to append `distance_to_open_coast_m`,
-   `open_coast_status`, `geometry_generation` and `site_generation`. It verifies
-   the reviewed representative locations and exact equality of legacy fields.
-3. Run `build_prior_characteristics.R` for both markets and all 250/500/1000 m
-   partitions. New fields are `min_open_coast_dist_m`, `max_open_coast_dist_m`,
-   `n_open_coast_known`, `n_open_coast_missing` and `site_generation`. Both reducers
-   use the same evidence rules; no-site counts are zero and all-unknown distances
-   are missing. Legacy fields and intensity cutoff values must remain exact.
-4. Run the existing five paper scripts. Every script checks the same site/reference
-   and all-market companion generation before fitting. Existing equations,
-   windows, controls, fixed effects and covariance estimators are unchanged.
-5. Run the report-local `run_refinement.R`, then render the QMD from saved bundles.
-   In addition to the required 70 refined cells, its separate 30-cell legacy
-   reproduction uses the same current inputs and London exclusion. Bathing
-   identities and coefficients must be identical across that coast-only comparison.
-   Saved results include selected/fitted identity turnover, coefficient intervals,
-   site-distance summaries and common-denominator nearest/any membership tables.
-
-A partial data rebuild is not consumable. Restore the complete targeted recovery
-set identified by `historical/manifest.json` and its matching source snapshot in
-an isolated checkout, or finish the interrupted refined generation. Never map
-missing refined fields onto tidal fields. Temporary publication `.prev` files are
-not the recovery archive.
-
-Paper exports are staged under `output/salience-generations/<generation>/`.
-All five specifications must validate before conventional exports are replaced
-and `output/salience-current.json` is written last. A prior completed manifest
-continues to identify its immutable matching artifacts after an interrupted run.
-The shared provenance includes source-input and code hashes; filenames alone do
-not establish compatibility.
-
 #### Executable report and historical outputs
 
 [The QMD report](reports/2026-09-03-003-heterogeneity-by-salience-report.qmd)
-reads validated saved bundles and preserves the historical exploration.
-Rendering never fits models, calls paper `main()`, or writes production exports:
+loads saved results by default and embeds the full historical exploration.
+It renders definitions, coefficient plots, results, sample counts and audits:
 
 ```bash
 quarto render docs/reports/2026-09-03-003-heterogeneity-by-salience-report.qmd --to html
 ```
 
-The default is `mode: render-only`; the retired `reestimate:true` switch is an
-error. Explicit historical reproduction and refinement estimation use the
-report-local `reproduce_historical.R` and `run_refinement.R` runners. Both write
-only under the adjacent report directory. The refinement manifest enumerates
-30 headline, 30 London-excluded and 10 fixed-2021 Bathing cells; failed fits carry
-an unavailable reason. Missing data, generation and join contracts are fatal.
+Append `-P reestimate:true` to explicitly rerun all five paper scripts and the
+exploration. Missing saved bundles fail clearly without triggering a fit.
+The rendered report states which mode was used.
 
-Historical snapshots and their exports live in the report's `historical/` directory,
-with SHA-256 verification and separate overlapping/four-stratum/exclusive families.
-Their original upstream input hashes were not recorded and cannot be inferred
-retroactively. Restoring the source and targeted data snapshot is required for
-optional historical reproduction.
+The report reads a saved original-classification map with Coastal sites inside
+and outside Greater London distinguished. Regenerate it separately:
+
+```bash
+Rscript docs/reports/2026-09-03-003-heterogeneity-by-salience-report/map_coastal_eligibility.R
+```
+
+The map uses the original site distances, representative crosswalk coordinates,
+ONS 2024 country boundaries and the union of the 33 E090 local authorities from
+May 2025. Its site categories do not represent the property-level London exclusion.
 
 The original five prefixes are the paper prefixes with `_groups` removed.
 For those original prefixes, the report preserves:

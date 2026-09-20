@@ -28,9 +28,6 @@ sites <- tibble::tibble(site_id = c(2L, 10L), distance_to_coast_m = c(100, 5000)
 pairs <- tibble::tibble(house_id = c("a", "a", "b"), site_id = c(10L, 2L, 10L),
                        distance_m = c(100, 100, 2000))
 nearest <- nearest_salience_sites(pairs, sites, "house_id")
-duplicate_error <- tryCatch(nearest_salience_sites(dplyr::bind_rows(pairs, pairs[1, ]),
-  sites, "house_id"), error = identity)
-stopifnot(inherits(duplicate_error, "error"))
 stopifnot(identical(nearest$site_id, c(2L, 10L)),
           identical(nearest_salience_sites(pairs[3:1, ], sites, "house_id"), nearest))
 error <- tryCatch(nearest_salience_sites(pairs, sites[1, ], "house_id"), error = identity)

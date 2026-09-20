@@ -211,15 +211,14 @@ if (all(vapply(producer_env$MARKET_SPECS, function(spec) {
   }, logical(1)))) {
   for (spec in producer_env$MARKET_SPECS) {
     dataset <- arrow::open_dataset(spec$output_path)
-    refined <- "site_generation" %in% dataset$schema$names
-    expected_columns <- producer_env$prior_characteristics_columns(spec$id, refined)
+    expected_columns <- producer_env$prior_characteristics_columns(spec$id)
     assert_true(
       setequal(dataset$schema$names, expected_columns) &&
         length(dataset$schema$names) == length(expected_columns),
       paste(spec$market, "canonical schema must be exact.")
     )
     expected_signature <- producer_env$arrow_schema_signature(
-      producer_env$prior_characteristics_schema(spec$id, include_radius = TRUE, refined = refined)
+      producer_env$prior_characteristics_schema(spec$id, include_radius = TRUE)
     )
     observed_signature <- producer_env$arrow_schema_signature(dataset$schema)
     assert_identical(
@@ -244,7 +243,7 @@ if (all(vapply(producer_env$MARKET_SPECS, function(spec) {
         collect() |>
         select(all_of(expected_columns))
       source <- producer_env$read_source_radius(spec, radius_value)
-      producer_env$validate_prior_characteristics(canonical, source, spec$id, refined)
+      producer_env$validate_prior_characteristics(canonical, source, spec$id)
     }
   }
 

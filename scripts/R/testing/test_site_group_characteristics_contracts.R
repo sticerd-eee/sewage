@@ -269,11 +269,10 @@ if (file.exists(canonical_path)) {
   projection <- producer_env$read_site_group_projection(
     producer_env$CONFIG$crosswalk_path, years = 2021:2024
   )
-  refined <- "site_generation" %in% names(canonical)
-  producer_env$validate_site_group_characteristics(canonical, projection$site_id, refined)
+  producer_env$validate_site_group_characteristics(canonical, projection$site_id)
   assert_identical(
     arrow::open_dataset(canonical_path)$schema$names,
-    producer_env$site_group_characteristics_columns(refined),
+    producer_env$site_group_characteristics_columns(),
     "Canonical Site Group parquet must retain the exact physical schema."
   )
   assert_identical(
@@ -281,7 +280,7 @@ if (file.exists(canonical_path)) {
       arrow::open_dataset(canonical_path)$schema
     ),
     producer_env$arrow_schema_signature(
-      producer_env$site_group_characteristics_schema(refined)
+      producer_env$site_group_characteristics_schema()
     ),
     "Canonical Site Group parquet must retain the exact physical types."
   )
