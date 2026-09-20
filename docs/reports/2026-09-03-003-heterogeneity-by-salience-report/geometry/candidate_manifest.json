@@ -1,0 +1,50 @@
+{
+  "status": "candidate_not_published",
+  "alignment_m": 0,
+  "distance_engine": "sf/GEOS planar Euclidean, EPSG:27700, metres",
+  "physical_coordinate_displacement_m": 0,
+  "geometry_hash": "b72e3dd65f5e82809657dd879ebabef21a548436d3844f3c15114247d2948732",
+  "site_evidence_hash": "94b964740f839d638d126edcb7ea67e6ff9d1f9ad161774f53e755f61631ac48",
+  "artifacts": [
+    {
+      "path": "coverage_summary.csv",
+      "sha256": "1cd481076d0f83eb1d9e5af65c1d792abbbdd6c698254efaa395deb34f3b4187"
+    },
+    {
+      "path": "alignment_summary.csv",
+      "sha256": "6124b89949bd82a5d101aec5a3ad5e3adb1ece567155db24b32e3ea3bb4e8d42"
+    },
+    {
+      "path": "alignment_by_company.csv",
+      "sha256": "063e6a6bf60174405c016fdf2d604179a0994c4c2540442897a0624d5a4f7deb"
+    },
+    {
+      "path": "thames.png",
+      "sha256": "4c09b541b69c86b1652947abf5944810279ba67d2fb25b48a20340cab5fce439"
+    },
+    {
+      "path": "severn.png",
+      "sha256": "56493d7c618ed24f3e9544c00391e0715f6c9045d4637982c1f48b48c8a5a6db"
+    },
+    {
+      "path": "morecambe.png",
+      "sha256": "47229a59251a499e3f02bb66d233cd3a2c5439d2fb313142ac8b8e76673b12f6"
+    },
+    {
+      "path": "poole.png",
+      "sha256": "b5cf55ed1c8674f74ed40e7dade8ed1cefe921d40ea193654468928cd4fff657"
+    },
+    {
+      "path": "dee.png",
+      "sha256": "5e64aee92caa62a6fdc52ed24acefeadba3d4d3b5d7118a06cef6bdb0b5c613b"
+    },
+    {
+      "path": "solway.png",
+      "sha256": "dbeab947d519cafac3634e014729f67549e73e019f1207505c624de51411d4b7"
+    },
+    {
+      "path": "source_manifest.json",
+      "sha256": "011ac7e355d019148f6719642cf41b8ea63084822565a60b439df6684cad1097"
+    }
+  ]
+}

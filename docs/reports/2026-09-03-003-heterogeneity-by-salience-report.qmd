@@ -4,7 +4,8 @@ subtitle: "Overlapping Bathing, Coastal and Inland groups, with the complete sal
 author: "Jacopo Olivieri"
 date: 2026-09-03
 params:
-  reestimate: true
+  mode: render-only
+  reestimate: false
 format:
   html:
     toc: true
@@ -22,9 +23,12 @@ format:
         main thead { border-bottom: 2px solid #b9c4ca; }
         main tbody tr { border-bottom: 1px solid #dfe5e8; }
         main tbody tr:nth-child(even) { background: #f5f8f9; }
+        .refinement-table { overflow-x: auto; margin-bottom: 1.5rem; }
+        .refinement-table th { overflow-wrap: anywhere; min-width: 5rem; }
         </style>
 execute:
   echo: false
+  error: false
   warning: false
   message: false
   cache: false
@@ -36,12 +40,14 @@ The paper comparison uses **overlapping groups**. The later sections preserve
 the full exploration: four coast/bathing strata, intensity splits, three
 robustness checks, and the earlier exclusive three-way comparison.
 
-By default, rendering re-estimates the analyses from the published inputs. The
-five selected specifications also run independently as paper scripts. Their
+By default, rendering reads hash-validated historical snapshots and fits no models.
+The five selected specifications also run independently as paper scripts. Their
 output names end in `_groups`; the earlier output names retain their original
 definitions. The dated Markdown memos remain historical snapshots.
 
-**This rendering:** `r if (params$reestimate) "analyses re-estimated from published inputs." else "results loaded from the saved model bundles in output/regs."`
+**Report structure:** the historical sections retain tidal coast distance and London exclusion. The final refined section uses reviewed open-coast distance, includes London in headline estimates, and reports the agreed robustness comparisons.
+The historical bundles predate input-generation hashes; their saved results are
+preserved exactly, but their original input generation cannot be proven retroactively.
 
 ## Data and definitions
 
@@ -51,13 +57,14 @@ exclude Greater London.
 
 | Paper group | Membership |
 |:--|:--|
-| All Bathing | Positive bathing designation in any annual return from 2021 through 2024, coastal or inland. |
+| All Bathing | Positive reported bathing association in any annual return from 2021 through 2024, coastal or inland. |
 | All Coastal | Site coast distance at most 2 km, including bathing locations. |
 | All Inland | Site coast distance above 2 km, including bathing locations. |
 
 A coastal bathing observation enters both Bathing and Coastal; an inland bathing
 observation enters both Bathing and Inland. **Group Ns must not be added together.**
-Positive designation takes precedence over other unknown evidence. Unresolved
+Positive reported association takes precedence over other unknown evidence.
+It does not establish direct discharge or designation at the transaction date. Unresolved
 designation does not establish Bathing membership. Missing coast prevents Coastal
 and Inland membership but does not negate an observed bathing designation.
 
@@ -86,6 +93,8 @@ test between-group differences.
 #| label: setup
 #| include: false
 
+source(here::here("docs", "reports",
+  "2026-09-03-003-heterogeneity-by-salience-report", "report_storage.R"), local = TRUE)
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 check_required_packages(c("arrow", "dplyr", "fixest", "forcats", "ggplot2", "here",
                           "knitr", "modelsummary", "readxl", "rio", "tibble", "tidyr"))
@@ -597,12 +606,12 @@ run_salience_extensive <- function(measure = c("trends", "articles"), reproduce_
     "robust_dropunknown", "coast_bathing", 2000, "exclude", TRUE
   )
   paths <- list(
-    tables = stats::setNames(here::here("output", "tables",
+    tables = stats::setNames(salience_report_output("tables",
       paste0(prefix, "_", variants$variant, ".tex")), variants$variant),
-    models = here::here("output", "regs", paste0(prefix, if (reproduce_only) "_reproduction", ".rds")),
-    counts = here::here("output", "logs", paste0(prefix, "_cell_counts.csv")),
-    coverage = here::here("output", "logs", paste0(prefix, "_nearest_site_coverage.csv")),
-    reproduction = here::here("output", "logs", paste0(prefix, "_reproduction.csv"))
+    models = salience_report_output("regs", paste0(prefix, if (reproduce_only) "_reproduction", ".rds")),
+    counts = salience_report_output("logs", paste0(prefix, "_cell_counts.csv")),
+    coverage = salience_report_output("logs", paste0(prefix, "_nearest_site_coverage.csv")),
+    reproduction = salience_report_output("logs", paste0(prefix, "_reproduction.csv"))
   )
   models <- stats::setNames(vector("list", nrow(variants)), variants$variant)
   unrestricted <- reproduction <- counts <- coverage <- list()
@@ -616,7 +625,8 @@ run_salience_extensive <- function(measure = c("trends", "articles"), reproduce_
       parent$prepare_rental_analysis_data(comparison, attention_data)
     unrestricted[[market]] <- fit_salience_extensive(data, market, attention)
     reproduction[[market]] <- verify_salience_reproduction(
-      unrestricted[[market]], parent$CONFIG$output_path, market, attention
+      unrestricted[[market]], salience_historical_export(file.path("tables",
+        basename(parent$CONFIG$output_path))), market, attention
     )
     if (reproduce_only) next
     id_col <- if (market == "sales") "house_id" else "rental_id"
@@ -789,12 +799,12 @@ run_salience_intensive <- function(measure = c("trends", "articles"), reproduce_
     "robust_dropunknown", "coast_bathing", 2000, "exclude", TRUE
   )
   paths <- list(
-    tables = stats::setNames(here::here("output", "tables",
+    tables = stats::setNames(salience_report_output("tables",
       paste0(prefix, "_", variants$variant, ".tex")), variants$variant),
-    models = here::here("output", "regs", paste0(prefix, if (reproduce_only) "_reproduction", ".rds")),
-    counts = here::here("output", "logs", paste0(prefix, "_cell_counts.csv")),
-    coverage = here::here("output", "logs", paste0(prefix, "_nearest_site_coverage.csv")),
-    reproduction = here::here("output", "logs", paste0(prefix, "_reproduction.csv"))
+    models = salience_report_output("regs", paste0(prefix, if (reproduce_only) "_reproduction", ".rds")),
+    counts = salience_report_output("logs", paste0(prefix, "_cell_counts.csv")),
+    coverage = salience_report_output("logs", paste0(prefix, "_nearest_site_coverage.csv")),
+    reproduction = salience_report_output("logs", paste0(prefix, "_reproduction.csv"))
   )
   models <- stats::setNames(vector("list", nrow(variants)), variants$variant)
   unrestricted <- reproduction <- counts <- coverage <- list()
@@ -816,7 +826,7 @@ run_salience_intensive <- function(measure = c("trends", "articles"), reproduce_
     unrestricted[[market]] <- fit_salience_intensive(data, market, attention)
     reproduction[[market]] <- verify_salience_reproduction(
       unrestricted[[market]],
-      here::here("output", "tables", paste0("did_", measure, "_prior_250m.tex")),
+      salience_historical_export(file.path("tables", paste0("did_", measure, "_prior_250m.tex"))),
       market, attention, exposure = "spill_count_weekly_avg"
     )
     if (reproduce_only) next
@@ -1062,12 +1072,12 @@ run_salience_hedonic <- function(reproduce_only = FALSE) {
     "robust_dropunknown", 2000, "exclude", TRUE
   )
   paths <- list(
-    tables = stats::setNames(here::here("output", "tables",
+    tables = stats::setNames(salience_report_output("tables",
       paste0(prefix, "_", variants$variant, ".tex")), variants$variant),
-    models = here::here("output", "regs", paste0(prefix, if (reproduce_only) "_reproduction", ".rds")),
-    counts = here::here("output", "logs", paste0(prefix, "_cell_counts.csv")),
-    coverage = here::here("output", "logs", paste0(prefix, "_nearest_site_coverage.csv")),
-    reproduction = here::here("output", "logs", paste0(prefix, "_reproduction.csv"))
+    models = salience_report_output("regs", paste0(prefix, if (reproduce_only) "_reproduction", ".rds")),
+    counts = salience_report_output("logs", paste0(prefix, "_cell_counts.csv")),
+    coverage = salience_report_output("logs", paste0(prefix, "_nearest_site_coverage.csv")),
+    reproduction = salience_report_output("logs", paste0(prefix, "_reproduction.csv"))
   )
   models <- stats::setNames(vector("list", nrow(variants)), variants$variant)
   unrestricted <- reproduction <- counts <- coverage <- list()
@@ -1085,7 +1095,7 @@ run_salience_hedonic <- function(reproduce_only = FALSE) {
       arrow::open_dataset(here::here("data", "processed", "cross_section", market, prior_dir)), market)
     unrestricted[[market]] <- fit_salience_hedonic(data, market)
     reproduction[[market]] <- verify_hedonic_reproduction(unrestricted[[market]],
-      here::here("output", "tables", "hedonic_count_continuous_prior_250m.tex"), market)
+      salience_historical_export(file.path("tables", "hedonic_count_continuous_prior_250m.tex")), market)
     if (reproduce_only) next
     lookup_path <- if (market == "sales") here::here("data", "processed", "spill_house_lookup.parquet") else
       here::here("data", "processed", "zoopla", "spill_rental_lookup.parquet")
@@ -1196,8 +1206,7 @@ model_results <- function(model) {
 #' Fit three disjoint subsamples and verify the unchanged non-bathing estimates
 fit_three_way <- function(data, market, analysis, attention = NULL) {
   data <- classify_three_way(data)
-  reference <- readRDS(here::here("output", "regs",
-                                 paste0(REFERENCE_PREFIXES[[analysis]], ".rds")))
+  reference <- read_salience_snapshot(REFERENCE_PREFIXES[[analysis]], "four_strata_intensity")
   fitted <- counts <- reproduction <- results <- list()
   for (stratum in STRATA) {
     original <- switch(stratum,
@@ -1311,7 +1320,7 @@ export_three_way <- function(models, analysis) {
     gof_map = tibble::tribble(~raw, ~clean, ~fmt, "nobs", "Observations", 0),
     notes = " ", title = paste("Three-Way Local Salience:", gsub("_", " ", analysis))
   )
-  path <- here::here("output", "tables", paste0("salience_three_way_", analysis, ".tex"))
+  path <- salience_report_output("tables", paste0("salience_three_way_", analysis, ".tex"))
   latex <- extensive$fit_tblr_latex(latex,
     label = paste0("tbl:salience-three-way-", gsub("_", "-", analysis)), notes = notes)
   writeLines(latex, path)
@@ -1385,16 +1394,16 @@ run_exclusive_three_way <- function() {
   reproduction <- collect("reproduction")
   stopifnot(nrow(results) == 30L, nrow(reproduction) == 20L, all(reproduction$passed))
   for (folder in c("regs", "tables", "logs")) {
-    dir.create(here::here("output", folder), recursive = TRUE, showWarnings = FALSE)
+    dir.create(salience_report_output(folder), recursive = TRUE, showWarnings = FALSE)
   }
   saveRDS(list(models = models, results = results, counts = counts, reproduction = reproduction,
     settings = list(coast_rule_m = 2000L, drop_london = TRUE, unknown_policy = "not_designated",
       classification = "Bathing takes precedence; coastal and inland are non-bathing only",
       created_at = Sys.time(), r_version = R.version.string)),
-    here::here("output", "regs", "salience_three_way.rds"))
+    salience_report_output("regs", "salience_three_way.rds"))
   for (field in c("results", "counts", "reproduction")) {
     suffix <- if (field == "counts") "cell_counts" else field
-    utils::write.csv(get(field), here::here("output", "logs",
+    utils::write.csv(get(field), salience_report_output("logs",
       paste0("salience_three_way_", suffix, ".csv")), row.names = FALSE)
   }
   for (analysis in names(models)) export_three_way(models[[analysis]], analysis)
@@ -1477,7 +1486,7 @@ show_paper_table <- function(results, family) {
 }
 
 historical_results <- function(prefix, analysis) {
-  bundle <- readRDS(here::here("output", "regs", paste0(prefix, ".rds")))
+  bundle <- read_salience_snapshot(prefix, "four_strata_intensity")
   dplyr::bind_rows(lapply(names(bundle$models), function(variant) {
     dplyr::bind_rows(lapply(names(bundle$models[[variant]]), function(market) {
       dplyr::bind_rows(lapply(names(bundle$models[[variant]][[market]]), function(stratum) {
@@ -1513,12 +1522,67 @@ show_historical_table <- function(results) {
 }
 ```
 
-# Paper comparison: overlapping groups
+# Open-coast geography validation
+
+The refinement uses physical high-water shoreline selected with official
+coastal/transitional evidence. The source manifest pins the April 2026 OS
+OpenMap Local archive and the EA/NRW Cycle 3 downloads. Classification dates
+and cartographic dates are distinct. Distances to offshore polygon edges or
+artificial estuary-mouth separators are never used.
+
+The following diagnostics preserve the **initial unaligned candidate**, before
+the completed geography review shown in the refined section below. A finite distance
+to a retained candidate is insufficient when an unresolved shore could be closer.
+
+The tables separate geometrically supported candidate distances, unresolved
+shores and missing locations. None establishes a validated reference. Alignment
+gaps are measured from each site's nearest unresolved physical shore to the
+downloaded classification polygons; they are not overflow-to-coast distances.
+Large gaps cannot be treated as ordinary coordinate rounding. They require
+additional exclusion/coverage evidence and documented segment decisions before
+the datasets or headline specifications can switch definitions.
+
+The [execution record](2026-09-03-003-heterogeneity-by-salience-report/execution-record.md)
+documents the resolution of these alignment gaps and the implementation checks.
+
+```{r}
+#| label: geography-coverage-evidence
+#| purl: false
+#| results: asis
+
+geography_path <- file.path(salience_report_root(), "geometry")
+coverage_path <- file.path(geography_path, "coverage_summary.csv")
+geography_available <- validate_salience_geography_audit(geography_path)
+if (geography_available) {
+  print(knitr::kable(utils::read.csv(coverage_path), format = "html",
+                    col.names = c("Candidate evidence status", "Site Groups")))
+  print(knitr::kable(utils::read.csv(file.path(geography_path, "alignment_summary.csv")),
+                    format = "html", col.names = c("Alignment gap (metres)", "Unresolved Site Groups")))
+} else {
+  cat("Geographic coverage audit is not yet available. The refinement remains unpublished.\n")
+}
+```
+
+```{r}
+#| label: geography-review-panels
+#| purl: false
+#| fig-cap: "Candidate physical shoreline: blue denotes coastal selection, grey transitional selection, and orange unresolved classification. Panels include tidal rivers, coastal bays, transitional harbours and border seams."
+
+geography_maps <- file.path(geography_path, paste0(c("thames", "severn", "morecambe", "poole", "dee", "solway"), ".png"))
+if (geography_available) {
+  # The manifest validated absolute files above. Emit paths relative to the QMD
+  # for Pandoc; the R working directory is deliberately the project root.
+  relative_maps <- file.path(basename(salience_report_root()), "geometry", basename(geography_maps))
+  knitr::include_graphics(relative_maps, rel_path = FALSE, error = FALSE)
+}
+```
+
+# Historical paper comparison: overlapping groups
 
 These are the five specifications selected for the paper. Each script estimates
 the three groups for both markets, saves compact models and sample audits, and
-exports a six-column LaTeX table. The report runs those same entry points so its
-paper results and the standalone scripts share one implementation.
+exports a six-column LaTeX table. This historical section reads preserved output from those same implementations.
+Rendering never invokes their publishing entry points.
 
 The exported paper tables follow `did_trends_prior_extensive.tex`: three decimal
 places, significance stars, standard errors in parentheses, controls and fixed
@@ -1531,14 +1595,12 @@ This report retains the more detailed coefficients and 95% confidence intervals.
 #| include: false
 #| purl: false
 
-paper <- lapply(PAPER_SCRIPTS, function(path) {
-  script <- new.env(parent = globalenv())
-  sys.source(here::here("scripts", "R", "09_analysis", path), script)
-  result <- if (params$reestimate) script$main() else readRDS(here::here(
-    "output", "regs", paste0(script$CONFIG$output_prefix, ".rds")
-  ))
-  invisible(gc())
-  result
+report_mode <- validate_salience_report_mode(params$mode, params$reestimate)
+if (report_mode != "render-only") {
+  stop("Estimation is a separate explicit operation. Use the report-local reproduction runner; rendering never fits models.")
+}
+paper <- lapply(REFERENCE_PREFIXES, function(prefix) {
+  read_salience_snapshot(paste0(prefix, "_groups"), "overlapping")
 })
 paper_results <- dplyr::bind_rows(lapply(names(paper), function(analysis) {
   dplyr::mutate(paper[[analysis]]$results, analysis = .env$analysis, .before = 1L)
@@ -1679,10 +1741,6 @@ are not recomputed after dropping London.
 #| include: false
 #| purl: false
 
-if (params$reestimate) {
-  run_salience_extensive("trends")
-  run_salience_extensive("articles")
-}
 extensive_results <- dplyr::bind_rows(
   historical_results("did_trends_prior_extensive_salience", "extensive_post"),
   historical_results("did_articles_prior_extensive_salience", "extensive_articles")
@@ -1710,10 +1768,6 @@ have unknown designation.
 #| include: false
 #| purl: false
 
-if (params$reestimate) {
-  run_salience_intensive("trends")
-  run_salience_intensive("articles")
-}
 intensive_results <- dplyr::bind_rows(
   historical_results("did_trends_prior_salience", "intensive_post"),
   historical_results("did_articles_prior_salience", "intensive_articles")
@@ -1740,7 +1794,6 @@ sample restrictions and heteroskedasticity-robust inference.
 #| include: false
 #| purl: false
 
-if (params$reestimate) run_salience_hedonic()
 hedonic_results <- historical_results("hedonic_count_continuous_prior_salience", "hedonic")
 ```
 
@@ -1765,8 +1818,7 @@ definition. Its output prefix remains `salience_three_way`.
 #| include: false
 #| purl: false
 
-if (params$reestimate) run_exclusive_three_way()
-exclusive <- readRDS(here::here("output", "regs", "salience_three_way.rds"))
+exclusive <- read_salience_snapshot("salience_three_way", "exclusive")
 ```
 
 
@@ -1801,7 +1853,7 @@ unrestricted reproductions check the parent tables with London retained.
 historical <- dplyr::bind_rows(extensive_results, intensive_results, hedonic_results)
 stopifnot(nrow(historical) == 176L, nrow(exclusive$results) == 30L)
 reproduction <- dplyr::bind_rows(lapply(names(REFERENCE_PREFIXES), function(analysis) {
-  bundle <- readRDS(here::here("output", "regs", paste0(REFERENCE_PREFIXES[[analysis]], ".rds")))
+  bundle <- read_salience_snapshot(REFERENCE_PREFIXES[[analysis]], "four_strata_intensity")
   stopifnot(all(bundle$reproduction$passed))
   for (i in seq_len(nrow(bundle$counts))) {
     row <- bundle$counts[i, ]
@@ -1837,17 +1889,26 @@ From the project root, use the R 4.6.0 `rv` environment:
 quarto render docs/reports/2026-09-03-003-heterogeneity-by-salience-report.qmd --to html
 ```
 
-To refresh the presentation from saved model bundles without re-estimation:
+Rendering is read-only by default. Historical RDS snapshots, matching exports,
+code snapshots and their SHA-256 manifest live in the adjacent report directory's
+`historical/` area. Missing, changed or incompatible bundles stop rendering with
+an actionable error; rendering never replaces them with fresh estimates.
+
+The manifest also identifies the targeted data recovery copies in managed storage.
+Historical inputs cannot be inferred from a model filename. Optional reproduction
+must verify the frozen data/code contract before fitting and writes only to
+`historical-reproduction/`. Normal paper scripts retain their standard production
+export paths.
+
+The explicit optional historical reproduction command is:
 
 ```bash
-quarto render docs/reports/2026-09-03-003-heterogeneity-by-salience-report.qmd --to html -P reestimate:false
+Rscript docs/reports/2026-09-03-003-heterogeneity-by-salience-report/reproduce_historical.R
 ```
 
-With re-estimation enabled, the report writes the original five model bundles and 24 exploratory tables,
-the historical exclusive-three-way bundle and five tables, and the five new
-paper-group bundles and tables. Paper output prefixes are the five historical
-analysis prefixes with `_groups` appended. Model bundles are in `output/regs`,
-LaTeX tables in `output/tables`, and audit/result CSVs in `output/logs`.
+It refuses changed legacy source or characteristic generations. Its upstream
+inputs must remain compatible with the pre-refinement study; the preserved
+bundles cannot establish their original input hashes retroactively.
 
 The data builders remain in the pipeline: `build_site_group_characteristics.R`
 publishes site coast/designation evidence and `build_prior_characteristics.R`
@@ -1858,3 +1919,239 @@ The [pipeline documentation](../pipeline_documentation.md#heterogeneity-by-local
 lists the runnable paper scripts. The [four-way memo](2026-09-03-001-heterogeneity-by-salience-results-memo.md)
 and [exclusive three-way memo](2026-09-03-002-salience-three-way-results.md)
 record the earlier results and definitions.
+
+# Refined open-coast analyses
+
+The refined definition measures overflow distance to physical high-water shoreline
+adjoining officially coastal water. Official coastal bays remain eligible;
+estuarine and tidal-river banks do not. Headline estimates include London.
+Bathing membership means positive reported association in any year from 2021 to
+2024, independently of coast evidence. It does not establish direct discharge or
+designation at the transaction date. The [bathing evidence audit](2026-09-19-001-bathing-evidence-audit.md)
+explains why first reporting and designation dates differ.
+
+## Reviewed shoreline
+
+The final source review combines pinned OS physical high-water lines with EA,
+NRW and SEPA coastal/transitional classifications. Inland tidal extensions are
+checked against official river and transitional-water evidence. Named exceptions
+and extended mouth separators are recorded by physical segment ID. Separators
+only select portions of the physical lines; they never become distance targets.
+Physical coordinates are not snapped or displaced. Numerical precision does not
+imply survey accuracy: these are generalised cartographic sources. Contains OS
+data © Crown copyright and database right 2026; water-body classifications are
+from the Environment Agency, Natural Resources Wales and SEPA.
+
+```{r}
+#| label: final-geography-evidence
+#| purl: false
+#| results: asis
+final_geo <- file.path(salience_report_root(), "geometry-alignment-50-sepa")
+geo_manifest_path <- file.path(final_geo, "final_geometry_manifest.json")
+if (file.exists(geo_manifest_path)) {
+  geo_manifest <- jsonlite::read_json(geo_manifest_path)
+  stopifnot(identical(geo_manifest$status, "complete"))
+  for (entry in geo_manifest$artifacts) {
+    stopifnot(identical(basename(entry$path), entry$path),
+      identical(salience_file_hash(file.path(final_geo, entry$path)), entry$sha256))
+  }
+  cat(knitr::kable(read.csv(file.path(final_geo, "final_coverage_summary.csv")), format = "html"))
+  cat("\n\nAll located sites have a covered nearest physical coast, with no unresolved potentially closer segment. The 21 sites without coordinates remain unknown. None of the reviewed distances is within the 1 m mouth-endpoint resolution of the unchanged inclusive 2,000 m threshold.\n\n")
+}
+```
+
+```{r}
+#| label: final-geography-maps
+#| purl: false
+#| out-width: "49%"
+#| fig-cap: "Reviewed physical shoreline: coastal bays remain eligible (blue); transitional estuaries and tidal rivers are excluded (grey). Remaining orange segments cannot be the nearest shore for any located study site."
+if (file.exists(geo_manifest_path)) {
+  knitr::include_graphics(file.path(basename(salience_report_root()), "geometry-alignment-50-sepa",
+    paste0("final-", c("thames", "severn", "morecambe", "poole", "dee", "solway"), ".png")),
+    rel_path = FALSE, error = FALSE)
+}
+```
+
+```{r}
+#| label: read-refinement-collection
+#| purl: false
+#| include: false
+source(here::here("docs", "reports", "2026-09-03-003-heterogeneity-by-salience-report", "refinement_results.R"))
+refinement <- read_refinement_collection()
+if (!is.null(refinement) && !file.exists(geo_manifest_path)) stop("Completed refinement requires its geography evidence manifest.")
+refinement_table <- function(data, digits = 4) {
+  if ("specification" %in% names(data)) {
+    labels <- stats::setNames(c("Extensive Post", "Extensive articles", "Intensive Post",
+      "Intensive articles", "Baseline hedonic"), salience_paper_prefixes())
+    data$specification <- unname(labels[data$specification])
+  }
+  cat("\n<div class='refinement-table'>\n", knitr::kable(data, format = "html", digits = digits), "\n</div>\n")
+}
+```
+
+```{r}
+#| label: cross-border-evidence
+#| purl: false
+#| results: asis
+cross_path <- file.path(final_geo, "cross_border_manifest.json")
+if (file.exists(cross_path)) {
+  cross <- jsonlite::read_json(cross_path)
+  stopifnot(identical(cross$status, "complete"))
+  for (entry in cross$artifacts) stopifnot(identical(entry$path, basename(entry$path)),
+    identical(salience_file_hash(file.path(final_geo, entry$path)), entry$sha256))
+  if (!is.null(refinement)) stopifnot(identical(cross$reference_sha256,
+    unname(refinement$provenance$inputs["data/processed/geography/open_coast/reference.rds"])))
+  cat("\n\n### Cross-border nearest shores\n\n")
+  cat("Country labels below use the nearest official UK Nations polygon only for this diagnostic. They never constrain the distance search. The same physical reference covers both sides of country borders.\n\n")
+  refinement_table(read.csv(file.path(final_geo, "cross_border_summary.csv")))
+  refinement_table(read.csv(file.path(final_geo, "cross_border_examples.csv")))
+}
+```
+
+```{r}
+#| label: refined-availability
+#| purl: false
+#| results: asis
+if (is.null(refinement)) {
+  cat("**Revised estimates are not yet available.** No complete validated refinement collection has been published. The historical results above retain their original definitions.\n")
+} else {
+  cat("The validated collection contains the headline 5 × 2 × 3 cells, London-excluded 5 × 2 × 3 cells, and 2021-only Bathing 5 × 2 cells. Unavailable fits are identified explicitly.\n")
+}
+```
+
+## Classification and assignment
+
+These comparisons precede interpretation of coefficients. Unknown coast evidence
+is separate from inland membership. For radius assignment, a known coastal site
+establishes Coastal even when another site is unknown; Inland requires complete
+evidence for every site. The old/new comparison therefore combines shoreline
+changes with this evidence-completeness rule.
+
+The nearest-versus-any comparison uses the same exact prepared transaction IDs
+within each specification and market, restricted to properties with a Site Group
+within 250 m. Extensive far controls are excluded from this diagnostic denominator.
+The preparation rule remains that of the named specification; the table does not
+compare independently fitted samples. Radius membership in this diagnostic is
+recomputed from the full lookup on those IDs: the extensive sample can contain
+properties outside the exposure-companion universe, and dropping those IDs would
+change the comparison. Positive and unknown bathing evidence are reported
+separately; an unknown flag does not override observed positive association.
+
+```{r}
+#| label: refined-membership-diagnostics
+#| purl: false
+#| results: asis
+if (!is.null(refinement)) {
+  transitions <- refinement$site_distances
+  count_sites <- function(old, new) sum(transitions$n_sites[transitions$legacy == old & transitions$refined == new])
+  cat(sprintf("The new measure moves %s Site Groups from Coastal to Inland and %s from Inland to Coastal; %s remain unknown. Coastal membership falls from %s to %s sites.\n\n",
+    format(count_sites("coastal", "inland"), big.mark = ","), count_sites("inland", "coastal"),
+    count_sites("unknown", "unknown"), format(sum(transitions$n_sites[transitions$legacy == "coastal"]), big.mark = ","),
+    format(sum(transitions$n_sites[transitions$refined == "coastal"]), big.mark = ",")))
+  assignment_summary <- refinement$assignments |> dplyr::summarise(
+    common_properties = sum(.data$n_properties),
+    coast_disagreement = sum(.data$n_properties[.data$nearest != .data$any_site]),
+    bathing_disagreement = sum(.data$n_properties[.data$nearest_bathing != .data$any_bathing]),
+    unresolved = sum(.data$n_properties[.data$nearest == "unknown" | .data$any_site == "unknown"]),
+    .by = c("specification", "market"))
+  cat("\n\n### Common-property comparison summary\n\n")
+  refinement_table(assignment_summary)
+  for (field in c("sites", "site_distances", "membership", "assignments", "bathing_evidence")) {
+    cat("\n\n### ", tools::toTitleCase(gsub("_", " ", field)), "\n\n", sep = "")
+    refinement_table(refinement[[field]])
+  }
+}
+```
+
+## Reading the revised headline
+
+```{r}
+#| label: refined-headline-interpretation
+#| purl: false
+#| results: asis
+if (!is.null(refinement)) {
+  headline <- dplyr::filter(refinement$results, .data$variant == "headline")
+  baseline <- dplyr::filter(headline, grepl("hedonic", .data$specification), .data$group == "inland")
+  show <- function(market) {
+    row <- baseline[baseline$market == market, ]
+    if (row$fit_status != "available") return("unavailable")
+    sprintf("%.4f log points (95%% CI %.4f to %.4f; N = %s)", row$estimate,
+      row$conf_low, row$conf_high, format(row$nobs, big.mark = ",", scientific = FALSE))
+  }
+  cat("The baseline Inland coefficient per additional spill per week is ", show("sales"),
+    " for sales and ", show("rentals"), " for rentals. These are conditional associations under the unchanged hedonic specification.\n\n", sep = "")
+  interactions <- dplyr::filter(headline, .data$group %in% c("coastal", "bathing"), grepl(":", .data$term))
+  if (all(interactions$fit_status == "available") &&
+      all(interactions$conf_low <= 0 & interactions$conf_high >= 0)) {
+    cat("Across both markets and all four attention specifications, the Coastal and Bathing interaction intervals include zero. Their width leaves substantial uncertainty; this is not evidence that the true associations are identical across groups.\n\n")
+  }
+  london <- dplyr::filter(refinement$turnover, .data$comparison == "london_excluded", .data$stage == "fitted")
+  other <- dplyr::filter(london, .data$group %in% c("bathing", "coastal"))
+  if (all(other$left == 0 & other$entered == 0)) cat("London exclusion leaves the fitted Bathing and Coastal samples unchanged in this generation; its sample changes occur in Inland.\n\n")
+  for (market in c("sales", "rentals")) {
+    old <- dplyr::filter(refinement$results, .data$variant == "london_excluded",
+      grepl("hedonic", .data$specification), .data$group == "inland", .data$market == .env$market)
+    early <- dplyr::filter(refinement$results, .data$variant == "bathing_2021",
+      grepl("hedonic", .data$specification), .data$market == .env$market)
+    if (old$fit_status == "available" && early$fit_status == "available") cat(sprintf(
+      "For %s, the London-excluded baseline Inland coefficient is %.4f (95%% CI %.4f to %.4f). The 2021-only baseline Bathing coefficient is %.4f (95%% CI %.4f to %.4f; N = %s).\n\n",
+      market, old$estimate, old$conf_low, old$conf_high, early$estimate, early$conf_low, early$conf_high,
+      format(early$nobs, big.mark = ",", scientific = FALSE)))
+  }
+  cat("The comparisons below separate the coast definition, London inclusion and the earlier bathing-evidence rule. Their coefficient changes also reflect which observations enter each group. No formal between-group or between-variant difference test is reported.\n\n")
+}
+```
+
+## Headline and robustness estimates
+
+The London-excluded variant changes only the London policy. The 2021-only Bathing
+variant keeps headline geography, London inclusion, equations and assignment,
+and requires positive association reported in 2021. A nearest site is selected
+before examining its bathing evidence.
+
+The preserved overlapping historical baseline above is distinct from the older
+four-stratum and exclusive three-way results. Its original upstream input hashes
+were not recorded. A separate legacy-definition reproduction below therefore uses
+the identical current prepared observations, equations, bathing evidence and London
+exclusion as the refined London-excluded estimates. That comparison isolates the
+combined shoreline and coast-evidence-policy change. Its overlapping Bathing
+estimates are checked for exact invariance. Headline versus London-excluded estimates
+then isolate the London policy within the refined generation.
+
+```{r}
+#| label: refined-estimate-tables
+#| purl: false
+#| results: asis
+if (!is.null(refinement)) {
+  cat("\n\n### Coast definitions with London excluded\n\n")
+  refinement_table(dplyr::select(refinement$coast_comparison, "specification", "market", "group", "term",
+    "legacy_estimate", "legacy_conf_low", "legacy_conf_high", "legacy_nobs",
+    "refined_estimate", "refined_conf_low", "refined_conf_high", "refined_nobs"))
+  for (variant in refinement_variants()) {
+    cat("\n\n### ", gsub("_", " ", variant), "\n\n", sep = "")
+    estimates <- refinement$results |> dplyr::filter(.data$variant == .env$variant) |>
+      dplyr::select("specification", "market", "group", "term", "estimate", "conf_low", "conf_high", "nobs", "fit_status", "reason")
+    refinement_table(estimates)
+  }
+  cat("\n\n### Sample accounting\n\n")
+  refinement_table(refinement$counts)
+  cat("\n\n### Observation turnover\n\n")
+  refinement_table(refinement$turnover)
+}
+```
+
+Fitted N comes from each saved model. Sample turnover follows exact observation
+identities through every estimator selection. Changes in coefficients combine
+membership and sample-composition changes. Different significance levels do not
+establish a statistically significant difference between subgroup effects.
+
+After the compatible refined datasets are published, explicitly estimate this
+report-owned collection with:
+
+```bash
+Rscript docs/reports/2026-09-03-003-heterogeneity-by-salience-report/run_refinement.R
+```
+
+The runner writes only beneath this report's adjacent directory. Rendering reads
+the completed manifest, validates artifact hashes and reconciles coefficients
+with saved model objects; it neither fits models nor writes production exports.

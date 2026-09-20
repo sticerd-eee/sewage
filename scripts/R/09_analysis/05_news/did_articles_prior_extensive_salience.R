@@ -30,6 +30,7 @@ source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 REQUIRED_PACKAGES <- c("arrow", "dplyr", "fixest", "forcats", "here", "modelsummary", "rio", "tibble")
 check_required_packages(REQUIRED_PACKAGES)
 source(here::here("scripts", "R", "utils", "salience_group_utils.R"), local = TRUE)
+source(here::here("scripts", "R", "utils", "salience_publication_utils.R"), local = TRUE)
 source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
 source(here::here("scripts", "R", "09_analysis", "05_news",
                   "extensive_margin_news_utils.R"), local = TRUE)
@@ -40,6 +41,10 @@ source(here::here("scripts", "R", "09_analysis", "05_news",
 # ==============================================================================
 
 CONFIG <- list(
+  profile = "open_coast",
+  exclude_london = FALSE,
+  bathing_policy = "ever_2124",
+  site_path = here::here("data", "processed", "site_characteristics", "site_group_characteristics.parquet"),
   coast_rule_m = 2000L,
   output_prefix = "did_articles_prior_extensive_salience_groups",
   title = "Extensive-Margin Cumulative Articles by Salience Group",
@@ -94,7 +99,7 @@ prepare_analysis_data <- function(market, attention_data, characteristics) {
     ))) |>
     dplyr::filter(.data$month_id >= 1L, .data$month_id <= spec$end_month_id)
   nearest <- nearest_salience_sites(
-    arrow::open_dataset(spec$lookup), characteristics, spec$id
+    arrow::open_dataset(spec$lookup), characteristics, spec$id, profile = CONFIG$profile
   )
   data <- build_extensive_margin_sample(transactions, nearest, spec$id, CONFIG$comparison) |>
     dplyr::inner_join(attention_data, by = "month_id", relationship = "many-to-one") |>
@@ -107,7 +112,7 @@ prepare_analysis_data <- function(market, attention_data, characteristics) {
     )
   data <- if (market == "sales") standardise_sales_estimation_data(data) else
     standardise_rental_estimation_data(data)
-  classify_salience_groups(data, CONFIG$coast_rule_m)
+  classify_salience_groups(data, CONFIG$coast_rule_m, profile = CONFIG$profile, bathing_policy = CONFIG$bathing_policy)
 }
 
 
@@ -135,17 +140,17 @@ fit_salience_extensive <- function(
 }
 
 estimate_groups <- function(data, market) {
-  counts <- audit_salience_groups(data, market)
+  counts <- audit_salience_groups(data, market, exclude_london = CONFIG$exclude_london, allow_unavailable = TRUE)
   masks <- salience_group_masks(data)
   models <- lapply(CONFIG$groups, function(group) {
-    sample <- data[masks[[group]] & !data$london, ]
+    sample <- data[masks[[group]] & (!CONFIG$exclude_london | !data$london), ]
     cat(sprintf("  %s / %s: %s observations before estimator removals\n",
                 market, group, format(nrow(sample), big.mark = ",")))
-    fit_salience_extensive(sample, market, CONFIG$attention)
+    fit_salience_group(sample, function(sample) fit_salience_extensive(sample, market, CONFIG$attention),
+      terms = c("near_bin", paste0("near_bin:", CONFIG$attention)), id = MARKETS[[market]]$id)
   })
   names(models) <- CONFIG$groups
-  counts$nobs <- vapply(models, stats::nobs, numeric(1))
-  counts$n_removed_by_estimator <- counts$n_estimation - counts$nobs
+  counts <- salience_fit_counts(counts, models)
   results <- dplyr::bind_rows(lapply(names(models), function(group) {
     salience_group_results(models[[group]]) |>
       dplyr::filter(.data$term %in% c("near_bin", paste0("near_bin:", CONFIG$attention))) |>
@@ -159,18 +164,18 @@ estimate_groups <- function(data, market) {
 # 4. Table and Model Export
 # ==============================================================================
 
-export_table <- function(result) {
+export_table <- function(result, path = here::here("output", "tables", paste0(CONFIG$output_prefix, ".tex"))) {
   coefficient_map <- c(near_bin = "Near bin")
   coefficient_map[paste0("near_bin:", CONFIG$attention)] <- "{Near bin \\\\ $\\times$ $\\log (\\text{Articles})$}"
   notes <- paste0(
     "This table presents hedonic estimates of the relationship between proximity to sewage ",
     "overflows, public attention, and property values, estimated separately within each ",
     "salience group. The sample includes properties whose nearest mapped overflow lies either ",
-    "within 0-500m (near bin) or 1000-2000m (far bin), excluding Greater London. The sample ",
+    "within 0-500m (near bin) or 1000-2000m (far bin), including Greater London. The sample ",
     "covers 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are ",
     "available). Treatment is proximity to a mapped overflow rather than measured spill ",
     "activity, so annual reporting gaps do not affect treatment classification. ",
-    salience_group_notes("nearest", CONFIG$coast_rule_m),
+    salience_group_notes("nearest", CONFIG$coast_rule_m, CONFIG$profile),
     "The dependent variable is the log transaction price for sales or the log weekly ",
     "asking rent for rentals. ",
     "Near bin is an indicator equal to one for properties in the 0-500m band and zero for ",
@@ -186,31 +191,20 @@ export_table <- function(result) {
   )
   export_salience_group_table(
     result$models, coefficient_map, CONFIG$title, notes,
-    here::here("output", "tables", paste0(CONFIG$output_prefix, ".tex"))
+    path
   )
 }
 
-export_results <- function(result) {
-  export_table(result)
-  for (folder in c("regs", "logs")) {
-    dir.create(here::here("output", folder), recursive = TRUE, showWarnings = FALSE)
-  }
-  saveRDS(result, here::here("output", "regs", paste0(CONFIG$output_prefix, ".rds")))
-  utils::write.csv(result$counts, here::here(
-    "output", "logs", paste0(CONFIG$output_prefix, "_cell_counts.csv")
-  ), row.names = FALSE)
-  utils::write.csv(result$results, here::here(
-    "output", "logs", paste0(CONFIG$output_prefix, "_results.csv")
-  ), row.names = FALSE)
-  invisible(result)
+export_results <- function(result, output_root = here::here("output")) {
+  publish_salience_result(result, CONFIG$output_prefix, output_root, export_table)
 }
-
 
 # ==============================================================================
 # 5. Execution
 # ==============================================================================
 
 main <- function() {
+  provenance <- salience_input_provenance()
   attention_data <- load_attention()
   characteristics <- arrow::read_parquet(here::here(
     "data", "processed", "site_characteristics", "site_group_characteristics.parquet"
@@ -224,7 +218,9 @@ main <- function() {
     models = lapply(output, function(x) x$models),
     counts = dplyr::bind_rows(lapply(output, function(x) x$counts)),
     results = dplyr::bind_rows(lapply(output, function(x) x$results)),
-    settings = list(config = CONFIG, london = "excluded", groups_overlap = TRUE,
+    settings = list(config = CONFIG, london = if (CONFIG$exclude_london) "excluded" else "included",
+                    profile = CONFIG$profile, bathing_policy = CONFIG$bathing_policy, provenance = provenance,
+                    groups_overlap = TRUE,
                     created_at = Sys.time(), r_version = R.version.string)
   )
   export_results(result)

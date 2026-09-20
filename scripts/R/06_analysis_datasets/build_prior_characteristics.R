@@ -12,6 +12,7 @@ if (!requireNamespace("here", quietly = TRUE)) {
 }
 
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+source(here::here("scripts", "R", "utils", "open_coast_contracts.R"), local = TRUE)
 source(
   here::here("scripts", "R", "utils", "dataset_publication_utils.R"),
   local = TRUE
@@ -59,18 +60,18 @@ CUTOFF_OUTPUT_PATH <- here::here(
   "data", "processed", "cross_section", "prior_intensity_cutoffs.parquet"
 )
 
-prior_characteristics_columns <- function(id_column) {
+prior_characteristics_columns <- function(id_column, refined = FALSE) {
   c(
     id_column, "radius", "n_spill_sites", "min_coast_dist_m",
     "max_coast_dist_m", "any_bath_2124", "all_bath_2124",
     "mixed_bath_2124", "bath_unknown_2124", "n_bath_2124",
     "any_shell_2124", "all_shell_2124", "mixed_shell_2124",
     "shell_unknown_2124", "n_shell_2124", "spill_count_band",
-    "spill_hrs_band"
+    "spill_hrs_band", if (refined) open_coast_radius_columns()
   )
 }
 
-prior_characteristics_schema <- function(id_column, include_radius = TRUE) {
+prior_characteristics_schema <- function(id_column, include_radius = TRUE, refined = FALSE) {
   fields <- list()
   fields[[id_column]] <- arrow::utf8()
   if (include_radius) fields$radius <- arrow::int32()
@@ -86,6 +87,13 @@ prior_characteristics_schema <- function(id_column, include_radius = TRUE) {
   }
   fields$spill_count_band <- arrow::utf8()
   fields$spill_hrs_band <- arrow::utf8()
+  if (refined) {
+    fields$min_open_coast_dist_m <- arrow::float64()
+    fields$max_open_coast_dist_m <- arrow::float64()
+    fields$n_open_coast_known <- arrow::int32()
+    fields$n_open_coast_missing <- arrow::int32()
+    fields$site_generation <- arrow::utf8()
+  }
   do.call(arrow::schema, fields)
 }
 
@@ -130,7 +138,9 @@ validate_source_universe <- function(data, id_column, radii = RADII) {
   invisible(data)
 }
 
-summarise_property_pairs <- function(pairs, site_characteristics, id_column) {
+summarise_property_pairs <- function(pairs, site_characteristics, id_column, refined = FALSE) {
+  if (refined) validate_open_coast_sites(site_characteristics)
+  if (anyDuplicated(pairs[c(id_column, "radius", "site_id")])) stop("Duplicate property-site pair.")
   required_site <- c(
     "site_id", "distance_to_coast_m", "bath_ever_2124",
     "bath_unknown_2124", "shell_ever_2124", "shell_unknown_2124"
@@ -151,7 +161,7 @@ summarise_property_pairs <- function(pairs, site_characteristics, id_column) {
   if (nrow(joined) != before || anyNA(joined$characteristic_matched)) {
     stop("Every real property-Site Group pair must join one characteristic row.", call. = FALSE)
   }
-  joined |>
+  output <- joined |>
     dplyr::mutate(
       bath_designated = tidyr::replace_na(.data$bath_ever_2124, FALSE),
       bath_uncertain = .data$bath_unknown_2124 | is.na(.data$bath_ever_2124),
@@ -178,17 +188,33 @@ summarise_property_pairs <- function(pairs, site_characteristics, id_column) {
       n_shell_2124 = sum(.data$shell_designated),
       .by = dplyr::all_of(c(id_column, "radius"))
     )
+  if (refined) {
+    refined_evidence <- joined |>
+      dplyr::summarise(
+        min_open_coast_dist_m = if (all(is.na(.data$distance_to_open_coast_m))) NA_real_ else
+          min(.data$distance_to_open_coast_m, na.rm = TRUE),
+        max_open_coast_dist_m = if (all(is.na(.data$distance_to_open_coast_m))) NA_real_ else
+          max(.data$distance_to_open_coast_m, na.rm = TRUE),
+        n_open_coast_known = sum(!is.na(.data$distance_to_open_coast_m)),
+        n_open_coast_missing = sum(is.na(.data$distance_to_open_coast_m)),
+        .by = dplyr::all_of(c(id_column, "radius")))
+    output <- dplyr::left_join(output, refined_evidence, by = c(id_column, "radius"))
+  }
+  output
 }
 
 aggregate_property_characteristics <- function(
-    source_data, lookup_data, site_characteristics, id_column, radii = RADII) {
+    source_data, lookup_data, site_characteristics, id_column, radii = RADII, refined = FALSE) {
   validate_source_universe(source_data, id_column, radii)
   required_lookup <- c(id_column, "site_id", "distance_m")
   if (!all(required_lookup %in% names(lookup_data))) {
     stop("Property-Site Group lookup is missing required columns.", call. = FALSE)
   }
+  if (anyNA(lookup_data[[id_column]])) stop("Property lookup identifiers are missing.")
+  lookup_data <- dplyr::filter(lookup_data, !(is.na(.data$site_id) & is.na(.data$distance_m)))
   if (anyNA(lookup_data[required_lookup]) ||
-      anyDuplicated(lookup_data[c(id_column, "site_id")])) {
+      anyDuplicated(lookup_data[c(id_column, "site_id")]) ||
+      any(!is.finite(lookup_data$distance_m) | lookup_data$distance_m < 0)) {
     stop("Property-Site Group lookup keys and distances must be complete and unique.", call. = FALSE)
   }
   expanded <- dplyr::bind_rows(lapply(radii, function(radius_value) {
@@ -196,7 +222,7 @@ aggregate_property_characteristics <- function(
       dplyr::filter(.data$distance_m <= .env$radius_value) |>
       dplyr::mutate(radius = as.integer(.env$radius_value))
   }))
-  aggregated <- summarise_property_pairs(expanded, site_characteristics, id_column)
+  aggregated <- summarise_property_pairs(expanded, site_characteristics, id_column, refined)
   output <- source_data |>
     dplyr::select(dplyr::all_of(c(id_column, "radius", "n_spill_sites"))) |>
     dplyr::left_join(aggregated, by = c(id_column, "radius"))
@@ -204,7 +230,7 @@ aggregate_property_characteristics <- function(
       any(is.na(output$n_pair_sites) & output$n_spill_sites != 0L)) {
     stop("Lookup Site Group counts do not equal source n_spill_sites.", call. = FALSE)
   }
-  output |>
+  output <- output |>
     dplyr::mutate(
       min_coast_dist_m = dplyr::if_else(.data$n_spill_sites == 0L, NA_real_, .data$min_coast_dist_m),
       max_coast_dist_m = dplyr::if_else(.data$n_spill_sites == 0L, NA_real_, .data$max_coast_dist_m),
@@ -216,8 +242,9 @@ aggregate_property_characteristics <- function(
         ~ dplyr::if_else(.data$n_spill_sites == 0L, NA, tidyr::replace_na(.x, FALSE)))
     ) |>
     dplyr::select(-"n_pair_sites")
+  if (refined) output$site_generation <- single_open_coast_generation(site_characteristics)
+  output
 }
-
 measure_band <- function(values, n_spill_sites, radius, market, measure) {
   if (any(!is.na(values) & (!is.finite(values) | values < 0))) {
     stop(measure, " must contain non-negative finite values or NA.", call. = FALSE)
@@ -316,9 +343,9 @@ validate_cutoff_audit <- function(data) {
 
 build_market_prior_characteristics <- function(
     source_data, lookup_data, site_characteristics, id_column, market,
-    radii = RADII) {
+    radii = RADII, refined = FALSE) {
   aggregated <- aggregate_property_characteristics(
-    source_data, lookup_data, site_characteristics, id_column, radii
+    source_data, lookup_data, site_characteristics, id_column, radii, refined
   )
   band_input <- dplyr::left_join(
     aggregated,
@@ -326,13 +353,13 @@ build_market_prior_characteristics <- function(
     by = c(id_column, "radius")
   )
   add_intensity_bands(band_input, market) |>
-    dplyr::select(dplyr::all_of(prior_characteristics_columns(id_column)))
+    dplyr::select(dplyr::all_of(prior_characteristics_columns(id_column, refined)))
 }
 
-validate_prior_characteristics <- function(data, source_data, id_column) {
+validate_prior_characteristics <- function(data, source_data, id_column, refined = FALSE) {
   data <- tibble::as_tibble(data)
   source_data <- tibble::as_tibble(source_data)
-  if (!identical(names(data), prior_characteristics_columns(id_column))) {
+  if (!identical(names(data), prior_characteristics_columns(id_column, refined))) {
     stop("Prior characteristics must have the exact hand-written schema.", call. = FALSE)
   }
   missing_key_values <- sum(is.na(data[[id_column]])) + sum(is.na(data$radius)) +
@@ -370,6 +397,7 @@ validate_prior_characteristics <- function(data, source_data, id_column) {
         (!is.finite(data$max_coast_dist_m) | data$max_coast_dist_m < 0))) {
     stop("Coast-distance summaries must be non-negative finite values or NA.", call. = FALSE)
   }
+  if (refined) validate_open_coast_radius(data)
   invisible(data)
 }
 
@@ -380,14 +408,34 @@ read_source_radius <- function(spec, radius_value) {
     dplyr::collect()
 }
 
-aggregate_pairs_arrow <- function(spec, radius_value, site_path) {
+aggregate_pairs_arrow <- function(spec, radius_value, site_path, refined = FALSE) {
+  sites <- arrow::read_parquet(site_path)
+  if (anyNA(sites$site_id) || anyDuplicated(sites$site_id)) stop("Site keys must be unique and complete.")
+  if (refined) validate_open_coast_sites(sites)
+  bad_distances <- arrow::open_dataset(spec$lookup_path) |>
+    # The lookup retains no-match placeholders with missing site and distance.
+    # They are outside every radius; real pairs still require valid distances.
+    dplyr::filter((!is.na(.data$site_id) & (is.na(.data$distance_m) | !is.finite(.data$distance_m))) |
+      .data$distance_m < 0) |>
+    dplyr::select("distance_m") |> head(1L) |> dplyr::collect()
+  if (nrow(bad_distances)) stop("Property-site distances must be finite and nonnegative.")
+  pairs <- arrow::open_dataset(spec$lookup_path) |>
+    dplyr::filter(.data$distance_m <= !!radius_value)
+  invalid <- pairs |>
+    dplyr::group_by(.data[[spec$id]], .data$site_id) |>
+    dplyr::summarise(n = dplyr::n()) |>
+    dplyr::filter(.data$n > 1L | is.na(.data[[spec$id]]) | is.na(.data$site_id)) |>
+    dplyr::collect()
+  if (nrow(invalid)) stop("Duplicate or missing property-site pair keys.")
   site_query <- arrow::open_dataset(site_path) |>
     dplyr::select(
       "site_id", "distance_to_coast_m", "bath_ever_2124",
-      "bath_unknown_2124", "shell_ever_2124", "shell_unknown_2124"
+      "bath_unknown_2124", "shell_ever_2124", "shell_unknown_2124",
+      dplyr::all_of(if (refined) "distance_to_open_coast_m" else character())
     ) |>
     dplyr::mutate(characteristic_matched = 1L)
-  arrow::open_dataset(spec$lookup_path) |>
+  if (!refined) site_query <- dplyr::mutate(site_query, distance_to_open_coast_m = NA_real_)
+  output <- pairs |>
     dplyr::select(dplyr::all_of(c(spec$id, "site_id", "distance_m"))) |>
     dplyr::filter(.data$distance_m <= !!radius_value) |>
     dplyr::left_join(site_query, by = "site_id") |>
@@ -403,6 +451,10 @@ aggregate_pairs_arrow <- function(spec, radius_value, site_path) {
     dplyr::group_by(.data[[spec$id]]) |>
     dplyr::summarise(
       n_pair_sites = dplyr::n(),
+      min_open_coast_dist_m = min(.data$distance_to_open_coast_m, na.rm = TRUE),
+      max_open_coast_dist_m = max(.data$distance_to_open_coast_m, na.rm = TRUE),
+      n_open_coast_known = sum(dplyr::if_else(is.na(.data$distance_to_open_coast_m), 0L, 1L)),
+      n_open_coast_missing = sum(dplyr::if_else(is.na(.data$distance_to_open_coast_m), 1L, 0L)),
       n_characteristic_missing = sum(.data$characteristic_missing),
       min_coast_dist_m = min(.data$distance_to_coast_m, na.rm = TRUE),
       max_coast_dist_m = max(.data$distance_to_coast_m, na.rm = TRUE),
@@ -416,6 +468,8 @@ aggregate_pairs_arrow <- function(spec, radius_value, site_path) {
     dplyr::collect() |>
     dplyr::mutate(
       radius = as.integer(radius_value),
+      min_open_coast_dist_m = dplyr::if_else(.data$n_open_coast_known == 0L, NA_real_, .data$min_open_coast_dist_m),
+      max_open_coast_dist_m = dplyr::if_else(.data$n_open_coast_known == 0L, NA_real_, .data$max_open_coast_dist_m),
       any_bath_2124 = .data$n_bath_2124 > 0L,
       all_bath_2124 = .data$n_bath_2124 == .data$n_pair_sites & .data$n_bath_unknown == 0L,
       mixed_bath_2124 = .data$n_bath_2124 > 0L & .data$n_bath_negative > 0L,
@@ -431,14 +485,17 @@ aggregate_pairs_arrow <- function(spec, radius_value, site_path) {
       "any_bath_2124", "all_bath_2124", "mixed_bath_2124",
       "bath_unknown_2124", "n_bath_2124", "any_shell_2124",
       "all_shell_2124", "mixed_shell_2124", "shell_unknown_2124",
-      "n_shell_2124"
+      "n_shell_2124",
+      dplyr::all_of(if (refined) setdiff(open_coast_radius_columns(), "site_generation") else character())
     )
+  if (refined) output$site_generation <- single_open_coast_generation(sites)
+  output
 }
 
-build_production_radius <- function(spec, radius_value, site_path) {
+build_production_radius <- function(spec, radius_value, site_path, refined = FALSE) {
   source <- read_source_radius(spec, radius_value)
   validate_source_universe(source, spec$id, radius_value)
-  aggregated <- aggregate_pairs_arrow(spec, radius_value, site_path)
+  aggregated <- aggregate_pairs_arrow(spec, radius_value, site_path, refined)
   if (any(aggregated$n_characteristic_missing != 0L)) {
     stop(spec$market, " radius ", radius_value,
       " contains property-Site Group pairs without characteristics.", call. = FALSE)
@@ -457,11 +514,12 @@ build_production_radius <- function(spec, radius_value, site_path) {
       dplyr::across(dplyr::starts_with("any_"), ~ tidyr::replace_na(.x, FALSE)),
       dplyr::across(dplyr::starts_with("mixed_"), ~ tidyr::replace_na(.x, FALSE)),
       dplyr::across(dplyr::ends_with("_unknown_2124"), ~ tidyr::replace_na(.x, FALSE)),
-      dplyr::across(dplyr::matches("^n_(bath|shell)_2124$"),
+      dplyr::across(dplyr::matches("^n_(bath|shell)_2124$|^n_open_coast_(known|missing)$"),
         ~ tidyr::replace_na(as.integer(.x), 0L)),
       dplyr::across(dplyr::starts_with("all_"),
         ~ dplyr::if_else(.data$n_spill_sites == 0L, NA, tidyr::replace_na(.x, FALSE)))
     )
+  if (refined) output$site_generation <- single_open_coast_generation(arrow::read_parquet(site_path))
   audit <- build_intensity_cutoff_audit(
     dplyr::mutate(
       dplyr::select(output, "radius", "n_spill_sites", dplyr::all_of(MEASURES)),
@@ -470,20 +528,21 @@ build_production_radius <- function(spec, radius_value, site_path) {
     )
   )
   output <- add_intensity_bands(output, spec$market) |>
-    dplyr::select(dplyr::all_of(prior_characteristics_columns(spec$id)))
-  validate_prior_characteristics(output, source, spec$id)
+    dplyr::select(dplyr::all_of(prior_characteristics_columns(spec$id, refined)))
+  validate_prior_characteristics(output, source, spec$id, refined)
   list(data = output, audit = audit)
 }
 
-validate_published_market <- function(path, spec) {
+validate_published_market <- function(path, spec, refined = FALSE, expected_generation = NULL) {
+  if (refined) validate_open_coast_companion_manifest(path, expected_generation)
   dataset <- arrow::open_dataset(path)
-  expected_columns <- prior_characteristics_columns(spec$id)
+  expected_columns <- prior_characteristics_columns(spec$id, refined)
   if (!setequal(dataset$schema$names, expected_columns) ||
       length(dataset$schema$names) != length(expected_columns)) {
     stop(spec$market, " published schema is not exact.", call. = FALSE)
   }
   expected_signature <- arrow_schema_signature(
-    prior_characteristics_schema(spec$id, include_radius = TRUE)
+    prior_characteristics_schema(spec$id, include_radius = TRUE, refined = refined)
   )
   observed_signature <- arrow_schema_signature(dataset$schema)
   if (!identical(
@@ -503,24 +562,25 @@ validate_published_market <- function(path, spec) {
       dplyr::collect() |>
       dplyr::select(dplyr::all_of(expected_columns))
     source <- read_source_radius(spec, radius_value)
-    validate_prior_characteristics(output, source, spec$id)
+    validate_prior_characteristics(output, source, spec$id, refined)
+    if (refined) validate_open_coast_radius(output, expected_generation)
   }
   invisible(path)
 }
 
-write_market_stage <- function(stage_path, spec, site_path) {
+write_market_stage <- function(stage_path, spec, site_path, refined = FALSE) {
   dir.create(stage_path, recursive = TRUE, showWarnings = FALSE)
   audits <- list()
   for (index in seq_along(RADII)) {
     radius_value <- RADII[[index]]
     logger::log_info("Building {spec$market} radius {radius_value} m")
-    result <- build_production_radius(spec, radius_value, site_path)
+    result <- build_production_radius(spec, radius_value, site_path, refined)
     partition_path <- file.path(stage_path, paste0("radius=", radius_value))
     dir.create(partition_path, recursive = TRUE, showWarnings = FALSE)
     partition_data <- dplyr::select(result$data, -"radius")
     table <- arrow::Table$create(
       partition_data,
-      schema = prior_characteristics_schema(spec$id, include_radius = FALSE)
+      schema = prior_characteristics_schema(spec$id, include_radius = FALSE, refined = refined)
     )
     arrow::write_parquet(table, file.path(partition_path, "part-0.parquet"))
     audits[[index]] <- result$audit
@@ -537,7 +597,7 @@ write_market_stage <- function(stage_path, spec, site_path) {
   list(audit = dplyr::bind_rows(audits))
 }
 
-publish_market <- function(spec, site_path = SITE_CHARACTERISTICS_PATH) {
+publish_market <- function(spec, site_path = SITE_CHARACTERISTICS_PATH, refined = TRUE) {
   dir.create(dirname(spec$output_path), recursive = TRUE, showWarnings = FALSE)
   stage_path <- file.path(
     dirname(spec$output_path),
@@ -547,16 +607,48 @@ publish_market <- function(spec, site_path = SITE_CHARACTERISTICS_PATH) {
   on.exit({
     if (dir.exists(stage_path)) unlink(stage_path, recursive = TRUE)
   }, add = TRUE)
-  result <- write_market_stage(stage_path, spec, site_path)
+  result <- write_market_stage(stage_path, spec, site_path, refined)
+  if (refined) {
+    input_paths <- c(site_path, spec$lookup_path,
+      if (dir.exists(spec$source_path)) list.files(spec$source_path, pattern = "[.]parquet$", recursive = TRUE,
+        full.names = TRUE) else spec$source_path)
+    entry <- function(path, relative) list(path = relative, sha256 = digest::digest(file = path, algo = "sha256"))
+    inputs <- lapply(sort(unique(input_paths)), function(path) entry(path,
+      if (startsWith(path, paste0(here::here(), "/"))) substring(path, nchar(here::here()) + 2L) else path))
+    outputs <- lapply(paste0("radius=", RADII, "/part-0.parquet"), function(relative)
+      entry(file.path(stage_path, relative), relative))
+    jsonlite::write_json(list(status = "complete", site_generation = single_open_coast_generation(arrow::read_parquet(site_path)),
+      inputs = inputs, outputs = outputs,
+      builder_sha256 = digest::digest(file = here::here("scripts", "R", "06_analysis_datasets", "build_prior_characteristics.R"), algo = "sha256")),
+      file.path(stage_path, "_open_coast_manifest.json"), auto_unbox = TRUE, pretty = TRUE)
+  }
+  if (dir.exists(spec$output_path)) {
+    legacy_columns <- prior_characteristics_columns(spec$id)
+    for (radius_value in RADII) {
+      read_legacy <- function(path) arrow::open_dataset(path) |>
+        dplyr::filter(.data$radius == !!radius_value) |>
+        dplyr::select(dplyr::all_of(legacy_columns)) |> dplyr::collect() |>
+        dplyr::arrange(.data[[spec$id]])
+      if (!isTRUE(all.equal(as.data.frame(read_legacy(stage_path)),
+                           as.data.frame(read_legacy(spec$output_path)), tolerance = 0, check.attributes = FALSE)))
+        stop("Legacy property characteristics changed for ", spec$market, " / ", radius_value, ".")
+    }
+  }
   publish_validated_dataset(
     stage_path, spec$output_path,
-    validate = function(path) validate_published_market(path, spec)
+    validate = function(path) validate_published_market(path, spec, refined,
+      if (refined) single_open_coast_generation(arrow::read_parquet(site_path)) else NULL)
   )
   result$audit
 }
 
 publish_cutoff_audit <- function(data, output_path = CUTOFF_OUTPUT_PATH) {
   validate_cutoff_audit(data)
+  if (file.exists(output_path)) {
+    ordered <- function(x) dplyr::arrange(x, .data$market, .data$radius, .data$measure)
+    if (!isTRUE(all.equal(as.data.frame(ordered(data)), as.data.frame(ordered(arrow::read_parquet(output_path))),
+                         tolerance = 0, check.attributes = FALSE))) stop("Existing intensity cutoffs changed.")
+  }
   dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
   candidate <- file.path(dirname(output_path), paste0(".", basename(output_path), ".candidate"))
   if (file.exists(candidate)) unlink(candidate)

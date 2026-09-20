@@ -1,0 +1,45 @@
+{
+  "status": "complete",
+  "artifacts": [
+    {
+      "path": "geography_review.json",
+      "sha256": "4ab50a382248ddb6f7fa7b8242bd59a5ec1b7d062e01660ac62c105f2278924c"
+    },
+    {
+      "path": "final_coverage_summary.csv",
+      "sha256": "fe26991fd5e9d49409bbd143e4af2811c60e62fc8fcdfc4ef41cbe6ca33e7742"
+    },
+    {
+      "path": "threshold_review.csv",
+      "sha256": "f0e16e138a5ad83215bf27663c0ed3e7b2d3ce76f19d614d67b50700700bf267"
+    },
+    {
+      "path": "solway_nearest_shores.csv",
+      "sha256": "4d1b2c5cb31861333e307f20401df83a195ee3a02c4de0b16e3c13f66d67176f"
+    },
+    {
+      "path": "final-thames.png",
+      "sha256": "e311db46c1aca5c6c004199180e6c7dd4b76b619c04b758831fe9f8db9326eb5"
+    },
+    {
+      "path": "final-severn.png",
+      "sha256": "689a86b5826ee6dc47474fa75fcfff3cd931f198a4e17cac7e5da02d3bd7e8b9"
+    },
+    {
+      "path": "final-morecambe.png",
+      "sha256": "72ff7b17776dfa4cbf077fafdf8839df31fed14e6af306ec7c5001dc1897a664"
+    },
+    {
+      "path": "final-poole.png",
+      "sha256": "74760400bc5a6724302b7a500fff00ded6db5530efe695b91cb5e0585643a705"
+    },
+    {
+      "path": "final-dee.png",
+      "sha256": "7dc779536e0b9a0c5c0980a15c201f57e5b60e2b1fd6a3bc3d9d2bbbcdf2b04a"
+    },
+    {
+      "path": "final-solway.png",
+      "sha256": "759c6623ba01afa96b102fe54c3fa70e5d95baa92ce29d8b200491e81445c89d"
+    }
+  ]
+}

@@ -26,6 +26,8 @@ if (!requireNamespace("here", quietly = TRUE)) {
 
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 source(here::here("scripts", "R", "utils", "site_group_utils.R"), local = TRUE)
+source(here::here("scripts", "R", "utils", "open_coast_contracts.R"), local = TRUE)
+source(here::here("scripts", "R", "03_data_enrichment", "build_open_coast_reference.R"), local = TRUE)
 source(
   here::here("scripts", "R", "utils", "dataset_publication_utils.R"),
   local = TRUE
@@ -40,6 +42,7 @@ YEARS <- 2021:2024
 LOG_FILE <- here::here("output", "log", "build_site_group_characteristics.log")
 
 CONFIG <- list(
+  open_coast_path = here::here("data", "processed", "geography", "open_coast", "reference.rds"),
   annual_path = here::here("data", "processed", "annual_return_edm.parquet"),
   lookup_path = here::here("data", "processed", "annual_return_lookup.parquet"),
   membership_path = here::here("data", "processed", "unique_spill_sites.parquet"),
@@ -57,7 +60,7 @@ CONFIG <- list(
   )
 )
 
-site_group_characteristics_columns <- function() {
+site_group_characteristics_columns <- function(refined = FALSE) {
   annual <- unlist(lapply(c("bath", "shell"), function(type) {
     unlist(lapply(c("status", "mixed", "unknown"), function(field) {
       paste0(type, "_", field, "_", 21:24)
@@ -66,10 +69,11 @@ site_group_characteristics_columns <- function() {
   summaries <- unlist(lapply(c("bath", "shell"), function(type) {
     paste0(type, c("_ever_2124", "_changed_2124", "_unknown_2124", "_24"))
   }), use.names = FALSE)
-  c("site_id", "distance_to_coast_m", annual, summaries)
+  c("site_id", "distance_to_coast_m", annual, summaries,
+    if (refined) open_coast_site_columns())
 }
 
-site_group_characteristics_schema <- function() {
+site_group_characteristics_schema <- function(refined = FALSE) {
   fields <- list(
     site_id = arrow::int32(),
     distance_to_coast_m = arrow::float64()
@@ -84,6 +88,12 @@ site_group_characteristics_schema <- function() {
     fields[[paste0(type, "_changed_2124")]] <- arrow::boolean()
     fields[[paste0(type, "_unknown_2124")]] <- arrow::boolean()
     fields[[paste0(type, "_24")]] <- arrow::boolean()
+  }
+  if (refined) {
+    fields$distance_to_open_coast_m <- arrow::float64()
+    fields$open_coast_status <- arrow::utf8()
+    fields$geometry_generation <- arrow::utf8()
+    fields$site_generation <- arrow::utf8()
   }
   do.call(arrow::schema, fields)
 }
@@ -341,9 +351,9 @@ calculate_site_coast_distance <- function(projection, country_boundaries) {
   output
 }
 
-validate_site_group_characteristics <- function(data, expected_site_ids) {
+validate_site_group_characteristics <- function(data, expected_site_ids, refined = FALSE) {
   data <- tibble::as_tibble(data)
-  expected_columns <- site_group_characteristics_columns()
+  expected_columns <- site_group_characteristics_columns(refined)
   if (!identical(names(data), expected_columns)) {
     stop("Site Group characteristics must have the exact hand-written schema.", call. = FALSE)
   }
@@ -367,7 +377,33 @@ validate_site_group_characteristics <- function(data, expected_site_ids) {
   if (anyNA(data[logical_columns])) {
     stop("Non-current designation flags must not be missing.", call. = FALSE)
   }
+  if (refined) validate_open_coast_sites(data)
   invisible(data)
+}
+
+add_open_coast_characteristics <- function(data, projection, reference) {
+  validate_published_open_coast_reference(reference)
+  validate_unique_mapping(projection, "site_id", "Representative locations")
+  if (!setequal(data$site_id, projection$site_id)) stop("Representative location keys differ.")
+  if (!identical(reference$review$location_hash, open_coast_location_hash(projection)))
+    stop("Representative locations differ from the geography coverage review.")
+  usable <- is.finite(projection$easting) & is.finite(projection$northing)
+  evidence <- tibble::tibble(site_id = projection$site_id,
+    distance_to_open_coast_m = NA_real_, open_coast_status = "missing_location")
+  if (any(usable)) {
+    points <- sf::st_as_sf(projection[usable, ], coords = c("easting", "northing"), crs = 27700)
+    measured <- measure_open_coast_evidence(points, reference, reference$coverage)
+    evidence$distance_to_open_coast_m[usable] <- measured$distance_to_open_coast_m
+    evidence$open_coast_status[usable] <- ifelse(measured$open_coast_status == "supported_candidate",
+      "validated", measured$open_coast_status)
+  }
+  output <- dplyr::left_join(data, evidence, by = "site_id", relationship = "one-to-one")
+  output$geometry_generation <- reference$generation
+  # Include representative coordinates in the generation without changing the
+  # legacy site schema or selecting a different representative location.
+  output$site_generation <- open_coast_site_generation(output, open_coast_location_hash(projection))
+  validate_site_group_characteristics(output, projection$site_id, refined = TRUE)
+  output
 }
 
 read_site_characteristic_inputs <- function(config = CONFIG) {
@@ -430,6 +466,17 @@ main <- function() {
   logger::log_info("Building Site Group characteristics")
   inputs <- read_site_characteristic_inputs()
   output <- build_site_group_characteristics(inputs)
+  if (file.exists(CONFIG$output_path)) {
+    prior <- arrow::read_parquet(CONFIG$output_path)
+    if (nrow(prior) != nrow(output) || anyDuplicated(prior$site_id) ||
+        !setequal(prior$site_id, output$site_id)) stop("Legacy Site Group identities changed.")
+    legacy_columns <- site_group_characteristics_columns()
+    prior <- prior[match(output$site_id, prior$site_id), legacy_columns]
+    if (!isTRUE(all.equal(as.data.frame(output), as.data.frame(prior), tolerance = 0, check.attributes = FALSE)))
+      stop("Legacy Site Group fields changed; refusing additive publication.")
+  }
+  if (!file.exists(CONFIG$open_coast_path)) stop("Validated open-coast reference is required before publication.")
+  output <- add_open_coast_characteristics(output, inputs$projection, readRDS(CONFIG$open_coast_path))
   log_site_diagnostics(output)
 
   dir.create(dirname(CONFIG$output_path), recursive = TRUE, showWarnings = FALSE)
@@ -437,21 +484,24 @@ main <- function() {
     dirname(CONFIG$output_path), paste0(".", basename(CONFIG$output_path), ".candidate")
   )
   if (file.exists(candidate)) unlink(candidate)
-  table <- arrow::Table$create(output, schema = site_group_characteristics_schema())
+  table <- arrow::Table$create(output, schema = site_group_characteristics_schema(refined = TRUE))
   arrow::write_parquet(table, candidate)
   validate_file <- function(path) {
     observed_signature <- arrow_schema_signature(
       arrow::open_dataset(path)$schema
     )
     expected_signature <- arrow_schema_signature(
-      site_group_characteristics_schema()
+      site_group_characteristics_schema(refined = TRUE)
     )
     if (!identical(observed_signature, expected_signature)) {
       stop("Site Group parquet physical types do not match the hand-written schema.",
         call. = FALSE)
     }
     candidate_data <- arrow::read_parquet(path)
-    validate_site_group_characteristics(candidate_data, inputs$projection$site_id)
+    validate_site_group_characteristics(candidate_data, inputs$projection$site_id, refined = TRUE)
+    if (!identical(single_open_coast_generation(candidate_data),
+        open_coast_site_generation(candidate_data, open_coast_location_hash(inputs$projection))))
+      stop("Site artifact values do not match their generation.")
   }
   publish_validated_file(candidate, CONFIG$output_path, validate_file)
   logger::log_info("Published {CONFIG$output_path}")

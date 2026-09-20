@@ -1,0 +1,9 @@
+"legacy","refined","evidence","bathing","n_sites"
+"coastal","coastal","validated",FALSE,430
+"coastal","coastal","validated",TRUE,666
+"coastal","inland","validated",FALSE,1651
+"coastal","inland","validated",TRUE,253
+"inland","coastal","validated",TRUE,2
+"inland","inland","validated",FALSE,10770
+"inland","inland","validated",TRUE,197
+"unknown","unknown","missing_location",FALSE,21
