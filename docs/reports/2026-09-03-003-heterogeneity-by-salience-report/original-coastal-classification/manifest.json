@@ -1,0 +1,36 @@
+{
+  "status": "complete",
+  "profile": "legacy_tidal",
+  "coast_rule_m": 2000,
+  "missing_location": 21,
+  "outside_map": 1,
+  "coastal_outside_london": 2917,
+  "coastal_inside_london": 83,
+  "inland": 10968,
+  "source_hashes": {
+    "sites": "cb1f2407572ba49d2571ef6de331e0e1d9f6a8a7334ca3579e28857971212015",
+    "crosswalk": "e0009691a459e3a1874a4cc8d2cdf5de2dd71f49c171f91a0871537fab0bb5f9",
+    "boundary": {
+      "CTRY_DEC_2024_UK_BGC.shp": "6f7085af68657d23d58e837c8654a67ebf64ad3a3b9d24c499361e2d4ac96b59",
+      "CTRY_DEC_2024_UK_BGC.shx": "f78b7c68eec482a5fdc1c41206959c479a47cb02eea1400a6f5730b943bff67c",
+      "CTRY_DEC_2024_UK_BGC.dbf": "c2c08d356986585f61e5732a29a5bd655505316e01503bf20e0772857e881b03",
+      "CTRY_DEC_2024_UK_BGC.prj": "d97d276680377a05a19a8b8030ae04c4a87e883a9e5c07d0c646e5402e773a89"
+    },
+    "london_boundary": {
+      "Local_Authority_Districts_(May_2025)_Boundaries_UK_BUC.shp": "d7e5844de3e349be43ab8229913fcdb13760d23d9dc2d99b91cac3bf8d0e3606",
+      "Local_Authority_Districts_(May_2025)_Boundaries_UK_BUC.shx": "16ab7c3e8ec92d855195b334e08a7e40d74cc06b453da9af190c53165e94fdb3",
+      "Local_Authority_Districts_(May_2025)_Boundaries_UK_BUC.dbf": "ff36de6af227f84b80d008b79f5c61ab080e1250a97cb5db706833b0767461fe",
+      "Local_Authority_Districts_(May_2025)_Boundaries_UK_BUC.prj": "d97d276680377a05a19a8b8030ae04c4a87e883a9e5c07d0c646e5402e773a89"
+    }
+  },
+  "artifacts": [
+    {
+      "path": "england-wales-coastal-classification.png",
+      "sha256": "4de89fb6b8a3561422101d5806d9dc71fdd57266c42dcf69adf98bffb91178b5"
+    },
+    {
+      "path": "site-counts.csv",
+      "sha256": "d14c1ae97c0ee2d1a442173ceec083928e2bf3722a08f5b7a1398c43f99abcb1"
+    }
+  ]
+}

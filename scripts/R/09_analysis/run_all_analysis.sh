@@ -61,6 +61,7 @@ SCRIPT_LIST=$(cat <<'EOF'
 
 # 02_hedonic
 scripts/R/09_analysis/02_hedonic/hedonic_continuous_prior.R
+scripts/R/09_analysis/02_hedonic/hedonic_continuous_prior_salience.R
 scripts/R/09_analysis/02_hedonic/hedonic_bins_prior.R
 scripts/R/09_analysis/02_hedonic/hedonic_continuous_full.R
 scripts/R/09_analysis/02_hedonic/hedonic_bins_full.R
@@ -77,14 +78,18 @@ scripts/R/09_analysis/04_long_difference/longdiff_weighted_exposed.R
 # 05_news
 scripts/R/09_analysis/05_news/did_trends_full.R
 scripts/R/09_analysis/05_news/did_trends_prior.R
+scripts/R/09_analysis/05_news/did_trends_prior_salience.R
 scripts/R/09_analysis/05_news/es_trends_prior.R
 scripts/R/09_analysis/05_news/did_articles_prior.R
+scripts/R/09_analysis/05_news/did_articles_prior_salience.R
 scripts/R/09_analysis/05_news/did_articles_windowed_prior.R
 scripts/R/09_analysis/05_news/did_articles_lag4_prior.R
 scripts/R/09_analysis/05_news/did_trends_full_extensive.R
 scripts/R/09_analysis/05_news/did_trends_prior_extensive.R
+scripts/R/09_analysis/05_news/did_trends_prior_extensive_salience.R
 scripts/R/09_analysis/05_news/es_trends_prior_extensive.R
 scripts/R/09_analysis/05_news/did_articles_prior_extensive.R
+scripts/R/09_analysis/05_news/did_articles_prior_extensive_salience.R
 scripts/R/09_analysis/05_news/did_articles_windowed_prior_extensive.R
 scripts/R/09_analysis/05_news/did_articles_lag4_prior_extensive.R
 
