@@ -1607,8 +1607,9 @@ prepare_market_panel <- function(market, cfg = market_config(market)) {
 profile_readiness <- function(market, cfg, profile_contract, scalar_contract) {
   pcfg <- profile_config(cfg)
   contract <- profile_contract %||% scalar_contract
-  eligible <- recompute_repeats(contract$panel)
-  out <- list(
+  # Counts only: the eligible ids are enough, so the wide panel is not copied.
+  eligible_ids <- repeat_eligible_ids(contract$panel)
+  list(
     panel = if (is.null(profile_contract)) "shared" else "separate",
     start = pcfg$start,
     end = pcfg$end,
@@ -1616,11 +1617,9 @@ profile_readiness <- function(market, cfg, profile_contract, scalar_contract) {
     date_range = contract$date_range,
     n_rows_pre_band = nrow(contract$panel),
     n_groups_pre_band = data.table::uniqueN(contract$panel$repeat_id),
-    n_rows_repeat_eligible_pre_band = nrow(eligible),
-    n_groups_repeat_eligible_pre_band = data.table::uniqueN(eligible$repeat_id)
+    n_rows_repeat_eligible_pre_band = sum(contract$panel$repeat_id %chin% eligible_ids),
+    n_groups_repeat_eligible_pre_band = length(eligible_ids)
   )
-  rm(eligible)
-  out
 }
 
 # Used by the estimation driver's progress output and the run metadata, so it
@@ -3515,6 +3514,39 @@ empty_profile_samples <- function() {
   )
 }
 
+# The columns the annual-profile fits and their membership record read. A
+# separate profile panel is reduced to these after its exposure step so that
+# the nine-million-row sales profile panel does not carry coordinates,
+# postcodes, controls or change flags through estimation.
+PROFILE_PANEL_COLUMNS <- c(
+  "id",
+  "repeat_id",
+  "date",
+  "year",
+  "month_index",
+  "log_price",
+  "lsoa",
+  "msoa",
+  "near",
+  "band"
+)
+
+prune_profile_panel <- function(panel) {
+  missing <- setdiff(PROFILE_PANEL_COLUMNS, names(panel))
+  if (length(missing) > 0L) {
+    stop(
+      "Profile panel lacks columns: ",
+      paste(missing, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  drop <- setdiff(names(panel), PROFILE_PANEL_COLUMNS)
+  if (length(drop) > 0L) {
+    panel[, (drop) := NULL]
+  }
+  panel[]
+}
+
 # Annual support of a banded panel: rows and properties per year and band, so
 # the report can show where the expanded profiles draw their near-far contrast.
 profile_support_by_year <- function(panel) {
@@ -3568,7 +3600,12 @@ joint_test <- function(coefs, V, t_df, Xd, joint_years) {
   if (anyNA(cols)) {
     return(unavailable("demeaned annual-interaction columns missing"))
   }
-  rank <- qr(Xd[, cols, drop = FALSE])$rank
+  # Rank of the residualised annual-interaction matrix through its k x k Gram
+  # matrix: a QR of the n x k demeaned design copies the nine-million-row
+  # expanded sales profile panel and exceeds R's vector memory limit. The
+  # tolerance is the square of qr()'s default so the decision matches a QR of
+  # the design itself (singular values enter the Gram matrix squared).
+  rank <- qr(crossprod(Xd)[cols, cols, drop = FALSE], tol = 1e-14)$rank
   if (rank < length(cols)) {
     return(unavailable(
       sprintf(
@@ -10297,7 +10334,7 @@ for (market in MARKETS) {
         profile_ledger,
         market
       )
-      entry$profile_panel <- profile_exposure$panel
+      entry$profile_panel <- prune_profile_panel(profile_exposure$panel)
       entry$profile_ledger <- profile_exposure$ledger
       rm(profile_exposure)
     }

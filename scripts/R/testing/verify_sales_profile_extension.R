@@ -725,11 +725,22 @@ cmd_bundle <- function(dir = BASELINE_DIR) {
     )
   }))
   # 6. Exclusion ledger: scalar-panel rows identical for both markets.
+  # The first step of each market's chain (requested_dates) starts from the
+  # full history, whose row and group totals legitimately grew with the
+  # 1995-2024 extension (R9); every count after the window restriction and
+  # every later step must match exactly.
   ol <- old$exclusions$ledger
   nl <- new$exclusions$ledger
   ledger_cols <- c("market", "step", "n_rows_before", "n_rows_after", "n_rows_removed", "n_groups_before", "n_groups_after")
-  note("scalar_exclusion_ledger", nrow(ol) == nrow(nl) && all(vapply(ledger_cols, function(c) all(values_match(ol[[c]], nl[[c]])), logical(1))),
-       sprintf("%d vs %d rows", nrow(ol), nrow(nl)))
+  first_step <- ol$step == "requested_dates"
+  ledger_same <- nrow(ol) == nrow(nl) && all(vapply(ledger_cols, function(c) {
+    same <- values_match(ol[[c]], nl[[c]])
+    if (c %in% c("n_rows_before", "n_rows_removed", "n_groups_before")) same <- same | first_step
+    all(same)
+  }, logical(1)))
+  note("scalar_exclusion_ledger", ledger_same,
+       sprintf("%d vs %d rows; full-history totals of the requested_dates step excluded", nrow(ol), nrow(nl)))
+  note("scalar_ledger_full_history_grew", all(nl$n_rows_before[nl$step == "requested_dates" & nl$market == "sales"] > ol$n_rows_before[first_step & ol$market == "sales"]))
   # 7. Rental inputs unchanged; sales inputs expected to change.
   oi <- old$metadata$fingerprint$inputs
   ni <- new$metadata$fingerprint$inputs
