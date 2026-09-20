@@ -1,5 +1,0 @@
-Read-only audit of original workbook cells for the97 Site Groups first observed positive in2024. Entire builder was never evaluated.
-Original annual IDs were traced by sheet order and retained company rows, then checked against company, permit, site-name anchors and current processed bathing values.
-Original cell references are inspected in workbook XML to distinguish absent/empty cells, Excel errors, and textual missing markers standardized by the cleaner.
-The cleaner treats '-' or any text matching n/a|#n/a|#na (case-insensitive) as NA, then runs type.convert. The later Site Group parser treats NA as not_designated.
-Original blanks/markers do not by themselves prove absence of official designation or a later effective date.

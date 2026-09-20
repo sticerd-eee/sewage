@@ -1,4 +1,0 @@
-Coverage audit of current baseline-hedonic and intensive-attention prepared samples, both markets. No models or builders run.
-Preparation functions are parsed individually from current scripts without running setup or main. London exclusion is reported explicitly.
-Country is the transaction geography field, not water-company identity. LSOA values are inspected for ONS code format; names must not be interpreted using their first letter.
-Counts precede salience subgroup selection and estimator-specific removals. This check establishes the geographic scope of eligible prepared observations, not exact final fitted observations.

@@ -1,9 +1,0 @@
-market,sample,country,n_before_london_exclusion,n_after_london_exclusion
-rentals,baseline_hedonic,England,46422,40584
-rentals,baseline_hedonic,Wales,2,2
-rentals,intensive_attention,England,46422,40584
-rentals,intensive_attention,Wales,2,2
-sales,baseline_hedonic,England,166077,160003
-sales,baseline_hedonic,Wales,115,115
-sales,intensive_attention,England,166077,160003
-sales,intensive_attention,Wales,115,115
