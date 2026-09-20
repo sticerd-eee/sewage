@@ -241,7 +241,7 @@ The report reads a saved original-classification map with Coastal sites inside
 and outside Greater London distinguished. Regenerate it separately:
 
 ```bash
-Rscript docs/reports/2026-09-03-003-heterogeneity-by-salience-report/map_coastal_eligibility.R
+Rscript docs/reports/2026-09-03-003-heterogeneity-by-salience-report/map_coastal_classification.R
 ```
 
 The map uses the original site distances, representative crosswalk coordinates,

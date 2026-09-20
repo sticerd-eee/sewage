@@ -1,5 +1,5 @@
 # Build report assets explicitly; rendering reads these files without live data.
-map_coastal_eligibility <- function() {
+map_coastal_classification <- function() {
   builder <- new.env(parent = globalenv())
   sys.source(here::here("scripts", "R", "03_data_enrichment", "build_site_group_characteristics.R"), builder)
   sites <- arrow::read_parquet(builder$CONFIG$output_path)
@@ -81,7 +81,7 @@ map_coastal_eligibility <- function() {
   aligned_heights <- grid::unit.pmax(shore_grob$heights, map_grob$heights)
   shore_grob$heights <- map_grob$heights <- aligned_heights
   output <- here::here("docs", "reports", "2026-09-03-003-heterogeneity-by-salience-report",
-    "original-coastal-eligibility")
+    "original-coastal-classification")
   dir.create(output, recursive = TRUE, showWarnings = FALSE)
   draw <- function() {
     grid::grid.newpage()
@@ -97,14 +97,11 @@ map_coastal_eligibility <- function() {
     grid::grid.text(source_note,
       x = .025, y = .02, just = "left", gp = grid::gpar(fontsize = 8, col = "#666666"))
   }
-  grDevices::png(file.path(output, "england-wales-coastal-eligibility.png"), width = 2400, height = 1800, res = 160)
-  draw()
-  grDevices::dev.off()
-  grDevices::pdf(file.path(output, "england-wales-coastal-eligibility.pdf"), width = 15, height = 11.25, useDingbats = FALSE)
+  grDevices::png(file.path(output, "england-wales-coastal-classification.png"), width = 2400, height = 1800, res = 160)
   draw()
   grDevices::dev.off()
   readr::write_csv(counts, file.path(output, "site-counts.csv"))
-  artifacts <- c("england-wales-coastal-eligibility.png", "england-wales-coastal-eligibility.pdf", "site-counts.csv")
+  artifacts <- c("england-wales-coastal-classification.png", "site-counts.csv")
   hash <- function(path) digest::digest(file = path, algo = "sha256")
   boundary_hashes <- function(path) {
     paths <- paste0(tools::file_path_sans_ext(path), c(".shp", ".shx", ".dbf", ".prj"))
@@ -124,4 +121,4 @@ map_coastal_eligibility <- function() {
   print(counts)
 }
 
-if (sys.nframe() == 0L) map_coastal_eligibility()
+if (sys.nframe() == 0L) map_coastal_classification()

@@ -92,9 +92,8 @@ test between-group differences.
 
 ### Original coastal classification and Greater London
 
-![The original tidal shoreline and Coastal Site Groups, with Greater London highlighted.](2026-09-03-003-heterogeneity-by-salience-report/original-coastal-eligibility/england-wales-coastal-eligibility.png)
+![The original tidal shoreline and Coastal Site Groups, with Greater London highlighted.](2026-09-03-003-heterogeneity-by-salience-report/original-coastal-classification/england-wales-coastal-classification.png)
 
-[Open the zoomable PDF map](2026-09-03-003-heterogeneity-by-salience-report/original-coastal-eligibility/england-wales-coastal-eligibility.pdf).
 The left panel shows the boundary of dissolved England, Wales and Scotland,
 with country seams removed. The right panel shows **2,917 Coastal Site Groups
 outside Greater London** (blue), **83 inside** (purple), and **10,968 Inland**
@@ -1891,7 +1890,7 @@ quarto render docs/reports/2026-09-03-003-heterogeneity-by-salience-report.qmd -
 To regenerate the map from the site distances, crosswalk and ONS boundaries:
 
 ```bash
-Rscript docs/reports/2026-09-03-003-heterogeneity-by-salience-report/map_coastal_eligibility.R
+Rscript docs/reports/2026-09-03-003-heterogeneity-by-salience-report/map_coastal_classification.R
 ```
 
 With re-estimation enabled, the report writes the original five model bundles and 24 exploratory tables,

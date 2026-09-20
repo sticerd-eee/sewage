@@ -25,12 +25,8 @@
   },
   "artifacts": [
     {
-      "path": "england-wales-coastal-eligibility.png",
+      "path": "england-wales-coastal-classification.png",
       "sha256": "4de89fb6b8a3561422101d5806d9dc71fdd57266c42dcf69adf98bffb91178b5"
-    },
-    {
-      "path": "england-wales-coastal-eligibility.pdf",
-      "sha256": "76e47a987d164c0b2d50c086a26dbe736a28ac5dda2a3b99849b0275c108a5ff"
     },
     {
       "path": "site-counts.csv",
