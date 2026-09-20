@@ -140,6 +140,13 @@ assert_error_matching(
   "1998.*share 1 transaction_id",
   "Split parts sharing an id must fail."
 )
+writeLines(c(sub(',"A","A"$', ',"A"', lr_csv_row("{S13}", "1999-03-01 00:00"))), file.path(source_dir, "pp-1999-part1.csv"))
+writeLines(c(lr_csv_row("{S14}", "1999-07-01 00:00")), file.path(source_dir, "pp-1999-part2.csv"))
+assert_error_matching(
+  cleaner_env$load_manifest_year(source_manifest, 1999L),
+  "1999 has 15 columns; expected 16",
+  "A source with a malformed schema must fail naming the year and column count."
+)
 writeLines(c(lr_csv_row("{S10}", "2014-03-01 00:00")), file.path(source_dir, "pp-2014.csv"))
 writeLines(c(lr_csv_row("{S11}", "2014-03-01 00:00")), file.path(source_dir, "pp-2014-part1.csv"))
 writeLines(c(lr_csv_row("{S12}", "2014-03-01 00:00")), file.path(source_dir, "pp-2014-part2.csv"))
@@ -248,36 +255,7 @@ assert_error_matching(
   "The cleaner must refuse writes to canonical output paths."
 )
 
-long_path <- file.path(test_dir, "house_price_long_run_candidate.parquet")
-study_path <- file.path(test_dir, "house_price_candidate.parquet")
 run_stamp <- "2026-08-14T12:34:56Z"
-cleaner_env$write_lr_candidates(pair, long_path, study_path, run_stamp = run_stamp)
-drifted_pair <- pair
-drifted_pair$study$price[1] <- drifted_pair$study$price[1] + 1
-assert_error_matching(
-  cleaner_env$write_lr_candidates(
-    drifted_pair,
-    file.path(test_dir, "drifted_long_run_candidate.parquet"),
-    file.path(test_dir, "drifted_candidate.parquet"),
-    run_stamp = run_stamp
-  ),
-  "unchanged filter",
-  "Candidate publication must reject independently built or drifted study data."
-)
-
-long_table <- arrow::read_parquet(long_path, as_data_frame = FALSE)
-study_table <- arrow::read_parquet(study_path, as_data_frame = FALSE)
-required_metadata <- c(
-  "cleaning_manifest_version", "cleaning_run_stamp", "cleaning_market",
-  "cleaning_artifact_role", "cleaning_year_min", "cleaning_year_max",
-  "cleaning_source_row_count", "cleaning_parent_role"
-)
-assert_true(all(required_metadata %in% names(long_table$metadata)), "The LR superset must carry the cleaning metadata contract.")
-assert_true(all(required_metadata %in% names(study_table$metadata)), "The LR subset must carry the cleaning metadata contract.")
-assert_identical(long_table$metadata$cleaning_run_stamp, run_stamp, "The LR superset run stamp must round-trip.")
-assert_identical(study_table$metadata$cleaning_run_stamp, run_stamp, "Superset and subset must share one run stamp.")
-assert_identical(long_table$metadata$cleaning_artifact_role, "long_run", "The superset metadata must declare its role.")
-assert_identical(study_table$metadata$cleaning_parent_role, "long_run", "The subset metadata must declare derivation from the superset.")
 
 # LR reconciliation permits identity/date-period/membership transitions only.
 old <- raw_fixture[2:3, ] |>
@@ -326,10 +304,6 @@ duplicate_old <- bind_rows(old, old[1, ] |> mutate(date_of_transfer = as.POSIXct
 duplicates <- reconcile_env$reconcile_lr_allowed_deltas(duplicate_old, candidate_long, candidate_study, 2021:2024)
 assert_true(nrow(duplicates$old_duplicate_ids) == 1L, "Historical duplicate transaction ids must be called out for the gate.")
 
-vintage_report <- reconcile_env$build_file_vintage_report(c(long_path, study_path), "fixture")
-assert_true(all(c("vintage", "path", "basename", "size_bytes", "mtime", "sha256") %in% names(vintage_report)), "Vintage reports must include checksums and file facts.")
-assert_true(all(grepl("^[0-9a-f]{64}$", vintage_report$sha256)), "Vintage reports must carry SHA-256 checksums.")
-
 # Streaming candidate writers: yearly tables are cast to the persisted schema,
 # appended in order, the study file mirrors the study years, and a row-count
 # shortfall against the manifest refuses to publish the candidates.
@@ -373,6 +347,20 @@ assert_identical(
   as.data.frame(stream_long_table)$house_id[lubridate::year(as.data.frame(stream_long_table)$date_of_transfer) %in% 2021:2024],
   "The streamed study candidate must be the study-year filter of the streamed superset."
 )
+long_table <- stream_long_table
+study_table <- stream_study_table
+required_metadata <- c(
+  "cleaning_manifest_version", "cleaning_run_stamp", "cleaning_market",
+  "cleaning_artifact_role", "cleaning_year_min", "cleaning_year_max",
+  "cleaning_source_row_count", "cleaning_parent_role"
+)
+assert_true(all(required_metadata %in% names(long_table$metadata)), "The LR superset must carry the cleaning metadata contract.")
+assert_true(all(required_metadata %in% names(study_table$metadata)), "The LR subset must carry the cleaning metadata contract.")
+assert_identical(study_table$metadata$cleaning_run_stamp, run_stamp, "Superset and subset must share one run stamp.")
+assert_identical(long_table$metadata$cleaning_artifact_role, "long_run", "The superset metadata must declare its role.")
+vintage_report <- reconcile_env$build_file_vintage_report(c(stream_long, stream_study), "fixture")
+assert_true(all(c("vintage", "path", "basename", "size_bytes", "mtime", "sha256") %in% names(vintage_report)), "Vintage reports must include checksums and file facts.")
+assert_true(all(grepl("^[0-9a-f]{64}$", vintage_report$sha256)), "Vintage reports must carry SHA-256 checksums.")
 short_writers <- cleaner_env$open_lr_candidate_writers(
   file.path(test_dir, "short_long_run_candidate.parquet"),
   file.path(test_dir, "short_candidate.parquet"),

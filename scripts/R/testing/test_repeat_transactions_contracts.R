@@ -636,17 +636,22 @@ assert_identical(
   "The manifest delta must still be logged against the canonical mapping."
 )
 early_history <- data.table(
-  house_id = c("11aaa", "22bbb", "33ccc"),
-  postcode = c("SW1A 1AA", "SW1A 1AA", "E1 6AN"),
-  paon = c("10", "10", "7"),
+  house_id = c("11aaa", "22bbb", "33ccc", "44ddd", "55eee"),
+  postcode = c("SW1A 1AA", "SW1A 1AA", "E1 6AN", "E1 6AN", "E1 6AN"),
+  paon = c("10", "10", "7", "9", "9"),
   saon = NA_character_,
-  street = c("ST JOHNS ROAD", "ST JOHNS ROAD", "BRICK LANE"),
-  date_of_transfer = as.Date(c("1995-01-01", "2022-01-01", "2013-03-15")),
-  price = c(50000, 120000, 450000),
-  property_type = c("T", "T", "F")
+  street = c("ST JOHNS ROAD", "ST JOHNS ROAD", "BRICK LANE", "BRICK LANE", "BRICK LANE"),
+  date_of_transfer = as.Date(c("1995-01-01", "2022-01-01", "2013-03-15", "1996-05-05", "1996-05-05")),
+  price = c(50000, 120000, 450000, 40000, 41000),
+  property_type = c("T", "T", "F", "T", "T")
 )
-early_result <- run_repeat_transactions(candidate_config, data = early_history)
+early_result <- suppressWarnings(run_repeat_transactions(candidate_config, data = early_history))
 assert_identical(nrow(early_result$mapping), 3L, "A 1995 transaction must be mapped under the extended window.")
+assert_identical(
+  sort(early_result$same_day_conflicts$house_id),
+  c("44ddd", "55eee"),
+  "A same-day conflict dated before 2014 must be excluded and routed to review like a recent one."
+)
 assert_identical(
   sort(unique(early_result$mapping$repeat_count)),
   c(1L, 2L),
@@ -716,6 +721,29 @@ compare_review(streamed$price_ratio_issues, in_memory$price_ratio_issues, c("add
 compare_review(streamed$large_groups, in_memory$large_groups, "repeat_id", "large-group review")
 compare_review(streamed$property_type_issues, in_memory$property_type_issues, "repeat_id", "property-type review")
 assert_true(nrow(in_memory$price_ratio_issues) > 0L && nrow(in_memory$large_groups) > 0L && nrow(in_memory$property_type_issues) > 0L, "The fixture must populate every review table.")
+# A configuration with an exact-duplicate check (the rentals contract) must
+# still run from a parquet input through the in-memory builder.
+duplicate_config <- stream_config
+duplicate_config$duplicate_check_cols <- c("postcode", "paon", "saon", "street", "date_of_transfer", "price")
+duplicate_config$output_path <- file.path(test_dir, "dupcheck-mapping_candidate.parquet")
+duplicate_config$large_group_review_path <- file.path(test_dir, "dupcheck-large_candidate.parquet")
+duplicate_config$price_ratio_review_path <- file.path(test_dir, "dupcheck-ratios_candidate.parquet")
+duplicate_config$same_day_review_path <- file.path(test_dir, "dupcheck-same-day_candidate.parquet")
+assert_error_matching(
+  build_repeat_mapping_streamed(duplicate_config),
+  "Exact-duplicate checks are not supported",
+  "The streamed builder must refuse a configuration it cannot honour."
+)
+dedup_history <- unique(stream_history, by = duplicate_config$duplicate_check_cols)
+dedup_path <- file.path(test_dir, "dedup_history.parquet")
+arrow::write_parquet(as.data.frame(dedup_history), dedup_path)
+duplicate_config$input_path <- dedup_path
+duplicate_run <- suppressWarnings(run_repeat_transactions(duplicate_config))
+assert_identical(
+  as.data.frame(duplicate_run$mapping),
+  as.data.frame(suppressWarnings(build_repeat_mapping(dedup_history, duplicate_config))$mapping),
+  "A parquet input with duplicate_check_cols must route to the in-memory builder and map identically."
+)
 streamed_run <- suppressWarnings(run_repeat_transactions(stream_config))
 assert_identical(as.data.frame(streamed_run$mapping), as.data.frame(in_memory$mapping), "run_repeat_transactions() must use the streamed builder for a parquet input.")
 assert_identical(streamed_run$manifest$mapped_count, as.character(in_memory$metrics$mapped_count), "The streamed manifest must carry the same mapped count.")

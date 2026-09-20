@@ -776,13 +776,20 @@ run_repeat_transactions <- function(config, data = NULL, log_fn = NULL) {
   previous_manifest <- read_repeat_manifest(previous_manifest_path)
   # The loaded input is passed straight in so that build_repeat_mapping() holds
   # the only reference and can release it once the address key is built.
-  # A parquet input is keyed row group by row group and grouped in DuckDB; an
-  # in-memory `data` frame (tests, small runs) uses the in-memory builder.
+  # A parquet input is keyed row group by row group and grouped in DuckDB when
+  # the configuration has no exact-duplicate check (sales). Configurations that
+  # check exact duplicates (rentals) and in-memory `data` frames (tests, small
+  # runs) use the in-memory builder.
+  streamable <- is.null(data) &&
+    length(config$duplicate_check_cols %||% character()) == 0L
   result <- withCallingHandlers(
-    if (is.null(data)) {
+    if (streamable) {
       build_repeat_mapping_streamed(config)
     } else {
-      build_repeat_mapping(data, config)
+      build_repeat_mapping(
+        if (is.null(data)) load_repeat_input(config) else data,
+        config
+      )
     },
     warning = function(w) {
       emit_repeat_log("WARN", conditionMessage(w), log_fn)

@@ -419,7 +419,7 @@ cmd_overlap <- function(dir = BASELINE_DIR) {
     dplyr::select(house_id) |>
     dplyr::collect() |>
     as.data.frame()
-  new_overlap_ids <- sort(new_overlap_ids$house_id)
+  new_overlap_ids <- sort(new_overlap_ids$house_id, method = "radix") # byte order, as setorderv
   if (!identical(old_ids, new_overlap_ids)) {
     fail("Candidate 2014-2024 ids differ from the baseline: baseline %d, candidate %d, %d baseline ids absent.",
          length(old_ids), length(new_overlap_ids), sum(!old_ids %chin% new_overlap_ids))

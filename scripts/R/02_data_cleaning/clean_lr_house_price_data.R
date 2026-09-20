@@ -351,7 +351,7 @@ validate_lr_transactions <- function(data, years) {
   if (duplicate_count > 0L) {
     stop(
       "Land Registry transaction_id contains ", duplicate_count,
-      " duplicate row(s); the raw files are not a valid same-vintage set.",
+      " duplicate row(s); the source set is not a valid transaction set.",
       call. = FALSE
     )
   }
@@ -488,64 +488,6 @@ write_cleaning_candidate <- function(data, path, metadata) {
   invisible(path)
 }
 
-write_lr_candidates <- function(
-    outputs,
-    long_run_path = CONFIG$long_run_candidate_path,
-    study_path = CONFIG$study_candidate_path,
-    run_stamp = new_cleaning_run_stamp()) {
-  if (!is.list(outputs) || !all(c("long_run", "study") %in% names(outputs))) {
-    stop("`outputs` must contain `long_run` and `study` data frames.", call. = FALSE)
-  }
-  if (identical(normalizePath(long_run_path, mustWork = FALSE),
-                normalizePath(study_path, mustWork = FALSE))) {
-    stop("Long-run and study candidates must use distinct paths.", call. = FALSE)
-  }
-  expected_study <- dplyr::filter(
-    outputs$long_run,
-    lubridate::year(.data$date_of_transfer) %in% CONFIG$study_years
-  )
-  if (!isTRUE(all.equal(
-    as.data.frame(expected_study),
-    as.data.frame(outputs$study),
-    check.attributes = FALSE
-  ))) {
-    stop(
-      "LR study candidate must be an unchanged filter of the long-run candidate.",
-      call. = FALSE
-    )
-  }
-
-  long_metadata <- cleaning_metadata(
-    run_stamp = run_stamp,
-    market = "sales",
-    artifact_role = "long_run",
-    years = CONFIG$years,
-    source_row_count = nrow(outputs$long_run),
-    parent_role = "raw_annual_files"
-  )
-  study_metadata <- cleaning_metadata(
-    run_stamp = run_stamp,
-    market = "sales",
-    artifact_role = "study",
-    years = CONFIG$study_years,
-    source_row_count = nrow(outputs$long_run),
-    parent_role = "long_run"
-  )
-
-  write_cleaning_candidate(outputs$long_run, long_run_path, long_metadata)
-  write_cleaning_candidate(outputs$study, study_path, study_metadata)
-
-  logger::log_info(
-    "Wrote paired LR candidates with run stamp {run_stamp}: long_run={nrow(outputs$long_run)}, study={nrow(outputs$study)}"
-  )
-
-  invisible(list(
-    long_run_path = long_run_path,
-    study_path = study_path,
-    run_stamp = run_stamp
-  ))
-}
-
 # The persisted long-run schema. Every yearly table is cast to it before it is
 # appended, so per-file type inference (a year whose secondary address is
 # always empty, say) cannot change the column types of the candidate.
@@ -670,11 +612,16 @@ open_lr_candidate_writers <- function(
         call. = FALSE
       )
     }
+    # Both candidates move or neither: a failed second rename moves the first
+    # back so a mixed pair (new long-run, old study) never sits on disk.
+    promoted <- character()
     for (role in names(targets)) {
       if (!file.rename(staged[[role]], targets[[role]])) {
+        for (done in promoted) file.rename(targets[[done]], staged[[done]])
         unlink(staged)
         stop("Failed to promote staged cleaning candidate to ", targets[[role]], ".", call. = FALSE)
       }
+      promoted <- c(promoted, role)
     }
     logger::log_info(
       "Wrote paired LR candidates with run stamp {run_stamp}: long_run={state$rows[['long_run']]}, study={state$rows[['study']]}"
@@ -717,6 +664,8 @@ main <- function(refresh_postcodes = FALSE) {
     here::here("scripts", "R", "utils", "postcode_processing_utils.R"),
     local = TRUE
   )
+  # The lookup is resolved over distinct postcodes, so its diagnostics count
+  # postcodes (one per distinct value), not transaction rows.
   postcode_result <- get_local_postcode_data_for_sales(
     tibble::tibble(postcode = scan$postcodes),
     lookup_path = CONFIG$local_postcode_lookup_path
