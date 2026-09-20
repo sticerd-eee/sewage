@@ -62,12 +62,18 @@ as_transaction_date <- function(x) {
 }
 
 normalise_address_component <- function(x) {
-  value <- enc2utf8(as.character(x))
+  # Normalise each distinct value once and map back: identical output to
+  # normalising every element, at a fraction of the memory on a 30-million-row
+  # history whose address fields repeat heavily.
+  x <- as.character(x)
+  uniques <- unique(x)
+  value <- enc2utf8(uniques)
   value[is.na(value)] <- ""
   value <- toupper(value)
   value <- gsub("[[:punct:]]+", "", value)
   value <- gsub("[[:space:]]+", " ", value)
-  trimws(value)
+  value <- trimws(value)
+  value[match(x, uniques)]
 }
 
 build_address_key <- function(data, config) {
@@ -77,7 +83,11 @@ build_address_key <- function(data, config) {
     stop("Missing address columns: ", paste(missing, collapse = ", "), call. = FALSE)
   }
 
-  components <- lapply(as.data.frame(data)[config$address_cols], normalise_address_component)
+  # Column extraction rather than as.data.frame(): converting a wide
+  # data.table copies every column, which the key never needs.
+  components <- lapply(config$address_cols, function(col) {
+    normalise_address_component(data[[col]])
+  })
   names(components) <- config$address_cols
   postcode <- components[[config$postcode_col]]
   primary <- components[[config$primary_address_col]]
@@ -162,11 +172,27 @@ build_repeat_mapping <- function(data, config) {
   validate_repeat_config(config)
   validate_repeat_input(data, config)
 
-  dt <- data.table::as.data.table(data.table::copy(data))
-  dt[, address_key := build_address_key(.SD, config)]
-
-  input_count <- nrow(dt)
-  keyed <- dt[!is.na(address_key)]
+  # Only the columns the mapping and its reviews read are carried: the address
+  # fields exist to build the key and are released once it exists, so the keyed
+  # subset below copies five columns rather than the full input.
+  carried <- unique(c(
+    config$id_col, config$date_col, config$price_col,
+    config$property_type_col %||% character()
+  ))
+  address_key <- build_address_key(data, config)
+  input_count <- nrow(data)
+  keep <- !is.na(address_key)
+  # The keyed subset is built column by column from the input, then the wide
+  # input is released before anything else is allocated: on the 30-million-row
+  # history the address columns are the largest thing in memory and are no
+  # longer needed once the key exists. `data` is this function's own reference;
+  # a caller that keeps another one keeps its copy.
+  keyed <- data.table::as.data.table(c(
+    lapply(stats::setNames(carried, carried), function(col) data[[col]][keep]),
+    list(address_key = address_key[keep])
+  ))
+  rm(data, address_key, keep)
+  invisible(gc())
   keyed_count <- nrow(keyed)
   excluded_count <- input_count - keyed_count
   key_coverage <- keyed_count / input_count
@@ -204,7 +230,10 @@ build_repeat_mapping <- function(data, config) {
     )
   }
 
-  keyed[, repeat_id := hash_serialized_values(address_key)]
+  # Hash each distinct key once; equal keys receive equal ids either way.
+  unique_keys <- unique(keyed$address_key)
+  keyed[, repeat_id := hash_serialized_values(unique_keys)[match(address_key, unique_keys)]]
+  rm(unique_keys)
   keyed[, repeat_count := as.integer(.N), by = address_key]
 
   if (data.table::uniqueN(keyed$address_key) != data.table::uniqueN(keyed$repeat_id)) {
@@ -513,11 +542,229 @@ load_repeat_input <- function(config) {
     config$property_type_col %||% character(),
     config$duplicate_check_cols %||% character()
   ))
-  data.table::as.data.table(
-    arrow::read_parquet(
-      config$input_path,
-      col_select = tidyselect::all_of(selected)
+  # Materialise the Arrow vectors before data.table takes the frame (see
+  # docs/solutions/logic-errors/arrow-altrep-data-table-join-nondeterminism.md).
+  # data.table::setDT() converts in place; as.data.table() would copy the
+  # whole materialised frame a second time.
+  frame <- as.data.frame(arrow::read_parquet(
+    config$input_path,
+    col_select = tidyselect::all_of(selected)
+  ))
+  data.table::setDT(frame)
+  frame[]
+}
+
+#' Build the repeat mapping from a parquet input without holding it in R
+#'
+#' Same contract as `build_repeat_mapping()`: every row's address key and
+#' repeat id come from `build_address_key()` and `hash_serialized_values()`,
+#' applied one parquet row group at a time; the grouping, same-day exclusion,
+#' review tables and metrics are then computed by DuckDB over a staged copy of
+#' (id, date, price, property type, key, repeat id). A 30-million-row history
+#' therefore never has to sit in R as strings. Row order follows the input, so
+#' the outputs match the in-memory builder value for value.
+build_repeat_mapping_streamed <- function(config, stage_dir = tempfile("repeat-stage-")) {
+  assert_repeat_dependencies()
+  validate_repeat_config(config)
+  for (pkg in c("duckdb", "DBI")) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      stop("Package `", pkg, "` is required for the streamed repeat mapping.", call. = FALSE)
+    }
+  }
+  if (!file.exists(config$input_path)) {
+    stop("Repeat input not found: ", config$input_path, call. = FALSE)
+  }
+  reader <- arrow::ParquetFileReader$create(config$input_path)
+  columns <- names(reader$GetSchema())
+  property_type_col <- config$property_type_col %||% NULL
+  required <- unique(c(
+    config$id_col, config$date_col, config$price_col, config$address_cols,
+    property_type_col %||% character(), config$duplicate_check_cols %||% character()
+  ))
+  missing <- setdiff(required, columns)
+  if (length(missing) > 0L) {
+    stop("Missing repeat input columns: ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  if (reader$num_rows == 0) stop("Repeat input must be non-empty.", call. = FALSE)
+  if (length(config$duplicate_check_cols %||% character()) > 0L) {
+    stop("Exact-duplicate checks are not supported by the streamed builder.", call. = FALSE)
+  }
+  dir.create(stage_dir, recursive = TRUE, showWarnings = FALSE)
+  on.exit(unlink(stage_dir, recursive = TRUE), add = TRUE)
+
+  # Stage 1 (R, per row group): validate, key and hash exactly as the in-memory
+  # builder does, keeping the input's row order through `rn`.
+  offset <- 0
+  for (g in seq_len(reader$num_row_groups) - 1L) {
+    chunk <- as.data.frame(reader$ReadRowGroup(g, column_indices = match(required, columns) - 1L))
+    ids <- as.character(chunk[[config$id_col]])
+    if (anyNA(ids) || any(!nzchar(ids))) {
+      stop("Repeat input transaction ids must be non-missing and unique.", call. = FALSE)
+    }
+    dates <- as_transaction_date(chunk[[config$date_col]])
+    years <- lubridate::year(dates)
+    if (anyNA(years) || any(years < config$year_min | years > config$year_max)) {
+      stop(
+        "Repeat input dates must fall within ", config$year_min, "-", config$year_max, ".",
+        call. = FALSE
+      )
+    }
+    key <- build_address_key(chunk, config)
+    repeat_id <- rep(NA_character_, length(key))
+    keyed <- !is.na(key)
+    if (any(keyed)) repeat_id[keyed] <- hash_serialized_values(key[keyed])
+    staged <- data.frame(
+      rn = offset + seq_along(ids),
+      id = ids,
+      tx_date = dates,
+      price = chunk[[config$price_col]],
+      property_type = if (is.null(property_type_col)) NA_character_ else as.character(chunk[[property_type_col]]),
+      address_key = key,
+      repeat_id = repeat_id,
+      stringsAsFactors = FALSE
     )
+    arrow::write_parquet(staged, file.path(stage_dir, sprintf("part-%04d.parquet", g)))
+    offset <- offset + nrow(chunk)
+    rm(chunk, ids, dates, years, key, repeat_id, keyed, staged)
+  }
+
+  # Stage 2 (DuckDB): grouping, same-day exclusion, reviews and metrics.
+  con <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  DBI::dbExecute(con, "PRAGMA memory_limit='4GB'")
+  DBI::dbExecute(con, sprintf("PRAGMA temp_directory='%s'", file.path(stage_dir, "duckdb_temp")))
+  DBI::dbExecute(con, sprintf(
+    "CREATE VIEW staged AS SELECT * FROM read_parquet('%s')",
+    file.path(stage_dir, "part-*.parquet")
+  ))
+  totals <- DBI::dbGetQuery(con, "SELECT count(*) AS n, count(DISTINCT id) AS n_ids, count(address_key) AS keyed FROM staged")
+  if (totals$n_ids != totals$n) {
+    stop("Repeat input transaction ids must be non-missing and unique.", call. = FALSE)
+  }
+  input_count <- as.integer(totals$n)
+  keyed_count <- as.integer(totals$keyed)
+  excluded_count <- input_count - keyed_count
+  key_coverage <- keyed_count / input_count
+  if (key_coverage < config$key_coverage_floor) {
+    stop(
+      sprintf("Key coverage %.6f is below configured floor %.6f.", key_coverage, config$key_coverage_floor),
+      call. = FALSE
+    )
+  }
+  DBI::dbExecute(con, paste(
+    "CREATE TABLE keyed AS SELECT rn, id, tx_date, price, property_type, address_key, repeat_id,",
+    "count(*) OVER (PARTITION BY address_key, tx_date) AS same_day_group_size",
+    "FROM staged WHERE address_key IS NOT NULL"
+  ))
+  same_day_conflicts <- DBI::dbGetQuery(con, paste(
+    "SELECT id, address_key, tx_date, price, same_day_group_size FROM keyed",
+    "WHERE same_day_group_size > 1 ORDER BY rn"
+  ))
+  same_day_excluded_count <- nrow(same_day_conflicts)
+  DBI::dbExecute(con, paste(
+    "CREATE TABLE grouped AS SELECT rn, id, tx_date, price, property_type, address_key, repeat_id,",
+    "count(*) OVER (PARTITION BY address_key) AS repeat_count",
+    "FROM keyed WHERE same_day_group_size = 1"
+  ))
+  DBI::dbExecute(con, "DROP TABLE keyed")
+  summary <- DBI::dbGetQuery(con, paste(
+    "SELECT count(*) AS mapped, count(DISTINCT address_key) AS n_keys, count(DISTINCT repeat_id) AS n_repeat_ids,",
+    "avg(CASE WHEN repeat_count > 1 THEN 1.0 ELSE 0.0 END) AS repeat_share, max(repeat_count) AS largest",
+    "FROM grouped"
+  ))
+  mapped_count <- as.integer(summary$mapped)
+  if (mapped_count == 0L) {
+    stop("Every keyed row was excluded as a same-day conflict; mapping would be empty.", call. = FALSE)
+  }
+  if (summary$n_keys != summary$n_repeat_ids) {
+    stop("Distinct address keys did not map one-to-one to repeat ids.", call. = FALSE)
+  }
+  mapping <- data.table::as.data.table(DBI::dbGetQuery(con, "SELECT id, repeat_id, repeat_count FROM grouped ORDER BY rn"))
+  data.table::setnames(mapping, "id", config$id_col)
+  mapping[, repeat_count := as.integer(repeat_count)]
+  if (anyDuplicated(mapping[[config$id_col]])) {
+    stop("Repeat mapping transaction ids are not unique.", call. = FALSE)
+  }
+  if (any(!grepl("^[0-9a-f]{16}$", unique(mapping$repeat_id)))) {
+    stop("repeat_id values must be lowercase 16-character hex strings.", call. = FALSE)
+  }
+  group_counts <- data.table::as.data.table(DBI::dbGetQuery(con, paste(
+    "SELECT address_key, repeat_id, max(repeat_count) AS repeat_count, min(rn) AS first_rn",
+    "FROM grouped GROUP BY address_key, repeat_id ORDER BY first_rn"
+  )))
+  group_counts[, repeat_count := as.integer(repeat_count)]
+  group_counts[, first_rn := NULL]
+  repeat_share <- as.numeric(summary$repeat_share)
+  if (repeat_share < config$repeat_share_floor) {
+    warning(
+      sprintf("Repeat share %.6f is below configured floor %.6f.", repeat_share, config$repeat_share_floor),
+      call. = FALSE
+    )
+  }
+  property_type_issues <- data.table::data.table()
+  if (!is.null(property_type_col)) {
+    property_type_issues <- data.table::as.data.table(DBI::dbGetQuery(con, paste(
+      "SELECT address_key, repeat_id, count(DISTINCT property_type) AS property_type_count, min(rn) AS first_rn",
+      "FROM grouped GROUP BY address_key, repeat_id HAVING count(DISTINCT property_type) > 1 ORDER BY first_rn"
+    )))
+    property_type_issues[, first_rn := NULL]
+    property_type_issues[, property_type_count := as.integer(property_type_count)]
+    if (nrow(property_type_issues) > 0L) {
+      warning(nrow(property_type_issues), " repeat group(s) contain more than one property type.", call. = FALSE)
+    }
+  }
+  if (same_day_excluded_count > 0L) {
+    warning(same_day_excluded_count, " row(s) excluded as same-day repeat conflicts and routed to review.", call. = FALSE)
+  }
+  large_groups <- group_counts[repeat_count > as.integer(config$large_group_size)]
+  threshold <- config$extreme_annualized_price_ratio
+  price_ratio_issues <- data.table::as.data.table(DBI::dbGetQuery(con, sprintf(paste(
+    "WITH lagged AS (",
+    "  SELECT id, address_key, tx_date, price,",
+    "    lag(tx_date) OVER w AS previous_date, lag(price) OVER w AS previous_price",
+    "  FROM grouped WINDOW w AS (PARTITION BY address_key ORDER BY tx_date, id)",
+    "), measured AS (",
+    "  SELECT *, CAST(date_diff('day', previous_date, tx_date) AS DOUBLE) AS holding_days,",
+    "    CAST(price AS DOUBLE) / CAST(previous_price AS DOUBLE) AS ratio",
+    "  FROM lagged",
+    "), annualised AS (",
+    "  SELECT id, address_key, tx_date, price, previous_date, previous_price, holding_days,",
+    "    CASE WHEN ratio IS NOT NULL AND ratio > 0 AND holding_days > 0",
+    "         THEN pow(ratio, 365.25 / holding_days) END AS annualized_price_ratio",
+    "  FROM measured",
+    ")",
+    "SELECT * FROM annualised",
+    "WHERE annualized_price_ratio IS NOT NULL AND (annualized_price_ratio > %s OR annualized_price_ratio < %s)",
+    "ORDER BY address_key, tx_date, id"
+  ), format(threshold, digits = 17), format(1 / threshold, digits = 17))))
+  if (nrow(price_ratio_issues) > 0L) {
+    warning(nrow(price_ratio_issues), " extreme annualized price-ratio pair(s) routed to review.", call. = FALSE)
+  }
+  rename_review <- function(dt) {
+    if (nrow(dt) == 0L && ncol(dt) == 0L) return(dt)
+    data.table::setnames(dt, c("id", "tx_date"), c(config$id_col, config$date_col), skip_absent = TRUE)
+    if (config$price_col != "price") data.table::setnames(dt, "price", config$price_col, skip_absent = TRUE)
+    dt[]
+  }
+  same_day_conflicts <- data.table::as.data.table(same_day_conflicts)
+  same_day_conflicts[, same_day_group_size := as.integer(same_day_group_size)]
+  list(
+    mapping = mapping[],
+    keyed_data = NULL,
+    metrics = list(
+      input_count = input_count,
+      keyed_count = keyed_count,
+      excluded_count = as.integer(excluded_count),
+      same_day_excluded_count = as.integer(same_day_excluded_count),
+      mapped_count = mapped_count,
+      key_coverage = key_coverage,
+      repeat_share = repeat_share,
+      largest_group_size = as.integer(summary$largest)
+    ),
+    large_groups = large_groups[],
+    property_type_issues = property_type_issues[],
+    price_ratio_issues = rename_review(price_ratio_issues),
+    same_day_conflicts = rename_review(same_day_conflicts)
   )
 }
 
@@ -527,10 +774,16 @@ run_repeat_transactions <- function(config, data = NULL, log_fn = NULL) {
   validate_repeat_config(config)
   previous_manifest_path <- config$previous_manifest_path %||% config$output_path
   previous_manifest <- read_repeat_manifest(previous_manifest_path)
-  input <- if (is.null(data)) load_repeat_input(config) else data
-
+  # The loaded input is passed straight in so that build_repeat_mapping() holds
+  # the only reference and can release it once the address key is built.
+  # A parquet input is keyed row group by row group and grouped in DuckDB; an
+  # in-memory `data` frame (tests, small runs) uses the in-memory builder.
   result <- withCallingHandlers(
-    build_repeat_mapping(input, config),
+    if (is.null(data)) {
+      build_repeat_mapping_streamed(config)
+    } else {
+      build_repeat_mapping(data, config)
+    },
     warning = function(w) {
       emit_repeat_log("WARN", conditionMessage(w), log_fn)
       invokeRestart("muffleWarning")

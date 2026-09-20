@@ -658,4 +658,66 @@ assert_true(
   "A candidate run must stage its mapping without promoting it."
 )
 
+# The streamed builder (parquet row groups keyed in R, grouped in DuckDB) must
+# reproduce the in-memory builder value for value: mapping, reviews and metrics.
+set.seed(20260920)
+n_stream <- 5000L
+stream_history <- data.table(
+  house_id = sprintf("%016x", seq_len(n_stream)),
+  postcode = sprintf("SW%d %dAA", sample.int(40, n_stream, replace = TRUE), sample.int(9, n_stream, replace = TRUE)),
+  paon = as.character(sample.int(30, n_stream, replace = TRUE)),
+  saon = ifelse(runif(n_stream) < 0.2, "FLAT 1", NA_character_),
+  street = sample(c("HIGH ST.", "high st", "Mill Lane", "", NA), n_stream, replace = TRUE),
+  date_of_transfer = as.POSIXct("2014-01-01", tz = "UTC") + sample.int(365 * 11, n_stream, replace = TRUE) * 86400,
+  price = as.integer(sample(c(50000L, 100000L, 250000L, 900000L), n_stream, replace = TRUE)),
+  property_type = sample(c("T", "F", "D", NA), n_stream, replace = TRUE)
+)
+stream_history[sample.int(n_stream, 60L), postcode := ""] # unkeyed rows
+stream_history[1:40, date_of_transfer := stream_history$date_of_transfer[41:80]] # some same-day pairs
+stream_history[1:40, `:=`(postcode = stream_history$postcode[41:80], paon = stream_history$paon[41:80], saon = stream_history$saon[41:80], street = stream_history$street[41:80])]
+stream_path <- file.path(test_dir, "stream_history.parquet")
+stream_sink <- arrow::FileOutputStream$create(stream_path)
+stream_table <- arrow::Table$create(as.data.frame(stream_history))
+stream_writer <- arrow::ParquetFileWriter$create(stream_table$schema, stream_sink, properties = arrow::ParquetWriterProperties$create(names(stream_table)))
+stream_writer$WriteTable(stream_table, chunk_size = 1200L) # several row groups
+stream_writer$Close()
+stream_sink$close()
+assert_true(arrow::ParquetFileReader$create(stream_path)$num_row_groups > 1L, "The streamed fixture must span several row groups.")
+stream_config <- make_config("stream")
+stream_config$input_path <- stream_path
+stream_config$year_min <- 2014L
+stream_config$year_max <- 2024L
+stream_config$large_group_size <- 3L
+stream_config$extreme_annualized_price_ratio <- 2
+stream_config$publish <- FALSE
+in_memory <- suppressWarnings(build_repeat_mapping(stream_history, stream_config))
+streamed <- suppressWarnings(build_repeat_mapping_streamed(stream_config))
+assert_identical(
+  as.data.frame(streamed$mapping),
+  as.data.frame(in_memory$mapping),
+  "The streamed mapping must equal the in-memory mapping row for row."
+)
+assert_identical(streamed$metrics, in_memory$metrics, "Streamed metrics must equal in-memory metrics.")
+assert_true(in_memory$metrics$same_day_excluded_count > 0L && in_memory$metrics$excluded_count > 0L, "The fixture must exercise same-day and unkeyed exclusions.")
+compare_review <- function(a, b, key_cols, label) {
+  a <- as.data.frame(a); b <- as.data.frame(b)
+  assert_identical(names(a), names(b), paste(label, "columns"))
+  assert_identical(nrow(a), nrow(b), paste(label, "rows"))
+  if (nrow(a) == 0L) return(invisible(TRUE))
+  a <- a[do.call(order, a[key_cols]), , drop = FALSE]
+  b <- b[do.call(order, b[key_cols]), , drop = FALSE]
+  for (col in names(a)) {
+    same <- if (is.numeric(a[[col]])) isTRUE(all.equal(as.numeric(a[[col]]), as.numeric(b[[col]]), tolerance = 1e-12)) else identical(as.character(a[[col]]), as.character(b[[col]]))
+    assert_true(same, paste(label, "column", col, "differs between builders"))
+  }
+}
+compare_review(streamed$same_day_conflicts, in_memory$same_day_conflicts, "house_id", "same-day review")
+compare_review(streamed$price_ratio_issues, in_memory$price_ratio_issues, c("address_key", "date_of_transfer", "house_id"), "price-ratio review")
+compare_review(streamed$large_groups, in_memory$large_groups, "repeat_id", "large-group review")
+compare_review(streamed$property_type_issues, in_memory$property_type_issues, "repeat_id", "property-type review")
+assert_true(nrow(in_memory$price_ratio_issues) > 0L && nrow(in_memory$large_groups) > 0L && nrow(in_memory$property_type_issues) > 0L, "The fixture must populate every review table.")
+streamed_run <- suppressWarnings(run_repeat_transactions(stream_config))
+assert_identical(as.data.frame(streamed_run$mapping), as.data.frame(in_memory$mapping), "run_repeat_transactions() must use the streamed builder for a parquet input.")
+assert_identical(streamed_run$manifest$mapped_count, as.character(in_memory$metrics$mapped_count), "The streamed manifest must carry the same mapped count.")
+
 cat("Repeat transaction contract tests passed.\n")

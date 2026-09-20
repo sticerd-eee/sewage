@@ -446,10 +446,15 @@ market_input_provenance <- function(market, cfg = market_config(market)) {
 
 # ---- Loading (column-pruned; read_parquet -> as.data.frame -> as.data.table) -----
 
+# as.data.frame() materialises the Arrow vectors (see docs/solutions on Arrow
+# ALTREP joins); setDT() then converts in place rather than copying the
+# 30-million-row sales history a second time.
 read_parquet_columns <- function(path, columns) {
-  arrow::read_parquet(path, col_select = tidyselect::all_of(columns)) |>
-    as.data.frame() |>
-    data.table::as.data.table()
+  frame <- as.data.frame(
+    arrow::read_parquet(path, col_select = tidyselect::all_of(columns))
+  )
+  data.table::setDT(frame)
+  frame[]
 }
 
 load_history <- function(
@@ -702,23 +707,38 @@ verify_current_address_keys <- function(
     )
   }
   stored <- mapping$repeat_id[idx]
-  key <- build_address_key(
-    candidates[, cfg$address_cols, with = FALSE],
-    repeat_key_config(cfg)
-  )
-  missing_key <- is.na(key)
-  expected <- rep(NA_character_, length(key))
-  if (any(!missing_key)) {
-    expected[!missing_key] <- hash_serialized_values(key[!missing_key])
+  rm(idx)
+  # Keys and hashes are recomputed in row chunks: the per-row results are the
+  # same as one pass over every candidate, but the 30-million-row sales history
+  # never holds all of its recomputed keys and hashes at once.
+  n <- nrow(candidates)
+  missing_key <- logical(n)
+  mismatched <- logical(n)
+  key_config <- repeat_key_config(cfg)
+  chunk_size <- 2000000L
+  starts <- seq.int(1L, max(n, 1L), by = chunk_size)
+  for (start in starts[starts <= n]) {
+    rows <- seq.int(start, min(start + chunk_size - 1L, n))
+    key <- build_address_key(
+      candidates[rows, cfg$address_cols, with = FALSE],
+      key_config
+    )
+    chunk_missing <- is.na(key)
+    expected <- rep(NA_character_, length(key))
+    if (any(!chunk_missing)) {
+      expected[!chunk_missing] <- hash_serialized_values(key[!chunk_missing])
+    }
+    missing_key[rows] <- chunk_missing
+    mismatched[rows] <- !chunk_missing & expected != stored[rows]
+    rm(key, expected, chunk_missing)
   }
-  mismatched <- !missing_key & expected != stored
   group_sizes <- data.table::data.table(repeat_id = stored)[,
     .N,
     by = repeat_id
   ]
   result <- list(
     status = if (any(missing_key) || any(mismatched)) "failed" else "passed",
-    n_candidates = length(key),
+    n_candidates = n,
     n_candidate_groups = nrow(group_sizes),
     n_window_singles = sum(group_sizes$N == 1L),
     n_missing_keys = sum(missing_key),
