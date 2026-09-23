@@ -137,6 +137,9 @@ All exposure datasets publish these averages under the same column names: `spill
 ### Average Weekly Spill Exposure
 Average Daily Spill Exposure multiplied by seven, used as the principal reporting scale in the project's analyses.
 
+### Inverse-Distance-Weighted Spill Exposure
+The sum, over the overflows within a property's Near-Overflow Radius, of each overflow's Average Weekly Spill Exposure divided by its straight-line distance to the property in units of 100 m. The sum is unnormalised rather than a weighted mean, so two overflows at a given distance contribute twice the exposure of one. Directional Spill Exposure's inverse-river-distance-weighted variant is the along-river analogue of this measure.
+
 ### Directional Spill Exposure
 Spill exposure split by whether the contributing overflow lies upstream or downstream of the property along the river network — used to separate same-river pollution transport from generic proximity. Estimated unweighted and in an inverse-river-distance-weighted variant.
 
