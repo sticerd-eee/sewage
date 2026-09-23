@@ -15,7 +15,7 @@
 #          differs. Exposure is built from the transaction-by-site pair tables
 #          as the sum over overflows within the radius of each overflow's
 #          average weekly spill exposure divided by its straight-line distance
-#          in kilometres (unnormalised, i.e. a weighted sum, not a mean).
+#          in units of 100 m (unnormalised, i.e. a weighted sum, not a mean).
 #
 #          The analysis is run for every radius in RADII (see Configuration);
 #          each radius writes its own radius-suffixed tables.
@@ -41,6 +41,9 @@
 # ==============================================================================
 # Radii (m) to run. Each radius writes its own suffixed tables; edit to restrict.
 RADII <- c(250L, 500L, 1000L)
+
+# Distance unit for the inverse-distance weight; an overflow at this distance has weight one.
+IDW_REFERENCE_M <- 100L
 
 
 # ==============================================================================
@@ -133,17 +136,18 @@ gof_map <- tibble::tribble(
 )
 
 # Inverse-distance-weighted exposure -------------------------------------------
-# The weight is 1 / (distance_m / 1000): the inverse straight-line distance in
-# kilometres, with no offset and no floor. The aggregation stays lazy in arrow
-# so the pair tables (~5.5M sales rows at 1000m) are never collected in full,
-# and `sum()` keeps its default `na.rm = FALSE` so the NA-propagation convention
-# carries through to the weighted measure unchanged.
+# The weight is 1 / (distance_m / IDW_REFERENCE_M): the inverse straight-line
+# distance in units of IDW_REFERENCE_M metres (100 m), with no offset and no
+# floor. The aggregation stays lazy in arrow so the pair tables (~5.5M sales
+# rows at 1000m) are never collected in full, and `sum()` keeps its default
+# `na.rm = FALSE` so the NA-propagation convention carries through to the
+# weighted measure unchanged.
 build_idw_exposure <- function(pair_path, id_col, RAD) {
   arrow::open_dataset(
     here::here("data", "processed", "cross_section", pair_path[1], pair_path[2])
   ) |>
     filter(radius == RAD) |>
-    mutate(idw_weight = 1 / (distance_m / 1000)) |>
+    mutate(idw_weight = 1 / (distance_m / IDW_REFERENCE_M)) |>
     group_by(.data[[id_col]]) |>
     summarise(
       spill_count_weekly_avg_idw = sum(idw_weight * spill_count_weekly_avg),
@@ -161,7 +165,7 @@ report_idw_diagnostics <- function(pair_path, id_col, RAD, keep_ids, label) {
     filter(radius == RAD) |>
     filter(.data[[id_col]] %in% keep_ids) |>
     mutate(
-      idw_weight = 1 / (distance_m / 1000),
+      idw_weight = 1 / (distance_m / IDW_REFERENCE_M),
       under_10m = distance_m < 10
     ) |>
     summarise(
@@ -544,7 +548,7 @@ run_for_radius <- function(RAD) {
 
   # Notes
   custom_notes_count <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Properties are excluded where any overflow within the radius has an incomplete spill record over the exposure window, since measured spill exposure would otherwise be understated. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Exposure weights each overflow's average weekly spills by the inverse of its straight-line distance in kilometres and sums across overflows within the radius; the coefficient is the effect of one additional weekly spill at an overflow 1 km away, and $\\\\beta/d$ at distance $d$ km. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Properties are excluded where any overflow within the radius has an incomplete spill record over the exposure window, since measured spill exposure would otherwise be understated. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Exposure weights each overflow's average weekly spills by the inverse of its straight-line distance in units of 100 m and sums across overflows within the radius; the coefficient is the effect of one additional weekly spill at an overflow 100 m away, and $\\\\beta/d$ at distance $d$ in units of 100 m. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Export table
@@ -604,7 +608,7 @@ run_for_radius <- function(RAD) {
   )
   # Notes
   custom_notes_hrs <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Properties are excluded where any overflow within the radius has an incomplete spill record over the exposure window, since measured spill exposure would otherwise be understated. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Exposure weights each overflow's average weekly spill hours by the inverse of its straight-line distance in kilometres and sums across overflows within the radius; the coefficient is the effect of one additional weekly spill hour at an overflow 1 km away, and $\\\\beta/d$ at distance $d$ km. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Properties are excluded where any overflow within the radius has an incomplete spill record over the exposure window, since measured spill exposure would otherwise be understated. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Exposure weights each overflow's average weekly spill hours by the inverse of its straight-line distance in units of 100 m and sums across overflows within the radius; the coefficient is the effect of one additional weekly spill hour at an overflow 100 m away, and $\\\\beta/d$ at distance $d$ in units of 100 m. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Export table
