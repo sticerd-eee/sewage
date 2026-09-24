@@ -175,6 +175,9 @@ The transaction-grain artifact assigning every Keyable Transaction to its Repeat
 ### Long-Run Transaction History
 The maximal retained span of cleaned transactions, defined by market: sales from January 1995 (the start of the Land Registry Price Paid record, extended on 20 September 2026 from the earlier 2014 start) and rentals from 2014 (the earliest rental coverage). Both are wider than the spill study window. Repeat identification runs over each market's long-run history; the study-window transaction tables are derived from it by filtering, never built independently, so both views agree row-for-row where they overlap. Analyses choose their own windows within the history and regroup after restricting: the scalar attention regressions keep January 2014 onward for both markets, while the sales Annual Near–Far Price Profiles use the full 1995–2024 history.
 
+### Long-Run Nearest Site Lookup
+The distance from every unique property coordinate in the Long-Run Transaction History to the nearest usable Site Group, where a Site Group is usable if it has a latest-valid location over 2021–2024. It is keyed on the coordinate pair rather than on transactions, so every transaction at the same coordinates shares one distance, and it lets analyses on the long-run history measure proximity to overflows outside the spill study window.
+
 ## Public Attention Area
 
 ### Annual Near–Far Price Profile
@@ -182,6 +185,9 @@ A descriptive path of the conditional price gap between properties near and fart
 
 ### Price-Profile Reference Year
 The calendar year against which an Annual Near–Far Price Profile is expressed, with its contrast normalised to zero. Choosing another reference year changes the comparison benchmark, not the treatment date or the underlying fitted price path when the sample and specification are unchanged.
+
+### Near–Far Distance Bands
+The two proximity groups used to contrast properties near and far from storm overflows on the Extensive Margin. A property is near when its nearest overflow lies within 0–500 m inclusive, and far when its nearest overflow lies more than 1,000 m and at most 2,000 m away. Properties in neither band are excluded, so the intermediate ring does not blur the contrast. The near band's outer edge matches the 500 m Near-Overflow Radius.
 
 ### Public Attention
 The project-level construct for how salient sewage spills are to the public over time, proxied by search interest and media coverage rather than by physical spill activity itself.
@@ -194,3 +200,9 @@ A time-series proxy for media coverage of sewage spills, used alongside Google T
 
 ### Windowed Article Count
 A trailing-window salience measure: the UK Media Article Count summed over the past 3, 6, or 12 months up to and including a transaction's month. Contrasts with the cumulative article count (summed from the start of the sample), which rises mechanically over time; windowed counts fluctuate, capturing recent rather than accumulated attention. Built on a gap-filled monthly grid because the source stores only months with at least one article.
+
+### Cumulative Article Stock
+The natural log of the cumulative UK Media Article Count for LexisNexis search 1, summed from January 2014 through the observation month. It measures accumulated rather than recent attention, in contrast to the Windowed Article Count. Its January 2014 origin matches the start of the long-run repeat-property sample; the study-window scripts instead accumulate from January 2021, so the two stocks are not interchangeable.
+
+### Attention Event Indicators
+Two indicators marking months after discrete public-attention events, used in the long-run repeat-property regression: one switches on from March 2021 inclusive and the other from August 2022 inclusive. Each enters its own regression as an alternative to the Cumulative Article Stock, dating the shift in Public Attention to a single event rather than tracing it continuously.
