@@ -26,6 +26,9 @@
 #     (easting, northing) pair across both histories. Coordinates are cast to
 #     double only for sf and written back as int32 so consumers join on the
 #     histories' native integer columns.
+#   - Manual prerequisite of
+#     scripts/R/09_analysis/05_news/did_attention_repeat_extensive.R: stage 04
+#     has no runner, so run this script by hand before that analysis script.
 #
 # ==============================================================================
 
