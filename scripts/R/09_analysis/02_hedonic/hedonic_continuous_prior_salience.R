@@ -72,7 +72,7 @@ prepare_salience_hedonic <- function(transactions, exposure, market = c("sales",
     c("property_type", "bedrooms", "bathrooms")
   factors <- if (market == "sales") controls else "property_type"
   transactions <- transactions |>
-    dplyr::select(dplyr::all_of(c(id_col, price_col, "region", "lsoa", controls))) |>
+    dplyr::select(dplyr::all_of(c(id_col, price_col, "region", "lsoa", "latitude", "longitude", controls))) |>
     dplyr::mutate(dplyr::across(dplyr::all_of(factors), forcats::as_factor))
   exposure |>
     dplyr::filter(.data$radius == 250L, .data$n_spill_sites > 0L) |>
@@ -117,7 +117,7 @@ fit_salience_hedonic <- function(data, market = c("sales", "rentals")) {
   formula <- if (market == "sales") {
     log_price ~ spill_count_weekly_avg + property_type + old_new + duration | lsoa
   } else log_price ~ spill_count_weekly_avg + property_type + bedrooms + bathrooms | lsoa
-  model <- fixest::feols(formula, data = data, vcov = "hetero", lean = TRUE)
+  model <- fixest::feols(formula, data = data, vcov = cross_section_vcov(), lean = TRUE)
   term <- "spill_count_weekly_avg"
   if (!is.finite(stats::coef(model)[term]) || !is.finite(fixest::se(model)[term])) {
     stop("Unidentified spill effect: ", market, call. = FALSE)
@@ -168,7 +168,7 @@ export_table <- function(result) {
     "Property controls include type (flat, semi-detached, terraced, other), new build status, ",
     "and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, ",
     "and bathrooms for rentals. ",
-    "Heteroskedasticity-robust standard errors are reported in parentheses. ",
+    cross_section_se_note(), " ",
     "Each column reports a separate regression; differences between groups are not tested. ",
     "*** $p<0.01$, ** $p<0.05$, * $p<0.1$."
   )

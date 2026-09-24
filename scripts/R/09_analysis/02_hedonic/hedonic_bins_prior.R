@@ -219,62 +219,62 @@ cat("Estimating spill count models...\n")
 model_sales_count_1 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin,
   data = dat_sales_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_sales_count_2 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin | lsoa,
   data = dat_sales_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_sales_count_3 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin + property_type + old_new + duration | lsoa,
   data = dat_sales_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_sales_count_4 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin | msoa,
   data = dat_sales_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_sales_count_5 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin + property_type + old_new + duration | msoa,
   data = dat_sales_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 # Rental Models
 model_rental_count_1 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin,
   data = dat_rental_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_rental_count_2 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin | lsoa,
   data = dat_rental_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_rental_count_3 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin + property_type + bedrooms + bathrooms | lsoa,
   data = dat_rental_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_rental_count_4 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin | msoa,
   data = dat_rental_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_rental_count_5 <- fixest::feols(
   log_price ~ spill_count_daily_avg_bin + property_type + bedrooms + bathrooms | msoa,
   data = dat_rental_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 # ==============================================================================
@@ -286,62 +286,62 @@ cat("Estimating spill hours models...\n")
 model_sales_hrs_1 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin,
   data = dat_sales_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_sales_hrs_2 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin | lsoa,
   data = dat_sales_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_sales_hrs_3 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin + property_type + old_new + duration | lsoa,
   data = dat_sales_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_sales_hrs_4 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin | msoa,
   data = dat_sales_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_sales_hrs_5 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin + property_type + old_new + duration | msoa,
   data = dat_sales_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 # Rental Models
 model_rental_hrs_1 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin,
   data = dat_rental_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_rental_hrs_2 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin | lsoa,
   data = dat_rental_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_rental_hrs_3 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin + property_type + bedrooms + bathrooms | lsoa,
   data = dat_rental_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_rental_hrs_4 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin | msoa,
   data = dat_rental_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 model_rental_hrs_5 <- fixest::feols(
   log_price ~ spill_hrs_daily_avg_bin + property_type + bedrooms + bathrooms | msoa,
   data = dat_rental_clean,
-  vcov = "hetero"
+  vcov = cross_section_vcov()
 )
 
 # ==============================================================================

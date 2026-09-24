@@ -111,3 +111,24 @@ fit_tblr_latex <- function(latex,
 
   latex
 }
+
+# ------------------------------------------------------------------------------
+# Cross-Section Inference
+# ------------------------------------------------------------------------------
+# Every hedonic cross-sectional regression reports Conley spatial standard
+# errors with a 1 km cutoff and fixest's default triangular kernel. The
+# estimation data must carry `latitude`/`longitude`, which conley() detects
+# automatically. See "Cross-Section Inference" in CONCEPTS.md.
+
+CROSS_SECTION_CONLEY_CUTOFF_KM <- 1
+
+cross_section_vcov <- function() {
+  fixest::conley(cutoff = CROSS_SECTION_CONLEY_CUTOFF_KM)
+}
+
+cross_section_se_note <- function() {
+  paste0(
+    "Conley standard errors with a ", CROSS_SECTION_CONLEY_CUTOFF_KM,
+    " km cutoff are reported in parentheses."
+  )
+}

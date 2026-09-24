@@ -155,6 +155,9 @@ The effect of sewage-spill *intensity* — a continuous exposure measure such as
 ### Extensive Margin
 The effect of *proximity itself* — being near versus far from an overflow — on property values, and how the near-versus-far price gap responds to public attention. Contrasts with the Intensive Margin, which varies realized spill intensity rather than proximity.
 
+### Cross-Section Inference
+The single standard-error convention for every property-level cross-sectional estimate (hedonic continuous, bins, quarter FE, inverse-distance-weighted, salience, radius robustness, upstream/downstream, long differences, repeat sales): Conley spatial standard errors with a 1 km distance cutoff and a triangular (Bartlett) kernel. It allows correlation among properties that share overflows and local shocks, fading with distance rather than stopping at an administrative boundary. Because the dependence comes from geography, not from the regressor, the same convention applies regardless of how exposure is measured. Panel estimates with a time dimension (difference-in-differences, attention) follow a different convention.
+
 ## Repeat-Transactions Area
 
 ### Content-Stable Transaction ID
