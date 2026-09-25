@@ -226,3 +226,18 @@ The report's ledger folds the price, coordinate and LSOA/MSOA requirements into 
 - The Overleaf slide tables are generated from `output/tables` by `scripts/python/convert_paper_tables_to_beamer.py`; no R script writes to Overleaf.
 - `CONCEPTS.md` defines Repeat Group, Repeat-Transactions Mapping, Long-Run Transaction History, Extensive Margin, Public Attention, UK Media Article Count and Windowed Article Count, but not the bands, the event indicators or the article stock.
 - Independent review on 24 September 2026: approve with changes; all sixteen findings are incorporated above.
+
+---
+
+## Addendum: simplification pass (2026-09-25)
+
+After the implementation and its review, the user directed a simplification pass so that both scripts read like the cleaner producers in the pipeline rather than like the exploratory report. Decisions from the grilling session of 25 September 2026; each supersedes the earlier text where they conflict.
+
+- **AD1. Shared publication.** The 04 script publishes through `publish_validated_file()` from `scripts/R/utils/dataset_publication_utils.R`, as the 03 and 06 producers do, with a validate function that checks the schema, uniqueness on the coordinate pair and finite non-negative distances. No hand-rolled staging, no `promote_stage` hook, no post-promotion re-verification. Supersedes KTD2's mechanism, not its checks.
+- **AD2. Checks dropped from the 04 script.** The brute-force oracle sample, the usable-set membership check on the output and the staged row-count check are removed. The int32 stop on the histories' coordinate columns becomes a cast to int32 after collect.
+- **AD3. One matching call.** Matching runs once over the union of coordinates; measured at 6 seconds and 1.1 GB, identical to the chunked result. The chunk loop and its `gc()` are removed. Functions return only what their caller uses.
+- **AD4. Panel builder in a utils file.** The window load, mapping join, geography-contradiction check, England and price and coordinate filters, band assignment, two-distinct-dates rule, characteristic-change exclusion and regroup move to `scripts/R/09_analysis/05_news/long_run_repeat_panel_utils.R`, sourced by the analysis script like `extensive_margin_news_utils.R`. The deferred year-by-year script reuses it. Supersedes KTD3's "no new utils file".
+- **AD5. No sample ledger.** The step-by-step counts and `output/logs/did_attention_repeat_extensive_cell_counts.csv` are dropped; no sibling script produces one and the order-dependent counts are not informative on their own. The script prints the final rows and properties per market to the console, as the siblings do. Supersedes the counts CSV in R6 and the ledger comparison in U2 and U3.
+- **AD6. Fits without `lean`.** `lean = TRUE` and the cluster-count recovery from `cov.scaled` attributes are removed; observations, properties and clusters come from fixest's standard accessors. The RDS grows to a few hundred MB, which the user accepted. Supersedes KTD5 and the `lean = TRUE` clause of R5. `fixef.rm = "perfect_fit"` stays explicit.
+- **AD7. Acceptance for the pass.** The lookup parquet and the `.tex` table are byte-identical to the pre-refactor outputs, and the results CSV agrees to 1e-12 on every numeric column, with identical observations, properties and clusters. Both scripts are re-run.
+- **AD8. Glossary.** `CONCEPTS.md` remains the only glossary; no `CONTEXT.md`.
