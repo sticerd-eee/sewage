@@ -96,9 +96,11 @@ MARKETS <- list(
 # 2. Data Preparation
 # ==============================================================================
 
-# Months since January 2014, January 2014 = 1 (March 2021 = 87, August 2022 = 104).
-calendar_month_index <- function(dates) {
-  as.integer((data.table::year(dates) - 2014L) * 12L + data.table::month(dates))
+# Months since the calendar start, with January 2014 = 1 (March 2021 = 87,
+# August 2022 = 104).
+calendar_month_index <- function(dates, start = CONFIG$calendar_start) {
+  origin_year <- as.integer(format(start, "%Y"))
+  as.integer((data.table::year(dates) - origin_year) * 12L + data.table::month(dates))
 }
 
 load_attention <- function() {

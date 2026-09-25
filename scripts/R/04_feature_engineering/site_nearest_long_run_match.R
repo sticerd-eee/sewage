@@ -47,8 +47,7 @@ REQUIRED_PACKAGES <- c(
   "dplyr",
   "glue",
   "logger",
-  "sf",
-  "tibble"
+  "sf"
 )
 
 LOG_FILE <- here::here("output", "log", "site_nearest_long_run_match.log")
