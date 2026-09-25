@@ -21,13 +21,18 @@ if (!exists("build_extensive_margin_sample", mode = "function")) {
   source(here::here("scripts", "R", "09_analysis", "05_news", "extensive_margin_news_utils.R"))
 }
 
-`%chin%` <- data.table::`%chin%`
-
 #' Load one market's window rows, filtered inside Arrow
+#'
+#' Reads only the columns the panel needs and filters the transfer or rental
+#' date to the market window inside Arrow before collecting. Timestamp columns
+#' are compared against UTC day bounds, and the native date column is replaced
+#' by a `date` column of class Date.
 #'
 #' @param spec Market specification with `id`, `date`, `date_type`, `price`,
 #'   `start`, `end`, `change_cols` and `history`.
-#' @return data.table with a `date` column; timestamp bounds are UTC days.
+#' @return data.table with the market ID, `date`, the price column, `country`,
+#'   `easting`, `northing`, `lsoa`, `msoa` and the change columns, one row per
+#'   unique ID within the window.
 load_window_history <- function(spec) {
   cols <- unique(c(spec$id, spec$date, spec$price, "country", "easting", "northing",
                    "lsoa", "msoa", spec$change_cols))
@@ -54,7 +59,15 @@ load_window_history <- function(spec) {
   history
 }
 
-#' Attach Repeat Group IDs, reading only the mapping rows for the window IDs
+#' Attach Repeat Group IDs to window rows
+#'
+#' Reads only the mapping rows for the IDs present in the window, checks that
+#' the mapping is unique on the market ID, attaches `repeat_id` and drops the
+#' market ID. Rows without a Repeat Group keep a missing `repeat_id`.
+#'
+#' @param history data.table returned by `load_window_history()`.
+#' @param spec Market specification with `id` and `mapping`.
+#' @return The input data.table with `repeat_id` in place of the market ID.
 attach_repeat_ids <- function(history, spec) {
   ids <- history[[spec$id]]
   mapping <- arrow::open_dataset(spec$mapping) |>
@@ -70,9 +83,16 @@ attach_repeat_ids <- function(history, spec) {
   history
 }
 
-#' Count Repeat Groups with more than one distinct nonmissing geography value
+#' Count Repeat Groups with contradictory geography
 #'
-#' Missing-to-observed differences are not contradictions.
+#' A Repeat Group contradicts itself when a geography field takes more than one
+#' distinct nonmissing value across its rows. Coordinates are checked as a
+#' pair. Missing-to-observed differences are not contradictions.
+#'
+#' @param dt data.table with `repeat_id`, `country`, `easting`, `northing`,
+#'   `lsoa` and `msoa`.
+#' @return Named numeric vector of contradicting Repeat Group counts for
+#'   `country`, `coordinates`, `lsoa` and `msoa`.
 geography_contradictions <- function(dt) {
   checks <- list(country = "country", coordinates = c("easting", "northing"),
                  lsoa = "lsoa", msoa = "msoa")
@@ -82,12 +102,27 @@ geography_contradictions <- function(dt) {
   }, numeric(1))
 }
 
-#' Repeat Groups observed on at least two distinct dates (AE1)
+#' Find Repeat Groups observed on at least two distinct dates
+#'
+#' Implements repeat eligibility (AE1): several rows on the same date count as
+#' one observation date.
+#'
+#' @param dt data.table with `repeat_id` and `date`.
+#' @return Vector of eligible `repeat_id` values.
 repeat_eligible_ids <- function(dt) {
   unique(dt[, .(repeat_id, date)])[, .N, by = repeat_id][N >= 2L, repeat_id]
 }
 
-#' Repeat Groups where a characteristic takes more than one nonmissing value (AE2)
+#' Find Repeat Groups with observed characteristic changes
+#'
+#' Implements the change exclusion (AE2): a Repeat Group changes when any
+#' change column takes more than one distinct nonmissing value across its rows.
+#' Missing-to-observed differences are not changes.
+#'
+#' @param dt data.table with `repeat_id` and the change columns.
+#' @param change_cols Character vector of characteristic columns to check.
+#' @return Vector of `repeat_id` values with at least one changed
+#'   characteristic.
 changed_property_ids <- function(dt, change_cols) {
   unique(unlist(lapply(change_cols, function(col) {
     unique(dt[!is.na(get(col)), c("repeat_id", col), with = FALSE])[
@@ -96,6 +131,20 @@ changed_property_ids <- function(dt, change_cols) {
 }
 
 #' Build the long-run repeat-property panel for one market
+#'
+#' Loads the window rows, attaches Repeat Groups, stops on contradictory
+#' geography, keeps England rows with a positive finite price and complete
+#' location, stops on coordinates absent from the lookup, and assigns the
+#' near-far distance bands with `build_extensive_margin_sample()`.
+#'
+#' Repeat eligibility (AE1) is applied twice. The first pass runs after the
+#' band assignment, which drops rows outside both bands, so changes are judged
+#' only on Repeat Groups that are still repeats in the banded sample. The
+#' change exclusion (AE2) then drops flagged Repeat Groups and the panel is
+#' regrouped, and the second pass reapplies the two-distinct-dates rule to the
+#' regrouped panel, as the report's `exclude_changes` variant does. Because the
+#' exclusion drops whole Repeat Groups, the second pass removes no rows today;
+#' it keeps the rule as an explicit property of the returned panel.
 #'
 #' @param spec Market specification (see `load_window_history()`), plus
 #'   `mapping`.
@@ -130,7 +179,7 @@ build_long_run_repeat_panel <- function(spec, lookup, comparison) {
   data.table::setDT(dt)
   dt[, c("comparison_id", "comparison_label") := NULL]
 
-  dt <- dt[repeat_id %chin% repeat_eligible_ids(dt)]
-  dt <- dt[!repeat_id %chin% changed_property_ids(dt, spec$change_cols)]
-  dt[repeat_id %chin% repeat_eligible_ids(dt)]
+  dt <- dt[data.table::`%chin%`(repeat_id, repeat_eligible_ids(dt))]
+  dt <- dt[!data.table::`%chin%`(repeat_id, changed_property_ids(dt, spec$change_cols))]
+  dt[data.table::`%chin%`(repeat_id, repeat_eligible_ids(dt))]
 }

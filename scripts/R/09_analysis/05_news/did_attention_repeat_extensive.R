@@ -23,13 +23,12 @@
 #   - output/regs/did_attention_repeat_extensive.rds (results and settings)
 #   - output/logs/did_attention_repeat_extensive_results.csv
 #
-# Prerequisite: data/processed/site_nearest_long_run.parquet is written by
-#   scripts/R/04_feature_engineering/site_nearest_long_run_match.R, which has no
-#   runner and must be run by hand before this script.
+# Prerequisite: run scripts/R/04_feature_engineering/site_nearest_long_run_match.R
+#   by hand first; stage 04 has no runner.
 #
 # Run from the repository root with Rscript in the rv environment (R 4.6.0).
 # Full exploration: docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd
-# (variant `exclude_changes`, fixed effects `property_month_msoa_year`).
+#   (variant `exclude_changes`, fixed effects `property_month_msoa_year`).
 # ==============================================================================
 
 if (!requireNamespace("here", quietly = TRUE)) {
@@ -37,7 +36,9 @@ if (!requireNamespace("here", quietly = TRUE)) {
        call. = FALSE)
 }
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
-REQUIRED_PACKAGES <- c("arrow", "data.table", "dplyr", "fixest", "here", "modelsummary", "tibble")
+REQUIRED_PACKAGES <- c(
+  "arrow", "data.table", "dplyr", "fixest", "here", "modelsummary", "tibble"
+)
 check_required_packages(REQUIRED_PACKAGES)
 source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
 source(here::here("scripts", "R", "09_analysis", "05_news",
@@ -57,10 +58,10 @@ CONFIG <- list(
     "Effect of Overflow Proximity on Repeat-Property Values: Long-Run Public Attention ",
     "(0-500m vs 1000-2000m)"
   ),
-  comparison = validate_comparison_config(list(
+  comparison = list(
     comparison_id = "500_vs_1000_2000", comparison_label = "0-500m vs 1000-2000m",
     near_min = 0L, near_max = 500L, far_min = 1000L, far_max = 2000L
-  )),
+  ),
   lookup = here::here("data", "processed", "site_nearest_long_run.parquet"),
   articles = here::here("data", "processed", "lexis_nexis", "search1_monthly.parquet"),
   calendar_start = as.Date("2014-01-01"),
@@ -140,8 +141,24 @@ load_attention <- function() {
   calendar
 }
 
-prepare_analysis_data <- function(market, attention, lookup) {
-  dt <- build_long_run_repeat_panel(MARKETS[[market]], lookup, CONFIG$comparison)
+# Nearest-site lookup at unique-coordinate grain, with distance_m renamed to
+# min_distance for build_extensive_margin_sample().
+load_long_run_lookup <- function(path) {
+  lookup <- as.data.frame(arrow::read_parquet(
+    path, col_select = c("easting", "northing", "distance_m")
+  ))
+  data.table::setDT(lookup)
+  data.table::setnames(lookup, "distance_m", "min_distance")
+  if (anyDuplicated(lookup, by = c("easting", "northing")) > 0L ||
+      any(!is.finite(lookup$min_distance))) {
+    stop("Nearest-site lookup is not unique on coordinates or has non-finite distances.",
+         call. = FALSE)
+  }
+  lookup
+}
+
+prepare_analysis_data <- function(market, attention, lookup, comparison) {
+  dt <- build_long_run_repeat_panel(MARKETS[[market]], lookup, comparison)
   dt[, `:=`(year = data.table::year(date), month_index = calendar_month_index(date))]
   idx <- match(dt$month_index, attention$month_index)
   if (anyNA(idx)) stop(market, ": observations outside the attention calendar.", call. = FALSE)
@@ -159,8 +176,8 @@ prepare_analysis_data <- function(market, attention, lookup) {
 fit_attention <- function(data, market, measure) {
   term <- paste0("near_bin:", measure)
   formula <- stats::as.formula(paste("log_price ~", term, "|", CONFIG$fixed_effects))
-  model <- fixest::feols(formula, data = data, vcov = stats::as.formula(paste0("~", CONFIG$cluster)),
-                         fixef.rm = CONFIG$fixef_rm)
+  vcov <- stats::as.formula(paste0("~", CONFIG$cluster))
+  model <- fixest::feols(formula, data = data, vcov = vcov, fixef.rm = CONFIG$fixef_rm)
   if (!is.finite(stats::coef(model)[term]) || !is.finite(fixest::se(model)[term])) {
     stop("Unidentified attention effect: ", market, " / ", term, call. = FALSE)
   }
@@ -183,8 +200,8 @@ result_row <- function(model, data, market, measure) {
   )
 }
 
-estimate_market <- function(market, attention, lookup) {
-  data <- prepare_analysis_data(market, attention, lookup)
+estimate_market <- function(market, attention, lookup, comparison) {
+  data <- prepare_analysis_data(market, attention, lookup, comparison)
   cat(sprintf("  %s sample: %s observations, %s properties\n", market,
               format(nrow(data), big.mark = ","),
               format(data.table::uniqueN(data$repeat_id), big.mark = ",")))
@@ -206,7 +223,7 @@ estimate_market <- function(market, attention, lookup) {
 # 4. Table and Model Export
 # ==============================================================================
 
-export_table <- function(result) {
+export_table <- function(result, comparison) {
   coefficient_map <- c(
     "near_bin:log_cumulative_articles" = "{Near bin \\\\ $\\times$ $\\log (\\text{Articles})$}",
     "near_bin:post_march_2021" = "{Near bin \\\\ $\\times$ Post March 2021}",
@@ -241,11 +258,11 @@ export_table <- function(result) {
     "listings at the same address, and each property is observed on at least two distinct ",
     "dates. Properties whose type (sales) or type, bedrooms or bathrooms (rentals) take more ",
     "than one observed value are excluded. ",
-    comparison_note_text(CONFIG$comparison),
+    comparison_note_text(comparison),
     "The dependent variable is the log transaction price for sales or the log asking rent ",
     "for rentals. Near bin is an indicator equal to one for properties in the ",
-    CONFIG$comparison$near_band_label, " band and zero for properties in the ",
-    CONFIG$comparison$far_band_label, " band. Each column is a separate regression with one ",
+    comparison$near_band_label, " band and zero for properties in the ",
+    comparison$far_band_label, " band. Each column is a separate regression with one ",
     "attention measure: $\\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative ",
     "UK news coverage of sewage spills from LexisNexis from January 2014 to the observation ",
     "month; Post March 2021 and Post August 2022 are indicators for months from March 2021 ",
@@ -271,8 +288,8 @@ export_table <- function(result) {
   invisible(path)
 }
 
-export_results <- function(result) {
-  export_table(result)
+export_results <- function(result, comparison) {
+  export_table(result, comparison)
   for (folder in c("regs", "logs")) {
     dir.create(here::here("output", folder), recursive = TRUE, showWarnings = FALSE)
   }
@@ -292,37 +309,32 @@ export_results <- function(result) {
 # ==============================================================================
 
 main <- function() {
+  comparison <- validate_comparison_config(CONFIG$comparison)
   attention <- load_attention()
-  lookup <- as.data.frame(arrow::read_parquet(
-    CONFIG$lookup, col_select = c("easting", "northing", "distance_m")
-  ))
-  data.table::setDT(lookup)
-  data.table::setnames(lookup, "distance_m", "min_distance")
-  if (anyDuplicated(lookup, by = c("easting", "northing")) > 0L ||
-      any(!is.finite(lookup$min_distance))) {
-    stop("Nearest-site lookup is not unique on coordinates or has non-finite distances.",
-         call. = FALSE)
-  }
+  lookup <- load_long_run_lookup(CONFIG$lookup)
   output <- lapply(names(MARKETS), function(market) {
     cat(sprintf("\nMarket: %s\n", market))
-    estimate_market(market, attention, lookup)
+    estimate_market(market, attention, lookup, comparison)
   })
   names(output) <- names(MARKETS)
+  # The settings record the validated comparison, with its display labels.
+  config <- CONFIG
+  config$comparison <- comparison
   result <- list(
     models = lapply(output, function(x) x$models),
     results = dplyr::bind_rows(lapply(output, function(x) x$results)),
-    settings = list(config = CONFIG, markets = MARKETS, london = "retained",
+    settings = list(config = config, markets = MARKETS, london = "retained",
                     sample = "exclude observed characteristic changes", controls = "none",
                     fixest_version = as.character(utils::packageVersion("fixest")),
                     created_at = Sys.time(), r_version = R.version.string)
   )
-  export_results(result)
+  export_results(result, comparison)
 }
 
 if (sys.nframe() == 0L) {
   if (length(commandArgs(trailingOnly = TRUE))) {
-    stop("This paper script accepts no arguments. Run the QMD for exploratory/reproduction analyses.",
-         call. = FALSE)
+    stop("This paper script accepts no arguments. ",
+         "Run the QMD for exploratory/reproduction analyses.", call. = FALSE)
   }
   main()
 }

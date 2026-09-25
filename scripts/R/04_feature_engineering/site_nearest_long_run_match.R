@@ -7,6 +7,7 @@
 #          lookup keyed on the coordinate pair.
 #
 # Author: Jacopo Olivieri
+# Date: 2026-09-24
 # Date Modified: 2026-09-25
 #
 # Inputs:
@@ -17,15 +18,10 @@
 # Outputs:
 #   - data/processed/site_nearest_long_run.parquet
 #   - output/log/site_nearest_long_run_match.log
-#   - output/log/site_nearest_long_run_match_dropped_sites.csv
 #
 # Notes:
 #   - The matching reproduces project_sites() and nearest_site_distance() in
 #     docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd.
-#   - The lookup is at unique-coordinate grain: one row per distinct
-#     (easting, northing) pair across both histories. Coordinates are cast to
-#     double only for sf and written back as int32 so consumers join on the
-#     histories' native integer columns.
 #   - Manual prerequisite of
 #     scripts/R/09_analysis/05_news/did_attention_repeat_extensive.R: stage 04
 #     has no runner, so run this script by hand before that analysis script.
@@ -41,18 +37,30 @@ if (!requireNamespace("here", quietly = TRUE)) {
 }
 
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "dplyr",
+  "here",
+  "logger",
+  "sf"
+)
+
+LOG_FILE <- here::here("output", "log", "site_nearest_long_run_match.log")
+
+check_required_packages(REQUIRED_PACKAGES)
+
 source(here::here("scripts", "R", "utils", "site_group_utils.R"), local = TRUE)
 source(
   here::here("scripts", "R", "utils", "dataset_publication_utils.R"),
   local = TRUE
 )
 
-REQUIRED_PACKAGES <- c("arrow", "dplyr", "here", "logger", "sf")
-check_required_packages(REQUIRED_PACKAGES)
-
-LOG_FILE <- here::here("output", "log", "site_nearest_long_run_match.log")
+# Configuration
+############################################################
 
 CONFIG <- list(
+  # Input file paths
   history_paths = c(
     sales = here::here("data", "processed", "house_price_long_run.parquet"),
     rentals = here::here(
@@ -63,18 +71,33 @@ CONFIG <- list(
     "data", "processed", "matched_events_annual_data",
     "site_group_crosswalk.parquet"
   ),
+  # Site Group projection window
   site_group_years = 2021:2024,
+  # Output file path
   output_path = here::here(
     "data", "processed", "site_nearest_long_run.parquet"
-  ),
-  dropped_site_path = here::here(
-    "output", "log", "site_nearest_long_run_match_dropped_sites.csv"
   )
 )
 
-# ---- Coordinates --------------------------------------------------------------
+# Functions
+############################################################
 
-#' Distinct finite coordinate pairs of one history, computed inside Arrow.
+# Attach the packages used unqualified in this script.
+initialise_environment <- function() {
+  invisible(lapply("dplyr", function(pkg) {
+    library(pkg, character.only = TRUE)
+  }))
+}
+
+# Initialise logging for this script.
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
+  logger::log_info("Logging to {LOG_FILE}")
+  logger::log_info("Script started at {Sys.time()}")
+}
+
+# Read the distinct finite coordinate pairs of one history, computed inside
+# Arrow, and log how many history rows lack coordinates.
 read_history_coordinates <- function(path, label) {
   if (!file.exists(path)) {
     stop(label, " history is missing: ", path, call. = FALSE)
@@ -117,6 +140,7 @@ read_history_coordinates <- function(path, label) {
   coordinates
 }
 
+# Union the distinct coordinate pairs of both histories.
 load_coordinates <- function(history_paths) {
   coordinates <- lapply(names(history_paths), function(label) {
     read_history_coordinates(history_paths[[label]], label)
@@ -133,10 +157,9 @@ load_coordinates <- function(history_paths) {
   coordinates
 }
 
-# ---- Site Groups ----------------------------------------------------------------
-
-#' Usable Site Groups under the latest-valid projection, with the report's rule.
-prepare_sites <- function(crosswalk_path, years, dropped_site_path) {
+# Project Site Groups to their latest valid location and keep the usable ones,
+# with the report's usability rule. Unusable sites are named in the log.
+prepare_sites <- function(crosswalk_path, years) {
   logger::log_info("Projecting Site Groups over {min(years)}-{max(years)}")
   projection <- read_site_group_projection(crosswalk_path, years = years)
   assert_unique_site_groups(projection, "Long-run nearest-site projection")
@@ -153,16 +176,7 @@ prepare_sites <- function(crosswalk_path, years, dropped_site_path) {
   }
 
   unusable <- projection |>
-    dplyr::filter(!.data$usable) |>
-    dplyr::select(dplyr::any_of(c(
-      "site_id", "water_company", "ngr", "easting", "northing"
-    ))) |>
-    dplyr::mutate(
-      missing_easting = !is.finite(.data$easting),
-      missing_northing = !is.finite(.data$northing)
-    )
-  dir.create(dirname(dropped_site_path), recursive = TRUE, showWarnings = FALSE)
-  utils::write.csv(unusable, dropped_site_path, row.names = FALSE, na = "")
+    dplyr::filter(!.data$usable)
   logger::log_info(
     "Site Groups: total={nrow(projection)}, usable={n_usable}, ",
     "unusable={nrow(unusable)}."
@@ -177,9 +191,8 @@ prepare_sites <- function(crosswalk_path, years, dropped_site_path) {
   as.data.frame(projection[projection$usable, c("site_id", "easting", "northing")])
 }
 
-# ---- Matching -------------------------------------------------------------------
-
-#' Nearest usable Site Group for unique coordinates, as nearest_site_distance().
+# Match each unique coordinate to its nearest usable Site Group, as the
+# report's nearest_site_distance() does, in EPSG:27700.
 match_nearest_sites <- function(coords, sites) {
   sites_sf <- sf::st_as_sf(sites, coords = c("easting", "northing"), crs = 27700)
   pts_sf <- sf::st_as_sf(
@@ -204,8 +217,8 @@ match_nearest_sites <- function(coords, sites) {
   result
 }
 
-# ---- Publication ----------------------------------------------------------------
-
+# Explicit Arrow schema of the published lookup. Coordinates are written back
+# as int32 so consumers join on the histories' native integer columns.
 lookup_schema <- function() {
   arrow::schema(
     easting = arrow::int32(),
@@ -215,6 +228,8 @@ lookup_schema <- function() {
   )
 }
 
+# Validate a staged lookup: schema, complete coordinates, uniqueness on the
+# coordinate pair, and finite non-negative distances.
 validate_lookup <- function(path) {
   observed_signature <- arrow_schema_signature(arrow::open_dataset(path)$schema)
   expected_signature <- arrow_schema_signature(lookup_schema())
@@ -234,6 +249,7 @@ validate_lookup <- function(path) {
   invisible(TRUE)
 }
 
+# Stage the lookup beside the output, validate it, and publish it atomically.
 write_lookup <- function(lookup, output_path) {
   dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
   candidate <- file.path(
@@ -247,18 +263,18 @@ write_lookup <- function(lookup, output_path) {
   )
 }
 
-# ---- Execution ------------------------------------------------------------------
+# Main Workflow
+############################################################
 
 main <- function() {
-  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
-  logger::log_info("Logging to {LOG_FILE}")
+  initialise_environment()
+  initialise_logging()
   started <- Sys.time()
 
   coordinates <- load_coordinates(CONFIG$history_paths)
   sites <- prepare_sites(
     CONFIG$site_group_crosswalk_path,
-    years = CONFIG$site_group_years,
-    dropped_site_path = CONFIG$dropped_site_path
+    years = CONFIG$site_group_years
   )
   lookup <- match_nearest_sites(coordinates, sites)
   logger::log_info(
@@ -268,10 +284,14 @@ main <- function() {
     "max={sprintf('%.1f', max(lookup$distance_m))}."
   )
   write_lookup(lookup, CONFIG$output_path)
+
+  elapsed <- as.numeric(difftime(Sys.time(), started, units = "secs"))
   logger::log_info(
-    "Script finished in {sprintf('%.1f', as.numeric(difftime(Sys.time(), started, units = 'secs')))} s"
+    "Script finished at {Sys.time()} ({sprintf('%.1f', elapsed)} s elapsed)"
   )
   invisible(NULL)
 }
 
-if (sys.nframe() == 0L) main()
+if (sys.nframe() == 0) {
+  main()
+}
