@@ -20,13 +20,6 @@
 #
 # Outputs:
 #   - output/tables/did_attention_repeat_extensive.tex
-#
-# Prerequisite: run scripts/R/04_feature_engineering/site_nearest_long_run_match.R
-#   by hand first; stage 04 has no runner.
-#
-# Run from the repository root with Rscript in the rv environment (R 4.6.0).
-# Full exploration: docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd
-#   (variant `exclude_changes`, fixed effects `property_month_msoa_year`).
 # ==============================================================================
 
 if (!requireNamespace("here", quietly = TRUE)) {

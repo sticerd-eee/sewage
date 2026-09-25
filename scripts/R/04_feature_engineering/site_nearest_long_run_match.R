@@ -18,14 +18,6 @@
 # Outputs:
 #   - data/processed/site_nearest_long_run.parquet
 #   - output/log/site_nearest_long_run_match.log
-#
-# Notes:
-#   - The matching reproduces project_sites() and nearest_site_distance() in
-#     docs/reports/2026-09-19-001-long-run-public-attention-repeat-properties.qmd.
-#   - Manual prerequisite of
-#     scripts/R/09_analysis/05_news/did_attention_repeat_extensive.R: stage 04
-#     has no runner, so run this script by hand before that analysis script.
-#
 # ==============================================================================
 
 if (!requireNamespace("here", quietly = TRUE)) {
