@@ -20,8 +20,8 @@
 #
 # Outputs:
 #   - output/tables/did_attention_repeat_extensive.tex
-#   - output/regs/did_attention_repeat_extensive.rds
-#   - output/logs/did_attention_repeat_extensive_{results,cell_counts}.csv
+#   - output/regs/did_attention_repeat_extensive.rds (results and settings)
+#   - output/logs/did_attention_repeat_extensive_results.csv
 #
 # Prerequisite: data/processed/site_nearest_long_run.parquet is written by
 #   scripts/R/04_feature_engineering/site_nearest_long_run_match.R, which has no
@@ -39,12 +39,11 @@ if (!requireNamespace("here", quietly = TRUE)) {
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 REQUIRED_PACKAGES <- c("arrow", "data.table", "dplyr", "fixest", "here", "modelsummary", "tibble")
 check_required_packages(REQUIRED_PACKAGES)
-source(here::here("scripts", "R", "utils", "repeat_transactions_utils.R"), local = TRUE)
 source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
 source(here::here("scripts", "R", "09_analysis", "05_news",
                   "extensive_margin_news_utils.R"), local = TRUE)
-
-`%chin%` <- data.table::`%chin%`
+source(here::here("scripts", "R", "09_analysis", "05_news",
+                  "long_run_repeat_panel_utils.R"), local = TRUE)
 
 
 # ==============================================================================
@@ -141,146 +140,15 @@ load_attention <- function() {
   calendar
 }
 
-count_properties <- function(repeat_id) data.table::uniqueN(repeat_id[!is.na(repeat_id)])
-
-record_step <- function(counts, market, step, dt, note) {
-  counts[[length(counts) + 1L]] <- tibble::tibble(
-    market = market, step_order = length(counts) + 1L, step = step,
-    n_rows = nrow(dt), n_properties = count_properties(dt$repeat_id), note = note
-  )
-  counts
-}
-
-# (1) Window rows, filtered inside Arrow; bounds are UTC days for timestamps.
-load_window_history <- function(spec) {
-  cols <- unique(c(spec$id, spec$date, spec$price, "country", "easting", "northing",
-                   "lsoa", "msoa", spec$change_cols))
-  lower <- spec$start
-  upper <- spec$end + 1L
-  if (spec$date_type == "timestamp_utc") {
-    lower <- as.POSIXct(format(lower), tz = "UTC")
-    upper <- as.POSIXct(format(upper), tz = "UTC")
-  }
-  history <- arrow::open_dataset(spec$history) |>
-    dplyr::select(dplyr::all_of(cols)) |>
-    dplyr::filter(.data[[spec$date]] >= lower, .data[[spec$date]] < upper) |>
-    dplyr::collect() |>
-    as.data.frame()
-  data.table::setDT(history)
-  history[, date := as_transaction_date(get(spec$date))]
-  if (spec$date != "date") history[, (spec$date) := NULL]
-  if (anyNA(history$date) || min(history$date) < spec$start || max(history$date) > spec$end) {
-    stop("Window rows fall outside ", spec$start, " to ", spec$end, ".", call. = FALSE)
-  }
-  if (anyDuplicated(history[[spec$id]]) > 0L) {
-    stop("History IDs are not unique within the window.", call. = FALSE)
-  }
-  history
-}
-
-# (2) Mapping rows restricted to the window IDs inside Arrow.
-attach_repeat_ids <- function(history, spec) {
-  ids <- history[[spec$id]]
-  mapping <- arrow::open_dataset(spec$mapping) |>
-    dplyr::select(dplyr::all_of(c(spec$id, "repeat_id"))) |>
-    dplyr::filter(.data[[spec$id]] %in% ids) |>
-    dplyr::collect() |>
-    as.data.frame()
-  if (anyDuplicated(mapping[[spec$id]]) > 0L || anyNA(mapping$repeat_id)) {
-    stop("Repeat mapping is not unique on ", spec$id, " or lacks repeat_id.", call. = FALSE)
-  }
-  history[, repeat_id := mapping$repeat_id[data.table::chmatch(ids, mapping[[spec$id]])]]
-  history[, (spec$id) := NULL]
-  history
-}
-
-# (3) More than one distinct nonmissing value within a Repeat Group; missing-to-
-# observed differences are not contradictions.
-geography_contradictions <- function(dt) {
-  checks <- list(country = "country", coordinates = c("easting", "northing"),
-                 lsoa = "lsoa", msoa = "msoa")
-  vapply(checks, function(cols) {
-    x <- dt[stats::complete.cases(dt[, cols, with = FALSE]), c("repeat_id", cols), with = FALSE]
-    as.numeric(nrow(unique(x)[, .N, by = repeat_id][N > 1L]))
-  }, numeric(1))
-}
-
-# At least two distinct surviving dates per Repeat Group (AE1).
-repeat_eligible_ids <- function(dt) {
-  unique(dt[, .(repeat_id, date)])[, .N, by = repeat_id][N >= 2L, repeat_id]
-}
-
-# Groups where a characteristic takes more than one distinct nonmissing value (AE2).
-changed_property_ids <- function(dt, change_cols) {
-  unique(unlist(lapply(change_cols, function(col) {
-    unique(dt[!is.na(get(col)), c("repeat_id", col), with = FALSE])[
-      , .N, by = repeat_id][N > 1L, repeat_id]
-  })))
-}
-
 prepare_analysis_data <- function(market, attention, lookup) {
-  spec <- MARKETS[[market]]
-  counts <- list()
-
-  dt <- load_window_history(spec)
-  dt <- attach_repeat_ids(dt, spec)
-  counts <- record_step(counts, market, "window", dt, sprintf(
-    "%s from %s to %s inclusive (properties counted among mapped rows)",
-    spec$date, spec$start, spec$end))
-  dt <- dt[!is.na(repeat_id)]
-  counts <- record_step(counts, market, "mapped", dt, "rows present in the repeat mapping")
-
-  contradictions <- geography_contradictions(dt)
-  if (any(contradictions > 0)) {
-    stop(market, ": Repeat Groups with contradictory geography: ",
-         paste(names(contradictions), contradictions, sep = "=", collapse = ", "), call. = FALSE)
-  }
-  counts <- record_step(counts, market, "geography_check", dt,
-                        "0 Repeat Groups with contradictory country, coordinates, LSOA or MSOA")
-
-  dt <- dt[!is.na(country) & country == "England"]
-  counts <- record_step(counts, market, "england", dt, "country England, Greater London retained")
-  dt[, log_price := log(as.numeric(get(spec$price)))]
-  dt <- dt[is.finite(log_price) & get(spec$price) > 0]
-  counts <- record_step(counts, market, "finite_positive_price", dt,
-                        paste0("finite positive ", spec$price))
-  dt <- dt[!is.na(easting) & !is.na(northing) & !is.na(lsoa) & nzchar(lsoa) &
-             !is.na(msoa) & nzchar(msoa)]
-  counts <- record_step(counts, market, "coordinates_lsoa_msoa", dt,
-                        "finite coordinates and nonmissing nonempty LSOA and MSOA")
-  dt[, c(spec$price, "country") := NULL]
-
-  if (nrow(dt[!lookup, on = c("easting", "northing")]) > 0L) {
-    stop(market, ": coordinates absent from the long-run nearest-site lookup; ",
-         "rerun site_nearest_long_run_match.R.", call. = FALSE)
-  }
-  data.table::setDF(dt)
-  dt <- build_extensive_margin_sample(dt, lookup, c("easting", "northing"), CONFIG$comparison)
-  data.table::setDT(dt)
-  dt[, c("comparison_id", "comparison_label") := NULL]
-  counts <- record_step(counts, market, "distance_bands", dt, sprintf(
-    "near [%d, %d] m, far (%d, %d] m", CONFIG$comparison$near_min,
-    CONFIG$comparison$near_max, CONFIG$comparison$far_min, CONFIG$comparison$far_max))
-
-  dt <- dt[repeat_id %chin% repeat_eligible_ids(dt)]
-  counts <- record_step(counts, market, "two_distinct_dates", dt,
-                        "properties observed on at least two distinct dates")
-  dt <- dt[!repeat_id %chin% changed_property_ids(dt, spec$change_cols)]
-  counts <- record_step(counts, market, "exclude_changes", dt, paste0(
-    "drop properties with more than one distinct nonmissing ",
-    paste(spec$change_cols, collapse = ", ")))
-  dt <- dt[repeat_id %chin% repeat_eligible_ids(dt)]
-  counts <- record_step(counts, market, "repeats_recomputed", dt,
-                        "at least two distinct dates recomputed after the exclusion")
-
+  dt <- build_long_run_repeat_panel(MARKETS[[market]], lookup, CONFIG$comparison)
   dt[, `:=`(year = data.table::year(date), month_index = calendar_month_index(date))]
   idx <- match(dt$month_index, attention$month_index)
   if (anyNA(idx)) stop(market, ": observations outside the attention calendar.", call. = FALSE)
   for (measure in CONFIG$attention) dt[, (measure) := attention[[measure]][idx]]
   cols <- c("repeat_id", "date", "year", "month_index", "log_price", "near_bin",
             "min_distance", "lsoa", "msoa", CONFIG$attention)
-  list(data = dt[, cols, with = FALSE], counts = dplyr::bind_rows(counts),
-       geography_contradictions = contradictions)
+  dt[, cols, with = FALSE]
 }
 
 
@@ -292,64 +160,47 @@ fit_attention <- function(data, market, measure) {
   term <- paste0("near_bin:", measure)
   formula <- stats::as.formula(paste("log_price ~", term, "|", CONFIG$fixed_effects))
   model <- fixest::feols(formula, data = data, vcov = stats::as.formula(paste0("~", CONFIG$cluster)),
-                         lean = TRUE, fixef.rm = CONFIG$fixef_rm)
+                         fixef.rm = CONFIG$fixef_rm)
   if (!is.finite(stats::coef(model)[term]) || !is.finite(fixest::se(model)[term])) {
     stop("Unidentified attention effect: ", market, " / ", term, call. = FALSE)
   }
   model
 }
 
-# fixest::obs() is unavailable under lean = TRUE, so counts come from the fit.
-model_counts <- function(model, data) {
-  df_t <- as.numeric(attr(model$cov.scaled, "df.t"))
-  n_clusters <- df_t + 1
-  if (!isTRUE(n_clusters == as.numeric(attr(model$cov.scaled, "G")))) {
-    stop("Cluster count from df.t does not match the clustered vcov.", call. = FALSE)
-  }
-  list(nobs = stats::nobs(model), n_properties = unname(model$fixef_sizes[["repeat_id"]]),
-       n_clusters = n_clusters, t_df = df_t,
-       n_removed_by_estimator = nrow(data) - stats::nobs(model))
+result_row <- function(model, data, market, measure) {
+  term <- paste0("near_bin:", measure)
+  estimate <- unname(stats::coef(model)[term])
+  se <- unname(fixest::se(model)[term])
+  n_clusters <- as.numeric(fixest::fitstat(model, "g", simplify = TRUE))
+  t_df <- n_clusters - 1
+  tibble::tibble(
+    market = market, measure = measure, term = term, estimate = estimate, std_error = se,
+    t_df = t_df, p_value = 2 * stats::pt(-abs(estimate / se), t_df),
+    conf_low = estimate - stats::qt(0.975, t_df) * se,
+    conf_high = estimate + stats::qt(0.975, t_df) * se,
+    nobs = stats::nobs(model), n_properties = unname(model$fixef_sizes[["repeat_id"]]),
+    n_clusters = n_clusters, n_removed_by_estimator = nrow(data) - stats::nobs(model)
+  )
 }
 
 estimate_market <- function(market, attention, lookup) {
-  prepared <- prepare_analysis_data(market, attention, lookup)
-  data <- prepared$data
-  cat(sprintf("  %s: %s observations, %s properties before estimator removals\n", market,
+  data <- prepare_analysis_data(market, attention, lookup)
+  cat(sprintf("  %s sample: %s observations, %s properties\n", market,
               format(nrow(data), big.mark = ","),
-              format(count_properties(data$repeat_id), big.mark = ",")))
+              format(data.table::uniqueN(data$repeat_id), big.mark = ",")))
   models <- lapply(CONFIG$attention, function(measure) fit_attention(data, market, measure))
   names(models) <- CONFIG$attention
-  model_rows <- lapply(CONFIG$attention, function(measure) {
-    counts <- model_counts(models[[measure]], data)
-    term <- paste0("near_bin:", measure)
-    estimate <- unname(stats::coef(models[[measure]])[term])
-    se <- unname(fixest::se(models[[measure]])[term])
-    tibble::tibble(
-      market = market, measure = measure, term = term, estimate = estimate, std_error = se,
-      t_df = counts$t_df, p_value = 2 * stats::pt(-abs(estimate / se), counts$t_df),
-      conf_low = estimate - stats::qt(0.975, counts$t_df) * se,
-      conf_high = estimate + stats::qt(0.975, counts$t_df) * se,
-      nobs = counts$nobs, n_properties = counts$n_properties, n_clusters = counts$n_clusters,
-      n_removed_by_estimator = counts$n_removed_by_estimator
-    )
-  })
-  results <- dplyr::bind_rows(model_rows)
-  step_counts <- prepared$counts
-  estimator_counts <- tibble::tibble(
-    market = market, step_order = nrow(step_counts) + seq_len(nrow(results)),
-    step = paste0("estimation:", results$measure), n_rows = results$nobs,
-    n_properties = results$n_properties,
-    note = sprintf("fixef.rm = %s removed %s observations", CONFIG$fixef_rm,
-                   results$n_removed_by_estimator)
-  )
-  counts <- dplyr::bind_rows(step_counts, estimator_counts) |>
-    dplyr::mutate(n_rows_removed = dplyr::lag(.data$n_rows, default = NA) - .data$n_rows,
-                  .after = "n_properties")
-  counts$n_rows_removed[startsWith(counts$step, "estimation:")] <- results$n_removed_by_estimator
-  print(as.data.frame(counts[, c("step", "n_rows", "n_properties", "n_rows_removed")]))
-  rm(data, prepared)
+  results <- dplyr::bind_rows(lapply(CONFIG$attention, function(measure) {
+    result_row(models[[measure]], data, market, measure)
+  }))
+  for (i in seq_len(nrow(results))) {
+    cat(sprintf("    %s: %s observations after %s estimator removals\n", results$measure[[i]],
+                format(results$nobs[[i]], big.mark = ","),
+                format(results$n_removed_by_estimator[[i]], big.mark = ",")))
+  }
+  rm(data)
   invisible(gc())
-  list(models = models, results = results, counts = counts)
+  list(models = models, results = results)
 }
 
 
@@ -427,10 +278,10 @@ export_results <- function(result) {
   for (folder in c("regs", "logs")) {
     dir.create(here::here("output", folder), recursive = TRUE, showWarnings = FALSE)
   }
-  saveRDS(result, here::here("output", "regs", paste0(CONFIG$output_prefix, ".rds")))
-  utils::write.csv(result$counts, here::here(
-    "output", "logs", paste0(CONFIG$output_prefix, "_cell_counts.csv")
-  ), row.names = FALSE)
+  # The fitted models hold per-observation vectors for 1.8M rows each, so the RDS
+  # keeps the coefficient results and the settings, not the model objects.
+  saveRDS(result[c("results", "settings")],
+          here::here("output", "regs", paste0(CONFIG$output_prefix, ".rds")))
   utils::write.csv(result$results, here::here(
     "output", "logs", paste0(CONFIG$output_prefix, "_results.csv")
   ), row.names = FALSE)
@@ -461,9 +312,7 @@ main <- function() {
   names(output) <- names(MARKETS)
   result <- list(
     models = lapply(output, function(x) x$models),
-    counts = dplyr::bind_rows(lapply(output, function(x) x$counts)),
     results = dplyr::bind_rows(lapply(output, function(x) x$results)),
-    calendar = attention,
     settings = list(config = CONFIG, markets = MARKETS, london = "retained",
                     sample = "exclude observed characteristic changes", controls = "none",
                     fixest_version = as.character(utils::packageVersion("fixest")),
