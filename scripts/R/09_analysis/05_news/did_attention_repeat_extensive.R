@@ -20,8 +20,6 @@
 #
 # Outputs:
 #   - output/tables/did_attention_repeat_extensive.tex
-#   - output/regs/did_attention_repeat_extensive.rds (results and settings)
-#   - output/logs/did_attention_repeat_extensive_results.csv
 #
 # Prerequisite: run scripts/R/04_feature_engineering/site_nearest_long_run_match.R
 #   by hand first; stage 04 has no runner.
@@ -36,9 +34,7 @@ if (!requireNamespace("here", quietly = TRUE)) {
        call. = FALSE)
 }
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
-REQUIRED_PACKAGES <- c(
-  "arrow", "data.table", "dplyr", "fixest", "here", "modelsummary", "tibble"
-)
+REQUIRED_PACKAGES <- c("arrow", "data.table", "dplyr", "fixest", "here", "modelsummary")
 check_required_packages(REQUIRED_PACKAGES)
 source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
 source(here::here("scripts", "R", "09_analysis", "05_news",
@@ -52,7 +48,7 @@ source(here::here("scripts", "R", "09_analysis", "05_news",
 # ==============================================================================
 
 CONFIG <- list(
-  output_prefix = "did_attention_repeat_extensive",
+  output_path = here::here("output", "tables", "did_attention_repeat_extensive.tex"),
   table_label = "tbl:did-attention-repeat-extensive",
   title = paste0(
     "Effect of Overflow Proximity on Repeat-Property Values: Long-Run Public Attention ",
@@ -103,40 +99,31 @@ calendar_month_index <- function(dates, start = CONFIG$calendar_start) {
   as.integer((data.table::year(dates) - origin_year) * 12L + data.table::month(dates))
 }
 
+# Monthly attention calendar: the stored series holds only months with at least
+# one article, so absent months are zero before the cumulative sum.
 load_attention <- function() {
   monthly <- as.data.frame(arrow::read_parquet(
     CONFIG$articles, col_select = c("year", "month", "article_count")
   ))
   key <- sprintf("%04d-%02d", as.integer(monthly$year), as.integer(monthly$month))
-  if (anyNA(monthly$year) || anyNA(monthly$month) || anyDuplicated(key) > 0L) {
-    stop("Article series has missing or duplicate year-month keys.", call. = FALSE)
+  if (anyDuplicated(key) > 0L || anyNA(monthly$article_count)) {
+    stop("Article series has duplicate year-month keys or missing counts.", call. = FALSE)
   }
-  if (anyNA(monthly$article_count)) {
-    stop("Article series has missing counts.", call. = FALSE)
+  if (max(key) < format(CONFIG$calendar_end, "%Y-%m")) {
+    stop("Article series ends at ", max(key), ", before the calendar end.", call. = FALSE)
   }
   months <- seq(CONFIG$calendar_start, CONFIG$calendar_end, by = "month")
-  if (max(key) < format(CONFIG$calendar_end, "%Y-%m")) {
-    stop("Article series ends at ", max(key), ", before ",
-         format(CONFIG$calendar_end, "%Y-%m"), ".", call. = FALSE)
-  }
-  # The stored series holds only months with at least one article.
   counts <- as.numeric(monthly$article_count[match(format(months, "%Y-%m"), key)])
   counts[is.na(counts)] <- 0
   if (counts[[1L]] <= 0) {
     stop("January 2014 article count is not positive; log stock undefined.", call. = FALSE)
   }
-  calendar <- tibble::tibble(
+  calendar <- data.table::data.table(
     month_index = calendar_month_index(months),
-    month = months,
-    article_count = counts,
-    cumulative_articles = cumsum(counts),
     log_cumulative_articles = log(cumsum(counts))
   )
   for (measure in names(CONFIG$event_months)) {
-    calendar[[measure]] <- as.integer(months >= as.Date(CONFIG$event_months[[measure]]))
-  }
-  if (!identical(calendar$month_index, seq_len(nrow(calendar)))) {
-    stop("Calendar month index is not 1..n from January 2014.", call. = FALSE)
+    calendar[, (measure) := as.integer(months >= as.Date(CONFIG$event_months[[measure]]))]
   }
   calendar
 }
@@ -157,15 +144,16 @@ load_long_run_lookup <- function(path) {
   lookup
 }
 
+# Repeat panel for one market with the calendar-month index and the three
+# attention measures attached.
 prepare_analysis_data <- function(market, attention, lookup, comparison) {
   dt <- build_long_run_repeat_panel(MARKETS[[market]], lookup, comparison)
   dt[, `:=`(year = data.table::year(date), month_index = calendar_month_index(date))]
-  idx <- match(dt$month_index, attention$month_index)
-  if (anyNA(idx)) stop(market, ": observations outside the attention calendar.", call. = FALSE)
-  for (measure in CONFIG$attention) dt[, (measure) := attention[[measure]][idx]]
-  cols <- c("repeat_id", "date", "year", "month_index", "log_price", "near_bin",
-            "min_distance", "lsoa", "msoa", CONFIG$attention)
-  dt[, cols, with = FALSE]
+  dt <- attention[dt, on = "month_index"]
+  if (anyNA(dt$log_cumulative_articles)) {
+    stop(market, ": observations outside the attention calendar.", call. = FALSE)
+  }
+  dt
 }
 
 
@@ -173,6 +161,8 @@ prepare_analysis_data <- function(market, attention, lookup, comparison) {
 # 3. Estimation
 # ==============================================================================
 
+# One regression per attention measure: interaction only, main effects absorbed
+# by the property and month fixed effects.
 fit_attention <- function(data, market, measure) {
   term <- paste0("near_bin:", measure)
   formula <- stats::as.formula(paste("log_price ~", term, "|", CONFIG$fixed_effects))
@@ -184,22 +174,6 @@ fit_attention <- function(data, market, measure) {
   model
 }
 
-result_row <- function(model, data, market, measure) {
-  term <- paste0("near_bin:", measure)
-  estimate <- unname(stats::coef(model)[term])
-  se <- unname(fixest::se(model)[term])
-  n_clusters <- as.numeric(fixest::fitstat(model, "g", simplify = TRUE))
-  t_df <- n_clusters - 1
-  tibble::tibble(
-    market = market, measure = measure, term = term, estimate = estimate, std_error = se,
-    t_df = t_df, p_value = 2 * stats::pt(-abs(estimate / se), t_df),
-    conf_low = estimate - stats::qt(0.975, t_df) * se,
-    conf_high = estimate + stats::qt(0.975, t_df) * se,
-    nobs = stats::nobs(model), n_properties = unname(model$fixef_sizes[["repeat_id"]]),
-    n_clusters = n_clusters, n_removed_by_estimator = nrow(data) - stats::nobs(model)
-  )
-}
-
 estimate_market <- function(market, attention, lookup, comparison) {
   data <- prepare_analysis_data(market, attention, lookup, comparison)
   cat(sprintf("  %s sample: %s observations, %s properties\n", market,
@@ -207,45 +181,39 @@ estimate_market <- function(market, attention, lookup, comparison) {
               format(data.table::uniqueN(data$repeat_id), big.mark = ",")))
   models <- lapply(CONFIG$attention, function(measure) fit_attention(data, market, measure))
   names(models) <- CONFIG$attention
-  results <- dplyr::bind_rows(lapply(CONFIG$attention, function(measure) {
-    result_row(models[[measure]], data, market, measure)
-  }))
-  for (i in seq_len(nrow(results))) {
-    cat(sprintf("    %s: %s observations after %s estimator removals\n", results$measure[[i]],
-                format(results$nobs[[i]], big.mark = ","),
-                format(results$n_removed_by_estimator[[i]], big.mark = ",")))
-  }
-  list(models = models, results = results)
+  models
 }
 
 
 # ==============================================================================
-# 4. Table and Model Export
+# 4. Table Export
 # ==============================================================================
 
-export_table <- function(result, comparison) {
+export_table <- function(models, comparison) {
   coefficient_map <- c(
     "near_bin:log_cumulative_articles" = "{Near bin \\\\ $\\times$ $\\log (\\text{Articles})$}",
     "near_bin:post_march_2021" = "{Near bin \\\\ $\\times$ Post March 2021}",
     "near_bin:post_august_2022" = "{Near bin \\\\ $\\times$ Post August 2022}"
   )
-  column_names <- sprintf("(%d)", seq_len(6L))
+  flat <- c(models$sales, models$rentals)
+  column_names <- sprintf("(%d)", seq_along(flat))
+  n_sales <- length(models$sales)
   panels <- list(
-    "House Sales" = stats::setNames(unname(result$models$sales), column_names[1:3]),
-    "House Rentals" = stats::setNames(unname(result$models$rentals), column_names[4:6])
+    "House Sales" = stats::setNames(unname(models$sales), column_names[seq_len(n_sales)]),
+    "House Rentals" = stats::setNames(unname(models$rentals), column_names[-seq_len(n_sales)])
   )
-  results <- result$results
   number <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+  yes <- rep("Yes", length(flat))
   add_rows <- as.data.frame(rbind(
-    c("Observations", number(results$nobs)),
-    c("Properties", number(results$n_properties)),
-    c("LSOA clusters", number(results$n_clusters)),
-    c("Property FE", rep("Yes", 6L)),
-    c("Month FE", rep("Yes", 6L)),
-    c("MSOA $\\times$ year FE", rep("Yes", 6L))
+    c("Observations", number(vapply(flat, stats::nobs, numeric(1)))),
+    c("Properties", number(vapply(flat, function(m) m$fixef_sizes[["repeat_id"]], numeric(1)))),
+    c("LSOA clusters", number(vapply(flat, function(m) {
+      as.numeric(fixest::fitstat(m, "g", simplify = TRUE))
+    }, numeric(1)))),
+    c("Property FE", yes),
+    c("Month FE", yes),
+    c("MSOA $\\times$ year FE", yes)
   ), stringsAsFactors = FALSE)
-  # Counts come from add_rows (gof_map = NA), so the rows follow the coefficients
-  # without a "coef_end" position, which fails when there are no gof rows.
   names(add_rows) <- c("term", column_names)
 
   notes <- paste0(
@@ -281,26 +249,10 @@ export_table <- function(result, comparison) {
     title = CONFIG$title
   )
   table_latex <- patch_modelsummary_latex(table_latex, label = CONFIG$table_label, notes = notes)
-  path <- here::here("output", "tables", paste0(CONFIG$output_prefix, ".tex"))
-  ensure_output_dir(path)
-  writeLines(table_latex, path)
-  cat(sprintf("LaTeX table exported to: %s\n", path))
-  invisible(path)
-}
-
-export_results <- function(result, comparison) {
-  export_table(result, comparison)
-  for (folder in c("regs", "logs")) {
-    dir.create(here::here("output", folder), recursive = TRUE, showWarnings = FALSE)
-  }
-  # The fitted models hold per-observation vectors for 1.8M rows each, so the RDS
-  # keeps the coefficient results and the settings, not the model objects.
-  saveRDS(result[c("results", "settings")],
-          here::here("output", "regs", paste0(CONFIG$output_prefix, ".rds")))
-  utils::write.csv(result$results, here::here(
-    "output", "logs", paste0(CONFIG$output_prefix, "_results.csv")
-  ), row.names = FALSE)
-  invisible(result)
+  ensure_output_dir(CONFIG$output_path)
+  writeLines(table_latex, CONFIG$output_path)
+  cat(sprintf("LaTeX table exported to: %s\n", CONFIG$output_path))
+  invisible(CONFIG$output_path)
 }
 
 
@@ -312,23 +264,13 @@ main <- function() {
   comparison <- validate_comparison_config(CONFIG$comparison)
   attention <- load_attention()
   lookup <- load_long_run_lookup(CONFIG$lookup)
-  output <- lapply(names(MARKETS), function(market) {
+  models <- lapply(names(MARKETS), function(market) {
     cat(sprintf("\nMarket: %s\n", market))
     estimate_market(market, attention, lookup, comparison)
   })
-  names(output) <- names(MARKETS)
-  # The settings record the validated comparison, with its display labels.
-  config <- CONFIG
-  config$comparison <- comparison
-  result <- list(
-    models = lapply(output, function(x) x$models),
-    results = dplyr::bind_rows(lapply(output, function(x) x$results)),
-    settings = list(config = config, markets = MARKETS, london = "retained",
-                    sample = "exclude observed characteristic changes", controls = "none",
-                    fixest_version = as.character(utils::packageVersion("fixest")),
-                    created_at = Sys.time(), r_version = R.version.string)
-  )
-  export_results(result, comparison)
+  names(models) <- names(MARKETS)
+  print(fixest::etable(c(models$sales, models$rentals), digits = 4))
+  export_table(models, comparison)
 }
 
 if (sys.nframe() == 0L) {
