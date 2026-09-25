@@ -82,7 +82,7 @@ CONFIG <- list(
 # Functions
 ############################################################
 
-# Attach the packages used unqualified in this script.
+# Attach dplyr so its verbs resolve inside Arrow queries; other calls are qualified.
 initialise_environment <- function() {
   invisible(lapply("dplyr", function(pkg) {
     library(pkg, character.only = TRUE)
