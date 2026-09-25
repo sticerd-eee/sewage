@@ -103,7 +103,7 @@ changed_property_ids <- function(dt, change_cols) {
 #'   `min_distance` to the nearest usable Site Group.
 #' @param comparison Validated comparison from `validate_comparison_config()`.
 #' @return data.table with `repeat_id`, `date`, `log_price`, `near_bin`,
-#'   `min_distance`, `lsoa`, `msoa` and the change columns.
+#'   `min_distance`, `easting`, `northing`, `lsoa`, `msoa` and the change columns.
 build_long_run_repeat_panel <- function(spec, lookup, comparison) {
   dt <- attach_repeat_ids(load_window_history(spec), spec)
   dt <- dt[!is.na(repeat_id)]

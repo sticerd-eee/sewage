@@ -47,7 +47,7 @@ source(
   local = TRUE
 )
 
-REQUIRED_PACKAGES <- c("arrow", "dplyr", "logger", "sf")
+REQUIRED_PACKAGES <- c("arrow", "dplyr", "here", "logger", "sf")
 check_required_packages(REQUIRED_PACKAGES)
 
 LOG_FILE <- here::here("output", "log", "site_nearest_long_run_match.log")
@@ -216,7 +216,9 @@ lookup_schema <- function() {
 }
 
 validate_lookup <- function(path) {
-  if (!arrow::open_dataset(path)$schema$Equals(lookup_schema(), check_metadata = FALSE)) {
+  observed_signature <- arrow_schema_signature(arrow::open_dataset(path)$schema)
+  expected_signature <- arrow_schema_signature(lookup_schema())
+  if (!identical(observed_signature, expected_signature)) {
     stop("Long-run lookup schema does not match the explicit contract.", call. = FALSE)
   }
   lookup <- as.data.frame(arrow::read_parquet(path))

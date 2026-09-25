@@ -198,8 +198,6 @@ estimate_market <- function(market, attention, lookup) {
                 format(results$nobs[[i]], big.mark = ","),
                 format(results$n_removed_by_estimator[[i]], big.mark = ",")))
   }
-  rm(data)
-  invisible(gc())
   list(models = models, results = results)
 }
 
