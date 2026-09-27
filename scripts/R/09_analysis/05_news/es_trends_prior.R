@@ -262,7 +262,7 @@ event_term <- paste0("i(event_qtr, spill_count_weekly_avg, ref = ", EVENT_REF, "
 model_sale_1 <- fixest::feols(
   as.formula(paste0("log_price ~ ", event_term)),
   data = dat,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Sales Model 1 (no controls, no FE) estimated\n")
 
@@ -270,7 +270,7 @@ cat("  Sales Model 1 (no controls, no FE) estimated\n")
 model_sale_2 <- fixest::feols(
   as.formula(paste0("log_price ~ ", event_term, " | lsoa + qtr_id")),
   data = dat,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Sales Model 2 (FE only) estimated\n")
 
@@ -281,7 +281,7 @@ model_sale_3 <- fixest::feols(
     " + property_type + old_new + duration | lsoa + qtr_id"
   )),
   data = dat,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Sales Model 3 (FE + controls) estimated\n")
 
@@ -291,7 +291,7 @@ cat("  Sales Model 3 (FE + controls) estimated\n")
 model_rent_1 <- fixest::feols(
   as.formula(paste0("log_price ~ ", event_term)),
   data = dat_rental,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Rental Model 1 (no controls, no FE) estimated\n")
 
@@ -299,7 +299,7 @@ cat("  Rental Model 1 (no controls, no FE) estimated\n")
 model_rent_2 <- fixest::feols(
   as.formula(paste0("log_price ~ ", event_term, " | lsoa + qtr_id")),
   data = dat_rental,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Rental Model 2 (FE only) estimated\n")
 
@@ -310,11 +310,11 @@ model_rent_3 <- fixest::feols(
     " + property_type + bedrooms + bathrooms | lsoa + qtr_id"
   )),
   data = dat_rental,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Rental Model 3 (FE + controls) estimated\n")
 
-cat("  Using LSOA-clustered SEs\n")
+cat("  Using Conley 1 km SEs\n")
 
 
 # ==============================================================================
@@ -379,7 +379,7 @@ attr(add_rows, "position") <- "coef_end"
 custom_notes <- paste0(
   "note{}={\\\\footnotesize{\\\\textbf{Notes:} Dependent variables are log house price (cols 1-3) and log rental price (cols 4-6). Event time is measured in quarters relative to the Google Trends peak quarter. Estimates report the interaction between average spills per week and event-time dummies, with the quarter immediately before the peak (t = -1) as the reference period. ",
   sprintf("The event window is [%d, %d] quarters. ", EVENT_MIN, EVENT_MAX),
-  "Spills per week (avg.) measures the average number of spill events per week (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. Standard errors clustered at the LSOA level in parentheses. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "Spills per week (avg.) measures the average number of spill events per week (12/24 count) recorded across all overflows within 250m from January 2021 to the transaction date. ", spatial_se_note(), " Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Set option to avoid siunitx wrapping

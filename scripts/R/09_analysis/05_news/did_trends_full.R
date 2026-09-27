@@ -247,7 +247,7 @@ cat("\nEstimating regression models...\n")
 model_sale_1 <- fixest::feols(
   log_price ~ spill_count_weekly_avg + post + spill_count_weekly_avg:post,
   data = dat,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Sales Model 1 (no controls, no FE) estimated\n")
 
@@ -255,7 +255,7 @@ cat("  Sales Model 1 (no controls, no FE) estimated\n")
 model_sale_2 <- fixest::feols(
   log_price ~ spill_count_weekly_avg + spill_count_weekly_avg:post | lsoa + qtr_id,
   data = dat,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Sales Model 2 (FE only) estimated\n")
 
@@ -264,7 +264,7 @@ model_sale_3 <- fixest::feols(
   log_price ~ spill_count_weekly_avg + spill_count_weekly_avg:post +
     property_type + old_new + duration | lsoa + qtr_id,
   data = dat,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Sales Model 3 (FE + controls) estimated\n")
 
@@ -274,7 +274,7 @@ cat("  Sales Model 3 (FE + controls) estimated\n")
 model_rent_1 <- fixest::feols(
   log_price ~ spill_count_weekly_avg + post + spill_count_weekly_avg:post,
   data = dat_rental,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Rental Model 1 (no controls, no FE) estimated\n")
 
@@ -282,7 +282,7 @@ cat("  Rental Model 1 (no controls, no FE) estimated\n")
 model_rent_2 <- fixest::feols(
   log_price ~ spill_count_weekly_avg + spill_count_weekly_avg:post | lsoa + qtr_id,
   data = dat_rental,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Rental Model 2 (FE only) estimated\n")
 
@@ -291,11 +291,11 @@ model_rent_3 <- fixest::feols(
   log_price ~ spill_count_weekly_avg + spill_count_weekly_avg:post +
     property_type + bedrooms + bathrooms | lsoa + qtr_id,
   data = dat_rental,
-  vcov = ~lsoa
+  vcov = spatial_vcov()
 )
 cat("  Rental Model 3 (FE + controls) estimated\n")
 
-cat("  Using LSOA-clustered SEs\n")
+cat("  Using Conley 1 km SEs\n")
 
 
 # ==============================================================================
@@ -331,7 +331,7 @@ attr(add_rows, "position") <- "coef_end"
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes properties with spatially eligible canonical Stage-2 exposure within 250m in England over 2021--2024 (sales) / 2021--2023 (rentals). The dependent variable is the log transaction price for sales (columns 1--3) or the log weekly asking rent for rentals (columns 4--6). Exposure is the canonical Stage-2 study-period weekly spill count (12/24 count) across all Site Groups within 250m. Annual evidence gaps, including the standard annual_returns_na_then_absent reporting-gap exclusion, are encoded as missing exposure and excluded; true spatially eligible zero-exposure observations are retained. Post is an indicator equal to one for transactions occurring on or after August 2022 (the peak month for Google Trends searches and news coverage of sewage spills). Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes properties with spatially eligible canonical Stage-2 exposure within 250m in England over 2021--2024 (sales) / 2021--2023 (rentals). The dependent variable is the log transaction price for sales (columns 1--3) or the log weekly asking rent for rentals (columns 4--6). Exposure is the canonical Stage-2 study-period weekly spill count (12/24 count) across all Site Groups within 250m. Annual evidence gaps, including the standard annual_returns_na_then_absent reporting-gap exclusion, are encoded as missing exposure and excluded; true spatially eligible zero-exposure observations are retained. Post is an indicator equal to one for transactions occurring on or after August 2022 (the peak month for Google Trends searches and news coverage of sewage spills). Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. ", spatial_se_note(), " *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 

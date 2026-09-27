@@ -44,6 +44,9 @@ REQUIRED_PACKAGES <- c(
 
 check_required_packages(REQUIRED_PACKAGES)
 
+# Shared table formatting and inference helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
+
 source(
   here::here(
     "scripts", "R", "09_analysis", "05_news",
@@ -275,7 +278,7 @@ estimate_preferred_model <- function(data, market) {
   fixest::feols(
     model_formula,
     data = data,
-    vcov = ~lsoa,
+    vcov = spatial_vcov(),
     lean = TRUE
   )
 }
@@ -401,8 +404,9 @@ export_table <- function(
     "overflow, so annual reporting gaps do not affect classification. The ",
     "rental common-sample ",
     "placebo path is reported in the component results file. All models include ",
-    "property controls, LSOA fixed effects, and month fixed effects. Standard ",
-    "errors are clustered by LSOA. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "property controls, LSOA fixed effects, and month fixed effects. ",
+    spatial_se_note(),
+    " *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   table_latex <- modelsummary::modelsummary(

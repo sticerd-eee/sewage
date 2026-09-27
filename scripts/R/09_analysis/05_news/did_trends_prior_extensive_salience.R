@@ -119,7 +119,7 @@ fit_salience_extensive <- function(
   formula <- stats::as.formula(paste(
     "log_price ~ near_bin +", term, "+", controls, "| lsoa + month_id"
   ))
-  model <- fixest::feols(formula, data = data, vcov = ~lsoa, lean = TRUE)
+  model <- fixest::feols(formula, data = data, vcov = spatial_vcov(), lean = TRUE)
   if (!is.finite(stats::coef(model)[term]) || !is.finite(fixest::se(model)[term])) {
     stop("Unidentified attention effect: ", market, " / ", term, call. = FALSE)
   }
@@ -172,7 +172,7 @@ export_table <- function(result) {
     "Property controls include type (flat, semi-detached, terraced, other), new build status, ",
     "and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, ",
     "and bathrooms for rentals. ",
-    "Standard errors clustered at the LSOA level are reported in parentheses. ",
+    spatial_se_note(), " ",
     "Each column reports a separate regression; differences between groups are not tested. ",
     "*** $p<0.01$, ** $p<0.05$, * $p<0.1$."
   )

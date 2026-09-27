@@ -34,12 +34,16 @@ REQUIRED_PACKAGES <- c(
   "fixest",
   "forcats",
   "here",
+  "modelsummary",
   "readxl",
   "tibble",
   "tidyr"
 )
 
 check_required_packages(REQUIRED_PACKAGES)
+
+# Shared table formatting and inference helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
 
 source(
   here::here(
@@ -304,7 +308,7 @@ estimate_sales_lag_path <- function(base_sample, peak_month_id, radius) {
       log_price ~ spill_count_weekly_avg + spill_count_weekly_avg:post +
         property_type + old_new + duration | lsoa + month_id,
       data = dat,
-      vcov = ~lsoa,
+      vcov = spatial_vcov(),
       lean = TRUE
     )
 
@@ -336,7 +340,7 @@ estimate_rental_benchmark <- function(base_sample, peak_month_id, radius) {
     log_price ~ spill_count_weekly_avg + spill_count_weekly_avg:post +
       property_type + bedrooms + bathrooms | lsoa + month_id,
     data = dat,
-    vcov = ~lsoa,
+    vcov = spatial_vcov(),
     lean = TRUE
   )
 
@@ -483,8 +487,9 @@ export_grid_table <- function(component_results, peak_info) {
   notes <- paste0(
     "\\multicolumn{6}{p{0.97\\linewidth}}{\\footnotesize \\textit{Notes:} ",
     "This table is the intensive-margin extension. Cells report the coefficient ",
-    "on weekly-average spill count $\\times$ Post, with LSOA-clustered standard ",
-    "errors in parentheses. Post begins in ", peak_info$peak_date,
+    "on weekly-average spill count $\\times$ Post. ",
+    spatial_se_note(),
+    " Post begins in ", peak_info$peak_date,
     " (month\\_id ", peak_info$peak_month_id,
     "); sales lag $L$ shifts that threshold forward by $L$ months. Models use ",
     "January 2021--December 2024 for sales and January 2021--December 2023 for ",

@@ -268,7 +268,7 @@ estimate_models <- function(dat, dat_rental, salience_col) {
     model_sale_1 = fixest::feols(
       make_formula(paste0("near_bin + ", salience_col, " + ", interaction)),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_1b = fixest::feols(
       make_formula(
@@ -281,12 +281,12 @@ estimate_models <- function(dat, dat_rental, salience_col) {
         )
       ),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_2 = fixest::feols(
       make_formula(paste0("near_bin + ", interaction), "msoa + month_id"),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_3 = fixest::feols(
       make_formula(
@@ -294,12 +294,12 @@ estimate_models <- function(dat, dat_rental, salience_col) {
         "msoa + month_id"
       ),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_4 = fixest::feols(
       make_formula(paste0("near_bin + ", interaction), "lsoa + month_id"),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_5 = fixest::feols(
       make_formula(
@@ -307,12 +307,12 @@ estimate_models <- function(dat, dat_rental, salience_col) {
         "lsoa + month_id"
       ),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_1 = fixest::feols(
       make_formula(paste0("near_bin + ", salience_col, " + ", interaction)),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_1b = fixest::feols(
       make_formula(
@@ -325,12 +325,12 @@ estimate_models <- function(dat, dat_rental, salience_col) {
         )
       ),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_2 = fixest::feols(
       make_formula(paste0("near_bin + ", interaction), "msoa + month_id"),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_3 = fixest::feols(
       make_formula(
@@ -338,12 +338,12 @@ estimate_models <- function(dat, dat_rental, salience_col) {
         "msoa + month_id"
       ),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_4 = fixest::feols(
       make_formula(paste0("near_bin + ", interaction), "lsoa + month_id"),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_5 = fixest::feols(
       make_formula(
@@ -351,11 +351,11 @@ estimate_models <- function(dat, dat_rental, salience_col) {
         "lsoa + month_id"
       ),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     )
   )
 
-  cat("  Model battery estimated; using LSOA-clustered SEs\n")
+  cat("  Model battery estimated; using Conley 1 km SEs\n")
 
   models
 }
@@ -448,8 +448,9 @@ export_table <- function(models, comparison, measure, salience_col) {
     "Property controls include ",
     "type (flat, semi-detached, terraced, other), new build status, and tenure ",
     "for sales; and type (bungalow, detached, semi-detached, terraced), ",
-    "bedrooms, and bathrooms for rentals. Standard errors clustered at the ",
-    "LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, ",
+    "bedrooms, and bathrooms for rentals. ",
+    spatial_se_note(),
+    " *** p<0.01, ** p<0.05, ",
     "* p<0.1.}},"
   )
 
