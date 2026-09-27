@@ -113,22 +113,26 @@ fit_tblr_latex <- function(latex,
 }
 
 # ------------------------------------------------------------------------------
-# Cross-Section Inference
+# Property-Level Inference
 # ------------------------------------------------------------------------------
-# Every hedonic cross-sectional regression reports Conley spatial standard
-# errors with a 1 km cutoff and fixest's default triangular kernel. The
-# estimation data must carry `latitude`/`longitude`, which conley() detects
-# automatically. See "Cross-Section Inference" in CONCEPTS.md.
+# Every regression estimated on individual transactions with coordinates
+# (hedonic cross-sections, upstream/downstream, long differences, repeat sales,
+# and the public-attention difference-in-differences, event-study and
+# lagged-attention regressions) reports Conley spatial standard errors with a
+# 1 km cutoff and fixest's uniform kernel, under which every pair of
+# observations within the cutoff gets full weight. The estimation data must
+# carry `latitude`/`longitude`, which conley() detects automatically. See
+# "Property-Level Inference" in CONCEPTS.md.
 
-CROSS_SECTION_CONLEY_CUTOFF_KM <- 1
+SPATIAL_CONLEY_CUTOFF_KM <- 1
 
-cross_section_vcov <- function() {
-  fixest::conley(cutoff = CROSS_SECTION_CONLEY_CUTOFF_KM)
+spatial_vcov <- function() {
+  fixest::conley(cutoff = SPATIAL_CONLEY_CUTOFF_KM)
 }
 
-cross_section_se_note <- function() {
+spatial_se_note <- function() {
   paste0(
-    "Conley standard errors with a ", CROSS_SECTION_CONLEY_CUTOFF_KM,
+    "Conley standard errors with a ", SPATIAL_CONLEY_CUTOFF_KM,
     " km cutoff are reported in parentheses."
   )
 }

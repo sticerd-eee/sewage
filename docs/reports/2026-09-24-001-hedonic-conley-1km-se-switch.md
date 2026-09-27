@@ -1,6 +1,6 @@
 # Hedonic cross-sections: switch to Conley 1 km standard errors — 24 September 2026
 
-All seven hedonic cross-sectional scripts in `scripts/R/09_analysis/02_hedonic/` now report Conley spatial standard errors with a 1 km cutoff and fixest's default triangular kernel, set through one shared helper (`cross_section_vcov()` in `scripts/R/09_analysis/utils_table_formatting.R`), in place of heteroskedasticity-robust standard errors. Point estimates, observation counts and adjusted R-squared values are unchanged in every table: every estimate in the old and new files matches once the comparison uses a baseline built from the current data (see "Baseline" below).
+All seven hedonic cross-sectional scripts in `scripts/R/09_analysis/02_hedonic/` now report Conley spatial standard errors with a 1 km cutoff and fixest's default uniform kernel, under which every pair of observations within the cutoff gets equal weight, set through one shared helper (`spatial_vcov()` in `scripts/R/09_analysis/utils_table_formatting.R`), in place of heteroskedasticity-robust standard errors. Point estimates, observation counts and adjusted R-squared values are unchanged in every table: every estimate in the old and new files matches once the comparison uses a baseline built from the current data (see "Baseline" below).
 
 ## Baseline
 
