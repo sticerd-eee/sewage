@@ -4,11 +4,14 @@
 #
 # Purpose: Estimate whether public attention to sewage spills changes the price
 #          gap between repeat-observed properties near to and far from the
-#          nearest sewage overflow, for sales (2014-2024) and rentals
+#          nearest sewage overflow, for sales (1995-2024) and rentals
 #          (2014-2023). One sample excludes properties with observed
 #          characteristic changes; three attention measures (log cumulative
-#          articles, post March 2021, post August 2022) each enter their own
-#          regression with property, calendar-month and MSOA x year effects.
+#          articles from the start of the LexisNexis series in March 1989,
+#          post March 2021, post August 2022) each enter their own regression
+#          with property, calendar-month and MSOA x year effects.
+#          Conley standard errors with a 1 km cutoff, as in the hedonic
+#          cross-sections.
 #
 # Inputs:
 #   - data/processed/house_price_long_run.parquet
@@ -27,7 +30,8 @@ if (!requireNamespace("here", quietly = TRUE)) {
        call. = FALSE)
 }
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
-REQUIRED_PACKAGES <- c("arrow", "data.table", "dplyr", "fixest", "here", "modelsummary")
+REQUIRED_PACKAGES <- c("arrow", "data.table", "dplyr", "fixest", "here", "modelsummary",
+                       "tinytable")
 check_required_packages(REQUIRED_PACKAGES)
 source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
 source(here::here("scripts", "R", "09_analysis", "05_news",
@@ -53,20 +57,30 @@ CONFIG <- list(
   ),
   lookup = here::here("data", "processed", "site_nearest_long_run.parquet"),
   articles = here::here("data", "processed", "lexis_nexis", "search1_monthly.parquet"),
-  calendar_start = as.Date("2014-01-01"),
+  # The attention calendar runs from the first month of the stored article
+  # series, so the log stock is defined and smooth over both market windows.
+  calendar_start = as.Date("1989-03-01"),
   calendar_end = as.Date("2024-12-01"),
   # Attention measures in table order; each enters its own regression.
   attention = c("log_cumulative_articles", "post_march_2021", "post_august_2022"),
+  # Column-header labels for the measures; braces let the label break over two lines.
+  attention_labels = c(
+    log_cumulative_articles = "{Log \\\\ Articles}",
+    post_march_2021 = "{Post \\\\ Mar. 2021}",
+    post_august_2022 = "{Post \\\\ Aug. 2022}"
+  ),
   event_months = c(post_march_2021 = "2021-03-01", post_august_2022 = "2022-08-01"),
   fixed_effects = "repeat_id + month_index + msoa^year",
-  cluster = "lsoa",
+  # Conley spatial standard errors, uniform kernel (fixest default); the
+  # panel carries latitude/longitude, which conley() detects by name.
+  conley_cutoff_km = 1,
   fixef_rm = "perfect_fit"
 )
 
 MARKETS <- list(
   sales = list(
     id = "house_id", date = "date_of_transfer", date_type = "timestamp_utc",
-    price = "price", start = as.Date("2014-01-01"), end = as.Date("2024-12-31"),
+    price = "price", start = as.Date("1995-01-01"), end = as.Date("2024-12-31"),
     change_cols = "property_type",
     history = here::here("data", "processed", "house_price_long_run.parquet"),
     mapping = here::here("data", "processed", "repeated_transactions", "repeated_sales.parquet")
@@ -85,8 +99,8 @@ MARKETS <- list(
 # 2. Data Preparation
 # ==============================================================================
 
-# Months since the calendar start, with January 2014 = 1 (March 2021 = 87,
-# August 2022 = 104).
+# Months since the calendar start, with March 1989 = 1 (January 1995 = 71,
+# March 2021 = 385, August 2022 = 402).
 calendar_month_index <- function(dates, start = CONFIG$calendar_start) {
   origin_year <- as.integer(format(start, "%Y"))
   as.integer((data.table::year(dates) - origin_year) * 12L + data.table::month(dates))
@@ -102,6 +116,9 @@ load_attention <- function() {
   if (anyDuplicated(key) > 0L || anyNA(monthly$article_count)) {
     stop("Article series has duplicate year-month keys or missing counts.", call. = FALSE)
   }
+  if (min(key) != format(CONFIG$calendar_start, "%Y-%m")) {
+    stop("Article series starts at ", min(key), ", not at the calendar start.", call. = FALSE)
+  }
   if (max(key) < format(CONFIG$calendar_end, "%Y-%m")) {
     stop("Article series ends at ", max(key), ", before the calendar end.", call. = FALSE)
   }
@@ -109,7 +126,7 @@ load_attention <- function() {
   counts <- as.numeric(monthly$article_count[match(format(months, "%Y-%m"), key)])
   counts[is.na(counts)] <- 0
   if (counts[[1L]] <= 0) {
-    stop("January 2014 article count is not positive; log stock undefined.", call. = FALSE)
+    stop("First calendar month has no articles; log stock undefined.", call. = FALSE)
   }
   calendar <- data.table::data.table(
     month_index = calendar_month_index(months),
@@ -159,7 +176,7 @@ prepare_analysis_data <- function(market, attention, lookup, comparison) {
 fit_attention <- function(data, market, measure) {
   term <- paste0("near_bin:", measure)
   formula <- stats::as.formula(paste("log_price ~", term, "|", CONFIG$fixed_effects))
-  vcov <- stats::as.formula(paste0("~", CONFIG$cluster))
+  vcov <- fixest::conley(cutoff = CONFIG$conley_cutoff_km)
   model <- fixest::feols(formula, data = data, vcov = vcov, fixef.rm = CONFIG$fixef_rm)
   if (!is.finite(stats::coef(model)[term]) || !is.finite(fixest::se(model)[term])) {
     stop("Unidentified attention effect: ", market, " / ", term, call. = FALSE)
@@ -182,38 +199,52 @@ estimate_market <- function(market, attention, lookup, comparison) {
 # 4. Table Export
 # ==============================================================================
 
+# Wrap the numeric body cells in \num{}, as modelsummary does when it writes
+# LaTeX directly; the tinytable route leaves them plain. Header rows are left
+# untouched so the column numbers stay as printed.
+wrap_siunitx <- function(lines) {
+  body <- grep(" \\\\\\\\$", lines)
+  first_row <- body[grepl("^[^&]*[^ &][^&]*&", lines[body])][1L]
+  rows <- body[body >= first_row]
+  number <- "-?[0-9]+\\.?[0-9]*"
+  lines[rows] <- vapply(lines[rows], function(line) {
+    cells <- trimws(strsplit(sub(" \\\\\\\\$", "", line), "&", fixed = TRUE)[[1L]])
+    cells <- sub(paste0("^(", number, ")(\\**)$"), "\\\\num{\\1}\\2", cells)
+    cells <- sub(paste0("^\\((", number, ")\\)$"), "(\\\\num{\\1})", cells)
+    sub("^ & ", "& ", paste0(paste(cells, collapse = " & "), " \\\\"))
+  }, character(1), USE.NAMES = FALSE)
+  lines
+}
+
 export_table <- function(models, comparison) {
-  coefficient_map <- c(
-    "near_bin:log_cumulative_articles" = "{Near bin \\\\ $\\times$ $\\log (\\text{Articles})$}",
-    "near_bin:post_march_2021" = "{Near bin \\\\ $\\times$ Post March 2021}",
-    "near_bin:post_august_2022" = "{Near bin \\\\ $\\times$ Post August 2022}"
-  )
+  # One coefficient row: every column estimates Near x A_t for the attention
+  # measure named in its header line.
+  terms <- paste0("near_bin:", CONFIG$attention)
+  coefficient_map <- stats::setNames(rep("$\\mathrm{Near}_i \\times A_t$", length(terms)), terms)
   flat <- c(models$sales, models$rentals)
-  column_names <- sprintf("(%d)", seq_along(flat))
+  names(flat) <- sprintf("(%d)", seq_along(flat))
   n_sales <- length(models$sales)
-  panels <- list(
-    "House Sales" = stats::setNames(unname(models$sales), column_names[seq_len(n_sales)]),
-    "House Rentals" = stats::setNames(unname(models$rentals), column_names[-seq_len(n_sales)])
-  )
-  number <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+  measure_labels <- unname(CONFIG$attention_labels[CONFIG$attention])
+
   yes <- rep("Yes", length(flat))
   add_rows <- as.data.frame(rbind(
-    c("Observations", number(vapply(flat, stats::nobs, numeric(1)))),
-    c("Properties", number(vapply(flat, function(m) m$fixef_sizes[["repeat_id"]], numeric(1)))),
-    c("LSOA clusters", number(vapply(flat, function(m) {
-      as.numeric(fixest::fitstat(m, "g", simplify = TRUE))
-    }, numeric(1)))),
     c("Property FE", yes),
     c("Month FE", yes),
     c("MSOA $\\times$ year FE", yes)
   ), stringsAsFactors = FALSE)
-  names(add_rows) <- c("term", column_names)
+  names(add_rows) <- c("term", names(flat))
+  attr(add_rows, "position") <- "coef_end"
+  gof_map <- data.frame(
+    raw = c("nobs", "adj.r.squared"),
+    clean = c("Observations", "Adj. R-squared"),
+    fmt = c(0, 3)
+  )
 
   notes <- paste0(
     "note{}={\\\\footnotesize{\\\\textbf{Notes:} ",
     "This table presents repeat-property estimates of how public attention to sewage spills ",
     "changes the price gap between properties near to and far from the nearest mapped ",
-    "sewage overflow. The sample covers sales from January 2014 to December 2024 ",
+    "sewage overflow. The sample covers sales from January 1995 to December 2024 ",
     "(columns 1--3) and rentals from January 2014 to December 2023 (columns 4--6) in ",
     "England, with Greater London retained. A property is a group of transactions or ",
     "listings at the same address, and each property is observed on at least two distinct ",
@@ -221,26 +252,41 @@ export_table <- function(models, comparison) {
     "than one observed value are excluded. ",
     comparison_note_text(comparison),
     "The dependent variable is the log transaction price for sales or the log asking rent ",
-    "for rentals. Near bin is an indicator equal to one for properties in the ",
+    "for rentals. $\\\\mathrm{Near}_i$ is an indicator equal to one for properties in the ",
     comparison$near_band_label, " band and zero for properties in the ",
-    comparison$far_band_label, " band. Each column is a separate regression with one ",
-    "attention measure: $\\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative ",
-    "UK news coverage of sewage spills from LexisNexis from January 2014 to the observation ",
-    "month; Post March 2021 and Post August 2022 are indicators for months from March 2021 ",
-    "and from August 2022 inclusive. All regressions include property, calendar-month and ",
-    "MSOA-by-year fixed effects, which absorb the near-bin and attention main effects, and ",
-    "no property controls. Observations exclude singletons removed by the estimator. ",
-    "Standard errors clustered at the LSOA level are reported in parentheses. ",
-    "*** p<0.01, ** p<0.05, * p<0.1.}},"
+    comparison$far_band_label, " band. Each column is a separate regression of the ",
+    "outcome on $\\\\mathrm{Near}_i \\\\times A_t$, where $A_t$ is the attention measure ",
+    "named in the column header: Log Articles is the natural logarithm of ",
+    "cumulative UK news coverage of sewage spills from LexisNexis from the start of the ",
+    "series in March 1989 to the observation month; Post Mar. 2021 and Post Aug. 2022 are ",
+    "indicators for months from ",
+    "March 2021 and from August 2022 inclusive. All regressions include property, ",
+    "calendar-month and MSOA-by-year fixed effects, which absorb the $\\\\mathrm{Near}_i$ ",
+    "and $A_t$ main effects, and no property controls. Observations exclude singletons ",
+    "removed by the estimator. Conley standard errors with a ", CONFIG$conley_cutoff_km,
+    " km cutoff are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
-  table_latex <- modelsummary::modelsummary(
-    panels, shape = "cbind", output = "latex", escape = FALSE,
+  table <- modelsummary::modelsummary(
+    flat, output = "tinytable", escape = FALSE,
     estimate = "{estimate}{stars}", statistic = "({std.error})",
     stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01), fmt = fmt_table,
-    coef_map = coefficient_map, gof_map = NA, add_rows = add_rows, notes = " ",
+    coef_map = coefficient_map, gof_map = gof_map, add_rows = add_rows, notes = " ",
     title = CONFIG$title
   )
+  # Header lines, innermost first: the attention measure over each column, then
+  # the market over each block of columns.
+  table <- tinytable::group_tt(
+    table, j = stats::setNames(as.list(seq_along(flat) + 1L), rep(measure_labels, 2L))
+  )
+  table <- tinytable::group_tt(table, j = list(
+    "House Sales" = seq_len(n_sales) + 1L,
+    "House Rentals" = seq_len(length(flat) - n_sales) + n_sales + 1L
+  ))
+  table_latex <- strsplit(tinytable::save_tt(table, output = "latex"), "\n", fixed = TRUE)[[1L]]
+  # Drop the per-column rules tinytable draws under single-column measure labels.
+  table_latex <- table_latex[!grepl("^hline\\{3\\}=", table_latex)]
+  table_latex <- wrap_siunitx(table_latex)
   table_latex <- patch_modelsummary_latex(table_latex, label = CONFIG$table_label, notes = notes)
   ensure_output_dir(CONFIG$output_path)
   writeLines(table_latex, CONFIG$output_path)
