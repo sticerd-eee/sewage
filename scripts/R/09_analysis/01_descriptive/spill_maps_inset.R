@@ -563,7 +563,7 @@ save_map_pdf <- function(plot, file_name, width, height, dpi = PLOT_DPI) {
 map_spills <- plot_static_map_with_inset(
   msoa_spills,
   "log_avg_annual_spill_count",
-  "Average annual spill count (log)",
+  "Average annual spill count (log-scale)",
   london_inset_config,
   variant = "paper"
 )
@@ -583,7 +583,7 @@ save_map_pdf(
 map_spills_slides <- plot_static_map_with_inset(
   msoa_spills,
   "log_avg_annual_spill_count",
-  "Average annual spill count (log)",
+  "Average annual spill count (log-scale)",
   london_inset_config,
   variant = "slides"
 )
@@ -605,7 +605,7 @@ save_map_pdf(
 map_dry_spills <- plot_static_map_with_inset(
   msoa_dry_spills,
   "log_avg_annual_dry_spill_count",
-  "Average annual dry spill count (log)",
+  "Average annual dry spill count (log-scale)",
   london_inset_config,
   variant = "paper"
 )
@@ -625,7 +625,7 @@ save_map_pdf(
 map_dry_spills_slides <- plot_static_map_with_inset(
   msoa_dry_spills,
   "log_avg_annual_dry_spill_count",
-  "Average annual dry spill count (log)",
+  "Average annual dry spill count (log-scale)",
   london_inset_config,
   variant = "slides"
 )
