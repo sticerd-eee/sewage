@@ -1,0 +1,1046 @@
+---
+title: "Sewage Data Pipeline Summary"
+format:
+  typst:
+    papersize: a4
+    margin:
+      x: 2.2cm
+      y: 2.4cm
+    fontsize: 10.5pt
+    number-sections: true
+    toc: false
+    keep-typ: false
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    theme: cosmo
+    number-sections: true
+    include-in-header:
+      text: |
+        <style>a, a:visited { color: #1F3A93; }</style>
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: false
+fig-dpi: 300
+fig-format: png
+fig-cap-location: top
+knitr:
+  opts_chunk:
+    dev: "ragg_png"
+    fig.align: "center"
+---
+
+```{=typst}
+#show link: set text(fill: rgb("#1F3A93"))
+#show ref: set text(fill: rgb("#1F3A93"))
+#show heading.where(level: 1): set block(above: 1.8em, below: 1em)
+#show heading.where(level: 2): set block(above: 1.6em, below: 1em)
+#show heading.where(level: 3): set block(above: 1.5em, below: 0.95em)
+#show figure: set block(above: 1.8em, below: 1.8em)
+#show figure: set figure(gap: 0.8em)
+#show table: set par(justify: false)
+#show table: set text(hyphenate: false)
+#let figdepth = state("figdepth", 0)
+#show figure: it => {
+  figdepth.update(d => d + 1)
+  context {
+    if figdepth.get() > 1 {
+      set text(weight: "regular")
+      it
+    } else {
+      it
+    }
+  }
+  figdepth.update(d => d - 1)
+}
+#show figure.caption: it => context {
+  if figdepth.get() > 1 { it } else { text(weight: "bold", it) }
+}
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(dplyr)
+  library(tidyr)
+  library(scales)
+  library(knitr)
+})
+
+base_family <- if (requireNamespace("systemfonts", quietly = TRUE) &&
+  nrow(systemfonts::match_fonts("Avenir Next")) > 0) {
+  "Avenir Next"
+} else {
+  "sans"
+}
+
+# One palette for the whole report. Statuses keep the same colour everywhere.
+pal <- c(
+  events     = "#3B6EA8", # the event-level recordswh
+  returns    = "#2F6F5E", # the annual returns
+  verified   = "#2E7D4F", # positive year with matched events
+  zero       = "#9DB0C2", # explicit zero in the returns
+  absent     = "#C0392B", # no return filed
+  na         = "#E0963C", # return filed, metrics missing
+  pos_noev   = "#7D4EA6", # return says spills, no events matched
+  ink        = "#1F2A37",
+  muted      = "#6B7785",
+  rule       = "#CBD3DC",
+  paper      = "#FFFFFF"
+)
+
+theme_report <- function(base_size = 11) {
+  theme_minimal(base_size = base_size, base_family = base_family) +
+    theme(
+      plot.title = element_text(face = "bold", colour = pal["ink"], size = base_size + 1.5),
+      plot.subtitle = element_text(colour = pal["muted"], size = base_size - 0.5),
+      plot.title.position = "plot",
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(colour = pal["rule"], linewidth = 0.3),
+      axis.title = element_text(colour = pal["muted"], size = base_size - 1),
+      axis.text = element_text(colour = pal["ink"]),
+      legend.position = "bottom",
+      legend.title = element_blank(),
+      legend.text = element_text(size = base_size - 1),
+      strip.text = element_text(face = "bold", colour = pal["ink"], hjust = 0),
+      plot.margin = margin(6, 10, 4, 6)
+    )
+}
+
+theme_schematic <- function(base_size = 11) {
+  theme_void(base_size = base_size, base_family = base_family) +
+    theme(
+      plot.title = element_text(face = "bold", colour = pal["ink"], size = base_size + 1.5, hjust = 0),
+      plot.subtitle = element_text(colour = pal["muted"], size = base_size - 0.5, hjust = 0),
+      plot.title.position = "plot",
+      legend.position = "bottom",
+      legend.title = element_blank(),
+      legend.text = element_text(size = base_size - 1),
+      plot.margin = margin(6, 10, 4, 6)
+    )
+}
+
+fmt <- function(x) format(x, big.mark = ",", trim = TRUE)
+pct <- function(x, d = 1) paste0(formatC(100 * x, format = "f", digits = d), "%")
+
+# --- Recorded pipeline figures ------------------------------------------------
+# Sources: output/log/05_merge_individ_annual_location.log (canonical run,
+# 2026-08-11); data/processed/matched_events_annual_data/site_group_crosswalk
+# .parquet; data/processed/cross_section/{sales,rentals}/* (read 2026-10-07).
+
+n_events <- 7383972
+n_annual_rows <- 57865
+n_lookup_clusters <- 15430
+n_site_groups <- 13990
+n_site_years <- 55960
+
+# Stage 2 results: the years in which each spill site is observed.
+# Source: data/processed/annual_return_lookup.parquet (read 2026-10-10).
+# Each pattern lists the years in which a spill site has a spill site-year.
+site_patterns <- tribble(
+  ~pattern, ~n,
+  "1234", 13606,
+  "123-", 184, "12-4", 2, "1-34", 22, "-234", 359,
+  "12--", 137, "1--4", 4, "-23-", 111, "-2-4", 3, "--34", 228,
+  "1---", 515, "-2--", 178, "--3-", 20, "---4", 61
+) |>
+  mutate(
+    n_years = nchar(gsub("-", "", pattern, fixed = TRUE)),
+    group = c("Single year", "Two years", "Three years", "Four years")[n_years]
+  ) |>
+  arrange(desc(n_years), desc(pattern))
+stopifnot(sum(site_patterns$n) == n_lookup_clusters)
+n_sites_by_years <- tapply(site_patterns$n, site_patterns$n_years, sum)
+# A gap year is a missing year between a spill site's first and last year.
+n_sites_gap <- sum(site_patterns$n[grepl("[0-9]-+[0-9]", site_patterns$pattern)])
+single_year <- site_patterns |>
+  filter(n_years == 1) |>
+  slice_max(n, n = 1)
+single_year_modal <- 2020 + regexpr("[0-9]", single_year$pattern)
+share_sites <- function(n) pct(n / n_lookup_clusters)
+# Single-year spill sites that Stage 3 places in a group with other spill sites.
+# Source: annual_return_lookup.parquet and unique_spill_sites.parquet (read 2026-10-10).
+n_single_regrouped <- 331
+
+# Stage 1 spill sites by their weakest cross-year link (identifier strongest).
+# Source: annual_return_lookup.parquet and annual_return_lookup_edges.parquet
+# (read 2026-10-09). Unmatched sites are single-year spill sites with no links.
+n_unmatched_sites <- 774
+sites_weak <- 210 + 333 # weakest link rests on 1 or 2 fields
+sites_strong <- n_lookup_clusters - n_unmatched_sites - sites_weak
+stopifnot(sites_strong == 226 + 6110 + 4406 + 2606 + 765)
+
+ladder <- tribble(
+  ~rung, ~tier, ~events,
+  "1  Unique site ID (2023 and 2024 returns only)", "Exact key", 3648992,
+  "2  Permit, with activity reference where present", "Exact key", 136335,
+  "3  EA site name", "Exact key", 3281915,
+  "4  Water-company site name", "Exact key", 166686,
+  "5  Annual hours agree with event hours", "Tie-break", 36557,
+  "6  Documented manual override", "Manual", 1226,
+  "Unmatched: no usable key", "Unmatched", 88578,
+  "Unmatched: name shared, hours disagree", "Unmatched", 23467,
+  "Unmatched: name spans sites, no same-year totals", "Unmatched", 209,
+  "Unmatched: all candidate hours near zero", "Unmatched", 7
+)
+n_matched <- sum(ladder$events[ladder$tier != "Unmatched"])
+n_unmatched <- sum(ladder$events[ladder$tier == "Unmatched"])
+
+status_by_year <- tribble(
+  ~year, ~status, ~n,
+  2021, "Positive, events matched", 10012 - 175, 2021, "Positive, no events matched", 175,
+  2021, "Reported zero", 1563, 2021, "Reported NA", 1811, 2021, "No return filed", 604,
+  2022, "Positive, events matched", 10151 - 641, 2022, "Positive, no events matched", 641,
+  2022, "Reported zero", 2074, 2022, "Reported NA", 1331, 2022, "No return filed", 434,
+  2023, "Positive, events matched", 11281 - 14, 2023, "Positive, no events matched", 14,
+  2023, "Reported zero", 1737, 2023, "Reported NA", 433, 2023, "No return filed", 539,
+  2024, "Positive, events matched", 11549 - 2, 2024, "Positive, no events matched", 2,
+  2024, "Reported zero", 1617, 2024, "Reported NA", 89, 2024, "No return filed", 735
+)
+status_levels <- c(
+  "Positive, events matched", "Reported zero", "Reported NA",
+  "No return filed", "Positive, no events matched"
+)
+status_cols <- c(pal[["verified"]], pal[["zero"]], pal[["na"]], pal[["absent"]], pal[["pos_noev"]])
+names(status_cols) <- status_levels
+
+sg_verified_all <- 10669
+site_years_verified <- 49152
+
+outlets_per_group <- tribble(
+  ~outlets, ~n,
+  "1", 13104, "2", 689, "3 to 5", 74 + 62 + 14, "6 or more", 18 + 9 + 4 + 7 + 3 + 1 + 3 + 1 + 1
+)
+
+# Exposure samples: transactions with at least one Site Group within the radius,
+# prior-to-transaction datasets (the hedonic samples). Reasons are not exclusive;
+# "two or more" collects properties whose nearby sites fail for different reasons.
+cost <- tribble(
+  ~market, ~radius, ~reason, ~n,
+  "Sales", 250, "Verified", 166192, "Sales", 250, "Reported NA only", 32028,
+  "Sales", 250, "Positive, no events only", 9414, "Sales", 250, "No return filed only", 7382,
+  "Sales", 250, "Two or more gaps", 14236,
+  "Sales", 500, "Verified", 523626, "Sales", 500, "Reported NA only", 113538,
+  "Sales", 500, "Positive, no events only", 31239, "Sales", 500, "No return filed only", 27293,
+  "Sales", 500, "Two or more gaps", 58541,
+  "Sales", 1000, "Verified", 1109285, "Sales", 1000, "Reported NA only", 323957,
+  "Sales", 1000, "Positive, no events only", 77244, "Sales", 1000, "No return filed only", 84512,
+  "Sales", 1000, "Two or more gaps", 217473,
+  "Rentals", 250, "Verified", 58354, "Rentals", 250, "Reported NA only", 12074,
+  "Rentals", 250, "Positive, no events only", 2974, "Rentals", 250, "No return filed only", 3835,
+  "Rentals", 250, "Two or more gaps", 6489,
+  "Rentals", 500, "Verified", 171967, "Rentals", 500, "Reported NA only", 41742,
+  "Rentals", 500, "Positive, no events only", 9301, "Rentals", 500, "No return filed only", 13207,
+  "Rentals", 500, "Two or more gaps", 27295,
+  "Rentals", 1000, "Verified", 344086, "Rentals", 1000, "Reported NA only", 111685,
+  "Rentals", 1000, "Positive, no events only", 23847, "Rentals", 1000, "No return filed only", 41939,
+  "Rentals", 1000, "Two or more gaps", 102940
+) |>
+  group_by(market, radius) |>
+  mutate(total = sum(n), share = n / total) |>
+  ungroup()
+cost_levels <- c(
+  "Verified", "Reported NA only", "No return filed only",
+  "Positive, no events only", "Two or more gaps"
+)
+cost_cols <- c(pal[["verified"]], pal[["na"]], pal[["absent"]], pal[["pos_noev"]], "#8A8F99")
+names(cost_cols) <- cost_levels
+
+# Small helpers for schematic drawings
+box <- function(x, y, w, h, fill, colour = NA, r = 0.015) {
+  annotate("rect",
+    xmin = x - w / 2, xmax = x + w / 2, ymin = y - h / 2, ymax = y + h / 2,
+    fill = fill, colour = colour, linewidth = 0.4
+  )
+}
+txt <- function(x, y, label, size = 3.4, colour = pal[["ink"]], ...) {
+  annotate("text",
+    x = x, y = y, label = label, size = size, colour = colour,
+    family = base_family, ...
+  )
+}
+arrow_seg <- function(x, y, xend, yend, colour = pal[["muted"]]) {
+  annotate("segment",
+    x = x, y = y, xend = xend, yend = yend, colour = colour,
+    linewidth = 0.5, arrow = arrow(length = unit(5, "pt"), type = "closed")
+  )
+}
+```
+
+## Sewage Spill Data Sources {.unnumbered}
+
+Two sources of sewage spill data are available for England. Both are produced by water and sewerage companies using event duration monitoring (EDM) devices installed at storm overflows:
+
+1. **EDM event-level records (EA, via EIR):** Individual discharge records obtained from the Environment Agency (EA) through requests under the Environmental Information Regulations (EIR).
+2. **EDM annual returns (EA):** Annual summaries of spill counts and duration, compiled by the companies from the same EDM records and submitted to the EA.
+
+```{r}
+#| label: tbl-sources
+#| tbl-cap: "EDM Datasets"
+#| tbl-colwidths: [10, 45, 45]
+sources <- tribble(
+  ~` `, ~`EDM event-level records (EA, via EIR)`, ~`EDM annual returns (EA)`,
+  # Row 1: Data provenance
+  "Data provenance",
+  "Requested annually by the EA from water companies to check for dry-day spills, and obtained by us from the EA under the EIR",
+  "Compiled by water companies and submitted annually to the EA, which publishes the returns on data.gov.uk",
+  # Row 2: Unit of observation
+  "Unit of observation",
+  "Discharge event, with start and end times recorded to the minute",
+  "Storm overflow–year, with annual spill count and total spill hours",
+  # Row 3: Size
+  "Observations, 2021–24",
+  paste0(fmt(n_events), " individual discharge events"),
+  paste0(fmt(n_annual_rows), " overflow-years, from ≈14,500 monitored overflows a year"),
+  # Row 4: Timing of spills
+  "Timing of spills",
+  "Spills can be counted over any period (e.g. the months preceding a property sale)",
+  "Annual totals only",
+  # Row 5: Zeros and missing values
+  "Zeros and missing values (see @fig-sources)",
+  "Not distinguished. An absence of records may indicate either:\n\n1. zero spills, or\n2. a non-reporting monitor",
+  "Explicitly distinguished:\n\n1. zero indicates no spills\n2. NA indicates a non-reporting monitor\n3. a missing row indicates no annual return, typically because the overflow was not yet monitored or had been decommissioned",
+  # Row 6: Site characteristics
+  "Site characteristics",
+  "None",
+  "Location, asset and treatment type, receiving waterbody, bathing and shellfish water designations, monitor commissioning date, annual monitoring coverage (and reasons for gaps), and high-spill review fields (see the #link(\"https://www.dropbox.com/scl/fi/dsfhx0xpvlruyn5rhnyah/2024_annual_return_edm_dataset_readme.pdf?rlkey=6si2yony20edfva4wm4jwc94q&dl=0\")[data README] for details)",
+  # Row 7: Site identifiers
+  "Site identifiers",
+  "- 2021–22: Site names, permit references and activity references, which can be missing or inconsistent across years.\n- 2023–24: Unique site IDs, consistent across years and shared by both datasets.",
+  ""
+)
+library(tinytable)
+tt(sources, width = c(0.19, 0.405, 0.405)) |>
+  style_tt(align = "l") |>
+  style_tt(j = 1, bold = TRUE, color = "#1F2A37") |>
+  style_tt(i = 0, bold = TRUE, background = "#EEF2F5", color = "#1F2A37") |>
+  style_tt(i = nrow(sources), j = 2, colspan = 2) |>
+  style_tt(i = seq_len(nrow(sources)), line = "b", line_color = "#DFE5E8", line_width = 0.05) |>
+  style_tt(fontsize = 0.9)
+```
+
+The two datasets serve complementary purposes in our analysis. We use the event-level records to measure spill exposure at the time of each property sale or rental, given their minute-level timing (@fig-sources, panel a). We use the annual returns to (i) distinguish zero spills (@fig-sources, panel b) from missing observations (@fig-sources, panel c) in the event-level records and (ii) obtain site characteristics, particularly overflow locations, to link spills to nearby properties.
+
+```{r}
+#| label: fig-sources
+#| fig-cap: "Illustration of the two EDM datasets"
+#| fig-subcap:
+#|   - "EDM event-level records (discharge-event level)"
+#|   - "EDM annual returns (overflow-year level)"
+#| layout-ncol: 2
+#| fig-width: 5.2
+#| fig-height: 3.0
+set.seed(11)
+yrs <- as.Date(c("2021-01-01", "2022-01-01", "2023-01-01", "2024-01-01", "2025-01-01"))
+mk_events <- function(n, from, to, mean_h) {
+  st <- sort(sample(seq(as.Date(from), as.Date(to), by = "day"), n))
+  tibble(
+    start = as.POSIXct(st) + runif(n, 0, 86400),
+    dur_h = pmax(0.5, rexp(n, 1 / mean_h))
+  )
+}
+ev <- bind_rows(
+  mk_events(55, "2021-01-05", "2024-12-20", 18) |> mutate(site = "Site A"),
+  mk_events(3, "2024-02-01", "2024-11-30", 6) |> mutate(site = "Site B"),
+  mk_events(9, "2022-01-10", "2023-12-15", 9) |> mutate(site = "Site C")
+) |> mutate(end = start + dur_h * 3600, site = factor(site, levels = c("Site C", "Site B", "Site A")))
+gaps <- tibble(
+  xmin = as.POSIXct(c("2021-01-01", "2021-01-01", "2024-01-01")),
+  xmax = as.POSIXct(c("2023-12-31", "2021-12-31", "2024-12-31")),
+  y = c(2, 1, 1),
+  status = c("Zero reported", "NA: non-reporting monitor", "No annual return")
+)
+gap_cols <- c("Zero reported" = pal[["zero"]], "NA: non-reporting monitor" = pal[["na"]], "No annual return" = pal[["absent"]])
+ggplot(ev) +
+  geom_vline(xintercept = as.POSIXct(yrs), colour = pal[["rule"]], linewidth = 0.4) +
+  geom_rect(
+    data = gaps, aes(xmin = xmin, xmax = xmax, ymin = y - 0.36, ymax = y + 0.36, colour = status),
+    fill = NA, linewidth = 0.7, show.legend = FALSE
+  ) +
+  scale_colour_manual(values = gap_cols) +
+  geom_rect(aes(
+    xmin = start, xmax = end + 3 * 86400, ymin = as.numeric(site) - 0.28,
+    ymax = as.numeric(site) + 0.28
+  ), fill = pal[["events"]], colour = pal[["events"]], linewidth = 0.3) +
+  scale_y_continuous(breaks = 1:3, labels = c("Site C", "Site B", "Site A"), limits = c(0.5, 3.6)) +
+  scale_x_datetime(breaks = as.POSIXct(yrs[1:4]), labels = 2021:2024, expand = expansion(mult = 0.01)) +
+  labs(x = NULL, y = NULL) +
+  theme_report() +
+  theme(panel.grid.major.y = element_blank(), panel.grid.major.x = element_blank())
+
+ret <- tribble(
+  ~site, ~year, ~label, ~status,
+  "Site A", 2021, "12 spills\n96 h", "Spills reported", "Site A", 2022, "9 spills\n54 h", "Spills reported",
+  "Site A", 2023, "41 spills\n312 h", "Spills reported", "Site A", 2024, "7 spills\n40 h", "Spills reported",
+  "Site B", 2021, "0 spills\n0 h", "Zero reported", "Site B", 2022, "0 spills\n0 h", "Zero reported",
+  "Site B", 2023, "0 spills\n0 h", "Zero reported", "Site B", 2024, "3 spills\n11 h", "Spills reported",
+  "Site C", 2021, "NA", "NA: non-reporting monitor", "Site C", 2022, "5 spills\n22 h", "Spills reported",
+  "Site C", 2023, "4 spills\n19 h", "Spills reported", "Site C", 2024, "no return", "No annual return"
+) |> mutate(
+  site = factor(site, levels = c("Site C", "Site B", "Site A")),
+  status = factor(status, levels = c("Spills reported", "Zero reported", "NA: non-reporting monitor", "No annual return"))
+)
+ret_cols <- c(
+  "Spills reported" = pal[["returns"]], "Zero reported" = pal[["zero"]],
+  "NA: non-reporting monitor" = pal[["na"]], "No annual return" = pal[["absent"]]
+)
+ggplot(ret, aes(x = factor(year), y = site)) +
+  geom_tile(aes(fill = status), colour = "white", linewidth = 1.2, width = 0.96, height = 0.9) +
+  geom_text(aes(label = label, colour = status == "Zero reported"), size = 3.0, family = base_family, lineheight = 0.9) +
+  scale_colour_manual(values = c(`TRUE` = pal[["ink"]], `FALSE` = "white"), guide = "none") +
+  scale_fill_manual(values = ret_cols, drop = FALSE) +
+  labs(x = NULL, y = NULL) +
+  theme_report() +
+  theme(panel.grid = element_blank(), legend.key.size = unit(10, "pt")) +
+  guides(fill = guide_legend(nrow = 2))
+```
+
+## How exposure is built {.unnumbered}
+
+Exposure is a property-level measure of nearby spills. Four steps produce it (@fig-pipeline), and each step rests on a decision explained in its own section below.
+
+1.  **Define sites.** Follow one monitored point across the four years of returns, and collapse the outlets of the same works into one site (@sec-sites).
+2.  **Attach events.** Match each event to a site on the best exact key it carries. Leave the rest unmatched, with a reason recorded (@sec-matching-events-sites).
+3.  **Classify site-years.** Decide, from the returns, whether each site-year is a verified zero, a verified positive, or unknown (@sec-zeros).
+4.  **Sum near each property.** Add up hours and spill counts within 250, 500 and 1,000 m of each property. Counts follow the Environment Agency's 12/24 convention: the first 12 hours of a discharge count as one spill, and each further 24-hour block counts as one more. Exposure is unknown if any nearby site-year is unknown, and unknown rows leave the sample (@sec-dropped).
+
+```{r}
+#| label: fig-pipeline
+#| fig-cap: "The four steps between the two public sources and the regression samples. Each step is explained in its own section below."
+#| fig-width: 9
+#| fig-height: 2.9
+steps <- tibble(
+  x = 1:4,
+  head = c("Define sites", "Attach events", "Classify years", "Sum near property"),
+  body = c(
+    "Follow one monitored\npoint across years;\ncollapse outlets\n250 m apart",
+    "Best exact key per\nrecord; unmatched\nrows carry a\nreason code",
+    "Verified zero,\nverified positive,\nor unknown, decided\nby the returns",
+    "Hours and counts near\neach property; unknown\nif any site-year\nis unknown"
+  ),
+  sec = c("Section 3", "Section 4", "Section 5", "Sections 5 and 6")
+)
+p <- ggplot() +
+  xlim(-0.5, 5.25) +
+  ylim(0.45, 2.0) +
+  box(0.0, 1.5, 0.92, 0.46, fill = alpha(pal[["events"]], 0.15), colour = pal[["events"]]) +
+  txt(0.0, 1.575, "Event records", size = 3.8, fontface = "bold", colour = pal[["events"]]) +
+  txt(0.0, 1.42, "7.4 M events", size = 3.1, colour = pal[["events"]]) +
+  box(0.0, 0.98, 0.92, 0.46, fill = alpha(pal[["returns"]], 0.15), colour = pal[["returns"]]) +
+  txt(0.0, 1.055, "Annual returns", size = 3.8, fontface = "bold", colour = pal[["returns"]]) +
+  txt(0.0, 0.90, "58 k site-years", size = 3.1, colour = pal[["returns"]]) +
+  arrow_seg(0.47, 1.5, 0.53, 1.3) +
+  arrow_seg(0.47, 0.98, 0.53, 1.18)
+for (i in seq_len(nrow(steps))) {
+  p <- p +
+    box(steps$x[i], 1.24, 0.9, 1.08, fill = "#F3F6F9", colour = pal[["rule"]]) +
+    txt(steps$x[i], 1.63, steps$head[i], size = 3.7, fontface = "bold") +
+    txt(steps$x[i], 1.19, steps$body[i], size = 3.15, colour = pal[["ink"]], lineheight = 0.92) +
+    txt(steps$x[i], 0.58, steps$sec[i], size = 3.1, colour = pal[["muted"]], fontface = "italic")
+  if (i < nrow(steps)) p <- p + arrow_seg(steps$x[i] + 0.46, 1.24, steps$x[i] + 0.54, 1.24)
+}
+p <- p +
+  arrow_seg(4.46, 1.24, 4.54, 1.24) +
+  box(4.9, 1.24, 0.62, 1.08, fill = alpha(pal[["verified"]], 0.12), colour = pal[["verified"]]) +
+  txt(4.9, 1.24, "Regression\nsamples", size = 3.7, fontface = "bold", colour = pal[["verified"]], lineheight = 0.95) +
+  theme_schematic()
+p
+```
+
+## Defining a Spill Site in the EDM Annual Returns Data {#sec-sites}
+
+The first step is to define a **spill site** consistently across the four years of the Environment Agency's EDM annual returns, so that individual spill sites can be tracked over time.
+
+### Problem {.unnumbered}
+
+Unique spill-site identifiers were introduced in 2023. For 2021 and 2022, spill sites must instead be matched across years using the other identifying fields: water company, site name, permit reference, activity code and grid reference. This presents two challenges (@fig-problems):
+
+1. **Spill-site identifiers can change across years.** Spill-site identifiers can differ across years, making it difficult to identify and link individual spill sites across annual returns. For example, between 2023 and 2024, when unique identifiers allow us to identify the same spill site across years, 1.7% of spill sites changed name, 3.4% changed permit reference and 3.6% changed grid reference.
+
+2. **Spill sites cannot always be uniquely identified.** When multiple spill sites have the same values for all identifying fields, they cannot be distinguished or individually tracked across years. This occurs particularly at sewage treatment works, where several monitored outlets of the same type (e.g. storm tanks) may share the same site name, permit reference and grid reference.
+
+```{r}
+#| label: fig-problems
+#| fig-cap: "Challenges to linking spill sites across years (Examples from the data)"
+#| fig-subcap:
+#|   - "Spill-site identifiers can change across years"
+#|   - "Spill sites cannot always be uniquely identified"
+#| layout-ncol: 2
+#| fig-width: 4.6
+#| fig-height: 2.5
+# Source: data/processed/annual_return_edm.parquet (read 2026-10-09).
+# (a) Lechlade STW, Thames Water, 2023 unique ID ThW0422. (b) Newbiggin, United
+# Utilities, 2021: the two rows also match on the company's own name and permit
+# and on the activity code (ST, storm tank).
+match_fill <- c(same = "#DCEBE2", changed = "#F6E3B4", none = pal[["paper"]])
+
+compare_panel <- function(cells, headers, fields) {
+  cells <- cells |>
+    mutate(
+      y = length(fields) + 1 - match(field, fields),
+      size = if_else(nchar(value) > 16, 3.1, 3.7)
+    )
+  ggplot(cells) +
+    coord_cartesian(xlim = c(-1.3, 2.35), ylim = c(0.45, length(fields) + 1.05), expand = FALSE) +
+    geom_tile(aes(x = x, y = y, fill = status),
+      width = 1.12, height = 0.82, colour = pal[["rule"]], linewidth = 0.4
+    ) +
+    geom_text(
+      aes(x = x, y = y, label = value, size = size, fontface = if_else(status == "changed", "bold", "plain")),
+      family = base_family, colour = pal[["ink"]], lineheight = 0.88
+    ) +
+    txt(-0.1, length(fields):1, fields, hjust = 1, size = 3.7) +
+    txt(c(0.55, 1.7), length(fields) + 0.72, headers, size = 3.9, fontface = "bold") +
+    scale_fill_manual(values = match_fill, guide = "none") +
+    scale_size_identity() +
+    theme_schematic() +
+    theme(plot.margin = margin(2, 4, 2, 2))
+}
+
+fields_a <- c("Site name", "Permit reference", "Grid reference", "Unique ID (2023)")
+cells_a <- tribble(
+  ~field, ~x, ~value, ~status,
+  "Site name", 0.55, "LECHLADE STW", "changed",
+  "Site name", 1.7, "LECHLADE WWTW", "changed",
+  "Permit reference", 0.55, "CTCR.1797", "same",
+  "Permit reference", 1.7, "CTCR.1797", "same",
+  "Grid reference", 0.55, "SU2271099330", "same",
+  "Grid reference", 1.7, "SU2271099330", "same",
+  "Unique ID (2023)", 0.55, "ThW0422", "same",
+  "Unique ID (2023)", 1.7, "ThW0422", "same"
+)
+compare_panel(cells_a, c("2023", "2024"), fields_a)
+
+fields_b <- c("Site name", "Permit reference", "Grid reference", "Spill hours, 2021")
+cells_b <- tribble(
+  ~field, ~x, ~value, ~status,
+  "Site name", 0.55, "NEWBIGGIN (LEVEN)\nWWTW NEWBG", "same",
+  "Site name", 1.7, "NEWBIGGIN (LEVEN)\nWWTW NEWBG", "same",
+  "Permit reference", 0.55, "017370051", "same",
+  "Permit reference", 1.7, "017370051", "same",
+  "Grid reference", 0.55, "SD2675168941", "same",
+  "Grid reference", 1.7, "SD2675168941", "same",
+  "Spill hours, 2021", 0.55, "3,878", "none",
+  "Spill hours, 2021", 1.7, "1.9", "none"
+)
+compare_panel(cells_b, c("Spill site 1", "Spill site 2"), fields_b)
+```
+
+::: {style="font-size: 85%;"}
+*Notes:* The figure illustrates the two challenges using examples from the EDM annual returns. Green indicates matching fields, while amber indicates differences. Panel (a) shows a spill site whose name changes between 2023 and 2024, but whose unique identifier confirms that it is the same site. Panel (b) shows two distinct spill sites that share identical identifying fields in 2021.
+:::
+
+### Approach {.unnumbered}
+
+#### Stage 1: Match spill sites across years {.unnumbered}
+
+We link each spill site-year to its counterparts in other years by comparing it with every spill site-year reported by the same water company in each other year. Linked spill site-years form one spill site. The matching rule depends on the years being compared:
+
+- **2023 and 2024.** Spill site-years are matched on their unique identifier.
+- **Pairs involving 2021 or 2022.** Spill site-years are matched on their identifying fields. Matching proceeds in rounds, from strictest to loosest. In each round, two spill site-years are matched if they have identical values on that round’s fields and no other unmatched spill site-year in either year shares those values. Matched spill site-years are removed before the next round. For example:^[These rounds are a simplified illustration. In practice, matching uses six fields: EA site name (the site name as recorded by the Environment Agency), company site name (the site name as recorded by the water company), EA permit reference (the permit reference as recorded by the Environment Agency), company permit reference (the permit reference as recorded by the water company), activity code (the code for the discharge activity under the permit), and grid reference (the grid reference of the discharge outlet).]
+  - **Round 1:** Site name, permit reference, outlet type and grid reference.
+  - **Round 2:** Permit reference, outlet type and grid reference (allowing for changes in site name).
+  - **Round 3:** Site name, outlet type and grid reference (allowing for changes in permit reference).
+  - **Subsequent rounds:** Other combinations of identifying fields, always requiring agreement on water company.
+- **Unmatched spill site-years.** Spill site-years that cannot be uniquely matched in any round remain unmatched at the end of this stage. Each forms a spill site observed in a single year.
+
+@tbl-links summarises the results of this stage. Of all spill sites, `r pct(sites_strong / n_lookup_clusters)` are linked across years through strong matches only, meaning a unique identifier or at least three agreeing fields. A further `r pct(sites_weak / n_lookup_clusters)` rely on at least one weak match, where two or fewer fields agree. The remaining `r fmt(n_unmatched_sites)` spill site-years are unmatched.
+
+Manual spot checks suggest that weak matches can be inaccurate. Because the sites that rely on them are a small share of the total, we have kept them in the exposure sample for now to save time, but we later may want to drop them or clean them further.
+
+```{r}
+#| label: tbl-links
+#| tbl-cap: "Matches across years, by matching round"
+# Source: data/processed/annual_return_lookup_edges.parquet (read 2026-10-09).
+# These are the links spill sites are built from: spill site-years minus spill
+# sites. Spill-site counts use annual_return_lookup.parquet: each spill site is
+# classified by its weakest link (identifier counted as strongest). Unmatched
+# spill site-years are single-year spill sites with no links.
+links <- tribble(
+  ~evidence, ~n,
+  "Unique identifier (2023–2024)", 14086,
+  "Identifying fields, all 6 agree", 15027,
+  "Identifying fields, 5 agree", 8748,
+  "Identifying fields, 4 agree", 2983,
+  "Identifying fields, 3 agree", 1022,
+  "Identifying fields, 2 agree", 358,
+  "Identifying fields, 1 agrees", 211
+)
+stopifnot(sum(links$n) == n_annual_rows - n_lookup_clusters)
+links_tbl <- links |>
+  bind_rows(tibble(evidence = "Total", n = sum(links$n))) |>
+  transmute(`Matched on` = evidence, Links = fmt(n), `Share of links` = pct(n / sum(links$n))) |>
+  bind_rows(tibble(`Matched on` = "Unmatched spill site-years", Links = fmt(n_unmatched_sites), `Share of links` = "–"))
+tt(links_tbl, width = c(0.5, 0.25, 0.25)) |>
+  style_tt(align = "lrr") |>
+  style_tt(j = 1, color = "#1F2A37") |>
+  style_tt(i = 0, bold = TRUE, background = "#EEF2F5", color = "#1F2A37") |>
+  style_tt(i = nrow(links_tbl) - 1, bold = TRUE) |>
+  style_tt(i = nrow(links_tbl), italic = TRUE) |>
+  style_tt(i = seq_len(nrow(links_tbl)), line = "b", line_color = "#DFE5E8", line_width = 0.05) |>
+  style_tt(fontsize = 0.9)
+```
+
+#### Stage 2: Build the Spill Site Panel {.unnumbered}
+
+Stage 1 produces pairwise matches between spill site-years in different years. With four years of data, each spill site-year can have up to three matches, one in each of the other years. It may have fewer if the spill site was not reported in some years or no unique match was found.
+
+Stage 2 uses a graph-based approach to combine these pairwise matches and identify distinct spill sites across years. Each spill site-year is represented as a node, with edges connecting pairs matched in Stage 1. Connected nodes are then grouped into spill sites, as illustrated in @fig-chaining:
+
+- **Direct and indirect matches.** Spill site-years are assigned to the same spill site if they are connected directly by an edge (row 1) or indirectly through other nodes (row 2). Because Stage 1 compares every pair of years, spill site-years can still be matched even when the spill site is not reported in an intermediate year (row 3).
+- **Unmatched spill site-years.** A node with no edges forms a separate spill site observed in a single year (row 4). This may be because the spill site was reported in only one year or because Stage 1 could not establish a unique match with other years.
+- **Conflicting matches.** Each spill site can contain at most one spill site-year per year. Because Stage 1 matches each pair of years separately, combining matches can occasionally violate this rule. For example, a 2021 spill site-year may be matched to two different 2022 spill site-years, one directly and one through 2023 (row 5). To resolve these conflicts, edges are added in order of match strength, prioritising unique identifiers and then the number of agreeing fields. Any edge that would introduce a second spill site-year from the same year is discarded. This affects 0.4% of spill site-years.
+
+```{r}
+#| label: fig-chaining
+#| fig-cap: "From pairwise matches to a spill site panel"
+#| fig-subcap:
+#|   - "Pairwise matches from Stage 1"
+#|   - "Spill sites after Stage 2"
+#| layout-ncol: 2
+#| fig-width: 4.6
+#| fig-height: 3.5
+# Stylised: each row is one case. Dots are spill site-years, lines are matches.
+# Row 5 has two 2022 spill site-years (B above, D below): A-B, A-C and C-D are
+# each valid within their own pair of years, but chained they put B and D in
+# one spill site, so the weakest match (C-D) is dropped.
+conflict_dy <- 0.62
+chain_cases <- tibble(
+  row = 1:5,
+  y = 5:1,
+  label = c(
+    "Matched in\nevery year", "Matched only to\nadjacent years", "Not reported\nin 2022",
+    "No match\nfound", "Conflicting\nmatches"
+  )
+)
+chain_sites <- tibble(
+  site = 1:6,
+  colour = c(pal[["events"]], pal[["pos_noev"]], "#B5651D", pal[["muted"]], "#A23B72", pal[["muted"]])
+)
+chain_dots <- tribble(
+  ~row, ~x, ~dy, ~site,
+  1, 1, 0, 1, 1, 2, 0, 1, 1, 3, 0, 1, 1, 4, 0, 1,
+  2, 1, 0, 2, 2, 2, 0, 2, 2, 3, 0, 2, 2, 4, 0, 2,
+  3, 1, 0, 3, 3, 3, 0, 3, 3, 4, 0, 3,
+  4, 1, 0, 4,
+  5, 1, 0, 5, 5, 2, 0, 5, 5, 3, 0, 5, 5, 2, -conflict_dy, 6
+) |>
+  left_join(select(chain_cases, row, y), by = "row") |>
+  left_join(chain_sites, by = "site") |>
+  mutate(y = y + dy)
+chain_links <- tribble(
+  ~row, ~x, ~xend, ~dy_end, ~dropped,
+  1, 1, 2, 0, FALSE, 1, 2, 3, 0, FALSE, 1, 3, 4, 0, FALSE,
+  1, 1, 3, 0, FALSE, 1, 2, 4, 0, FALSE, 1, 1, 4, 0, FALSE,
+  2, 1, 2, 0, FALSE, 2, 2, 3, 0, FALSE, 2, 3, 4, 0, FALSE,
+  3, 1, 3, 0, FALSE, 3, 3, 4, 0, FALSE, 3, 1, 4, 0, FALSE,
+  5, 1, 2, 0, FALSE, 5, 1, 3, 0, FALSE, 5, 3, 2, -conflict_dy, TRUE
+) |>
+  left_join(select(chain_cases, row, y), by = "row") |>
+  mutate(
+    adjacent = abs(xend - x) == 1,
+    # Trim each straight link so it stops short of the dots.
+    len = sqrt((xend - x)^2 + dy_end^2),
+    x0 = x + 0.13 * (xend - x) / len, y0 = y + 0.13 * dy_end / len,
+    x1 = xend - 0.13 * (xend - x) / len, y1 = y + dy_end - 0.13 * dy_end / len
+  )
+
+# Matches between non-adjacent years are drawn as arcs whose height grows with
+# the gap between the years.
+chain_arcs <- chain_links |>
+  filter(!adjacent) |>
+  mutate(link = row_number(), h = 0.13 * (xend - x)) |>
+  tidyr::crossing(u = seq(0, 1, length.out = 40)) |>
+  # Trim 0.16 x-units off each end so arcs stop short of the dots.
+  mutate(
+    d = 0.16 / (xend - x),
+    t = d + u * (1 - 2 * d),
+    ax = x + t * (xend - x),
+    # Row 1's 2021-2024 match is drawn below the dots to reduce clutter.
+    side = if_else(row == 1 & xend - x == 3, -1, 1),
+    ay = y + side * 4 * h * t * (1 - t)
+  )
+
+chain_base <- function() {
+  ggplot() +
+    coord_cartesian(xlim = c(-0.85, 5.45), ylim = c(0.1, 5.95), expand = FALSE) +
+    txt(1:4, 5.8, 2021:2024, size = 3.7, fontface = "bold") +
+    theme_schematic() +
+    theme(plot.margin = margin(2, 4, 2, 2))
+}
+match_arrow <- arrow(length = unit(3.5, "pt"), ends = "both", type = "closed")
+
+# Panel (a): every pairwise match as its own two-headed line, stopping short of
+# the dots so each reads as a separate link.
+chain_base() +
+  geom_text(
+    data = chain_cases, aes(x = 0.6, y = y + 0.14, label = label), hjust = 1,
+    size = 3.4, family = base_family, colour = pal[["ink"]], lineheight = 0.9
+  ) +
+  geom_segment(
+    data = filter(chain_links, adjacent), aes(x = x0, xend = x1, y = y0, yend = y1),
+    colour = pal[["muted"]], linewidth = 0.6, arrow = match_arrow
+  ) +
+  geom_path(
+    data = chain_arcs, aes(x = ax, y = ay, group = link),
+    colour = pal[["muted"]], linewidth = 0.5, arrow = match_arrow
+  ) +
+  geom_point(data = chain_dots, aes(x = x, y = y), size = 3.2, colour = pal[["ink"]])
+
+# Panel (b): each spill site as one bar spanning its years. The open circle is
+# the year with no spill site-year. The dropped match is dashed and crossed out.
+chain_bars <- chain_dots |>
+  group_by(site, colour) |>
+  summarise(y = first(y), xmin = min(x), xmax = max(x), .groups = "drop") |>
+  # Spill site 6 is labelled on its left, clear of the dropped match.
+  mutate(
+    label_x = if_else(site == 6, xmin - 0.32, xmax + 0.32),
+    label_hjust = if_else(site == 6, 1, 0)
+  )
+chain_gaps <- tibble(site = 3, x = 2, y = chain_cases$y[3]) |> left_join(chain_sites, by = "site")
+dropped <- filter(chain_links, dropped)
+chain_base() +
+  geom_segment(
+    data = chain_bars, aes(x = xmin - 0.12, xend = xmax + 0.12, y = y, yend = y),
+    colour = alpha(chain_bars$colour, 0.35), linewidth = 7, lineend = "round"
+  ) +
+  geom_segment(
+    data = dropped, aes(x = x0, xend = x1, y = y0, yend = y1),
+    colour = pal[["muted"]], linewidth = 0.5, linetype = "22"
+  ) +
+  geom_text(
+    data = dropped, aes(x = (x0 + x1) / 2, y = (y0 + y1) / 2, label = "×"),
+    size = 5, colour = pal[["absent"]], family = base_family, fontface = "bold"
+  ) +
+  geom_point(data = chain_dots, aes(x = x, y = y), size = 3.2, colour = chain_dots$colour) +
+  geom_point(
+    data = chain_gaps, aes(x = x, y = y), size = 3.2, shape = 21,
+    fill = pal[["paper"]], colour = chain_gaps$colour, stroke = 0.9
+  ) +
+  geom_text(
+    data = chain_bars, aes(x = label_x, y = y, label = paste("Spill site", site), hjust = label_hjust),
+    size = 3.5, family = base_family, colour = chain_bars$colour, fontface = "bold"
+  )
+```
+
+
+
+This procedure identifies `r fmt(n_lookup_clusters)` spill sites (@fig-site-patterns). Most (`r share_sites(n_sites_by_years[['4']])`) are observed in all four years, while `r share_sites(n_sites_by_years[['3']])` are observed in three years and `r share_sites(n_sites_by_years[['2']])` in two. Spill figures within the returns are more often missing in 2021 and 2022, partly because EDM monitors were not installed at all spill sites until the end of 2023.^[The share of storm overflows in England fitted with an event duration monitor rose from 89% in 2021 to 96% in 2022, reaching 100% by the end of 2023 ([Environment Agency, 2024](https://www.gov.uk/government/news/environment-agency-publishes-storm-overflow-spill-data-for-2023); [The Rivers Trust, 2024](https://theriverstrust.org/about-us/news/2023s-sewage-deluge)).] The remaining `r fmt(n_sites_by_years[['1']])` spill sites (`r share_sites(n_sites_by_years[['1']])`) are observed in only one year, most often `r single_year_modal`. Some of these were reported only once, while others are the same overflow split across two spill sites because Stage 1 found no unique match. Stage 3 merges `r fmt(n_single_regrouped)` of them into larger groups.
+
+```{r}
+#| label: fig-site-patterns
+#| fig-cap: "Spill sites after Stage 2, by the years in which they are observed"
+#| fig-width: 9
+#| fig-height: 3.9
+
+pattern_rows <- site_patterns |>
+  mutate(y = rev(seq_len(n())) + cumsum(group != lag(group, default = first(group))) * -0.6)
+pattern_rows$y <- pattern_rows$y - min(pattern_rows$y) + 1
+pattern_dots <- pattern_rows |>
+  tidyr::crossing(x = 1:4) |>
+  mutate(observed = substr(pattern, x, x) != "-")
+pattern_spans <- pattern_dots |>
+  filter(observed) |>
+  group_by(pattern, y) |>
+  summarise(xmin = min(x), xmax = max(x), .groups = "drop")
+# Open circles only for gaps inside a spill site's span.
+pattern_gaps <- pattern_dots |>
+  filter(!observed) |>
+  inner_join(pattern_spans, by = c("pattern", "y")) |>
+  filter(x > xmin, x < xmax)
+group_labels <- pattern_rows |>
+  group_by(group) |>
+  summarise(ymin = min(y), ymax = max(y), y = (ymin + ymax) / 2, n = sum(n), .groups = "drop") |>
+  mutate(share = n / sum(n))
+
+bar_x0 <- 5.0
+bar_w <- 3.1
+pattern_rows <- mutate(pattern_rows, bar_len = bar_w * n / max(n))
+site_col <- pal[["events"]]
+
+ggplot() +
+  coord_cartesian(xlim = c(-1.6, 11.9), ylim = c(0.4, max(pattern_rows$y) + 1.45), expand = FALSE) +
+  geom_text(
+    data = group_labels, aes(x = 0.45, y = y, label = group), hjust = 1,
+    size = 3.4, family = base_family, colour = pal[["ink"]]
+  ) +
+  geom_segment(
+    data = pattern_spans, aes(x = xmin - 0.12, xend = xmax + 0.12, y = y, yend = y),
+    colour = alpha(site_col, 0.3), linewidth = 4.5, lineend = "round"
+  ) +
+  geom_point(
+    data = filter(pattern_dots, observed), aes(x = x, y = y),
+    size = 2.1, colour = site_col
+  ) +
+  geom_point(
+    data = pattern_gaps, aes(x = x, y = y), size = 2.1, shape = 21,
+    fill = pal[["paper"]], colour = site_col, stroke = 0.7
+  ) +
+  geom_rect(
+    data = pattern_rows, aes(xmin = bar_x0, xmax = bar_x0 + bar_len, ymin = y - 0.32, ymax = y + 0.32),
+    fill = pal[["muted"]]
+  ) +
+  geom_text(
+    data = pattern_rows, aes(x = bar_x0 + bar_len + 0.08, y = y, label = fmt(n)),
+    hjust = 0, size = 3.2, family = base_family, colour = pal[["ink"]]
+  ) +
+  txt(1:4, max(pattern_rows$y) + 1.05, 2021:2024, size = 3.5, fontface = "bold") +
+  txt(bar_x0, max(pattern_rows$y) + 1.05, "Spill sites", size = 3.5, fontface = "bold", hjust = 0) +
+  # Category totals: a bracket spanning each group's rows, with the share of all spill sites.
+  geom_segment(
+    data = group_labels, aes(x = 9.45, xend = 9.45, y = ymin - 0.3, yend = ymax + 0.3),
+    colour = pal[["muted"]], linewidth = 0.6
+  ) +
+  geom_text(
+    data = group_labels, aes(x = 9.6, y = y, label = paste0(fmt(n), " (", pct(share), ")")),
+    hjust = 0, size = 3.2, family = base_family, colour = pal[["ink"]]
+  ) +
+  txt(9.45, max(pattern_rows$y) + 1.05, "Total (share)", size = 3.5, fontface = "bold", hjust = 0) +
+  theme_schematic()
+```
+
+#### Stage 3: Collapse spill sites into groups {.unnumbered}
+
+1.  Tracks are collapsed into one **spill site** when they belong to the same company, carry the same normalised name, and are corroborated either by an identical permit reference or by grid references within 250 m of each other. A shared name alone is not enough, and a shared permit alone is not enough. This gives `r fmt(n_site_groups)` sites, each with a row in every year and an explicit status for the years in which it filed nothing.
+
+**What we rejected.** Treating every return row as its own site. The years before 2023 would become uninterpretable, because the same overflow would appear as a different site each year, and the matching step would have to choose between near-identical outlets with no basis for the choice.
+
+**What it costs.** Some spatial precision. Of the `r fmt(n_site_groups)` sites, `r fmt(outlets_per_group$n[1])` are a single outlet, `r fmt(outlets_per_group$n[2])` are a pair, and `r fmt(sum(outlets_per_group$n[3:4]))` contain three or more. A multi-outlet site is assigned one representative location.
+
+
+
+## Matching EDM Event Records to Spill Sites {#sec-matching-events-sites}
+
+The second step links each discharge event in the EDM event-level records (EA, via EIR) to a spill site in the panel constructed in @sec-sites. This assigns each matched discharge event a location and a consistent spill-site identifier, allowing us to measure spill exposure over time.
+
+### Problem {.unnumbered}
+
+As with the EDM annual returns, the EDM event-level records contain unique spill-site identifiers only from 2023 onward. For 2021 and 2022, discharge events must instead be matched to spill sites using identifying fields shared by the two datasets: water company, site name, permit reference, and activity code.
+
+We match discharge events to spill sites **within the same year**, simplifying the process by removing the need to account for changes in identifying information across years (the first challenge described in @sec-sites).
+
+However, the second challenge remains: when multiple spill sites share the identifying information recorded for a discharge event, the event cannot be uniquely assigned to a site. This problem is more common than in the EDM annual returns because the EDM event-level records contain fewer identifying fields. In particular, they lack grid references, and only about 4% of discharge events in 2021 and 2022 have a permit reference. Matching in these years therefore relies primarily on site names.
+
+### Approach {.unnumbered}
+
+Each event record carries some subset of six identifying fields: the unique site ID (from 2023), two permit references, an activity reference, and two site names, one assigned by the Environment Agency and one by the water company. No field is present on every record, and none is unique on its own. A wrongly attached event adds spill hours to the wrong neighbourhood, so the matching puts precision before coverage.
+
+**The rule** is a ladder of exact keys, walked within each company and year (@fig-ladder). A record is attached on the first rung whose key resolves to exactly one site.
+
+1.  The unique site ID.
+2.  The permit reference, combined with the activity reference where the permit alone is shared.
+3.  The Environment Agency site name.
+4.  The water-company site name.
+5.  If a name is shared by several sites, the record group is attached to the candidate whose annual hours in the returns agree with the summed event hours, within a 25% relative error and with the runner-up at least twice as far off.
+6.  Otherwise the record stays unmatched, with a reason code. Five cases that the ladder could not settle were resolved by hand in a documented overrides file, four of them backed by an exact match on hours.
+
+**What we rejected.**
+
+- Fuzzy name matching. A near-miss between two overflows at the same works is not evidence that they are the same outlet, and the site definition already absorbs genuine spelling drift.
+- Picking, among several candidate sites, the one with the most reported spills. This selects on the outcome: ambiguous events go to the busiest site and inflate its exposure.
+
+**The result.**
+
+- `r fmt(n_matched)` of `r fmt(n_events)` events are attached, or `r pct(n_matched / n_events, 2)`.
+- `r fmt(n_unmatched)` events are unmatched. `r fmt(ladder$events[7])` carry no usable key at all, and `r fmt(ladder$events[8])` share a name with several sites whose hours do not separate them. Every unmatched record and every near-miss is listed in its own output file.
+- The match rate is 99.3% in 2021, 94.1% in 2022, and above 99.9% in 2023 and 2024, the two years with a stable identifier.
+
+```{r}
+#| label: fig-ladder
+#| fig-cap: "The matching ladder, with the number of event records attached at each rung. The first exact rung whose key resolves to one site wins. Two rungs do nearly all the work: the unique site ID where it exists, and the Environment Agency site name before 2023."
+#| fig-width: 9
+#| fig-height: 4.0
+lad <- ladder |>
+  mutate(
+    rung = factor(rung, levels = rev(rung)),
+    tier = factor(tier, levels = c("Exact key", "Tie-break", "Manual", "Unmatched")),
+    lab = paste0(fmt(events), "  (", formatC(100 * events / n_events, format = "f", digits = 2), "%)")
+  )
+tier_cols <- c("Exact key" = pal[["events"]], "Tie-break" = pal[["returns"]], "Manual" = pal[["muted"]], "Unmatched" = pal[["absent"]])
+ggplot(lad, aes(x = events, y = rung, fill = tier)) +
+  geom_col(width = 0.72) +
+  geom_text(aes(label = lab), hjust = -0.08, size = 3.0, family = base_family, colour = pal[["ink"]]) +
+  annotate("segment", x = 0, xend = 3.9e6, y = 4.5, yend = 4.5, colour = pal[["rule"]], linewidth = 0.5, linetype = "22") +
+  scale_x_continuous(
+    labels = label_number(scale = 1e-6, suffix = " M"), limits = c(0, 4.9e6),
+    expand = expansion(mult = c(0, 0.02)), breaks = seq(0, 4e6, 1e6)
+  ) +
+  scale_fill_manual(values = tier_cols) +
+  labs(
+    title = paste0(fmt(n_events), " event records, 2021 to 2024"),
+    subtitle = paste0(pct(n_matched / n_events, 2), " attached to a spill site. Dashed line separates matched from unmatched."),
+    x = "Event records", y = NULL
+  ) +
+  theme_report() +
+  theme(panel.grid.major.y = element_blank(), axis.text.y = element_text(size = 9.5))
+```
+
+## When a zero is believed {#sec-zeros}
+
+Once events are attached, a site with no events in a window looks exactly like a site with zero spills. The annual returns settle which it is.
+
+**The rule.** A site-year is **verified** if its return reports zero spills, or if it reports spills and at least one event was matched to the site in that year. Every other site-year is **unknown**. There are three unknown cases.
+
+1.  No return was filed for the site that year.
+2.  A return was filed, but its spill count and hours are NA.
+3.  The return reports spills, but no event was matched to the site. This case catches events that are missing from the event records or were filed under identifiers the ladder could not resolve. A naive rule would read it as a zero.
+
+A property's exposure is a number only if every site within the radius is verified in every year the window touches. A single unknown site-year makes the property's exposure unknown (@fig-verified).
+
+**What we rejected.**
+
+- Filling silence with zero. The gaps are not random. They come from offline monitors, late or incomplete returns and changed identifiers, so zero-filling would record the least exposure exactly where reporting is worst, and would do so more often in the early years and for some companies.
+- Interpolating from the annual totals. This would bring back the timing problem that the event records exist to avoid.
+
+**The scale of it.**
+
+- `r fmt(site_years_verified)` of `r fmt(n_site_years)` site-years are verified, or `r pct(site_years_verified / n_site_years)`.
+- `r fmt(sg_verified_all)` of `r fmt(n_site_groups)` sites are verified in all four years.
+- The unknowns shrink quickly as monitoring was rolled out. NA returns fall from 1,811 in 2021 to 89 in 2024, and sites that report spills but match no events fall from 641 in 2022 to 2 in 2024.
+
+```{r}
+#| label: fig-verified
+#| fig-cap: "When silence is a zero. Left, four sites across the four years and the exposure the rule returns for a window covering all four. Only Site A, where every year is verified, gets a number. Right, the actual status of all site-years in the returns. Unknown site-years concentrate in the early years, before monitoring and reporting were complete."
+#| fig-subcap:
+#|   - "The rule on four example sites"
+#|   - "All site-years, by status"
+#| layout-ncol: 2
+#| fig-width: 5.4
+#| fig-height: 3.5
+ex <- tribble(
+  ~site, ~year, ~lab, ~status,
+  "Site A", 2021, "12", "Positive, events matched", "Site A", 2022, "0", "Reported zero",
+  "Site A", 2023, "41", "Positive, events matched", "Site A", 2024, "7", "Positive, events matched",
+  "Site B", 2021, "12", "Positive, events matched", "Site B", 2022, "no row", "No return filed",
+  "Site B", 2023, "41", "Positive, events matched", "Site B", 2024, "7", "Positive, events matched",
+  "Site C", 2021, "12", "Positive, events matched", "Site C", 2022, "NA", "Reported NA",
+  "Site C", 2023, "41", "Positive, events matched", "Site C", 2024, "7", "Positive, events matched",
+  "Site D", 2021, "12", "Positive, events matched", "Site D", 2022, "9", "Positive, events matched",
+  "Site D", 2023, "41*", "Positive, no events matched", "Site D", 2024, "7", "Positive, events matched"
+) |> mutate(
+  site = factor(site, levels = rev(c("Site A", "Site B", "Site C", "Site D"))),
+  status = factor(status, levels = status_levels)
+)
+outcome <- tibble(
+  site = factor(c("Site A", "Site B", "Site C", "Site D"), levels = levels(ex$site)),
+  lab = c("60 spills", "unknown", "unknown", "unknown"),
+  ok = c(TRUE, FALSE, FALSE, FALSE)
+)
+ggplot(ex, aes(x = year, y = site)) +
+  geom_tile(aes(fill = status), width = 0.92, height = 0.86, colour = "white", linewidth = 1) +
+  geom_text(aes(label = lab, colour = status == "Reported zero"), size = 3.2, family = base_family) +
+  geom_tile(
+    data = outcome, aes(x = 2025.4), fill = ifelse(outcome$ok, alpha(pal[["verified"]], 0.18), alpha(pal[["absent"]], 0.12)),
+    colour = ifelse(outcome$ok, pal[["verified"]], pal[["absent"]]), width = 1.3, height = 0.86, linewidth = 0.5
+  ) +
+  geom_text(
+    data = outcome, aes(x = 2025.4, label = lab), size = 3.1, family = base_family, fontface = "bold",
+    colour = ifelse(outcome$ok, pal[["verified"]], pal[["absent"]])
+  ) +
+  annotate("text", x = 2025.4, y = 4.78, label = "2021–24\nexposure", size = 2.8, family = base_family, colour = pal[["muted"]], lineheight = 0.9) +
+  scale_colour_manual(values = c(`TRUE` = pal[["ink"]], `FALSE` = "white"), guide = "none") +
+  scale_fill_manual(values = status_cols, drop = FALSE) +
+  scale_x_continuous(breaks = 2021:2024, limits = c(2020.5, 2026.1)) +
+  scale_y_discrete(expand = expansion(add = c(0.5, 1.0))) +
+  labs(
+    title = "Exposure is a number only if every year is verified",
+    subtitle = "* return reports 41 spills, but no event was matched to the site", x = NULL, y = NULL
+  ) +
+  theme_report() +
+  theme(panel.grid = element_blank(), legend.key.size = unit(9, "pt"), legend.text = element_text(size = 8.5)) +
+  guides(fill = guide_legend(nrow = 2))
+
+sby <- status_by_year |> mutate(status = factor(status, levels = rev(status_levels)))
+ggplot(sby, aes(x = factor(year), y = n, fill = status)) +
+  geom_col(width = 0.7) +
+  geom_text(
+    data = sby |> filter(status != "Positive, events matched", n >= 1000),
+    aes(label = fmt(n)), position = position_stack(vjust = 0.5), size = 2.6, family = base_family, colour = "white"
+  ) +
+  scale_fill_manual(values = status_cols, breaks = status_levels, drop = FALSE) +
+  scale_y_continuous(labels = label_comma(), expand = expansion(mult = c(0, 0.04))) +
+  labs(
+    title = paste0(fmt(n_site_years), " site-years, ", pct(site_years_verified / n_site_years), " verified"),
+    subtitle = "Verified = reported zero, or reported positive with events matched", x = NULL, y = "Site-years"
+  ) +
+  theme_report() +
+  theme(panel.grid.major.x = element_blank(), legend.key.size = unit(9, "pt"), legend.text = element_text(size = 8.5)) +
+  guides(fill = guide_legend(nrow = 2))
+```
+
+## What happens to unverified properties {#sec-dropped}
+
+**The rule.** A property with unknown exposure leaves the regression sample. Its exposure is never set to zero, never imputed from neighbours, and never replaced by the annual totals. Every exposure builder applies the same rule: sales and rentals, the fixed 2021 to 2024 window, and the window running from January 2021 to each transaction date that the hedonic regressions use.
+
+**What it costs.** @tbl-cost and @fig-cost describe the hedonic samples, which are the transactions with at least one site within the radius.
+
+- At 250 m, `r pct(1 - cost$share[cost$market == "Sales" & cost$radius == 250 & cost$reason == "Verified"])` of sales and `r pct(1 - cost$share[cost$market == "Rentals" & cost$radius == 250 & cost$reason == "Verified"])` of rentals are dropped. The share rises with the radius, because a wider circle contains more sites and therefore more chances that one of them has an unknown year.
+- The largest single reason is a return filed with NA metrics, which is the monitoring gap of 2021 and 2022.
+- Sites that report spills but match no events account for about 4% of transactions on their own.
+- Properties with two or more kinds of gap among their nearby sites are the group that grows fastest with the radius.
+
+**Who is dropped.** Not a random subset. The dropped properties sit near sites with incomplete early-year reporting. Those near a site that reported spills but matched no events had real discharges that the exposure measure cannot see, so keeping them at zero would attenuate any price effect. Whether dropping them biases the estimate depends on whether reporting gaps correlate with neighbourhood characteristics, which is why the pipeline keeps the reason flags for every dropped property.
+
+```{r}
+#| label: tbl-cost
+#| tbl-colwidths: [10, 9, 12, 10, 14, 12, 18, 15]
+#| tbl-cap: "Transactions with at least one spill site within the radius, prior-to-transaction datasets. 'Dropped' is the share with unknown exposure under the rule of @sec-zeros. The four reason columns are shares of all transactions in the row and sum to the dropped share. 'Spills, no events' means the return reports spills but no event was matched to the site."
+ct <- cost |>
+  select(market, radius, reason, share, total) |>
+  pivot_wider(names_from = reason, values_from = share) |>
+  mutate(Dropped = 1 - Verified) |>
+  transmute(
+    Market = market, `Radius` = paste(radius, "m"), `N` = fmt(total),
+    `Dropped` = pct(Dropped),
+    `Return NA` = pct(`Reported NA only`),
+    `No return` = pct(`No return filed only`),
+    `Spills, no events` = pct(`Positive, no events only`),
+    `Two or more` = pct(`Two or more gaps`)
+  )
+kable(ct, align = "llrrrrrr")
+```
+
+```{r}
+#| label: fig-cost
+#| fig-cap: "The same samples as a picture. The verified share falls as the radius widens. Properties are only ever dropped, never zero-filled."
+#| fig-width: 9
+#| fig-height: 3.3
+cst <- cost |> mutate(
+  reason = factor(reason, levels = rev(cost_levels)),
+  radius = factor(paste0(radius, " m"), levels = c("1000 m", "500 m", "250 m")),
+  market = factor(market, levels = c("Sales", "Rentals"))
+)
+ggplot(cst, aes(x = share, y = radius, fill = reason)) +
+  geom_col(width = 0.68) +
+  geom_text(
+    data = cst |> filter(share > 0.06), aes(label = pct(share, 0)),
+    position = position_stack(vjust = 0.5), size = 2.9, family = base_family, colour = "white"
+  ) +
+  facet_wrap(~market, ncol = 2) +
+  scale_fill_manual(values = cost_cols, breaks = cost_levels) +
+  scale_x_continuous(labels = label_percent(), breaks = c(0, 0.25, 0.5, 0.75, 1), expand = expansion(mult = c(0, 0.02))) +
+  labs(title = "Share of transactions kept and dropped, by radius", x = NULL, y = NULL) +
+  theme_report() +
+  theme(
+    panel.grid.major.y = element_blank(), legend.key.size = unit(9, "pt"),
+    panel.spacing.x = unit(2.2, "lines")
+  ) +
+  guides(fill = guide_legend(nrow = 1))
+```
+
+## What this buys us {.unnumbered}
+
+- Every zero in the exposure measure is a zero the water company confirmed.
+- Every positive is built from timestamped discharges attached to a site by an exact identifier or by a documented exception.
+- The price is a smaller sample, concentrated in the early years and at the widest radii, and a short list of exceptions that is written down rather than absorbed by a heuristic.
+
+::: {.callout-note appearance="simple"}
+## Terms and sources
+
+**Terms.** This note uses plain words. In the code, a **spill site-year** is an *Annual-Return Site*, a **spill site** is a *Canonical Spill Site* in the *Annual Return Lookup*, and a **spill site group** is a *Site Group*; a site-year's status is its *Annual Status* (`reported_positive`, `reported_zero`, `reported_na`, `absent`); the property-level NA of @sec-zeros comes from the *harmonised missing-evidence rule*.
+
+**Sources.** Event-level records: EA release under the Environmental Information Regulations 2004, request EIR2026/13204, internal review IR2026/16091, 3 June 2026, Open Government Licence. Match counts: `output/log/05_merge_individ_annual_location.log` (run of 2026-08-11). Site-year statuses and outlets: `site_group_crosswalk.parquet`. Sample shares: `house_site_spills` and `rental_site_spills`, aggregated to transactions within each radius on 2026-10-07; verified counts equal the known rows in `prior_to_sale` and `prior_to_rental`. Design records: `docs/plans/2026-07-04-002`, `2026-07-05-001`, `2026-08-17-002`; `docs/reports/2026-08-19-001`.
+:::
