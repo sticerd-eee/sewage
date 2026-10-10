@@ -290,4 +290,5 @@ dependencies = [
     "nanoparquet",
     "ggmapinset",
     "pdftools",
+    "languageserver",
 ]
