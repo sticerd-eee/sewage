@@ -253,41 +253,41 @@ fig_ladder
 
 
 
-## When a zero is believed {#sec-zeros}
+## Distinguishing Zero Spills from Missing Data {#sec-zeros}
 
-Once events are attached, a site with no events in a window looks exactly like a site with zero spills. The annual returns settle which it is.
+The third step uses the EDM annual returns to distinguish zero spills from missing data in the EDM event-level records. This determines whether spill exposure can be measured for properties near each spill site group.
 
-**The rule.** A site-year is **verified** if its return reports zero spills, or if it reports spills and at least one event was matched to the site in that year. Every other site-year is **unknown**. There are three unknown cases.
+### Problem {.unnumbered}
 
-1.  No return was filed for the site that year.
-2.  A return was filed, but its spill count and hours are NA.
-3.  The return reports spills, but no event was matched to the site. This case catches events that are missing from the event records or were filed under identifiers the ladder could not resolve. A naive rule would read it as a zero.
+When no discharge events are matched to a spill site group during an exposure window, there are two possible explanations (@fig-sources):
 
-A property's exposure is a number only if every site within the radius is verified in every year the window touches. A single unknown site-year makes the property's exposure unknown (@fig-verified).
+1. **Zero spills.** No spills occurred during the exposure window.
+2. **Missing data.** Spills may have occurred, but the discharge events are either missing from the EDM event-level records or could not be matched to the spill site group (@sec-matching-events-sites).
 
-**What we rejected.**
+The EDM event-level records alone cannot distinguish between these cases. We therefore use the EDM annual returns to determine when the absence of matched discharge events can be treated as zero spills.
 
-- Filling silence with zero. The gaps are not random. They come from offline monitors, late or incomplete returns and changed identifiers, so zero-filling would record the least exposure exactly where reporting is worst, and would do so more often in the early years and for some companies.
-- Interpolating from the annual totals. This would bring back the timing problem that the event records exist to avoid.
+### Approach {.unnumbered}
 
-**The scale of it.**
+Using the EDM annual returns and the matching results from @sec-matching-events-sites, we classify a **spill site group-year** as **non-missing** if either of the following conditions holds:
 
-- `r n$site_years_verified` of `r n$site_years` site-years are verified, or `r n$share_site_years_verified`.
-- `r n$sites_verified_all` of `r n$site_groups` sites are verified in all four years.
-- The unknowns shrink quickly as monitoring was rolled out. NA returns fall from 1,811 in 2021 to 89 in 2024, and sites that report spills but match no events fall from 641 in 2022 to 2 in 2024.
+1. **The EDM annual returns report zero spills.** We set spill exposure from that group-year to zero.
+2. **The EDM annual returns report spills, and discharge events are matched to the group in that year.** We measure spill exposure from the matched discharge events. Exposure windows with no matched discharge events are treated as zero spills.
+
+Otherwise, we treat the spill site group-year as **missing**. This occurs when the EDM annual returns contain no spill figures for the group, or when they report spills but no discharge events are matched to the group in that year. In both cases, the absence of matched discharge events cannot reliably be interpreted as zero spills.
+
+@fig-verified summarises the classification of spill site group-years by year. The share classified as non-missing increases from `r pct(status_non_missing_share[["2021"]])` in 2021 to `r pct(status_non_missing_share[["2024"]])` in 2024, primarily reflecting a decline in missing spill figures in the EDM annual returns. In 2021 and 2022, most spill sites with missing spill figures were recorded as awaiting EDM installation.
 
 ```{r}
 #| label: fig-verified
-#| fig-cap: "When silence is a zero. Left, four sites across the four years and the exposure the rule returns for a window covering all four. Only Site A, where every year is verified, gets a number. Right, the actual status of all site-years in the returns. Unknown site-years concentrate in the early years, before monitoring and reporting were complete."
-#| fig-subcap:
-#|   - "The rule on four example sites"
-#|   - "All site-years, by status"
-#| layout-ncol: 2
-#| fig-width: 5.4
-#| fig-height: 3.5
-fig_verified$rule
+#| fig-cap: "Spill site group-years, by reporting and matching status"
+#| fig-width: 9
+#| fig-height: 3.8
 fig_verified$status
 ```
+
+::: {style="font-size: 85%;"}
+*Notes:* Each bar shows the `r fmt(status_group_count)` spill site groups in that year. Segment labels show group counts where space permits. The percentage beside each bar is the share classified as non-missing: the annual returns report zero spills, or both the annual returns and the matched event-level records report spills. All other group-years are classified as missing.
+:::
 
 ## What happens to unverified properties {#sec-dropped}
 

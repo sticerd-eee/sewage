@@ -1,8 +1,8 @@
 # Objects for docs/reports/2026-10-07-001-spill-data-decisions-report.qmd.
 # The report sources this file once and prints the figures and tables it
 # defines; each object is named after its chunk label. Inline numbers in the
-# prose come from the list `n` at the end. Every count is hard-coded from the
-# source named in its comment.
+# prose come from the list `n` at the end. Most counts are recorded snapshots from the
+# source named in their comments; Section 3 reads the current group crosswalk.
 
 suppressPackageStartupMessages({
   library(ggplot2)
@@ -177,17 +177,30 @@ n_matched_group <- sum(event_matches$events[event_matches$outcome == "group"])
 n_unmatched_by_reason <- tapply(event_unmatched$events, event_unmatched$reason, sum)
 n_unmatched_2022 <- sum(event_unmatched$events[event_unmatched$year == 2022])
 
-status_by_year <- tribble(
-  ~year, ~status, ~n,
-  2021, "Positive, events matched", 10012 - 175, 2021, "Positive, no events matched", 175,
-  2021, "Reported zero", 1563, 2021, "Reported NA", 1811, 2021, "No return filed", 604,
-  2022, "Positive, events matched", 10151 - 641, 2022, "Positive, no events matched", 641,
-  2022, "Reported zero", 2074, 2022, "Reported NA", 1331, 2022, "No return filed", 434,
-  2023, "Positive, events matched", 11281 - 14, 2023, "Positive, no events matched", 14,
-  2023, "Reported zero", 1737, 2023, "Reported NA", 433, 2023, "No return filed", 539,
-  2024, "Positive, events matched", 11549 - 2, 2024, "Positive, no events matched", 2,
-  2024, "Reported zero", 1617, 2024, "Reported NA", 89, 2024, "No return filed", 735
-)
+# Section 3: derive reporting and matching status from the current crosswalk.
+status_crosswalk <- arrow::read_parquet(here::here(
+  "data", "processed", "matched_events_annual_data", "site_group_crosswalk.parquet"
+)) |>
+  filter(year %in% 2021:2024) |>
+  mutate(
+    status = case_when(
+      annual_status == "reported_positive" & coalesce(matched_event_count, 0L) > 0L ~
+        "Positive, events matched",
+      annual_status == "reported_positive" ~ "Positive, no events matched",
+      annual_status == "reported_zero" ~ "Reported zero",
+      annual_status == "reported_na" ~ "Reported NA",
+      annual_status == "absent" ~ "No return filed"
+    ),
+    non_missing = status %in% c("Positive, events matched", "Reported zero")
+  )
+stopifnot(!anyNA(status_crosswalk$status))
+status_by_year <- status_crosswalk |> count(year, status)
+status_summary <- status_crosswalk |>
+  group_by(year) |>
+  summarise(groups = n(), non_missing_share = mean(non_missing), .groups = "drop")
+status_group_count <- n_distinct(status_crosswalk$site_id)
+stopifnot(all(status_summary$groups == status_group_count))
+status_non_missing_share <- setNames(status_summary$non_missing_share, status_summary$year)
 status_levels <- c(
   "Positive, events matched", "Reported zero", "Reported NA",
   "No return filed", "Positive, no events matched"
@@ -195,8 +208,12 @@ status_levels <- c(
 status_cols <- c(pal[["verified"]], pal[["zero"]], pal[["na"]], pal[["absent"]], pal[["pos_noev"]])
 names(status_cols) <- status_levels
 
-sg_verified_all <- 10669
-site_years_verified <- 49152
+sg_verified_all <- status_crosswalk |>
+  group_by(site_id) |>
+  summarise(non_missing_all = n_distinct(year) == 4L & all(non_missing), .groups = "drop") |>
+  summarise(total = sum(non_missing_all)) |>
+  pull(total)
+site_years_verified <- sum(status_crosswalk$non_missing)
 
 outlets_per_group <- tribble(
   ~outlets, ~n,
@@ -814,66 +831,58 @@ fig_ladder <- ggplot() +
   theme_schematic()
 
 # --- fig-verified -------------------------------------------------------------
-ex <- tribble(
-  ~site, ~year, ~lab, ~status,
-  "Site A", 2021, "12", "Positive, events matched", "Site A", 2022, "0", "Reported zero",
-  "Site A", 2023, "41", "Positive, events matched", "Site A", 2024, "7", "Positive, events matched",
-  "Site B", 2021, "12", "Positive, events matched", "Site B", 2022, "no row", "No return filed",
-  "Site B", 2023, "41", "Positive, events matched", "Site B", 2024, "7", "Positive, events matched",
-  "Site C", 2021, "12", "Positive, events matched", "Site C", 2022, "NA", "Reported NA",
-  "Site C", 2023, "41", "Positive, events matched", "Site C", 2024, "7", "Positive, events matched",
-  "Site D", 2021, "12", "Positive, events matched", "Site D", 2022, "9", "Positive, events matched",
-  "Site D", 2023, "41*", "Positive, no events matched", "Site D", 2024, "7", "Positive, events matched"
-) |> mutate(
-  site = factor(site, levels = rev(c("Site A", "Site B", "Site C", "Site D"))),
-  status = factor(status, levels = status_levels)
-)
-outcome <- tibble(
-  site = factor(c("Site A", "Site B", "Site C", "Site D"), levels = levels(ex$site)),
-  lab = c("60 spills", "unknown", "unknown", "unknown"),
-  ok = c(TRUE, FALSE, FALSE, FALSE)
+status_plot <- status_by_year |>
+  mutate(status = factor(status, levels = status_levels)) |>
+  arrange(year, status) |>
+  group_by(year) |>
+  mutate(
+    xmax = cumsum(n),
+    xmin = xmax - n,
+    y = 2025 - year,
+    non_missing = sum(n[status %in% status_levels[1:2]]) / sum(n)
+  ) |>
+  ungroup()
+status_key <- tibble(
+  status = status_levels,
+  x = c(0, 7200, 0, 7200, 0),
+  y = c(-0.15, -0.15, -0.55, -0.55, -0.95),
+  lab = c(
+    "Spills reported; discharge events matched", "Zero spills reported",
+    "Spill figures missing", "No annual return available",
+    "Spills reported; no discharge events matched"
+  )
 )
 fig_verified <- list()
-fig_verified$rule <- ggplot(ex, aes(x = year, y = site)) +
-  geom_tile(aes(fill = status), width = 0.92, height = 0.86, colour = "white", linewidth = 1) +
-  geom_text(aes(label = lab, colour = status == "Reported zero"), size = 3.2, family = base_family) +
-  geom_tile(
-    data = outcome, aes(x = 2025.4), fill = ifelse(outcome$ok, alpha(pal[["verified"]], 0.18), alpha(pal[["absent"]], 0.12)),
-    colour = ifelse(outcome$ok, pal[["verified"]], pal[["absent"]]), width = 1.3, height = 0.86, linewidth = 0.5
+fig_verified$status <- ggplot() +
+  geom_rect(
+    data = status_plot,
+    aes(xmin = xmin, xmax = xmax, ymin = y - 0.3, ymax = y + 0.3, fill = status),
+    colour = pal[["paper"]], linewidth = 0.4
   ) +
   geom_text(
-    data = outcome, aes(x = 2025.4, label = lab), size = 3.1, family = base_family, fontface = "bold",
-    colour = ifelse(outcome$ok, pal[["verified"]], pal[["absent"]])
+    data = filter(status_plot, n >= 1000),
+    aes(x = (xmin + xmax) / 2, y = y, label = fmt(n), colour = status == "Reported zero"),
+    family = base_family, size = 3.2
   ) +
-  annotate("text", x = 2025.4, y = 4.78, label = "2021–24\nexposure", size = 2.8, family = base_family, colour = pal[["muted"]], lineheight = 0.9) +
-  scale_colour_manual(values = c(`TRUE` = pal[["ink"]], `FALSE` = "white"), guide = "none") +
-  scale_fill_manual(values = status_cols, drop = FALSE) +
-  scale_x_continuous(breaks = 2021:2024, limits = c(2020.5, 2026.1)) +
-  scale_y_discrete(expand = expansion(add = c(0.5, 1.0))) +
-  labs(
-    title = "Exposure is a number only if every year is verified",
-    subtitle = "* return reports 41 spills, but no event was matched to the site", x = NULL, y = NULL
-  ) +
-  theme_report() +
-  theme(panel.grid = element_blank(), legend.key.size = unit(9, "pt"), legend.text = element_text(size = 8.5)) +
-  guides(fill = guide_legend(nrow = 2))
-
-sby <- status_by_year |> mutate(status = factor(status, levels = rev(status_levels)))
-fig_verified$status <- ggplot(sby, aes(x = factor(year), y = n, fill = status)) +
-  geom_col(width = 0.7) +
   geom_text(
-    data = sby |> filter(status != "Positive, events matched", n >= 1000),
-    aes(label = fmt(n)), position = position_stack(vjust = 0.5), size = 2.6, family = base_family, colour = "white"
+    data = distinct(status_plot, year, y, non_missing),
+    aes(x = -200, y = y, label = year), hjust = 1,
+    family = base_family, size = 3.5, fontface = "bold", colour = pal[["ink"]]
   ) +
-  scale_fill_manual(values = status_cols, breaks = status_levels, drop = FALSE) +
-  scale_y_continuous(labels = label_comma(), expand = expansion(mult = c(0, 0.04))) +
-  labs(
-    title = paste0(fmt(n_site_years), " site-years, ", pct(site_years_verified / n_site_years), " verified"),
-    subtitle = "Verified = reported zero, or reported positive with events matched", x = NULL, y = "Site-years"
+  geom_text(
+    data = distinct(status_plot, year, y, non_missing),
+    aes(x = status_group_count + 200, y = y, label = paste0(pct(non_missing), " non-missing")),
+    hjust = 0, family = base_family, size = 3.2, colour = pal[["ink"]]
   ) +
-  theme_report() +
-  theme(panel.grid.major.x = element_blank(), legend.key.size = unit(9, "pt"), legend.text = element_text(size = 8.5)) +
-  guides(fill = guide_legend(nrow = 2))
+  geom_tile(data = status_key, aes(x = x + 150, y = y, fill = status), width = 300, height = 0.2) +
+  geom_text(
+    data = status_key, aes(x = x + 450, y = y, label = lab), hjust = 0,
+    family = base_family, size = 3.0, colour = pal[["ink"]]
+  ) +
+  scale_fill_manual(values = status_cols, guide = "none") +
+  scale_colour_manual(values = c(`TRUE` = pal[["ink"]], `FALSE` = pal[["paper"]]), guide = "none") +
+  coord_cartesian(xlim = c(-1200, 17900), ylim = c(-1.2, 4.5), expand = FALSE) +
+  theme_schematic()
 
 # --- tbl-cost -----------------------------------------------------------------
 ct <- cost |>
