@@ -907,43 +907,64 @@ fig_verified <- list(
   )
 )
 
-# --- tbl-cost -----------------------------------------------------------------
-ct <- cost |>
-  select(market, radius, reason, share, total) |>
-  pivot_wider(names_from = reason, values_from = share) |>
-  mutate(Dropped = 1 - Verified) |>
-  transmute(
-    Market = market, `Radius` = paste(radius, "m"), `N` = fmt(total),
-    `Dropped` = pct(Dropped),
-    `Return NA` = pct(`Reported NA only`),
-    `No return` = pct(`No return filed only`),
-    `Spills, no events` = pct(`Positive, no events only`),
-    `Two or more` = pct(`Two or more gaps`)
-  )
-tbl_cost <- kable(ct, align = "llrrrrrr")
-
 # --- fig-cost -----------------------------------------------------------------
-cst <- cost |> mutate(
-  reason = factor(reason, levels = rev(cost_levels)),
-  radius = factor(paste0(radius, " m"), levels = c("1000 m", "500 m", "250 m")),
-  market = factor(market, levels = c("Sales", "Rentals"))
+# Reuse Figure 6's missing-data legend verbatim and the report's status colours.
+cost_legend <- c(
+  "Verified" = "Non-missing spill exposure",
+  "Reported NA only" = missing_legend[["Reported NA"]],
+  "No return filed only" = missing_legend[["No return filed"]],
+  "Positive, no events only" = missing_legend[["Positive, no events matched"]],
+  "Two or more gaps" = "Multiple missing-data reasons"
 )
-fig_cost <- ggplot(cst, aes(x = share, y = radius, fill = reason)) +
-  geom_col(width = 0.68) +
-  geom_text(
-    data = cst |> filter(share > 0.06), aes(label = pct(share, 0)),
-    position = position_stack(vjust = 0.5), size = 2.9, family = base_family, colour = "white"
-  ) +
-  facet_wrap(~market, ncol = 2) +
-  scale_fill_manual(values = cost_cols, breaks = cost_levels) +
-  scale_x_continuous(labels = label_percent(), breaks = c(0, 0.25, 0.5, 0.75, 1), expand = expansion(mult = c(0, 0.02))) +
-  labs(title = "Share of transactions kept and dropped, by radius", x = NULL, y = NULL) +
-  theme_report() +
-  theme(
-    panel.grid.major.y = element_blank(), legend.key.size = unit(9, "pt"),
-    panel.spacing.x = unit(2.2, "lines")
-  ) +
-  guides(fill = guide_legend(nrow = 1))
+cst <- cost |>
+  mutate(reason = factor(reason, levels = cost_levels)) |>
+  arrange(market, radius, reason) |>
+  group_by(market, radius) |>
+  mutate(xmax = cumsum(share), xmin = xmax - share) |>
+  ungroup() |>
+  mutate(
+    offset = if_else(market == "Sales", 0, 1.62),
+    y = match(radius, c(1000, 500, 250)),
+    xmin = xmin + offset, xmax = xmax + offset
+  )
+cost_totals <- cst |>
+  filter(reason == "Verified") |>
+  mutate(excluded = pct(1 - share))
+cost_key <- tibble(
+  reason = cost_levels,
+  x = c(0, 0, 0, 1.62, 1.62),
+  y = c(-0.15, -0.7, -1.25, -0.3, -1.1),
+  lab = unname(cost_legend[cost_levels])
+)
+cost_headers <- tibble(market = c("Sales", "Rentals"), offset = c(0, 1.62))
+fig_cost <- ggplot(cst) +
+  geom_rect(aes(xmin = xmin, xmax = xmax, ymin = y - 0.3,
+    ymax = y + 0.3, fill = reason),
+    colour = pal[["paper"]], linewidth = 0.4) +
+  geom_text(data = filter(cst, share >= 0.10),
+    aes(x = (xmin + xmax) / 2, y = y, label = pct(share, 0)),
+    size = 3.2, family = base_family, colour = pal[["paper"]]) +
+  geom_text(data = cost_totals,
+    aes(x = offset - 0.035, y = y, label = paste(fmt(radius), "m")),
+    hjust = 1, size = 3.5, fontface = "bold", family = base_family,
+    colour = pal[["ink"]]) +
+  geom_text(data = cost_totals,
+    aes(x = offset + 1.04, y = y, label = excluded),
+    hjust = 0, size = 3.2, family = base_family, colour = pal[["ink"]]) +
+  geom_text(data = cost_headers, aes(x = offset, y = 3.85, label = market),
+    hjust = 0, size = 3.8, fontface = "bold", family = base_family,
+    colour = pal[["ink"]]) +
+  geom_text(data = cost_headers, aes(x = offset + 1.04, y = 3.5),
+    label = "Excluded", hjust = 0, size = 3.1, family = base_family,
+    colour = pal[["muted"]]) +
+  geom_tile(data = cost_key, aes(x = x + 0.015, y = y, fill = reason),
+    width = 0.03, height = 0.2) +
+  geom_text(data = cost_key, aes(x = x + 0.055, y = y, label = lab),
+    hjust = 0, size = 3.1, lineheight = 0.95,
+    family = base_family, colour = pal[["ink"]]) +
+  scale_fill_manual(values = cost_cols, guide = "none") +
+  coord_cartesian(xlim = c(-0.29, 3.18), ylim = c(-1.8, 4.2), expand = FALSE) +
+  theme_schematic()
 
 # --- Inline numbers -----------------------------------------------------------
 # Ready-formatted strings for the prose, in the order they appear.

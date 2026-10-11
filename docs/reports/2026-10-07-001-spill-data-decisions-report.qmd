@@ -290,44 +290,34 @@ fig_verified$status
 fig_verified$missing
 ```
 
-## What happens to unverified properties {#sec-dropped}
+## Aggregating Spill Exposure to Properties {#sec-dropped}
 
-**The rule.** A property with unknown exposure leaves the regression sample. Its exposure is never set to zero, never imputed from neighbours, and never replaced by the annual totals. Every exposure builder applies the same rule: sales and rentals, the fixed 2021 to 2024 window, and the window running from January 2021 to each transaction date that the hedonic regressions use.
+The fourth step aggregates spill hours and spill counts across nearby spill site groups to measure property-level spill exposure.
 
-**What it costs.** @tbl-cost and @fig-cost describe the hedonic samples, which are the transactions with at least one site within the radius.
+### Approach {.unnumbered}
 
-- At 250 m, `r n$drop_sales_250` of sales and `r n$drop_rentals_250` of rentals are dropped. The share rises with the radius, because a wider circle contains more sites and therefore more chances that one of them has an unknown year.
-- The largest single reason is a return filed with NA metrics, which is the monitoring gap of 2021 and 2022.
-- Sites that report spills but match no events account for about 4% of transactions on their own.
-- Properties with two or more kinds of gap among their nearby sites are the group that grows fastest with the radius.
+For both sales and rentals, we measure spill exposure within 250, 500 and 1,000 m over the period from January 2021 to each transaction date.
 
-**Who is dropped.** Not a random subset. The dropped properties sit near sites with incomplete early-year reporting. Those near a site that reported spills but matched no events had real discharges that the exposure measure cannot see, so keeping them at zero would attenuate any price effect. Whether dropping them biases the estimate depends on whether reporting gaps correlate with neighbourhood characteristics, which is why the pipeline keeps the reason flags for every dropped property.
+We apply the following procedure separately to each transaction and radius:
 
-```{r}
-#| label: tbl-cost
-#| tbl-colwidths: [10, 9, 12, 10, 14, 12, 18, 15]
-#| tbl-cap: "Transactions with at least one spill site within the radius, prior-to-transaction datasets. 'Dropped' is the share with unknown exposure under the rule of @sec-zeros. The four reason columns are shares of all transactions in the row and sum to the dropped share. 'Spills, no events' means the return reports spills but no event was matched to the site."
-tbl_cost
-```
+1. **Identify nearby spill site groups.** We select all spill site groups whose assigned location lies within the radius of the property, using the group locations defined in @sec-sites.
+2. **Check data availability.** For each nearby spill site group, we check every spill site group-year covered by the exposure window. If any is classified as missing under @sec-zeros, we treat the transaction's spill exposure at that radius as missing.
+3. **Aggregate spills.** Otherwise, we sum spill hours and spill counts across the nearby groups during the exposure window. Within these non-missing group-years, periods with no matched discharge events are treated as zero spills, as described in @sec-zeros.
+
+Transactions with missing exposure are excluded from regressions using that radius.
+
+@fig-cost shows the share of transactions excluded from the hedonic regressions because of missing spill exposure. At each radius, this share is calculated among transactions with at least one spill site group within that radius. At 250 m, `r n$drop_sales_250` of sales and `r n$drop_rentals_250` of rentals are excluded. These shares rise with the radius because including more spill site groups increases the likelihood that at least one spill site group-year in the exposure window is missing.
+
+Of the missing-data cases described in @sec-zeros, missing spill figures in the EDM annual returns are the most common single reason for exclusion. These gaps primarily reflect incomplete monitoring coverage in 2021 and 2022.
 
 ```{r}
 #| label: fig-cost
-#| fig-cap: "The same samples as a picture. The verified share falls as the radius widens. Properties are only ever dropped, never zero-filled."
+#| fig-cap: "Transactions with non-missing and missing spill exposure, by radius"
 #| fig-width: 9
-#| fig-height: 3.3
+#| fig-height: 4.5
 fig_cost
 ```
 
-## What this buys us {.unnumbered}
-
-- Every zero in the exposure measure is a zero the water company confirmed.
-- Every positive is built from timestamped discharges attached to a site by an exact identifier or by a documented exception.
-- The price is a smaller sample, concentrated in the early years and at the widest radii, and a short list of exceptions that is written down rather than absorbed by a heuristic.
-
-::: {.callout-note appearance="simple"}
-## Terms and sources
-
-**Terms.** This note uses plain words. In the code, a **spill site-year** is an *Annual-Return Site*, a **spill site** is a *Canonical Spill Site* in the *Annual Return Lookup*, and a **spill site group** is a *Site Group*; a site-year's status is its *Annual Status* (`reported_positive`, `reported_zero`, `reported_na`, `absent`); the property-level NA of @sec-zeros comes from the *harmonised missing-evidence rule*.
-
-**Sources.** Event-level records: EA release under the Environmental Information Regulations 2004, request EIR2026/13204, internal review IR2026/16091, 3 June 2026, Open Government Licence. Match counts: `output/log/05_merge_individ_annual_location.log` (run of 2026-08-11). Site-year statuses and outlets: `site_group_crosswalk.parquet`. Sample shares: `house_site_spills` and `rental_site_spills`, aggregated to transactions within each radius on 2026-10-07; verified counts equal the known rows in `prior_to_sale` and `prior_to_rental`. Design records: `docs/plans/2026-07-04-002`, `2026-07-05-001`, `2026-08-17-002`; `docs/reports/2026-08-19-001`.
+::: {style="font-size: 85%;"}
+*Notes:* The sample includes transactions with at least 30 days of potential exposure and is measured before exclusions for missing regression covariates.
 :::
