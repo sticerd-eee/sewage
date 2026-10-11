@@ -280,14 +280,15 @@ Otherwise, we treat the spill site group-year as **missing**. This occurs when t
 ```{r}
 #| label: fig-verified
 #| fig-cap: "Spill site group-years, by reporting and matching status"
-#| fig-width: 9
-#| fig-height: 3.8
+#| fig-subcap:
+#|   - "All spill site group-years"
+#|   - "Breakdown of missing spill site group-years"
+#| layout-ncol: 2
+#| fig-width: 5.4
+#| fig-height: 4.2
 fig_verified$status
+fig_verified$missing
 ```
-
-::: {style="font-size: 85%;"}
-*Notes:* Each bar shows the `r fmt(status_group_count)` spill site groups in that year. Segment labels show group counts where space permits. The percentage beside each bar is the share classified as non-missing: the annual returns report zero spills, or both the annual returns and the matched event-level records report spills. All other group-years are classified as missing.
-:::
 
 ## What happens to unverified properties {#sec-dropped}
 

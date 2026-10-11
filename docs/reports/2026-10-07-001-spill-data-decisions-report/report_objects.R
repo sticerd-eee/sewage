@@ -797,11 +797,11 @@ ladder_unmatched_lab <- ladder_unmatched |>
   left_join(distinct(ladder_outcomes, row, total), by = "row") |>
   mutate(lab = paste0(fmt(events), " (", pct(events / total, 2), if_else(row == "All years", " of all)", " of the year)")))
 ladder_key <- tibble(
-  x = c(0, 1.55, 4.55, zoom_x0, zoom_x0),
+  x = c(0, 2.75, 5.25, zoom_x0, zoom_x0),
   y = c(-0.3, -0.3, -0.3, -0.3, -0.7),
   key = c(names(outcome_cols), "no_field", "hours"),
   lab = c(
-    "Spill site group\ncontaining one spill site", "Site group with several spill sites", "Unmatched",
+    "Spill site group with\none spill site", "Spill site group with\nseveral spill sites", "Unmatched",
     "No identifying field matches any spill site-year",
     "Site name shared by several site groups whose\nspill hours do not single one out"
   )
@@ -831,58 +831,81 @@ fig_ladder <- ggplot() +
   theme_schematic()
 
 # --- fig-verified -------------------------------------------------------------
-status_plot <- status_by_year |>
-  mutate(status = factor(status, levels = status_levels)) |>
-  arrange(year, status) |>
-  group_by(year) |>
-  mutate(
-    xmax = cumsum(n),
-    xmin = xmax - n,
-    y = 2025 - year,
-    non_missing = sum(n[status %in% status_levels[1:2]]) / sum(n)
-  ) |>
-  ungroup()
-status_key <- tibble(
-  status = status_levels,
-  x = c(0, 7200, 0, 7200, 0),
-  y = c(-0.15, -0.15, -0.55, -0.55, -0.95),
-  lab = c(
-    "Spills reported; discharge events matched", "Zero spills reported",
-    "Spill figures missing", "No annual return available",
-    "Spills reported; no discharge events matched"
+status_overview <- status_crosswalk |>
+  mutate(category = case_when(
+    status == "Positive, events matched" ~ ">0 spills",
+    status == "Reported zero" ~ "0 spills",
+    TRUE ~ "NA"
+  )) |>
+  count(year, category) |>
+  mutate(category = factor(category, levels = c(">0 spills", "0 spills", "NA")))
+status_missing <- status_by_year |>
+  filter(!status %in% status_levels[1:2]) |>
+  mutate(category = factor(status, levels = status_levels[3:5]))
+missing_legend <- c(
+  "Reported NA" = "Spill figures are NA in EDM annual returns",
+  "No return filed" = "Site group absent from EDM annual returns",
+  "Positive, no events matched" = paste0(
+    "Spills reported in EDM annual returns, but no\n",
+    "matched EDM event-level records"
   )
 )
-fig_verified <- list()
-fig_verified$status <- ggplot() +
-  geom_rect(
-    data = status_plot,
-    aes(xmin = xmin, xmax = xmax, ymin = y - 0.3, ymax = y + 0.3, fill = status),
-    colour = pal[["paper"]], linewidth = 0.4
-  ) +
-  geom_text(
-    data = filter(status_plot, n >= 1000),
-    aes(x = (xmin + xmax) / 2, y = y, label = fmt(n), colour = status == "Reported zero"),
-    family = base_family, size = 3.2
-  ) +
-  geom_text(
-    data = distinct(status_plot, year, y, non_missing),
-    aes(x = -200, y = y, label = year), hjust = 1,
-    family = base_family, size = 3.5, fontface = "bold", colour = pal[["ink"]]
-  ) +
-  geom_text(
-    data = distinct(status_plot, year, y, non_missing),
-    aes(x = status_group_count + 200, y = y, label = paste0(pct(non_missing), " non-missing")),
-    hjust = 0, family = base_family, size = 3.2, colour = pal[["ink"]]
-  ) +
-  geom_tile(data = status_key, aes(x = x + 150, y = y, fill = status), width = 300, height = 0.2) +
-  geom_text(
-    data = status_key, aes(x = x + 450, y = y, label = lab), hjust = 0,
-    family = base_family, size = 3.0, colour = pal[["ink"]]
-  ) +
-  scale_fill_manual(values = status_cols, guide = "none") +
-  scale_colour_manual(values = c(`TRUE` = pal[["ink"]], `FALSE` = pal[["paper"]]), guide = "none") +
-  coord_cartesian(xlim = c(-1200, 17900), ylim = c(-1.2, 4.5), expand = FALSE) +
-  theme_schematic()
+
+# Match the schematic bars and directly placed legends used in Figure 5.
+# A common canvas keeps the year rows aligned despite different legend lengths.
+status_panel <- function(data, colours, labels, label_min, compact_legend = FALSE) {
+  data <- data |>
+    arrange(year, category) |>
+    group_by(year) |>
+    mutate(xmax = cumsum(n), xmin = xmax - n) |>
+    ungroup()
+  totals <- data |> group_by(year) |> summarise(total = sum(n), .groups = "drop")
+  max_total <- max(totals$total)
+  data <- data |> mutate(xmin = xmin / max_total, xmax = xmax / max_total)
+  key <- tibble(
+    category = levels(data$category),
+    x = if (compact_legend) c(0, 0.36, 0.70) else rep(0, 3),
+    y = if (compact_legend) rep(-0.15, 3) else c(-0.15, -0.65, -1.3),
+    lab = if (compact_legend) labels else vapply(labels, function(label) {
+      paste(strwrap(gsub("\n", " ", label), width = 46), collapse = "\n")
+    }, character(1))
+  )
+  ggplot(data) +
+    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 2025 - year - 0.3,
+      ymax = 2025 - year + 0.3, fill = category),
+      colour = pal[["paper"]], linewidth = 0.4) +
+    geom_text(
+      data = filter(data, n >= label_min),
+      aes(x = (xmin + xmax) / 2, y = 2025 - year, label = fmt(n),
+        colour = category == "0 spills"),
+      size = 3.2, family = base_family
+    ) +
+    geom_text(data = totals, aes(x = total / max_total + 0.025,
+      y = 2025 - year, label = fmt(total)),
+      hjust = 0, size = 3.2, family = base_family, colour = pal[["ink"]]) +
+    geom_text(data = totals, aes(x = -0.035, y = 2025 - year, label = year),
+      hjust = 1, size = 3.5, fontface = "bold", family = base_family, colour = pal[["ink"]]) +
+    geom_tile(data = key, aes(x = x + 0.015, y = y, fill = category),
+      width = 0.03, height = 0.2) +
+    geom_text(data = key, aes(x = x + 0.055, y = y, label = lab),
+      hjust = 0, size = 3.1, lineheight = 0.95,
+      family = base_family, colour = pal[["ink"]]) +
+    scale_fill_manual(values = colours, guide = "none") +
+    scale_colour_manual(values = c(`TRUE` = pal[["ink"]], `FALSE` = pal[["paper"]]), guide = "none") +
+    coord_cartesian(xlim = c(-0.16, 1.19), ylim = c(-1.9, 4.5), expand = FALSE) +
+    theme_schematic()
+}
+fig_verified <- list(
+  status = status_panel(
+    status_overview,
+    c(">0 spills" = pal[["returns"]], "0 spills" = pal[["zero"]], "NA" = pal[["na"]]),
+    c(">0 spills", "0 spills", "NA"), label_min = 700, compact_legend = TRUE
+  ),
+  missing = status_panel(
+    status_missing, status_cols[status_levels[3:5]], missing_legend,
+    label_min = 100
+  )
+)
 
 # --- tbl-cost -----------------------------------------------------------------
 ct <- cost |>
