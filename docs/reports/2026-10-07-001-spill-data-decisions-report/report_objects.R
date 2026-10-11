@@ -784,7 +784,7 @@ ladder_key <- tibble(
   y = c(-0.3, -0.3, -0.3, -0.3, -0.7),
   key = c(names(outcome_cols), "no_field", "hours"),
   lab = c(
-    "Single spill site", "Site group with several spill sites", "Unmatched",
+    "Spill site group\ncontaining one spill site", "Site group with several spill sites", "Unmatched",
     "No identifying field matches any spill site-year",
     "Site name shared by several site groups whose\nspill hours do not single one out"
   )

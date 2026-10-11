@@ -206,36 +206,41 @@ The grouping of spill sites comes at two costs:
 
 2. **Each spill site group is assigned a single location.** We assign each spill site group the most recent usable grid reference of its first-observed spill site (2024 for most groups) and measure all distances to properties from this location. The choice of spill site is arbitrary, and the grid references of other spill sites in the group are ignored.^[One potential improvement is to use the grid reference of the spill site with the highest spill count in the group.] Among groups containing multiple spill sites, `r n$share_multi_same_ngr` have identical grid references, and in `r n$share_multi_within_250` all spill sites lie within 250 m of one another.
 
-## Matching EDM Event Records to Spill Sites {#sec-matching-events-sites}
+## Matching EDM Event Records to Spill Site Groups {#sec-matching-events-sites}
 
-The second step links each discharge event in the EDM event-level records (EA, via EIR) to a spill site in the panel constructed in @sec-sites. This assigns each matched discharge event a location and a consistent spill-site identifier, allowing us to measure spill exposure over time.
+The second step matches discharge events in the EDM event-level records (EA, via EIR) to the spill site groups constructed in @sec-sites. This assigns each matched discharge event a location and a consistent spill site group identifier, allowing us to measure spill exposure over time.
 
 ### Problem {.unnumbered}
 
-The second step matches discharge events in the EDM event-level records (EA, via EIR) to the spill site groups defined in @sec-sites. This assigns each matched event the group’s location and links it to a group that is defined consistently across years, allowing us to measure spill exposure over time.
+As discussed in Stage 3 of @sec-sites, multiple spill sites can share identical identifying information, making it impossible to assign discharge events to individual spill sites in those cases. We therefore match discharge events to spill site groups instead. The challenge is to identify the corresponding group using the information available in the EDM event-level records.
 
-We match discharge events to spill sites **within the same year**, simplifying the process by removing the need to account for changes in identifying information across years (the first challenge described in @sec-sites).
-
-However, the second challenge remains: when multiple spill sites share the identifying information recorded for a discharge event, the event cannot be uniquely assigned to a site. This problem is more common than in the EDM annual returns because the EDM event-level records contain fewer identifying fields. In particular, they lack grid references, and only about 4% of discharge events in 2021 and 2022 have a permit reference. Matching in these years therefore relies primarily on site names.
+In 2023 and 2024, unique identifiers allow us to link discharge events directly to spill site-years in the EDM annual returns (EA), and hence to their spill site groups. In 2021 and 2022, these identifiers are absent, so matching relies primarily on site names within each water company. Permit references provide additional information but are available for only about 4% of discharge events in those years.
 
 ### Approach {.unnumbered}
 
-We match discharge events to spill site groups, the groups of spill sites constructed in Stage 3 of @sec-sites. Discharge events reported by the same water company in the same year with identical identifying fields cannot be told apart, so they are matched together. We compare them with the spill site-years reported by the same water company in the EDM annual returns, checking the identifying fields in turn from the most to the least reliable. Discharge events are matched only if their identifying fields point to exactly one spill site group. Otherwise, they remain unmatched rather than being assigned to the most likely spill site group. This favours accuracy over coverage, because a discharge event matched to the wrong spill site group places its spills in the wrong location. The matching proceeds as follows:
+For each discharge event, we compare its identifying fields with those of spill site-years reported by the same water company in the EDM annual returns. Unique identifiers are compared within the same year; other fields are compared across all four years.
 
-- **Exact matches.** A field matches when every spill site-year with the same value belongs to the same spill site group. Fields are checked in the following order, and discharge events are matched on the first field that matches:^[The unique identifier is compared only with spill site-years from the same year. The other fields are compared with spill site-years from all four years. If no spill site-year has the same EA permit reference and activity code, the EA permit reference is compared on its own.]
-  - **Unique identifier** (2023 and 2024 only).
-  - **EA permit reference and activity code.**
-  - **EA site name.**
-  - **Company site name.**
+We consider the fields in the order listed below. For each field, we find all spill site-years with the same value. If they all belong to one spill site group, the field identifies that group. If there are no matches, or the matching spill site-years belong to multiple groups, we proceed to the next field.
 
-  If two fields match different spill site groups, the discharge events remain unmatched.
-- **Shared site names.** When no field matches because a site name is shared by several spill site groups, we compare the total hours of the discharge events in that year with the spill hours each spill site group reports in that year's annual return. The discharge events are matched to the closest spill site group if its spill hours are within 25% of the discharge events' total and the next closest spill site group is at least twice as far off.^[The difference is measured relative to the larger of the two totals, or to one hour if both totals are below one hour.]
-- **Manual review.** Five cases in which two fields matched different spill site groups were resolved by hand. In four of them, the total hours of the discharge events exactly equal the spill hours reported by one of the two spill site groups.
-- **Unmatched discharge events.** Discharge events that are not matched by any of these steps remain unmatched, and the reason is recorded.
+We provisionally assign each discharge event to the first spill site group identified in this way. We then check whether any other field identifies a different group and review cases where the fields give conflicting matches.
 
-@fig-ladder summarises the results. Of the `r n$events` discharge events, `r n$events_matched` (`r n$share_events_matched`) are matched to a spill site group. Discharge events in 2023 and 2024 are almost all matched on the unique identifier, while those in 2021 and 2022 are matched on the other identifying fields, mostly the EA site name. Across all years, `r n$share_events_group` of discharge events are matched to a spill site group with several spill sites rather than to a single spill site, and this share is similar in every year. Of the `r n$events_unmatched` unmatched discharge events, `r n$share_unmatched_2022` are from 2022. In total, `r n$unmatched_no_key` of them have no identifying field that matches any spill site-year, and `r n$unmatched_hours_disagree` share a site name with several spill site groups whose spill hours do not single one out.
+The matching order is as follows:
 
-We considered two alternatives for discharge events that cannot be matched exactly and rejected both. Fuzzy matching on site names risks matching discharge events to the wrong outlet, because different outlets at the same works often have similar names. Assigning discharge events to the candidate spill site group with the most reported spills would select on the outcome, inflating exposure near the spill site groups that spill most.
+1. **Unique identifier (2023 and 2024 only).**
+2. **EA permit reference and activity code.** The permit reference (identifying the discharge permit) and activity code (identifying the discharge activity under that permit) together provide a more specific basis for matching than site names. If no spill site-year matches both fields, we check the permit reference alone.
+3. **EA site name.** The site name recorded by the Environment Agency.
+4. **Company site name.** The site name recorded by the water company.
+
+This matching process leaves two cases that need further checks: a site name may be shared by several spill site groups, so that no field identifies a single group, or different fields may identify different groups.
+
+1. **Shared site names.** When several spill site groups share a site name and the other identifying fields cannot distinguish between them, we use annual spill hours to resolve the match. We sum the annual spill hours of the discharge events being matched, then compare this total with each candidate group’s total in the EDM annual returns for the same year. We assign the discharge events to the group with the smallest relative difference, provided that this difference is (i) no greater than 25% and (ii) at most half that of the next-closest group.
+2. **Conflicting matches.** In five cases, different identifying fields pointed to different spill site groups. All five were reviewed and resolved manually.
+
+Discharge events that cannot be assigned to a spill site group after these checks remain unmatched, with the reason recorded.
+
+@fig-ladder summarises the matching results. Of the `r n$events` discharge events, `r n$events_matched` (`r n$share_events_matched`) are matched to a spill site group. Most matches rely on EA site names in 2021 and 2022, whereas almost all rely on unique identifiers in 2023 and 2024. Across all four years, `r n$share_events_group` of all discharge events are matched to spill site groups containing two or more spill sites.
+
+Of the `r n$events_unmatched` unmatched discharge events, `r n$unmatched_no_key` have no matching spill site-year on any identifying field. A further `r n$unmatched_hours_disagree` share a site name with several spill site groups, but comparing annual spill hours does not resolve the match. For the remaining `r n$unmatched_other` discharge events, spill hours are unavailable or too low to distinguish between candidate groups reliably.
 
 ```{r}
 #| label: fig-ladder
@@ -245,9 +250,8 @@ We considered two alternatives for discharge events that cannot be matched exact
 fig_ladder
 ```
 
-::: {style="font-size: 85%;"}
-*Notes:* A single spill site is a spill site group that contains only one spill site. The left bars give the share of discharge events matched to a single spill site, matched to a spill site group with several spill sites, or left unmatched. The right bars count the unmatched discharge events by reason, on a common scale. A further `r n$unmatched_other` unmatched discharge events have other reasons and are too few to show.
-:::
+
+
 
 ## When a zero is believed {#sec-zeros}
 
