@@ -80,6 +80,12 @@ n_lookup_clusters <- 15430
 n_site_groups <- 13990
 n_site_years <- 55960
 
+# Storm overflows listed in each year's annual return, 2021-2024. These match
+# the Environment Agency's published totals.
+# Source: data/processed/annual_return_edm.parquet (read 2026-10-10).
+rows_by_year <- c(`2021` = 14470, `2022` = 14580, `2023` = 14530, `2024` = 14285)
+stopifnot(sum(rows_by_year) == n_annual_rows)
+
 # Stage 2 results: the years in which each spill site is observed.
 # Source: data/processed/annual_return_lookup.parquet (read 2026-10-10).
 # Each pattern lists the years in which a spill site has a spill site-year.
@@ -108,6 +114,31 @@ share_sites <- function(n) pct(n / n_lookup_clusters)
 # Source: annual_return_lookup.parquet and unique_spill_sites.parquet (read 2026-10-10).
 n_single_regrouped <- 331
 
+# Stage 3 cost: group-years in which one spill site is reported without spill
+# figures (and not as no longer operational) while another spill site in the
+# same group is reported with figures. The group-year then counts as reported.
+# Excludes Site Group 12250, which merges unrelated Yorkshire Water sites under
+# placeholder names. Recompute once that grouping is fixed.
+# Source: annual_return_edm, annual_return_lookup, unique_spill_sites,
+# site_group_crosswalk and spill_house_lookup parquet files (read 2026-10-10).
+masked_by_year <- c(`2021` = 141, `2022` = 87, `2023` = 15, `2024` = 8)
+n_masked_groups <- 178
+n_masked_zero <- 34 # of which classed as zero spills
+# Silent spill sites imputed from their nearest year with figures (198 of 270).
+masked_missing_share_median <- 0.222 # of the group's spill count, 176 group-years
+n_masked_zero_checkable <- 22
+n_masked_false_zero <- 15 # silent spill site reported positive spills in that year
+masked_hours_share <- c(`2021` = 0.0077, `2022` = 0.0092, `2023` = 0.0008, `2024` = 0.0001)
+# Houses with any Site Group within the radius, and those with a masked group.
+masked_houses <- tribble(
+  ~radius, ~n_any, ~n_masked,
+  250, 233818, 3316,
+  500, 769554, 14390,
+  1000, 1849570, 58257
+)
+n_masked <- sum(masked_by_year)
+stopifnot(n_masked == 251)
+
 # Stage 1 spill sites by their weakest cross-year link (identifier strongest).
 # Source: annual_return_lookup.parquet and annual_return_lookup_edges.parquet
 # (read 2026-10-09). Unmatched sites are single-year spill sites with no links.
@@ -116,21 +147,35 @@ sites_weak <- 210 + 333 # weakest link rests on 1 or 2 fields
 sites_strong <- n_lookup_clusters - n_unmatched_sites - sites_weak
 stopifnot(sites_strong == 226 + 6110 + 4406 + 2606 + 765)
 
-ladder <- tribble(
-  ~rung, ~tier, ~events,
-  "1  Unique site ID (2023 and 2024 returns only)", "Exact key", 3648992,
-  "2  Permit, with activity reference where present", "Exact key", 136335,
-  "3  EA site name", "Exact key", 3281915,
-  "4  Water-company site name", "Exact key", 166686,
-  "5  Annual hours agree with event hours", "Tie-break", 36557,
-  "6  Documented manual override", "Manual", 1226,
-  "Unmatched: no usable key", "Unmatched", 88578,
-  "Unmatched: name shared, hours disagree", "Unmatched", 23467,
-  "Unmatched: name spans sites, no same-year totals", "Unmatched", 209,
-  "Unmatched: all candidate hours near zero", "Unmatched", 7
+# Event matching: matched discharge events by year and by what they were
+# matched to. A single spill site is a site group with one spill site.
+# Source: matched_events_annual_data.parquet joined to n_outlets in
+# site_group_crosswalk.parquet (read 2026-10-10).
+event_matches <- tribble(
+  ~year, ~outcome, ~unique_id, ~events,
+  2021, "single", FALSE, 1747128, 2021, "group", FALSE, 333418,
+  2022, "single", FALSE, 1272661, 2022, "group", FALSE, 259920,
+  2023, "single", TRUE, 1503525, 2023, "single", FALSE, 9394,
+  2023, "group", TRUE, 294765, 2023, "group", FALSE, 153,
+  2024, "single", TRUE, 1552094, 2024, "single", FALSE, 45,
+  2024, "group", TRUE, 298608
 )
-n_matched <- sum(ladder$events[ladder$tier != "Unmatched"])
-n_unmatched <- sum(ladder$events[ladder$tier == "Unmatched"])
+# Unmatched discharge events by year and reason.
+# Source: events_unmatched.parquet (read 2026-10-10). "other" combines
+# name_spans_site_groups and agreement_uninformative.
+event_unmatched <- tribble(
+  ~year, ~reason, ~events,
+  2021, "no_field", 12898, 2021, "hours", 1478, 2021, "other", 213,
+  2022, "no_field", 74135, 2022, "hours", 21989, 2022, "other", 3,
+  2023, "no_field", 461,
+  2024, "no_field", 1084
+)
+n_matched <- sum(event_matches$events)
+n_unmatched <- sum(event_unmatched$events)
+stopifnot(n_matched + n_unmatched == n_events)
+n_matched_group <- sum(event_matches$events[event_matches$outcome == "group"])
+n_unmatched_by_reason <- tapply(event_unmatched$events, event_unmatched$reason, sum)
+n_unmatched_2022 <- sum(event_unmatched$events[event_unmatched$year == 2022])
 
 status_by_year <- tribble(
   ~year, ~status, ~n,
@@ -157,6 +202,16 @@ outlets_per_group <- tribble(
   ~outlets, ~n,
   "1", 13104, "2", 689, "3 to 5", 74 + 62 + 14, "6 or more", 18 + 9 + 4 + 7 + 3 + 1 + 3 + 1 + 1
 )
+
+# Spread of multi-site groups, using each spill site's most recent parsed grid
+# reference (clean_ngr, parse_bng_coordinates) and the largest distance between
+# any two spill sites in the group.
+# Source: annual_return_edm, annual_return_lookup and unique_spill_sites parquet
+# files (read 2026-10-11).
+n_multi_groups <- 886
+n_multi_same_ngr <- 576
+n_multi_within_250 <- 739
+n_multi_within_1000 <- 801 # one group has no parsed grid reference
 
 # Exposure samples: transactions with at least one Site Group within the radius,
 # prior-to-transaction datasets (the hedonic samples). Reasons are not exclusive;
@@ -226,22 +281,22 @@ sources <- tribble(
   # Row 3: Size
   "Observations, 2021–24",
   paste0(fmt(n_events), " individual discharge events"),
-  paste0(fmt(n_annual_rows), " overflow-years, from ≈14,500 monitored overflows a year"),
+  paste0(fmt(n_annual_rows), " overflow-years, from ≈14,500 spill sites in each year's annual returns"),
   # Row 4: Timing of spills
   "Timing of spills",
   "Spills can be counted over any period (e.g. the months preceding a property sale)",
   "Annual totals only",
   # Row 5: Zeros and missing values
   "Zeros and missing values (see @fig-sources)",
-  "Not distinguished. An absence of records may indicate either:\n\n1. zero spills, or\n2. a non-reporting monitor",
-  "Explicitly distinguished:\n\n1. zero indicates no spills\n2. NA indicates a non-reporting monitor\n3. a missing row indicates no annual return, typically because the overflow was not yet monitored or had been decommissioned",
+  "Not distinguished. An absence of records may indicate either:\n\n1. zero spills, or\n2. missing event records",
+  "Explicitly distinguished:\n\n1. zero indicates no spills\n2. NA indicates missing spill figures\n3. a missing row indicates that no annual-return record is linked to that spill site in that year",
   # Row 6: Site characteristics
   "Site characteristics",
   "None",
   "Location, asset and treatment type, receiving waterbody, bathing and shellfish water designations, monitor commissioning date, annual monitoring coverage (and reasons for gaps), and high-spill review fields (see the #link(\"https://www.dropbox.com/scl/fi/dsfhx0xpvlruyn5rhnyah/2024_annual_return_edm_dataset_readme.pdf?rlkey=6si2yony20edfva4wm4jwc94q&dl=0\")[data README] for details)",
   # Row 7: Site identifiers
   "Site identifiers",
-  "- 2021–22: Site names, permit references and activity references, which can be missing or inconsistent across years.\n- 2023–24: Unique site IDs, consistent across years and shared by both datasets.",
+  "- 2021–22: Site names, permit references and activity codes, which can be missing or inconsistent across years.\n- 2023–24: Unique site IDs, consistent across years and shared by both datasets.",
   ""
 )
 tbl_sources <- tt(sources, width = c(0.19, 0.405, 0.405)) |>
@@ -271,9 +326,9 @@ gaps <- tibble(
   xmin = as.POSIXct(c("2021-01-01", "2021-01-01", "2024-01-01")),
   xmax = as.POSIXct(c("2023-12-31", "2021-12-31", "2024-12-31")),
   y = c(2, 1, 1),
-  status = c("Zero reported", "NA: non-reporting monitor", "No annual return")
+  status = c("Zero reported", "NA: missing spill figures", "No annual return")
 )
-gap_cols <- c("Zero reported" = pal[["zero"]], "NA: non-reporting monitor" = pal[["na"]], "No annual return" = pal[["absent"]])
+gap_cols <- c("Zero reported" = pal[["zero"]], "NA: missing spill figures" = pal[["na"]], "No annual return" = pal[["absent"]])
 fig_sources <- list()
 fig_sources$events <- ggplot(ev) +
   geom_vline(xintercept = as.POSIXct(yrs), colour = pal[["rule"]], linewidth = 0.4) +
@@ -298,15 +353,15 @@ ret <- tribble(
   "Site A", 2023, "41 spills\n312 h", "Spills reported", "Site A", 2024, "7 spills\n40 h", "Spills reported",
   "Site B", 2021, "0 spills\n0 h", "Zero reported", "Site B", 2022, "0 spills\n0 h", "Zero reported",
   "Site B", 2023, "0 spills\n0 h", "Zero reported", "Site B", 2024, "3 spills\n11 h", "Spills reported",
-  "Site C", 2021, "NA", "NA: non-reporting monitor", "Site C", 2022, "5 spills\n22 h", "Spills reported",
+  "Site C", 2021, "NA", "NA: missing spill figures", "Site C", 2022, "5 spills\n22 h", "Spills reported",
   "Site C", 2023, "4 spills\n19 h", "Spills reported", "Site C", 2024, "no return", "No annual return"
 ) |> mutate(
   site = factor(site, levels = c("Site C", "Site B", "Site A")),
-  status = factor(status, levels = c("Spills reported", "Zero reported", "NA: non-reporting monitor", "No annual return"))
+  status = factor(status, levels = c("Spills reported", "Zero reported", "NA: missing spill figures", "No annual return"))
 )
 ret_cols <- c(
   "Spills reported" = pal[["returns"]], "Zero reported" = pal[["zero"]],
-  "NA: non-reporting monitor" = pal[["na"]], "No annual return" = pal[["absent"]]
+  "NA: missing spill figures" = pal[["na"]], "No annual return" = pal[["absent"]]
 )
 fig_sources$returns <- ggplot(ret, aes(x = factor(year), y = site)) +
   geom_tile(aes(fill = status), colour = "white", linewidth = 1.2, width = 0.96, height = 0.9) +
@@ -568,6 +623,47 @@ fig_chaining$sites <- chain_base() +
     size = 3.5, family = base_family, colour = chain_bars$colour, fontface = "bold"
   )
 
+# --- tbl-grouping -------------------------------------------------------------
+# Source: distinct site_id / n_outlets pairs in site_group_crosswalk.parquet,
+# read 2026-10-11. Counts are recorded snapshots, as elsewhere in this report.
+grouping_counts <- tribble(
+  ~sites_per_group, ~groups,
+  1L, 13104L, 2L, 689L, 3L, 74L, 4L, 62L, 5L, 14L, 6L, 18L,
+  7L, 9L, 8L, 4L, 9L, 7L, 10L, 3L, 11L, 1L, 14L, 3L, 15L, 1L, 44L, 1L
+) |>
+  mutate(sites = sites_per_group * groups)
+stopifnot(
+  sum(grouping_counts$groups) == n_site_groups,
+  sum(grouping_counts$sites) == n_lookup_clusters
+)
+grouping_detail <- grouping_counts |>
+  mutate(composition = if_else(sites_per_group >= 5, "5+", as.character(sites_per_group))) |>
+  group_by(composition) |>
+  summarise(groups = sum(groups), sites = sum(sites), .groups = "drop")
+grouping_multi <- grouping_counts |>
+  filter(sites_per_group > 1) |>
+  summarise(composition = "All groups with 2+ sites", groups = sum(groups), sites = sum(sites))
+grouping_tbl <- bind_rows(
+  grouping_detail,
+  grouping_multi,
+  tibble(composition = "Total", groups = n_site_groups, sites = n_lookup_clusters)
+) |>
+  transmute(
+    `Spill sites per group` = composition,
+    `Number of groups` = fmt(groups),
+    `Share of groups` = pct(groups / n_site_groups),
+    `Number of spill sites` = fmt(sites)
+  )
+tbl_grouping <- tt(grouping_tbl, width = c(0.37, 0.21, 0.21, 0.21)) |>
+  style_tt(align = "lrrr") |>
+  style_tt(j = 1, color = "#1F2A37") |>
+  style_tt(i = 0, bold = TRUE, background = "#EEF2F5", color = "#1F2A37") |>
+  style_tt(i = seq_len(nrow(grouping_tbl)), line = "b", line_color = "#DFE5E8", line_width = 0.05) |>
+  style_tt(i = 1, line = "b", line_color = "#CBD3DC", line_width = 0.1) |>
+  style_tt(i = 6, bold = TRUE, line = "t", line_color = "#CBD3DC", line_width = 0.1) |>
+  style_tt(i = 7, bold = TRUE) |>
+  style_tt(fontsize = 0.9)
+
 # --- fig-site-patterns --------------------------------------------------------
 pattern_rows <- site_patterns |>
   mutate(y = rev(seq_len(n())) + cumsum(group != lag(group, default = first(group))) * -0.6)
@@ -635,29 +731,87 @@ fig_site_patterns <- ggplot() +
   theme_schematic()
 
 # --- fig-ladder ---------------------------------------------------------------
-lad <- ladder |>
+# One row per year plus an all-years row. Left: what the discharge events were
+# matched to, as shares of the row. Right: the unmatched discharge events, in
+# counts on their own scale, by reason.
+outcome_cols <- c(single = pal[["events"]], group = pal[["returns"]], unmatched = pal[["absent"]])
+reason_cols <- c(no_field = pal[["absent"]], hours = "#E59A8F", other = "#F3CFC9")
+ladder_rows <- tibble(row = c("2021", "2022", "2023", "2024", "All years"), y = c(5, 4, 3, 2, 0.7))
+bar_w <- 5.2   # width of the 100% bar
+zoom_x0 <- 6.75 # start of the unmatched count bars
+zoom_w <- 2.0  # width of the all-years unmatched bar
+
+by_row <- function(d) {
+  bind_rows(mutate(d, row = as.character(year)), mutate(d, row = "All years"))
+}
+ladder_outcomes <- bind_rows(
+  event_matches |> select(year, outcome, events),
+  event_unmatched |> mutate(outcome = "unmatched") |> select(year, outcome, events)
+) |>
+  by_row() |>
+  group_by(row, outcome) |>
+  summarise(events = sum(events), .groups = "drop") |>
+  mutate(outcome = factor(outcome, levels = names(outcome_cols))) |>
+  arrange(row, outcome) |>
+  group_by(row) |>
   mutate(
-    rung = factor(rung, levels = rev(rung)),
-    tier = factor(tier, levels = c("Exact key", "Tie-break", "Manual", "Unmatched")),
-    lab = paste0(fmt(events), "  (", formatC(100 * events / n_events, format = "f", digits = 2), "%)")
+    share = events / sum(events),
+    xmax = cumsum(share) * bar_w,
+    xmin = xmax - share * bar_w,
+    lab = if_else(share >= 0.07, pct(share), NA_character_),
+    match_lab = paste0(pct(1 - share[outcome == "unmatched"], 2), " matched"),
+    total = sum(events)
+  ) |>
+  ungroup() |>
+  left_join(ladder_rows, by = "row")
+ladder_unmatched <- event_unmatched |>
+  by_row() |>
+  group_by(row, reason) |>
+  summarise(events = sum(events), .groups = "drop") |>
+  mutate(reason = factor(reason, levels = names(reason_cols))) |>
+  arrange(row, reason) |>
+  group_by(row) |>
+  mutate(xmax = zoom_x0 + cumsum(events) / n_unmatched * zoom_w, xmin = xmax - events / n_unmatched * zoom_w) |>
+  ungroup() |>
+  left_join(ladder_rows, by = "row")
+ladder_unmatched_lab <- ladder_unmatched |>
+  group_by(row, y) |>
+  summarise(events = sum(events), xmax = max(xmax), .groups = "drop") |>
+  left_join(distinct(ladder_outcomes, row, total), by = "row") |>
+  mutate(lab = paste0(fmt(events), " (", pct(events / total, 2), if_else(row == "All years", " of all)", " of the year)")))
+ladder_key <- tibble(
+  x = c(0, 1.55, 4.55, zoom_x0, zoom_x0),
+  y = c(-0.3, -0.3, -0.3, -0.3, -0.7),
+  key = c(names(outcome_cols), "no_field", "hours"),
+  lab = c(
+    "Single spill site", "Site group with several spill sites", "Unmatched",
+    "No identifying field matches any spill site-year",
+    "Site name shared by several site groups whose\nspill hours do not single one out"
   )
-tier_cols <- c("Exact key" = pal[["events"]], "Tie-break" = pal[["returns"]], "Manual" = pal[["muted"]], "Unmatched" = pal[["absent"]])
-fig_ladder <- ggplot(lad, aes(x = events, y = rung, fill = tier)) +
-  geom_col(width = 0.72) +
-  geom_text(aes(label = lab), hjust = -0.08, size = 3.0, family = base_family, colour = pal[["ink"]]) +
-  annotate("segment", x = 0, xend = 3.9e6, y = 4.5, yend = 4.5, colour = pal[["rule"]], linewidth = 0.5, linetype = "22") +
-  scale_x_continuous(
-    labels = label_number(scale = 1e-6, suffix = " M"), limits = c(0, 4.9e6),
-    expand = expansion(mult = c(0, 0.02)), breaks = seq(0, 4e6, 1e6)
-  ) +
-  scale_fill_manual(values = tier_cols) +
-  labs(
-    title = paste0(fmt(n_events), " event records, 2021 to 2024"),
-    subtitle = paste0(pct(n_matched / n_events, 2), " attached to a spill site. Dashed line separates matched from unmatched."),
-    x = "Event records", y = NULL
-  ) +
-  theme_report() +
-  theme(panel.grid.major.y = element_blank(), axis.text.y = element_text(size = 9.5))
+)
+
+fig_ladder <- ggplot() +
+  coord_cartesian(xlim = c(-1.25, 10.75), ylim = c(-1.0, 5.75), expand = FALSE) +
+  txt(0, 5.6, "Share of discharge events, by what they were matched to", hjust = 0, size = 3.3, fontface = "bold") +
+  txt(zoom_x0, 5.6, "Unmatched discharge events, by reason", hjust = 0, size = 3.3, fontface = "bold") +
+  geom_text(data = ladder_rows, aes(x = -0.12, y = y, label = row), hjust = 1, size = 3.5,
+    family = base_family, colour = pal[["ink"]], fontface = "bold") +
+  geom_rect(data = ladder_outcomes, aes(xmin = xmin, xmax = xmax, ymin = y - 0.31, ymax = y + 0.31, fill = outcome),
+    colour = pal[["paper"]], linewidth = 0.4) +
+  geom_text(data = filter(ladder_outcomes, !is.na(lab)), aes(x = (xmin + xmax) / 2, y = y, label = lab),
+    size = 3.0, family = base_family, colour = pal[["paper"]]) +
+  geom_text(data = distinct(ladder_outcomes, row, y, match_lab), aes(x = bar_w + 0.1, y = y, label = match_lab),
+    hjust = 0, size = 3.0, family = base_family, colour = pal[["ink"]]) +
+  geom_rect(data = ladder_unmatched, aes(xmin = xmin, xmax = xmax, ymin = y - 0.31, ymax = y + 0.31, fill = reason),
+    colour = pal[["paper"]], linewidth = 0.3) +
+  geom_text(data = ladder_unmatched_lab, aes(x = xmax + 0.08, y = y, label = lab), hjust = 0, size = 3.0,
+    family = base_family, colour = pal[["ink"]]) +
+  annotate("segment", x = -1.25, xend = 10.75, y = 1.35, yend = 1.35, colour = pal[["rule"]], linewidth = 0.4) +
+  geom_tile(data = ladder_key, aes(x = x + 0.11, y = y, fill = key), width = 0.22, height = 0.24) +
+  geom_text(data = ladder_key, aes(x = x + 0.32, y = y, label = lab), hjust = 0, size = 2.9,
+    family = base_family, colour = pal[["ink"]], lineheight = 0.85) +
+  scale_fill_manual(values = c(outcome_cols, reason_cols), guide = "none") +
+  theme_schematic()
 
 # --- fig-verified -------------------------------------------------------------
 ex <- tribble(
@@ -771,6 +925,8 @@ n <- list(
   unmatched_sites = fmt(n_unmatched_sites),
   # Stage 2
   spill_sites = fmt(n_lookup_clusters),
+  overflows_year_min = fmt(min(rows_by_year)),
+  overflows_year_max = fmt(max(rows_by_year)),
   share_4_years = share_sites(n_sites_by_years[["4"]]),
   share_3_years = share_sites(n_sites_by_years[["3"]]),
   share_2_years = share_sites(n_sites_by_years[["2"]]),
@@ -783,13 +939,28 @@ n <- list(
   outlets_1 = fmt(outlets_per_group$n[1]),
   outlets_2 = fmt(outlets_per_group$n[2]),
   outlets_3_plus = fmt(sum(outlets_per_group$n[3:4])),
+  share_multi_same_ngr = pct(n_multi_same_ngr / n_multi_groups, 0),
+  share_multi_within_250 = pct(n_multi_within_250 / n_multi_groups, 0),
+  share_multi_over_1000 = pct(1 - n_multi_within_1000 / n_multi_groups, 0),
+  masked_group_years = fmt(n_masked),
+  masked_groups = fmt(n_masked_groups),
+  masked_zero = fmt(n_masked_zero),
+  masked_missing_share = pct(masked_missing_share_median, 0),
+  masked_false_zero = fmt(n_masked_false_zero),
+  masked_hours_2021 = pct(masked_hours_share[["2021"]]),
+  masked_hours_2022 = pct(masked_hours_share[["2022"]]),
+  masked_houses_250 = pct(masked_houses$n_masked[1] / masked_houses$n_any[1]),
+  masked_houses_1000 = pct(masked_houses$n_masked[3] / masked_houses$n_any[3]),
   # Event matching
   events_matched = fmt(n_matched),
   events = fmt(n_events),
   share_events_matched = pct(n_matched / n_events, 2),
   events_unmatched = fmt(n_unmatched),
-  unmatched_no_key = fmt(ladder$events[7]),
-  unmatched_hours_disagree = fmt(ladder$events[8]),
+  share_events_group = pct(n_matched_group / n_events),
+  unmatched_no_key = fmt(n_unmatched_by_reason[["no_field"]]),
+  unmatched_hours_disagree = fmt(n_unmatched_by_reason[["hours"]]),
+  unmatched_other = fmt(n_unmatched_by_reason[["other"]]),
+  share_unmatched_2022 = pct(n_unmatched_2022 / n_unmatched, 0),
   # Verified site-years
   site_years_verified = fmt(site_years_verified),
   site_years = fmt(n_site_years),
