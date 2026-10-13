@@ -277,12 +277,6 @@ txt <- function(x, y, label, size = 3.4, colour = pal[["ink"]], ...) {
     family = base_family, ...
   )
 }
-arrow_seg <- function(x, y, xend, yend, colour = pal[["muted"]]) {
-  annotate("segment",
-    x = x, y = y, xend = xend, yend = yend, colour = colour,
-    linewidth = 0.5, arrow = arrow(length = unit(5, "pt"), type = "closed")
-  )
-}
 
 # --- tbl-sources --------------------------------------------------------------
 sources <- tribble(
@@ -389,43 +383,6 @@ fig_sources$returns <- ggplot(ret, aes(x = factor(year), y = site)) +
   theme_report() +
   theme(panel.grid = element_blank(), legend.key.size = unit(10, "pt")) +
   guides(fill = guide_legend(nrow = 2))
-
-# --- fig-pipeline -------------------------------------------------------------
-steps <- tibble(
-  x = 1:4,
-  head = c("Define sites", "Attach events", "Classify years", "Sum near property"),
-  body = c(
-    "Follow one monitored\npoint across years;\ncollapse outlets\n250 m apart",
-    "Best exact key per\nrecord; unmatched\nrows carry a\nreason code",
-    "Verified zero,\nverified positive,\nor unknown, decided\nby the returns",
-    "Hours and counts near\neach property; unknown\nif any site-year\nis unknown"
-  ),
-  sec = c("Section 3", "Section 4", "Section 5", "Sections 5 and 6")
-)
-fig_pipeline <- ggplot() +
-  xlim(-0.5, 5.25) +
-  ylim(0.45, 2.0) +
-  box(0.0, 1.5, 0.92, 0.46, fill = alpha(pal[["events"]], 0.15), colour = pal[["events"]]) +
-  txt(0.0, 1.575, "Event records", size = 3.8, fontface = "bold", colour = pal[["events"]]) +
-  txt(0.0, 1.42, "7.4 M events", size = 3.1, colour = pal[["events"]]) +
-  box(0.0, 0.98, 0.92, 0.46, fill = alpha(pal[["returns"]], 0.15), colour = pal[["returns"]]) +
-  txt(0.0, 1.055, "Annual returns", size = 3.8, fontface = "bold", colour = pal[["returns"]]) +
-  txt(0.0, 0.90, "58 k site-years", size = 3.1, colour = pal[["returns"]]) +
-  arrow_seg(0.47, 1.5, 0.53, 1.3) +
-  arrow_seg(0.47, 0.98, 0.53, 1.18)
-for (i in seq_len(nrow(steps))) {
-  fig_pipeline <- fig_pipeline +
-    box(steps$x[i], 1.24, 0.9, 1.08, fill = "#F3F6F9", colour = pal[["rule"]]) +
-    txt(steps$x[i], 1.63, steps$head[i], size = 3.7, fontface = "bold") +
-    txt(steps$x[i], 1.19, steps$body[i], size = 3.15, colour = pal[["ink"]], lineheight = 0.92) +
-    txt(steps$x[i], 0.58, steps$sec[i], size = 3.1, colour = pal[["muted"]], fontface = "italic")
-  if (i < nrow(steps)) fig_pipeline <- fig_pipeline + arrow_seg(steps$x[i] + 0.46, 1.24, steps$x[i] + 0.54, 1.24)
-}
-fig_pipeline <- fig_pipeline +
-  arrow_seg(4.46, 1.24, 4.54, 1.24) +
-  box(4.9, 1.24, 0.62, 1.08, fill = alpha(pal[["verified"]], 0.12), colour = pal[["verified"]]) +
-  txt(4.9, 1.24, "Regression\nsamples", size = 3.7, fontface = "bold", colour = pal[["verified"]], lineheight = 0.95) +
-  theme_schematic()
 
 # --- fig-problems -------------------------------------------------------------
 # Source: data/processed/annual_return_edm.parquet (read 2026-10-09).
@@ -965,6 +922,97 @@ fig_cost <- ggplot(cst) +
   scale_fill_manual(values = cost_cols, guide = "none") +
   coord_cartesian(xlim = c(-0.29, 3.18), ylim = c(-1.8, 4.2), expand = FALSE) +
   theme_schematic()
+
+# --- Appendix: selected records, with every source variable -------------------
+# Read the original company files, before standardisation or matching. Each
+# event is the first row in the CSV for one of the selected annual-return IDs.
+extract_ids <- c("UUP00006", "UUP00007", "UUP02182")
+extract_annual <- readxl::read_excel(
+  here::here("data", "raw", "edm_data", "2024_annual_return_edm.xlsx"),
+  sheet = "United Utilities 2024", skip = 1, col_types = "text"
+)
+stopifnot(ncol(extract_annual) == 28L)
+extract_annual <- extract_annual[match(extract_ids, extract_annual[[1]]), ]
+stopifnot(identical(extract_annual[[1]], extract_ids))
+extract_events <- read.csv(
+  here::here("data", "raw", "edm_data", "2024_united_utilities_edm.csv"),
+  check.names = FALSE, colClasses = "character", na.strings = ""
+)
+stopifnot(ncol(extract_events) == 4L)
+extract_events <- extract_events[match(extract_ids, extract_events[[1]]), ]
+stopifnot(identical(extract_events[[1]], extract_ids))
+for (column in 3:4) {
+  event_time <- as.POSIXct(extract_events[[column]],
+    format = "%Y/%m/%dT%H:%M:%OSZ", tz = "UTC")
+  stopifnot(!anyNA(event_time))
+  extract_events[[column]] <- format(event_time, "%d %b %Y %H:%M:%S", tz = "UTC")
+}
+
+# This parquet is the direct three-column import of the original 2021 XLSB,
+# before field standardisation, matching or aggregation. Times are Excel serials.
+extract_events_2021 <- arrow::read_parquet(here::here(
+  "data", "processed", "edm_spill_level", "2021_united_utilities.parquet"
+)) |>
+  filter(Site.Name == "113 HASSALL RD CSO") |>
+  slice_head(n = 3)
+stopifnot(ncol(extract_events_2021) == 3L, nrow(extract_events_2021) == 3L)
+for (column in 2:3) {
+  event_time <- as.POSIXct(round(extract_events_2021[[column]] * 86400),
+    origin = "1899-12-30", tz = "UTC")
+  stopifnot(!anyNA(event_time))
+  extract_events_2021[[column]] <- format(event_time, "%d %b %Y %H:%M:%S", tz = "UTC")
+}
+names(extract_events_2021) <- c("Site Name", "Discharge Start", "Discharge Stop")
+
+# Abbreviate headings only; retain every source column. Excel durations are
+# stored as fractions of a day: display total hours, never wrap after 24 hours.
+extract_labels <- c(
+  "Unique identifier", "Water company", "EA site name", "Company site name (optional)",
+  "EA permit reference", "Company permit reference (optional)",
+  "Activity reference on permit", "Storm discharge asset type", "Outlet grid reference",
+  "WFD waterbody ID (Cycle 3)", "WFD waterbody catchment (Cycle 3)",
+  "Receiving water / environment", "Shellfish waters", "Bathing waters",
+  "Treatment on permit beyond settlement / screening", "Annual spill duration (hh:mm:ss)",
+  "Annual spill count (12/24-hour method)", "Long-term average spill count",
+  "Data start year", "EDM operational (% of reporting period)",
+  "Primary reason for EDM coverage below 90%", "EDM action: status and timeframe",
+  "High-spill review: single-year reason", "High-spill review: long-term average reason",
+  "Investigation activity in reporting period", "Improvement activity in reporting period",
+  "UWWTR (SOAF) investigation status", "Previous unique identifier (pre-2024)"
+)
+extract_seconds <- round(as.numeric(extract_annual[[16]]) * 86400)
+extract_annual[[16]] <- sprintf("%02d:%02d:%02d", extract_seconds %/% 3600,
+  (extract_seconds %% 3600) %/% 60, extract_seconds %% 60)
+extract_annual[[18]] <- formatC(as.numeric(extract_annual[[18]]), format = "f", digits = 2)
+extract_annual[[20]] <- formatC(as.numeric(extract_annual[[20]]), format = "f", digits = 2)
+extract_annual[is.na(extract_annual)] <- "—"
+
+extract_table <- function(data, labels, selected, main, accent, tint) {
+  values <- as.data.frame(t(as.matrix(data[, selected, drop = FALSE])),
+    stringsAsFactors = FALSE)
+  names(values) <- c("Record 1", "Record 2", "Record 3")
+  display <- data.frame(Variable = labels[selected], values, check.names = FALSE)
+  shaded <- which(selected %in% main)
+  tt(display, width = c(0.34, 0.22, 0.22, 0.22)) |>
+    style_tt(align = "l", color = pal[["ink"]], fontsize = 0.82) |>
+    style_tt(i = 0, bold = TRUE, background = accent, color = pal[["paper"]]) |>
+    style_tt(i = seq_len(nrow(display)), line = "b", line_color = "#DFE5E8", line_width = 0.05) |>
+    style_tt(i = shaded, background = tint) |>
+    style_tt(i = shaded, j = 1, bold = TRUE)
+}
+extract_main <- c(1:7, 9, 16:17, 20, 28)
+# Repeat ID on the second panel so that records remain identifiable on a new page.
+extract_part1 <- c(1:15, 28)
+extract_part2 <- c(1, 16:27)
+stopifnot(setequal(c(extract_part1, extract_part2), seq_len(ncol(extract_annual))))
+tbl_extract_annual_identity <- extract_table(extract_annual, extract_labels,
+  extract_part1, extract_main, pal[["returns"]], "#EAF3EE")
+tbl_extract_annual_monitoring <- extract_table(extract_annual, extract_labels,
+  extract_part2, extract_main, pal[["returns"]], "#EAF3EE")
+tbl_extract_events <- extract_table(extract_events, names(extract_events),
+  1:4, 1:4, pal[["events"]], "#EDF3F9")
+tbl_extract_events_2021 <- extract_table(extract_events_2021, names(extract_events_2021),
+  1:3, 1:3, pal[["events"]], "#EDF3F9")
 
 # --- Inline numbers -----------------------------------------------------------
 # Ready-formatted strings for the prose, in the order they appear.

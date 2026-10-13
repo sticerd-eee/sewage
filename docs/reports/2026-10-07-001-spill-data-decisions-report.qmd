@@ -57,6 +57,8 @@ tbl_sources
 
 The two datasets serve complementary purposes in our analysis. We use the event-level records to measure spill exposure at the time of each property sale or rental, given their minute-level timing (@fig-sources, panel a). We use the annual returns to (i) distinguish zero spills from missing data in the event-level records (@fig-sources, panel b) and (ii) obtain site characteristics, particularly overflow locations, to link spills to nearby properties.
 
+[Appendix A](#sec-data-extracts) shows examples from both datasets, with all variables included and the main fields highlighted.
+
 ```{r}
 #| label: fig-sources
 #| fig-cap: "Illustration of the two EDM datasets"
@@ -69,23 +71,15 @@ The two datasets serve complementary purposes in our analysis. We use the event-
 fig_sources$events
 fig_sources$returns
 ```
-<!-- 
-## How exposure is built {.unnumbered}
 
-Exposure is a property-level measure of nearby spills. Four steps produce it (@fig-pipeline), and each step rests on a decision explained in its own section below.
+## Constructing Property-Level Spill Exposure {.unnumbered}
 
-1.  **Define sites.** Follow one monitored point across the four years of returns, and collapse the outlets of the same works into one site (@sec-sites).
-2.  **Attach events.** Match each event to a site on the best exact key it carries. Leave the rest unmatched, with a reason recorded (@sec-matching-events-sites).
-3.  **Classify site-years.** Decide, from the returns, whether each site-year is a verified zero, a verified positive, or unknown (@sec-zeros).
-4.  **Sum near each property.** Add up hours and spill counts within 250, 500 and 1,000 m of each property. Counts follow the Environment Agency's 12/24 convention: the first 12 hours of a discharge count as one spill, and each further 24-hour block counts as one more. Exposure is unknown if any nearby site-year is unknown, and unknown rows leave the sample (@sec-dropped). -->
+We combine the two EDM datasets in four steps to measure spill exposure at the time of each property sale or rental:
 
-```{r}
-# #| label: fig-pipeline
-# #| fig-cap: "The four steps between the two public sources and the regression samples. Each step is explained in its own section below."
-# #| fig-width: 9
-# #| fig-height: 2.9
-# fig_pipeline
-```
+1. **Define spill sites and spill site groups (@sec-sites).** Link spill site-years across the EDM annual returns to identify spill sites, then group spill sites that cannot be uniquely distinguished.
+2. **Match discharge events to spill site groups (@sec-matching-events-sites).** Use identifying fields to match discharge events to these groups, assigning each matched discharge event a location and a consistent spill site group identifier.
+3. **Distinguish zero spills from missing data (@sec-zeros).** Use the EDM annual returns and event-matching results to classify each spill site group-year as non-missing or missing.
+4. **Aggregate spill exposure to properties (@sec-dropped).** Sum spill hours and spill counts across nearby spill site groups from January 2021 to each transaction date. Treat exposure as missing if any group-year within the relevant radius and exposure window is missing.
 
 ## Defining a Spill Site in the EDM Annual Returns Data {#sec-sites}
 
@@ -320,4 +314,60 @@ fig_cost
 
 ::: {style="font-size: 85%;"}
 *Notes:* The sample includes transactions with at least 30 days of potential exposure and is measured before exclusions for missing regression covariates.
+:::
+
+{{< pagebreak >}}
+
+## Appendix A. Extracts from the EDM Datasets {#sec-data-extracts .unnumbered}
+
+The tables show examples from United Utilities’ EDM annual returns for 2024 and EDM event-level records for 2024 and 2021. Each column contains one record, with variables listed down the rows. The 2024 records cover the same three spill sites. The 2021 records show three discharge events at Hassall Road, when unique identifiers were not available in the EDM event-level records.
+
+All source variables are included, with the main fields shaded and some headings shortened for readability. A dash denotes a blank source cell; “Not Applicable” is retained as recorded in the source.
+
+### Annual returns, 2024 {.unnumbered}
+
+```{r}
+#| label: tbl-extract-annual-identity
+#| tbl-cap: "Annual returns, 2024: site details"
+tbl_extract_annual_identity
+```
+
+{{< pagebreak >}}
+
+### Annual returns, 2024 (continued) {.unnumbered}
+
+```{r}
+#| label: tbl-extract-annual-monitoring
+#| tbl-cap: "Annual returns, 2024: spills and monitoring"
+tbl_extract_annual_monitoring
+```
+
+::: {style="font-size: 85%;"}
+*Source:* EA EDM annual returns, 2024, “United Utilities 2024” worksheet.
+:::
+
+{{< pagebreak >}}
+
+### Event-level records, 2024 {.unnumbered}
+
+```{r}
+#| label: tbl-extract-events
+#| tbl-cap: "Individual discharge events, 2024"
+tbl_extract_events
+```
+
+::: {style="font-size: 85%;"}
+*Source:* United Utilities' 2024 EDM event-level records, supplied by the EA via EIR.
+:::
+
+### Event-level records, 2021 {.unnumbered}
+
+```{r}
+#| label: tbl-extract-events-2021
+#| tbl-cap: "Individual discharge events, 2021"
+tbl_extract_events_2021
+```
+
+::: {style="font-size: 85%;"}
+*Source:* United Utilities' 2021 EDM event-level records, supplied by the EA via EIR.
 :::
