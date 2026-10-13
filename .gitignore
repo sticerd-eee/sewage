@@ -105,3 +105,6 @@ _old/
 RiverNetworks/
 upstream_downstream/
 .scratch/
+
+# Quarto render cache
+.quarto/
