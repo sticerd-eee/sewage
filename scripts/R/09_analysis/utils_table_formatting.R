@@ -120,7 +120,9 @@ fit_tblr_latex <- function(latex,
 # and the public-attention difference-in-differences, event-study and
 # lagged-attention regressions) reports Conley spatial standard errors with a
 # 1 km cutoff and fixest's uniform kernel, under which every pair of
-# observations within the cutoff gets full weight. The estimation data must
+# observations within the cutoff gets full weight. So far only the hedonic and
+# public-attention scripts call it; upstream/downstream, long differences and
+# repeat sales have not been switched yet. The estimation data must
 # carry `latitude`/`longitude`, which conley() detects automatically. See
 # "Property-Level Inference" in CONCEPTS.md.
 
