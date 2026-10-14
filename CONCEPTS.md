@@ -178,9 +178,21 @@ All Keyable Transactions in one dataset that share an Address Key — the projec
 The transaction-grain artifact assigning every Keyable Transaction to its Repeat Group, singles included, with the group size recorded. It is a census of keyable transactions — exclusions are auditable by subtraction — and the sole bridge between cleaned transactions and repeat-based analyses. Group membership and group size are defined over the Long-Run Transaction History; a consumer restricting to a narrower window must regroup rather than trust the recorded size.
 
 ### Long-Run Transaction History
-The maximal retained span of cleaned transactions (from 2014, the earliest rental coverage), wider than the spill study window. Repeat identification runs over the long-run history; the study-window transaction tables are derived from it by filtering, never built independently, so both views agree row-for-row where they overlap.
+The maximal retained span of cleaned transactions, defined by market: sales from January 1995 (the start of the Land Registry Price Paid record, extended on 20 September 2026 from the earlier 2014 start) and rentals from 2014 (the earliest rental coverage). Both are wider than the spill study window. Repeat identification runs over each market's long-run history; the study-window transaction tables are derived from it by filtering, never built independently, so both views agree row-for-row where they overlap. Analyses choose their own windows within the history and regroup after restricting: the long-run repeat-property attention regression keeps sales from January 1995 and rentals from January 2014, and the sales Annual Near–Far Price Profiles use the full 1995–2024 history.
+
+### Long-Run Nearest Site Lookup
+The distance from every unique property coordinate in the Long-Run Transaction History to the nearest usable Site Group, where a Site Group is usable if it has a latest-valid location over 2021–2024. It is keyed on the coordinate pair rather than on transactions, so every transaction at the same coordinates shares one distance, and it lets analyses on the long-run history measure proximity to overflows outside the spill study window.
 
 ## Public Attention Area
+
+### Annual Near–Far Price Profile
+A descriptive path of the conditional price gap between properties near and farther from storm overflows, expressed relative to a stated reference year. It describes longer-run relative price changes without assigning them to a single intervention or identifying a causal effect of monitoring or public attention.
+
+### Price-Profile Reference Year
+The calendar year against which an Annual Near–Far Price Profile is expressed, with its contrast normalised to zero. Choosing another reference year changes the comparison benchmark, not the treatment date or the underlying fitted price path when the sample and specification are unchanged.
+
+### Near–Far Distance Bands
+The two proximity groups used to contrast properties near and far from storm overflows on the Extensive Margin. A property is near when its nearest overflow lies within 0–500 m inclusive, and far when its nearest overflow lies more than 1,000 m and at most 2,000 m away. Properties in neither band are excluded, so the intermediate ring does not blur the contrast. The near band's outer edge matches the 500 m Near-Overflow Radius.
 
 ### Public Attention
 The project-level construct for how salient sewage spills are to the public over time, proxied by search interest and media coverage rather than by physical spill activity itself.
@@ -193,3 +205,9 @@ A time-series proxy for media coverage of sewage spills, used alongside Google T
 
 ### Windowed Article Count
 A trailing-window salience measure: the UK Media Article Count summed over the past 3, 6, or 12 months up to and including a transaction's month. Contrasts with the cumulative article count (summed from the start of the sample), which rises mechanically over time; windowed counts fluctuate, capturing recent rather than accumulated attention. Built on a gap-filled monthly grid because the source stores only months with at least one article.
+
+### Cumulative Article Stock
+The natural log of the cumulative UK Media Article Count for LexisNexis search 1, summed from the first month of the series (March 1989) through the observation month. It measures accumulated rather than recent attention, in contrast to the Windowed Article Count. Its origin is the start of the series rather than of any estimation window, so the same stock serves the 1995 sales and 2014 rentals windows of the long-run repeat-property regression; the study-window scripts instead accumulate from January 2021, so the two stocks are not interchangeable.
+
+### Attention Event Indicators
+Two indicators marking months after discrete public-attention events, used in the long-run repeat-property regression: one switches on from March 2021 inclusive and the other from August 2022 inclusive. Each enters its own regression as an alternative to the Cumulative Article Stock, dating the shift in Public Attention to a single event rather than tracing it continuously.

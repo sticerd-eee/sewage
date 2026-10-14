@@ -25,9 +25,10 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 ### 02_data_cleaning
 
 - `clean_consented_discharges_database.R`: cleans the consented discharges database.
-- `clean_lr_house_price_data.R`: cleans one same-vintage 2014–2024 Land Registry
-  download, assigns content-stable string `house_id` values, and writes paired
-  long-run and 2021–2024 study-window candidates. The study window is always a
+- `clean_lr_house_price_data.R`: cleans the 1995–2024 Land Registry Price Paid
+  history from an explicit year-to-source manifest, assigns content-stable
+  string `house_id` values, and writes paired long-run and 2021–2024
+  study-window candidates. The study window is always a
   pure filter of the long-run table from the same run.
 - `clean_zoopla_data.R`: cleans safeguarded 2014–2023 Zoopla rental data,
   removes exact duplicates, assigns content-stable string `rental_id` values,
@@ -74,6 +75,7 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 - `site_house_sale_match.R`: spatially matches house sales to the unique Site Group projection using a configurable radius (currently 10 km) and writes `n_site_groups` as the nearby-group count.
 - `site_rental_match.R`: spatially matches rental listings to the unique Site Group projection using a configurable radius (currently 10 km) and writes `n_site_groups` as the nearby-group count.
 - `compute_spill_stats.R`: builds enhanced spill statistics and treatment indicators.
+- `site_nearest_long_run_match.R`: matches every distinct property coordinate in the long-run sales and rental histories to its nearest usable Site Group and writes `site_nearest_long_run.parquet`, keyed on the coordinate pair. It feeds `05_news/did_attention_repeat_extensive.R`.
 
 ### 05_data_integration
 
@@ -289,7 +291,7 @@ model grid.
 ### Layer 02: Data Cleaning
 
 3. `clean_consented_discharges_database.R` — clean the consented discharges database.
-4. `clean_lr_house_price_data.R` — create paired 2014–2024 long-run and
+4. `clean_lr_house_price_data.R` — create paired 1995–2024 long-run and
    2021–2024 study-window Land Registry candidates in one run; promote the
    validated candidates to `house_price_long_run.parquet` and
    `house_price.parquet` together.
@@ -322,6 +324,7 @@ model grid.
 23. `site_house_sale_match.R` — create house-to-site spatial matches using the configured radius (currently 10 km).
 24. `site_rental_match.R` — create rental-to-site spatial matches using the configured radius (currently 10 km).
 25. `compute_spill_stats.R` — build enhanced spill statistics and treatment indicators.
+26. `site_nearest_long_run_match.R` — match each distinct long-run sales and rental coordinate to its nearest usable Site Group; feeds the long-run attention regression.
 
 ### Layer 05: Data Integration
 
@@ -329,27 +332,27 @@ Integration scripts are executed earlier for dependency reasons; see steps 12 an
 
 ### Layer 06: Analysis Datasets
 
-26. `house_site_spills.R` — publish the unmasked sales measurement layer at transaction–Site Group grain.
-27. `rental_site_spills.R` — publish the unmasked rental measurement layer at transaction–Site Group grain.
-28. `cross_section_sales.R` — build the fixed 2021–2024 sales `study_period` cross-section from matched individual EDM events.
-29. `cross_section_rental.R` — build the fixed 2021–2023 rental `study_period` cross-section from matched individual EDM events.
-30. `cross_section_sales_ea.R` — build the fixed 2021–2024 sales `study_period_ea` cross-section from EA annual-return evidence.
-31. `cross_section_rental_ea.R` — build the fixed 2021–2023 rental `study_period_ea` cross-section from EA annual-return evidence.
-32. `cross_section_prior_to_sale.R` — derive prior-to-sale sales cross-sections from the measurement layer.
-33. `cross_section_prior_to_rental.R` — derive prior-to-rental rental cross-sections from the measurement layer.
-34. `build_prior_characteristics.R` — publish sales and rental property-radius companion characteristics and the combined cutoff audit after both prior-exposure products exist.
-35. `house_spill_prior_to_sale.R` — derive the sale-spill prior-exposure dataset from the measurement layer.
-36. `rental_spill_prior_to_rental.R` — derive the rental-spill prior-exposure dataset from the measurement layer.
-37. `site_panel_sales.R` — build site-level sales panels.
-38. `site_panel_rental.R` — build site-level rental panels.
-39. `house_panel_within_radius.R` — build within-radius house panels.
-40. `rental_panel_within_radius.R` — build within-radius rental panels.
-41. `sale_panel_exp.R` — export the general sales panel.
-42. `rental_panel_exp.R` — export the general rental panel.
-43. `grid_long_difference_sales.R` — build the sales long-difference grid dataset.
-44. `grid_long_difference_rentals.R` — build the rental long-difference grid dataset.
-45. `repeat_sales.R` — build the long-run sales repeat mapping and review tables.
-46. `repeat_rentals.R` — build the long-run rental repeat mapping and review tables.
+27. `house_site_spills.R` — publish the unmasked sales measurement layer at transaction–Site Group grain.
+28. `rental_site_spills.R` — publish the unmasked rental measurement layer at transaction–Site Group grain.
+29. `cross_section_sales.R` — build the fixed 2021–2024 sales `study_period` cross-section from matched individual EDM events.
+30. `cross_section_rental.R` — build the fixed 2021–2023 rental `study_period` cross-section from matched individual EDM events.
+31. `cross_section_sales_ea.R` — build the fixed 2021–2024 sales `study_period_ea` cross-section from EA annual-return evidence.
+32. `cross_section_rental_ea.R` — build the fixed 2021–2023 rental `study_period_ea` cross-section from EA annual-return evidence.
+33. `cross_section_prior_to_sale.R` — derive prior-to-sale sales cross-sections from the measurement layer.
+34. `cross_section_prior_to_rental.R` — derive prior-to-rental rental cross-sections from the measurement layer.
+35. `build_prior_characteristics.R` — publish sales and rental property-radius companion characteristics and the combined cutoff audit after both prior-exposure products exist.
+36. `house_spill_prior_to_sale.R` — derive the sale-spill prior-exposure dataset from the measurement layer.
+37. `rental_spill_prior_to_rental.R` — derive the rental-spill prior-exposure dataset from the measurement layer.
+38. `site_panel_sales.R` — build site-level sales panels.
+39. `site_panel_rental.R` — build site-level rental panels.
+40. `house_panel_within_radius.R` — build within-radius house panels.
+41. `rental_panel_within_radius.R` — build within-radius rental panels.
+42. `sale_panel_exp.R` — export the general sales panel.
+43. `rental_panel_exp.R` — export the general rental panel.
+44. `grid_long_difference_sales.R` — build the sales long-difference grid dataset.
+45. `grid_long_difference_rentals.R` — build the rental long-difference grid dataset.
+46. `repeat_sales.R` — build the long-run sales repeat mapping and review tables.
+47. `repeat_rentals.R` — build the long-run rental repeat mapping and review tables.
 
 ## Dependency Notes
 

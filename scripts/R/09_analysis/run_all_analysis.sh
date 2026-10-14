@@ -94,6 +94,7 @@ scripts/R/09_analysis/05_news/did_articles_prior_extensive.R
 scripts/R/09_analysis/05_news/did_articles_prior_extensive_salience.R
 scripts/R/09_analysis/05_news/did_articles_windowed_prior_extensive.R
 scripts/R/09_analysis/05_news/did_articles_lag4_prior_extensive.R
+scripts/R/09_analysis/05_news/did_attention_repeat_extensive.R
 
 # 06_upstream_downstream
 #scripts/R/09_analysis/06_upstream_downstream/upstream_downstream.R
