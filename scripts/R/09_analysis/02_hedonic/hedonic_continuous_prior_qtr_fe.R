@@ -223,74 +223,74 @@ run_for_radius <- function(RAD) {
   model_sales_count_1 <- fixest::feols(
     log_price ~ spill_count_weekly_avg,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_sales_count_1b <- fixest::feols(
     log_price ~ spill_count_weekly_avg + property_type + old_new + duration | qtr_id,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_sales_count_2 <- fixest::feols(
     log_price ~ spill_count_weekly_avg | lsoa + qtr_id,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_sales_count_3 <- fixest::feols(
     log_price ~ spill_count_weekly_avg + property_type + old_new + duration | lsoa + qtr_id,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_sales_count_4 <- fixest::feols(
     log_price ~ spill_count_weekly_avg | msoa + qtr_id,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_sales_count_5 <- fixest::feols(
     log_price ~ spill_count_weekly_avg + property_type + old_new + duration | msoa + qtr_id,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   # Rental Models
   model_rental_count_1 <- fixest::feols(
     log_price ~ spill_count_weekly_avg,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_rental_count_1b <- fixest::feols(
     log_price ~ spill_count_weekly_avg + property_type + bedrooms + bathrooms | qtr_id,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_rental_count_2 <- fixest::feols(
     log_price ~ spill_count_weekly_avg | lsoa + qtr_id,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_rental_count_3 <- fixest::feols(
     log_price ~ spill_count_weekly_avg + property_type + bedrooms + bathrooms | lsoa + qtr_id,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_rental_count_4 <- fixest::feols(
     log_price ~ spill_count_weekly_avg | msoa + qtr_id,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_rental_count_5 <- fixest::feols(
     log_price ~ spill_count_weekly_avg + property_type + bedrooms + bathrooms | msoa + qtr_id,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   # ============================================================================
@@ -302,74 +302,74 @@ run_for_radius <- function(RAD) {
   model_sales_hrs_1 <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_sales_hrs_1b <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg + property_type + old_new + duration | qtr_id,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_sales_hrs_2 <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg | lsoa + qtr_id,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_sales_hrs_3 <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg + property_type + old_new + duration | lsoa + qtr_id,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_sales_hrs_4 <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg | msoa + qtr_id,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_sales_hrs_5 <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg + property_type + old_new + duration | msoa + qtr_id,
     data = dat_sales_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   # Rental Models
   model_rental_hrs_1 <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_rental_hrs_1b <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg + property_type + bedrooms + bathrooms | qtr_id,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_rental_hrs_2 <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg | lsoa + qtr_id,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_rental_hrs_3 <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg + property_type + bedrooms + bathrooms | lsoa + qtr_id,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_rental_hrs_4 <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg | msoa + qtr_id,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   model_rental_hrs_5 <- fixest::feols(
     log_price ~ spill_hrs_weekly_avg + property_type + bedrooms + bathrooms | msoa + qtr_id,
     data = dat_rental_clean,
-    vcov = "hetero"
+    vcov = spatial_vcov()
   )
 
   # ============================================================================
@@ -414,7 +414,7 @@ run_for_radius <- function(RAD) {
 
   # Notes
   custom_notes_count <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values with quarter fixed effects. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Quarter fixed effects are included in all specifications except column 1 (plain OLS). Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values with quarter fixed effects. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Properties are excluded where any overflow within the radius has an incomplete spill record over the exposure window, since measured spill exposure would otherwise be understated. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Quarter fixed effects are included in all specifications except column 1 (plain OLS). ", spatial_se_note(), " *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Export table
@@ -474,7 +474,7 @@ run_for_radius <- function(RAD) {
   )
   # Notes
   custom_notes_hrs <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values with quarter fixed effects. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2023. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Quarter fixed effects are included in all specifications except column 1 (plain OLS). Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure and property values with quarter fixed effects. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Properties are excluded where any overflow within the radius has an incomplete spill record over the exposure window, since measured spill exposure would otherwise be understated. The dependent variable is the log transaction price for sales (columns 1--6) or log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average total number of spill hours per week recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Quarter fixed effects are included in all specifications except column 1 (plain OLS). ", spatial_se_note(), " *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Export table

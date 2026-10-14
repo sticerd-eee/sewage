@@ -65,6 +65,8 @@ scripts/R/09_analysis/02_hedonic/hedonic_continuous_prior_salience.R
 scripts/R/09_analysis/02_hedonic/hedonic_bins_prior.R
 scripts/R/09_analysis/02_hedonic/hedonic_continuous_full.R
 scripts/R/09_analysis/02_hedonic/hedonic_bins_full.R
+scripts/R/09_analysis/02_hedonic/hedonic_continuous_prior_qtr_fe.R
+scripts/R/09_analysis/02_hedonic/hedonic_continuous_prior_idw.R
 
 # 03_repeat_sales
 scripts/R/09_analysis/03_repeat_sales/repeat_sales.R

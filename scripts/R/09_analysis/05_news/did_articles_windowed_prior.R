@@ -295,17 +295,17 @@ estimate_models <- function(dat, dat_rental, salience_col) {
     model_sale_1 = fixest::feols(
       make_formula(paste0("spill_count_weekly_avg + ", salience_col, " + ", interaction)),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_1b = fixest::feols(
       make_formula(sales_controls),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_2 = fixest::feols(
       make_formula(paste0("spill_count_weekly_avg + ", interaction), "msoa + month_id"),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_3 = fixest::feols(
       make_formula(
@@ -317,12 +317,12 @@ estimate_models <- function(dat, dat_rental, salience_col) {
         "msoa + month_id"
       ),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_4 = fixest::feols(
       make_formula(paste0("spill_count_weekly_avg + ", interaction), "lsoa + month_id"),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_5 = fixest::feols(
       make_formula(
@@ -334,22 +334,22 @@ estimate_models <- function(dat, dat_rental, salience_col) {
         "lsoa + month_id"
       ),
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_1 = fixest::feols(
       make_formula(paste0("spill_count_weekly_avg + ", salience_col, " + ", interaction)),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_1b = fixest::feols(
       make_formula(rental_controls),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_2 = fixest::feols(
       make_formula(paste0("spill_count_weekly_avg + ", interaction), "msoa + month_id"),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_3 = fixest::feols(
       make_formula(
@@ -361,12 +361,12 @@ estimate_models <- function(dat, dat_rental, salience_col) {
         "msoa + month_id"
       ),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_4 = fixest::feols(
       make_formula(paste0("spill_count_weekly_avg + ", interaction), "lsoa + month_id"),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_5 = fixest::feols(
       make_formula(
@@ -378,11 +378,11 @@ estimate_models <- function(dat, dat_rental, salience_col) {
         "lsoa + month_id"
       ),
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     )
   )
 
-  cat("  Model battery estimated; using LSOA-clustered SEs\n")
+  cat("  Model battery estimated; using Conley 1 km SEs\n")
 
   models
 }
@@ -489,7 +489,7 @@ export_measure_table <- function(models, measure, rad, salience_col) {
         " months, inclusive of the transaction month. "
       )
     },
-    "Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. ", spatial_se_note(), " *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   panels <- list(
@@ -606,7 +606,7 @@ write_window_comparison_table <- function(models_by_measure) {
     "\\end{tblr}",
     "\\vspace{0.3em}",
     "\\begin{minipage}{\\linewidth}",
-    "\\footnotesize \\textbf{Notes:} Each cell reports the coefficient on the interaction between weekly spill count and the stated public-attention measure, with LSOA-clustered standard errors in parentheses. Models use sales from 2021--2024 and rentals from 2021--2023 at the 250m radius and include property controls, the stated location fixed effects, and month fixed effects. Article-count measures differ in scale, so the comparison is intended to read the sign and significance pattern across windows rather than raw magnitudes. *** p<0.01, ** p<0.05, * p<0.1.",
+    paste0("\\footnotesize \\textbf{Notes:} Each cell reports the coefficient on the interaction between weekly spill count and the stated public-attention measure. ", spatial_se_note(), " Models use sales from 2021--2024 and rentals from 2021--2023 at the 250m radius and include property controls, the stated location fixed effects, and month fixed effects. Article-count measures differ in scale, so the comparison is intended to read the sign and significance pattern across windows rather than raw magnitudes. *** p<0.01, ** p<0.05, * p<0.1."),
     "\\end{minipage}",
     "\\end{table}"
   )

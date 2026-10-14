@@ -36,11 +36,15 @@ REQUIRED_PACKAGES <- c(
   "fixest",
   "forcats",
   "here",
+  "modelsummary",
   "tibble",
   "tidyr"
 )
 
 check_required_packages(REQUIRED_PACKAGES)
+
+# Shared table formatting and inference helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
 
 source(
   here::here(
@@ -305,7 +309,7 @@ estimate_sales_model <- function(dat) {
       spill_count_weekly_avg:log_cumulative_articles +
       property_type + old_new + duration | lsoa + month_id,
     data = dat,
-    vcov = ~lsoa,
+    vcov = spatial_vcov(),
     lean = TRUE
   )
 }
@@ -317,7 +321,7 @@ estimate_rental_model <- function(dat) {
       spill_count_weekly_avg:log_cumulative_articles +
       property_type + bedrooms + bathrooms | lsoa + month_id,
     data = dat,
-    vcov = ~lsoa,
+    vcov = spatial_vcov(),
     lean = TRUE
   )
 }
@@ -561,8 +565,9 @@ export_grid_table <- function(component_results) {
   notes <- paste0(
     "\\multicolumn{7}{p{0.97\\linewidth}}{\\footnotesize \\textit{Notes:} ",
     "This table is the intensive-margin extension. Cells report the coefficient ",
-    "on weekly-average spill count $\\times$ log cumulative articles, with ",
-    "LSOA-clustered standard errors in parentheses. Common-sample sales models ",
+    "on weekly-average spill count $\\times$ log cumulative articles. ",
+    spatial_se_note(),
+    " Common-sample sales models ",
     "retain January 2022--December 2024 (month\\_id 13--48) at every lag. ",
     "The sales Full lag-0 column reports contemporaneous January 2021--December ",
     "2024; rentals use January 2021--December 2023 and appear only in the Full ",

@@ -47,6 +47,7 @@ REQUIRED_PACKAGES <- c(
   "glue",
   "here",
   "lubridate",
+  "modelsummary",
   "purrr",
   "readxl",
   "rio",
@@ -59,6 +60,9 @@ REQUIRED_PACKAGES <- c(
 )
 
 check_required_packages(REQUIRED_PACKAGES)
+
+# Shared table formatting and inference helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
 
 
 # ==============================================================================
@@ -444,10 +448,11 @@ build_comparison_sample <- function(data, comparison_row) {
 
 # 4.4 Estimation Functions -----------------------------------------------------
 
-# Cluster on the specification's own fixed-effect unit, matching the sibling
-# table scripts in this folder (all of which pass `vcov = ~lsoa`).
+# Conley standard errors with a 1 km cutoff for every specification, whatever
+# its fixed-effect unit, matching the sibling table scripts in this folder
+# (see "Property-Level Inference" in CONCEPTS.md).
 resolve_vcov <- function(spec_row) {
-  stats::as.formula(paste0("~", spec_row$fe_unit))
+  spatial_vcov()
 }
 
 build_formula <- function(family, spec_row, market) {

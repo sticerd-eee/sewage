@@ -155,6 +155,11 @@ The effect of sewage-spill *intensity* — a continuous exposure measure such as
 ### Extensive Margin
 The effect of *proximity itself* — being near versus far from an overflow — on property values, and how the near-versus-far price gap responds to public attention. Contrasts with the Intensive Margin, which varies realized spill intensity rather than proximity.
 
+### Property-Level Inference
+The single standard-error convention for every estimate on individual transactions with coordinates: the hedonic cross-sections (continuous, bins, quarter FE, inverse-distance-weighted, salience, radius robustness), upstream/downstream, long differences, repeat sales, and the public-attention difference-in-differences, event-study, windowed-article, lagged-attention and salience tables, together with the confidence bands in their coefficient plots. So far only the hedonic and public-attention estimates use it; upstream/downstream, long differences and repeat sales still report their earlier standard errors until they are switched. It is Conley spatial standard errors with a 1 km distance cutoff and fixest's uniform kernel, under which every pair of transactions within 1 km gets full weight and pairs farther apart are treated as independent. It allows correlation among properties that share overflows and local shocks, which fades with distance rather than stopping at an administrative boundary. Because the dependence comes from geography, not from the regressor, the same convention applies regardless of how exposure is measured. The public-attention regressions are estimated on the same transactions as the hedonic cross-sections, so the house-to-overflow dependence is the same; adding an interaction with a time-varying attention measure does not change the estimator, and month fixed effects absorb shocks common to all properties.
+
+Exceptions: the dry-spill logit is a site-day model, not a transaction model, and clusters by overflow site (`site_id`). LSOA clustering, the earlier convention for the difference-in-differences tables, is now a comparison estimator only, not a primary one.
+
 ## Repeat-Transactions Area
 
 ### Content-Stable Transaction ID

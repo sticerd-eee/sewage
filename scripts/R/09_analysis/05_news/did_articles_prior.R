@@ -279,7 +279,7 @@ run_for_radius <- function(RAD) {
     log_price ~ spill_count_weekly_avg + log_cumulative_articles +
                 spill_count_weekly_avg:log_cumulative_articles,
     data = dat,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Sales Model 1 (no controls, no FE) estimated\n")
 
@@ -289,7 +289,7 @@ run_for_radius <- function(RAD) {
                 spill_count_weekly_avg:log_cumulative_articles +
                 property_type + old_new + duration,
     data = dat,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Sales Model 1b (controls, no FE) estimated\n")
 
@@ -298,7 +298,7 @@ run_for_radius <- function(RAD) {
     log_price ~ spill_count_weekly_avg +
                 spill_count_weekly_avg:log_cumulative_articles | msoa + month_id,
     data = dat,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Sales Model 2 (MSOA FE + month FE) estimated\n")
 
@@ -308,7 +308,7 @@ run_for_radius <- function(RAD) {
                 spill_count_weekly_avg:log_cumulative_articles +
                 property_type + old_new + duration | msoa + month_id,
     data = dat,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Sales Model 3 (MSOA FE + month FE + controls) estimated\n")
 
@@ -317,7 +317,7 @@ run_for_radius <- function(RAD) {
     log_price ~ spill_count_weekly_avg +
                 spill_count_weekly_avg:log_cumulative_articles | lsoa + month_id,
     data = dat,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Sales Model 4 (LSOA FE + month FE) estimated\n")
 
@@ -327,7 +327,7 @@ run_for_radius <- function(RAD) {
                 spill_count_weekly_avg:log_cumulative_articles +
                 property_type + old_new + duration | lsoa + month_id,
     data = dat,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Sales Model 5 (LSOA FE + month FE + controls) estimated\n")
 
@@ -338,7 +338,7 @@ run_for_radius <- function(RAD) {
     log_price ~ spill_count_weekly_avg + log_cumulative_articles +
                 spill_count_weekly_avg:log_cumulative_articles,
     data = dat_rental,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Rental Model 1 (no controls, no FE) estimated\n")
 
@@ -348,7 +348,7 @@ run_for_radius <- function(RAD) {
                 spill_count_weekly_avg:log_cumulative_articles +
                 property_type + bedrooms + bathrooms,
     data = dat_rental,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Rental Model 1b (controls, no FE) estimated\n")
 
@@ -357,7 +357,7 @@ run_for_radius <- function(RAD) {
     log_price ~ spill_count_weekly_avg +
                 spill_count_weekly_avg:log_cumulative_articles | msoa + month_id,
     data = dat_rental,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Rental Model 2 (MSOA FE + month FE) estimated\n")
 
@@ -367,7 +367,7 @@ run_for_radius <- function(RAD) {
                 spill_count_weekly_avg:log_cumulative_articles +
                 property_type + bedrooms + bathrooms | msoa + month_id,
     data = dat_rental,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Rental Model 3 (MSOA FE + month FE + controls) estimated\n")
 
@@ -376,7 +376,7 @@ run_for_radius <- function(RAD) {
     log_price ~ spill_count_weekly_avg +
                 spill_count_weekly_avg:log_cumulative_articles | lsoa + month_id,
     data = dat_rental,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Rental Model 4 (LSOA FE + month FE) estimated\n")
 
@@ -386,11 +386,11 @@ run_for_radius <- function(RAD) {
                 spill_count_weekly_avg:log_cumulative_articles +
                 property_type + bedrooms + bathrooms | lsoa + month_id,
     data = dat_rental,
-    vcov = ~lsoa
+    vcov = spatial_vcov()
   )
   cat("  Rental Model 5 (LSOA FE + month FE + controls) estimated\n")
 
-  cat("  Using LSOA-clustered SEs\n")
+  cat("  Using Conley 1 km SEs\n")
 
   # ==========================================================================
   # Export Table
@@ -419,7 +419,7 @@ run_for_radius <- function(RAD) {
 
   # Notes
   custom_notes <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Observations with incomplete annual reporting within ", RAD, "m (including overflows that stopped reporting and left the register) are excluded. $\\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative UK news coverage of sewage spills from LexisNexis from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents hedonic estimates of the relationship between sewage spill exposure, public attention, and property values. The sample includes all properties within ", RAD, "m of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). The dependent variable is the log transaction price for sales (columns 1--6) or the log weekly asking rent for rentals (columns 7--12). Spill exposure is measured as the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date. Observations with incomplete annual reporting within ", RAD, "m (including overflows that stopped reporting and left the register) are excluded. $\\\\log (\\\\text{Articles})$ is the natural logarithm of cumulative UK news coverage of sewage spills from LexisNexis from January 2021 to the transaction month. Property controls include type (flat, semi-detached, terraced, other), new build status, and tenure for sales; and type (bungalow, detached, semi-detached, terraced), bedrooms, and bathrooms for rentals. ", spatial_se_note(), " *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   # Set option to avoid siunitx wrapping
@@ -499,7 +499,7 @@ cat("  Radii:", paste(RADII, collapse = ", "), "m\n")
 cat("\nBuilding cross-radius robustness summary...\n")
 
 custom_notes_summary <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the cumulative media coverage estimates to the house-to-site radius. Each column reports estimates for the sample of properties within the stated radius (250m, 500m, or 1000m) of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Each cell is the coefficient on the interaction between the weekly spill count and $\\\\log (\\\\text{Articles})$, the natural logarithm of cumulative UK news coverage of sewage spills from January 2021 to the transaction month, from the fully-saturated specification including property controls, the stated location fixed effects, and month fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Observations with incomplete annual reporting within the stated radius (including overflows that stopped reporting and left the register) are excluded. Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the cumulative media coverage estimates to the house-to-site radius. Each column reports estimates for the sample of properties within the stated radius (250m, 500m, or 1000m) of a storm overflow in England, 2021--2024 for sales and 2021--2023 for rentals (no 2024 rental data are available). Each cell is the coefficient on the interaction between the weekly spill count and $\\\\log (\\\\text{Articles})$, the natural logarithm of cumulative UK news coverage of sewage spills from January 2021 to the transaction month, from the fully-saturated specification including property controls, the stated location fixed effects, and month fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Observations with incomplete annual reporting within the stated radius (including overflows that stopped reporting and left the register) are excluded. Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. ", spatial_se_note(), " *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 write_radius_robustness_table(
