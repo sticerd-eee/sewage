@@ -1,0 +1,415 @@
+---
+title: "Sample impact of the harmonized missing-evidence rule"
+subtitle: "Stage-2 dry run of the exposure-builder refactor: what changes, by how much, and what it does to the preferred hedonic"
+date: 2026-08-19
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+# Arrow's ALTREP vectors are lazily materialized and are not safe under
+# data.table's multi-threaded operations: joins and sorts on them return
+# nondeterministic results. Materialize eagerly for the whole document.
+options(arrow.use_altrep = FALSE)
+
+suppressMessages({
+  library(arrow)
+  library(data.table)
+  library(fixest)
+  library(knitr)
+})
+
+repo_root <- here::here()
+# Post-promotion defaults: the canonical tree holds the Stage-2 generations,
+# and the Stage-1 generations survive in the ticket-01 baseline snapshot
+# (proved bit-identical to the accepted Stage-1 outputs by the ticket-06
+# reconciliation). During the pre-promotion dry run this memo was rendered
+# with the same env vars pointing at canonical (then Stage 1) and the staging
+# root instead.
+stage1_root <- Sys.getenv(
+  "STAGE2_MEMO_STAGE1_ROOT",
+  file.path(
+    repo_root, ".scratch", "exposure-builder-refactor", "baseline-snapshot"
+  )
+)
+stage2_root <- Sys.getenv(
+  "STAGE2_MEMO_STAGE2_ROOT",
+  file.path(repo_root, "data", "processed", "cross_section")
+)
+if (identical(normalizePath(stage1_root, mustWork = FALSE),
+              normalizePath(stage2_root, mustWork = FALSE))) {
+  stop(
+    "The two roots resolve to the same directory; the comparison would be ",
+    "vacuous. Set STAGE2_MEMO_STAGE1_ROOT and STAGE2_MEMO_STAGE2_ROOT to ",
+    "distinct generations.",
+    call. = FALSE
+  )
+}
+changing <- list(
+  list(dir = "sales/prior_to_sale", id = "house_id",
+       label = "Prior exposure, sales (radius grain)"),
+  list(dir = "rentals/prior_to_rental", id = "rental_id",
+       label = "Prior exposure, rentals (radius grain)"),
+  list(dir = "sales/study_period", id = "house_id",
+       label = "Study period, sales (events)"),
+  list(dir = "rentals/study_period", id = "rental_id",
+       label = "Study period, rentals (events)")
+)
+required <- c(
+  file.path(stage1_root, vapply(changing, `[[`, "", "dir")),
+  file.path(stage2_root, vapply(changing, `[[`, "", "dir"))
+)
+if (!all(dir.exists(required))) {
+  stop(
+    "Both dataset generations must be readable before rendering. Missing: ",
+    paste(required[!dir.exists(required)], collapse = ", "),
+    call. = FALSE
+  )
+}
+
+read_stage <- function(root, dir, id) {
+  cols <- c(id, "radius", "spill_count",
+            "spill_count_weekly_avg", "spill_hrs_weekly_avg")
+  dt <- arrow::open_dataset(file.path(root, dir)) |>
+    dplyr::select(dplyr::all_of(cols)) |>
+    dplyr::collect() |>
+    data.table::as.data.table()
+  data.table::setnames(dt, id, "transaction_id")
+  data.table::setkey(dt, transaction_id, radius)
+  dt
+}
+
+impact <- lapply(changing, function(spec) {
+  before <- read_stage(stage1_root, spec$dir, spec$id)
+  after <- read_stage(stage2_root, spec$dir, spec$id)
+  stopifnot(
+    nrow(before) == nrow(after),
+    identical(before$transaction_id, after$transaction_id),
+    identical(before$radius, after$radius)
+  )
+  newly_na <- !is.na(before$spill_count) & is.na(after$spill_count)
+  unmasked <- is.na(before$spill_count) & !is.na(after$spill_count)
+  stopifnot(sum(unmasked) == 0L)
+  counts <- data.table::data.table(
+    radius = sort(unique(before$radius))
+  )
+  counts <- counts[, {
+    rows <- before$radius == radius
+    list(
+      n_rows = sum(rows),
+      known_before = sum(rows & !is.na(before$spill_count)),
+      known_after = sum(rows & !is.na(after$spill_count)),
+      newly_na = sum(rows & newly_na)
+    )
+  }, by = radius]
+  dist <- data.table::rbindlist(lapply(
+    c("spill_count_weekly_avg", "spill_hrs_weekly_avg"),
+    function(measure) {
+      data.table::rbindlist(lapply(sort(unique(before$radius)), function(r) {
+        removed <- before[[measure]][before$radius == r & newly_na]
+        retained <- before[[measure]][
+          before$radius == r & !newly_na & !is.na(before$spill_count)
+        ]
+        summarise_group <- function(values, group) {
+          if (length(values) == 0L) {
+            return(data.table::data.table(
+              measure = measure, radius = r, group = group, n = 0L,
+              share_zero = NA_real_, mean = NA_real_, p25 = NA_real_,
+              median = NA_real_, p75 = NA_real_, max = NA_real_
+            ))
+          }
+          data.table::data.table(
+            measure = measure, radius = r, group = group,
+            n = length(values),
+            share_zero = base::mean(values == 0),
+            mean = base::mean(values),
+            p25 = stats::quantile(values, 0.25, names = FALSE),
+            median = stats::median(values),
+            p75 = stats::quantile(values, 0.75, names = FALSE),
+            max = base::max(values)
+          )
+        }
+        rbind(
+          summarise_group(removed, "removed"),
+          summarise_group(retained, "retained")
+        )
+      }))
+    }
+  ))
+  list(label = spec$label, dir = spec$dir, counts = counts, dist = dist)
+})
+```
+
+## What this memo is
+
+Stage 2 of the exposure-builder refactor applies one harmonized
+missing-evidence rule to every event-based exposure dataset: a Site Group's
+evidence over a window is unknown when any window year carries a missing
+Annual Return (`annual_returns_na`), a Site Group absent from the register
+(`annual_returns_absent`), or a reported-positive year with zero matched EDM
+events (`reported_positive_without_matched_events`). The four prior-exposure
+datasets previously masked on the register-absence flag alone at the radius
+grain, and the two study-period event datasets masked on the two
+Annual-Returns flags without the unverifiable-positive flag. The site-grain
+prior datasets already carried the full three-flag rule, and the
+Annual-Returns study-period variant keeps its two-flag rule by design, so
+neither changes.
+
+This memo quantifies what the harmonized rule does to the estimation samples.
+It is the acceptance document for the Stage-2 dry run: the rebuilt datasets
+are staged outside the canonical tree, every difference from the accepted
+Stage-1 outputs has been attributed row by row to the added flags in the
+Stage-2 reconciliation, and **nothing is promoted to canonical until this memo
+is signed off**. Every number here is computed inside this document from the
+two dataset generations; no analysis script is modified or re-run.
+
+All changes are NA flips: a row whose exposure was known under Stage 1
+becomes unknown under the harmonized rule. No row changes value, no row is
+added or removed, and no unknown row becomes known. "Rows with known
+exposure" below therefore counts rows whose exposure measures are non-missing;
+total row counts are identical before and after by construction.
+
+## Sample impact by dataset and radius
+
+```{r impact-table, results="asis"}
+for (item in impact) {
+  tab <- data.table::copy(item$counts)
+  tab[, `:=`(
+    share_known_before = known_before / n_rows,
+    share_known_after = known_after / n_rows,
+    newly_na_share_of_known = newly_na / known_before
+  )]
+  out <- data.table::data.table(
+    `Radius (m)` = tab$radius,
+    `Rows` = format(tab$n_rows, big.mark = ","),
+    `Known before` = format(tab$known_before, big.mark = ","),
+    `Known after` = format(tab$known_after, big.mark = ","),
+    `Newly NA` = format(tab$newly_na, big.mark = ","),
+    `Known share before` = sprintf("%.1f%%", 100 * tab$share_known_before),
+    `Known share after` = sprintf("%.1f%%", 100 * tab$share_known_after),
+    `Removed share of known` = sprintf(
+      "%.2f%%", 100 * tab$newly_na_share_of_known
+    )
+  )
+  print(knitr::kable(out, caption = paste0(
+    item$label, " (`", item$dir, "`)."
+  )))
+  cat("\n")
+}
+```
+
+The two site-grain prior datasets (`sales/prior_to_sale_house_site`,
+`rentals/prior_to_rental_rental_site`) and the two Annual-Returns study-period
+datasets (`sales/study_period_ea`, `rentals/study_period_ea`) are unchanged:
+the Stage-2 reconciliation compared every row of each against its accepted
+Stage-1 generation and found zero differences, as the harmonized rule
+predicts. They are omitted from the table above because every count is
+identical.
+
+## Exposure distribution of the removed rows
+
+The removed rows are those flipping from known to unknown exposure. Their
+Stage-1 exposure values, alongside the retained rows' for reference:
+
+```{r dist-table, results="asis"}
+measure_labels <- c(
+  spill_count_weekly_avg = "Weekly spill count (avg.)",
+  spill_hrs_weekly_avg = "Weekly spill hours (avg.)"
+)
+for (item in impact) {
+  tab <- data.table::copy(item$dist)
+  out <- data.table::data.table(
+    Measure = measure_labels[tab$measure],
+    `Radius (m)` = tab$radius,
+    Group = tab$group,
+    N = format(tab$n, big.mark = ","),
+    `Share zero` = sprintf("%.1f%%", 100 * tab$share_zero),
+    Mean = sprintf("%.4f", tab$mean),
+    P25 = sprintf("%.4f", tab$p25),
+    Median = sprintf("%.4f", tab$median),
+    P75 = sprintf("%.4f", tab$p75),
+    Max = sprintf("%.2f", tab$max)
+  )
+  print(knitr::kable(out, caption = paste0(
+    item$label, " (`", item$dir,
+    "`): Stage-1 exposure of removed versus retained rows."
+  )))
+  cat("\n")
+}
+```
+
+## The preferred 250-metre continuous hedonic, before and after
+
+The preferred cross-sectional specification regresses the log price on the
+average weekly spill count within 250 metres prior to the transaction, with
+property controls and MSOA or LSOA fixed effects and heteroskedasticity-robust
+standard errors, on properties with at least one spill site within the radius
+(`scripts/R/09_analysis/02_hedonic/hedonic_continuous_prior.R`). The same
+sample construction and estimation are replicated here, inside this document,
+on three samples per market:
+
+1. **Stage 1** — the accepted Stage-1 dataset under the current sample rule
+   (no manual exclusion).
+2. **Stage 1 + manual exclusion** — the same dataset with the removed
+   `annual_returns_na_then_absent` exclusion reapplied: the branch's previous
+   preferred estimate, shown because that exclusion removed 1.66 percent of
+   the 250-metre sales sample and moved the sales estimate from insignificant
+   to significant at 5 percent.
+3. **Stage 2 (harmonized)** — the dry-run dataset, where the harmonized rule
+   masks every row the exclusion targeted and more.
+
+```{r hedonic}
+preferred_radius_m <- 250L
+
+sales_meta <- arrow::read_parquet(
+  file.path(repo_root, "data", "processed", "house_price.parquet"),
+  col_select = c("house_id", "price", "lsoa", "msoa",
+                 "property_type", "old_new", "duration")
+) |>
+  data.table::as.data.table()
+rentals_meta <- arrow::read_parquet(
+  file.path(repo_root, "data", "processed", "zoopla", "zoopla_rentals.parquet"),
+  col_select = c("rental_id", "listing_price", "lsoa", "msoa",
+                 "property_type", "bedrooms", "bathrooms")
+) |>
+  data.table::as.data.table()
+
+load_hedonic_sample <- function(root, market, manual_exclusion = FALSE) {
+  dir <- if (market == "sales") "sales/prior_to_sale" else "rentals/prior_to_rental"
+  id <- if (market == "sales") "house_id" else "rental_id"
+  dat <- arrow::open_dataset(file.path(root, dir)) |>
+    dplyr::filter(radius == preferred_radius_m, n_spill_sites > 0) |>
+    dplyr::select(dplyr::all_of(c(
+      id, "spill_count_weekly_avg", "spill_hrs_weekly_avg",
+      "annual_returns_na_then_absent"
+    ))) |>
+    dplyr::collect() |>
+    data.table::as.data.table()
+  if (manual_exclusion) {
+    # The removed analysis-script filter dropped flagged rows; a missing flag
+    # would silently widen that into dropping NA rows too, so assert first.
+    stopifnot(!anyNA(dat$annual_returns_na_then_absent))
+    dat <- dat[annual_returns_na_then_absent == FALSE]
+  }
+  if (market == "sales") {
+    dat <- data.table::as.data.table(
+      dplyr::inner_join(dat, sales_meta, by = id)
+    )
+    dat <- dat[
+      !is.na(spill_count_weekly_avg) & !is.na(spill_hrs_weekly_avg) &
+        !is.na(lsoa) & !is.na(property_type) & !is.na(old_new) & !is.na(duration)
+    ]
+    dat[, log_price := log(price)]
+  } else {
+    dat <- data.table::as.data.table(
+      dplyr::inner_join(dat, rentals_meta, by = id)
+    )
+    dat <- dat[
+      !is.na(spill_count_weekly_avg) & !is.na(spill_hrs_weekly_avg) &
+        !is.na(lsoa) & !is.na(property_type) & !is.na(bedrooms) & !is.na(bathrooms)
+    ]
+    dat[, log_price := log(listing_price)]
+  }
+  dat[, `:=`(
+    lsoa = factor(lsoa), msoa = factor(msoa),
+    property_type = factor(property_type)
+  )]
+  dat
+}
+
+fit_preferred <- function(dat, market, fe) {
+  controls <- if (market == "sales") {
+    "property_type + old_new + duration"
+  } else {
+    "property_type + bedrooms + bathrooms"
+  }
+  fml <- stats::as.formula(paste0(
+    "log_price ~ spill_count_weekly_avg + ", controls, " | ", fe
+  ))
+  fixest::feols(fml, data = dat, vcov = "hetero")
+}
+
+variants <- list(
+  list(name = "Stage 1", root = stage1_root, exclusion = FALSE),
+  list(name = "Stage 1 + manual exclusion", root = stage1_root, exclusion = TRUE),
+  list(name = "Stage 2 (harmonized)", root = stage2_root, exclusion = FALSE)
+)
+
+hedonic_rows <- data.table::rbindlist(lapply(
+  c("sales", "rentals"),
+  function(market) {
+    data.table::rbindlist(lapply(variants, function(v) {
+      dat <- load_hedonic_sample(v$root, market, v$exclusion)
+      data.table::rbindlist(lapply(c("msoa", "lsoa"), function(fe) {
+        model <- fit_preferred(dat, market, fe)
+        ct <- fixest::coeftable(model)["spill_count_weekly_avg", ]
+        data.table::data.table(
+          market = market, variant = v$name, fe = toupper(fe),
+          estimate = ct[["Estimate"]], se = ct[["Std. Error"]],
+          p = ct[["Pr(>|t|)"]], n = stats::nobs(model)
+        )
+      }))
+    }))
+  }
+))
+```
+
+```{r hedonic-table, results="asis"}
+stars <- function(p) {
+  ifelse(p < 0.01, "***", ifelse(p < 0.05, "**", ifelse(p < 0.1, "*", "")))
+}
+for (mkt in c("sales", "rentals")) {
+  tab <- hedonic_rows[market == mkt]
+  out <- data.table::data.table(
+    Sample = tab$variant,
+    `Fixed effects` = tab$fe,
+    Estimate = sprintf("%.5f%s", tab$estimate, stars(tab$p)),
+    `Std. error` = sprintf("(%.5f)", tab$se),
+    `p-value` = sprintf("%.4f", tab$p),
+    N = format(tab$n, big.mark = ",")
+  )
+  print(knitr::kable(out, caption = paste0(
+    "Preferred 250 m continuous hedonic, ",
+    ifelse(mkt == "sales", "house sales (log transaction price)",
+           "house rentals (log weekly asking rent)"),
+    ". Coefficient on the average weekly spill count; property controls",
+    " included; heteroskedasticity-robust standard errors;",
+    " *** p<0.01, ** p<0.05, * p<0.1."
+  )))
+  cat("\n")
+}
+```
+
+The three samples per market differ only through the rows each rule removes:
+the manual exclusion dropped rows flagged `annual_returns_na_then_absent`,
+while the harmonized rule masks every row whose within-radius evidence
+includes a missing Annual Return or an unverifiable reported positive —
+a strict superset of the exclusion's target, applied as missingness in the
+dataset rather than as a filter in the analysis script.
+
+## Provenance and reproducibility
+
+The Stage-1 generation read by this memo is the accepted Stage-1 output: at
+sign-off time the canonical tree itself, and after promotion the ticket-01
+baseline snapshot, which the ticket-06 reconciliation proved bit-identical to
+it (the defaults above reflect the post-promotion layout; the displaced
+Stage-1 directories are also parked beside their canonical paths as
+`<name>.stage1-parked-20260819`). The Stage-2 generation is the ticket-09 dry
+run, built by the unmodified builder entry scripts with their published
+output redirected to a staging root and promoted to canonical on sign-off.
+Set `STAGE2_MEMO_STAGE1_ROOT` and `STAGE2_MEMO_STAGE2_ROOT` to render against
+relocated generations. The row-by-row attribution backing this memo — every
+difference is an NA flip, and the newly-NA row sets equal the flag-predicted
+sets exactly — is recorded in the ticket-09 reconciliation log.
+
+## Sign-off
+
+Per the locked plan (R26), this memo is the gate between "rebuilt" and
+"canonical": the Stage-2 generations are promoted only once Jacopo has read
+this memo and recorded sign-off in the ticket-09 file, with its date.

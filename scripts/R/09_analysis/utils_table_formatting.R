@@ -106,7 +106,35 @@ fit_tblr_latex <- function(latex,
     latex <- sub("note\\{\\}=\\{\\s*\\},", notes, latex)
   }
 
-  latex <- gsub("-0\\.000", "0.000", latex)
+  # Strip only rounded negative zero; preserve small negatives at higher precision.
+  latex <- gsub("-(0\\.0+)(?![0-9])", "\\1", latex, perl = TRUE)
 
   latex
+}
+
+# ------------------------------------------------------------------------------
+# Property-Level Inference
+# ------------------------------------------------------------------------------
+# Every regression estimated on individual transactions with coordinates
+# (hedonic cross-sections, upstream/downstream, long differences, repeat sales,
+# and the public-attention difference-in-differences, event-study and
+# lagged-attention regressions) reports Conley spatial standard errors with a
+# 1 km cutoff and fixest's uniform kernel, under which every pair of
+# observations within the cutoff gets full weight. So far only the hedonic and
+# public-attention scripts call it; upstream/downstream, long differences and
+# repeat sales have not been switched yet. The estimation data must
+# carry `latitude`/`longitude`, which conley() detects automatically. See
+# "Property-Level Inference" in CONCEPTS.md.
+
+SPATIAL_CONLEY_CUTOFF_KM <- 1
+
+spatial_vcov <- function() {
+  fixest::conley(cutoff = SPATIAL_CONLEY_CUTOFF_KM)
+}
+
+spatial_se_note <- function() {
+  paste0(
+    "Conley standard errors with a ", SPATIAL_CONLEY_CUTOFF_KM,
+    " km cutoff are reported in parentheses."
+  )
 }

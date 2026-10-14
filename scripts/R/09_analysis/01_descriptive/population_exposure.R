@@ -13,6 +13,8 @@
 # Inputs:
 #   - data/processed/agg_spill_stats/agg_spill_mo.parquet
 #   - data/processed/agg_spill_stats/agg_spill_dry_mo.parquet
+#   - data/processed/agg_spill_stats/agg_spill_yr.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #   - data/raw/population_grid/data/uk_residential_population_2021.tif
 #
 # Outputs:
@@ -44,14 +46,18 @@ REQUIRED_PACKAGES <- c(
 # ==============================================================================
 # 1. Configuration
 # ==============================================================================
-TARGET_YEARS <- 2021:2023
+TARGET_YEARS <- 2021:2024
 BASE_YEAR <- 2021L
 DRY_SPILL_COUNT_COL <- "dry_spill_count_mo_r1_d0123_strict"
 DISTANCES_M <- c(50, 100, 250, 500, 1000)
 
 PATH_ALL_MO <- here::here("data", "processed", "agg_spill_stats", "agg_spill_mo.parquet")
 PATH_DRY_MO <- here::here("data", "processed", "agg_spill_stats", "agg_spill_dry_mo.parquet")
-PATH_UNIQUE_SITES <- here::here("data", "processed", "unique_spill_sites.parquet")
+PATH_ALL_YR <- here::here("data", "processed", "agg_spill_stats", "agg_spill_yr.parquet")
+PATH_SITE_GROUP_CROSSWALK <- here::here(
+  "data", "processed", "matched_events_annual_data",
+  "site_group_crosswalk.parquet"
+)
 PATH_POP_RASTER <- here::here(
   "data", "raw", "population_grid", "data", "uk_residential_population_2021.tif"
 )
@@ -75,6 +81,8 @@ initialise_environment <- function() {
 }
 
 initialise_environment()
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+source(here::here("scripts", "R", "utils", "spill_missing_utils.R"))
 
 
 # ==============================================================================
@@ -119,6 +127,9 @@ dry_mo <- arrow::read_parquet(PATH_DRY_MO) |>
 
 stopifnot(DRY_SPILL_COUNT_COL %in% names(dry_mo))
 
+all_yr <- arrow::read_parquet(PATH_ALL_YR) |>
+  dplyr::mutate(site_id = as.integer(site_id))
+
 cat("Loading population raster...\n")
 pop_r <- terra::rast(PATH_POP_RASTER)
 
@@ -143,13 +154,41 @@ site_dry <- dry_win |>
     .groups = "drop"
   )
 
+# Zero Spills requires non-missing data in every target year
+site_missing <- all_yr |>
+  dplyr::filter(year %in% TARGET_YEARS) |>
+  flag_missing_group_years() |>
+  dplyr::group_by(site_id) |>
+  dplyr::summarise(
+    n_missing_years = sum(is_missing_group_year),
+    n_years_observed = dplyr::n(),
+    .groups = "drop"
+  ) |>
+  dplyr::mutate(
+    complete_data = n_missing_years == 0 &
+      n_years_observed == length(TARGET_YEARS)
+  )
+
 site_status <- site_any |>
   dplyr::left_join(site_dry, by = c("site_id", "water_company")) |>
+  dplyr::left_join(
+    dplyr::select(site_missing, site_id, complete_data),
+    by = "site_id"
+  ) |>
   dplyr::mutate(
     total_dry = tidyr::replace_na(total_dry, 0),
+    complete_data = tidyr::replace_na(complete_data, FALSE),
     any_spill = total_spills > 0,
-    has_dry = total_dry > 0
+    has_dry = total_dry > 0,
+    zero_spill = !any_spill & complete_data
   )
+
+cat(
+  "Overflows with no spills: ", sum(!site_status$any_spill),
+  "; of which complete data in all years (Zero Spills): ",
+  sum(site_status$zero_spill), "\n",
+  sep = ""
+)
 
 
 # ==============================================================================
@@ -157,16 +196,17 @@ site_status <- site_any |>
 # ==============================================================================
 cat("Geocoding sites from NGR...\n")
 
-# Coordinates come from unique_spill_sites (works grain, one row per site_id,
-# same site_id space as the regenerated aggregates); the aggregated spill
-# files no longer carry ngr/ngr_og columns.
-ngr_df <- arrow::read_parquet(PATH_UNIQUE_SITES) |>
+# Coordinates come from the unique Site Group projection; the aggregated spill
+# files use the same group key and no longer carry NGR columns.
+ngr_df <- read_site_group_projection(
+  PATH_SITE_GROUP_CROSSWALK,
+  years = 2021:2024
+) |>
   dplyr::transmute(
     site_id = as.integer(site_id),
     water_company,
     ngr = dplyr::na_if(ngr, "")
   ) |>
-  dplyr::distinct(site_id, water_company, .keep_all = TRUE) |>
   dplyr::mutate(ngr = toupper(gsub("\\s+", "", ngr))) |>
   dplyr::filter(
     !is.na(ngr),
@@ -188,8 +228,12 @@ ll <- tryCatch(
 loc_df <- dplyr::bind_cols(ngr_df, as.data.frame(ll)) |>
   dplyr::filter(!is.na(lat), !is.na(lon))
 
-sites_sf <- sf::st_as_sf(loc_df, coords = c("lon", "lat"), crs = 4326) |>
-  dplyr::left_join(site_status, by = c("site_id", "water_company")) |>
+sites_sf <- sf::st_as_sf(loc_df, coords = c("lon", "lat"), crs = 4326)
+sites_sf <- left_join_site_group_projection(
+  sites_sf,
+  dplyr::select(site_status, -"water_company"),
+  context = "Population exposure Site Group status join"
+) |>
   dplyr::filter(!is.na(any_spill))
 
 cat("Geocoded ", nrow(sites_sf), " sites.\n", sep = "")
@@ -216,7 +260,7 @@ sites_v <- terra::vect(sites_proj)
 groups <- list(
   list(label = "Any Spill",  filter_expr = quote(any_spill == TRUE)),
   list(label = "Dry Spills", filter_expr = quote(has_dry == TRUE)),
-  list(label = "Zero Spills", filter_expr = quote(any_spill == FALSE))
+  list(label = "Zero Spills", filter_expr = quote(zero_spill == TRUE))
 )
 
 res_rows <- list()
@@ -271,11 +315,13 @@ tex_lines <- c(
   "\\begin{table}[H]",
   "\\centering",
   "\\begin{talltblr}[",
-  "caption={Residential Population (Thousands) Within Distance of Spill Sites (2021--2023)},",
+  "caption={Residential Population (Thousands) Within Distance of Spill Sites (2021--2024)},",
   "label={tab:pop_exposure},",
   "note{a}={Population (in thousands) is computed from the UK residential population 2021 raster",
   "  (100\\,m grid). Where buffers from multiple sites overlap, the overlapping",
-  "  area is counted only once.},",
+  "  area is counted only once. Zero Spills requires an annual return reporting",
+  "  zero spills in every year 2021--2024; overflows with incomplete data in any",
+  "  year are not classified as zero-spill, so rows need not sum to the total.},",
   "]{",
   "colsep=3pt,",
   "rowsep=0.5pt,",

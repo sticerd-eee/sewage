@@ -1,0 +1,738 @@
+---
+title: "Windowed article salience results"
+subtitle: "Cumulative and trailing 3-, 6-, and 12-month LexisNexis article-count salience measures for intensive- and extensive-margin public-attention specifications"
+author: "Jacopo Olivieri"
+date: 2026-08-21
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    theme: cosmo
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(knitr)
+library(readr)
+library(stringr)
+
+tables_dir <- here::here("output", "tables")
+source(here::here(
+  "scripts", "R", "09_analysis", "05_news",
+  "windowed_article_analysis_config.R"
+))
+
+measures <- names(windowed_article_salience_cols)
+measure_slugs <- windowed_article_measure_slugs
+intensive_radii <- windowed_article_intensive_radii
+intensive_tables <- lapply(intensive_radii, function(radius) {
+  setNames(
+    paste0(
+      "did_articles_windowed_prior_", radius, "m_", measure_slugs, ".tex"
+    ),
+    measures
+  )
+})
+intensive_effect_size_paths <- setNames(
+  paste0(
+    "did_articles_windowed_prior_", intensive_radii, "m_effect_sizes.csv"
+  ),
+  names(intensive_radii)
+)
+
+extensive_specs <- windowed_article_extensive_comparisons
+extensive_tables <- lapply(extensive_specs, function(specification) {
+  setNames(
+    paste0(
+      "did_articles_windowed_prior_extensive_",
+      specification$comparison_id, "_", measure_slugs, ".tex"
+    ),
+    measures
+  )
+})
+extensive_effect_size_paths <- vapply(
+  extensive_specs,
+  function(specification) paste0(
+    "did_articles_windowed_prior_extensive_",
+    specification$comparison_id,
+    "_effect_sizes.csv"
+  ),
+  character(1)
+)
+
+stat_labels <- c(
+  "Property controls", "Location FE", "Time FE", "MSOA FE", "LSOA FE",
+  "Observations", "Adj. R-squared"
+)
+
+html_escape <- function(value) {
+  value |>
+    str_replace_all("&", "&amp;") |>
+    str_replace_all("<", "&lt;") |>
+    str_replace_all(">", "&gt;") |>
+    str_replace_all('"', "&quot;")
+}
+
+strip_outer_braces <- function(value) {
+  value <- str_trim(value)
+  if (str_starts(value, fixed("{")) && str_ends(value, fixed("}"))) {
+    str_sub(value, 2, -2)
+  } else {
+    value
+  }
+}
+
+replace_grouped_integers <- function(value) {
+  str_replace_all(
+    value,
+    "(?<![\\w.,])\\d{4,}(?![\\w.,])",
+    function(number) format(as.numeric(number), big.mark = ",", scientific = FALSE)
+  )
+}
+
+clean_cell <- function(raw) {
+  value <- str_trim(raw)
+  if (identical(value, "")) return("")
+
+  value <- strip_outer_braces(value)
+  value <- str_replace_all(value, "\\\\textbf\\{([^}]*)\\}", "@@B_OPEN@@\\1@@B_CLOSE@@")
+  value <- str_replace_all(value, "\\\\quad\\s*", "@@INDENT@@")
+  value <- str_replace_all(value, fixed("\\\\"), "@@BREAK@@")
+  value <- str_replace_all(value, "\\\\num\\{([^}]*)\\}", "\\1")
+  value <- str_replace_all(value, "\\\\text\\{([^}]*)\\}", "\\1")
+  value <- str_replace_all(value, "\\\\mathrm\\{([^}]*)\\}", "\\1")
+  value <- str_replace_all(value, fixed("\\times"), "×")
+  value <- str_replace_all(value, fixed("\\log"), "log")
+  value <- str_replace_all(value, fixed("\\geq"), "≥")
+  value <- str_replace_all(value, fixed("\\leq"), "≤")
+  value <- str_replace_all(value, fixed("\\%"), "%")
+  value <- str_replace_all(value, fixed("\\&"), "&")
+  value <- str_replace_all(value, fixed("\\,"), " ")
+  value <- str_replace_all(value, fixed("\\;"), " ")
+  value <- str_replace_all(value, fixed("~"), " ")
+  value <- str_replace_all(value, fixed("$"), "")
+  value <- str_squish(value)
+  value <- replace_grouped_integers(value)
+  value <- str_replace_all(value, "(?<!\\w)-(?=\\d)", "−")
+  value <- html_escape(value)
+  value <- str_replace(value, "(\\*{1,3})$", '<sup class="stars">\\1</sup>')
+  value |>
+    str_replace_all(fixed("@@BREAK@@"), "<br>") |>
+    str_replace_all(fixed("@@B_OPEN@@"), "<strong>") |>
+    str_replace_all(fixed("@@B_CLOSE@@"), "</strong>") |>
+    str_replace_all(fixed("@@INDENT@@"), "&nbsp;&nbsp;") |>
+    str_replace_all("Articles_\\{(3m|6m|12m)\\}", "Articles<sub>\\1</sub>")
+}
+
+clean_note <- function(raw) {
+  value <- str_trim(raw)
+  value <- str_replace(value, "^\\\\footnotesize\\s*\\{(.*)\\}\\s*$", "\\1")
+  value <- str_replace_all(value, "\\\\textbf\\{([^}]*)\\}", "@@B_OPEN@@\\1@@B_CLOSE@@")
+  value <- str_replace_all(value, fixed("\\\\"), " ")
+  value <- str_replace_all(value, "\\\\num\\{([^}]*)\\}", "\\1")
+  value <- str_replace_all(value, "\\\\text\\{([^}]*)\\}", "\\1")
+  value <- str_replace_all(value, "\\\\mathrm\\{([^}]*)\\}", "\\1")
+  value <- str_replace_all(value, fixed("\\times"), "×")
+  value <- str_replace_all(value, fixed("\\log"), "log")
+  value <- str_replace_all(value, fixed("\\%"), "%")
+  value <- str_replace_all(value, fixed("$"), "")
+  value <- str_replace_all(value, fixed("--"), "–")
+  value <- str_squish(value)
+  value <- html_escape(value)
+  value |>
+    str_replace_all(fixed("@@B_OPEN@@"), "<strong>") |>
+    str_replace_all(fixed("@@B_CLOSE@@"), "</strong>")
+}
+
+extract_balanced_value <- function(text, marker) {
+  marker_start <- str_locate(text, fixed(marker))[1, "start"]
+  if (is.na(marker_start)) return("")
+
+  start <- marker_start + str_length(marker)
+  characters <- str_split(text, "", simplify = TRUE)
+  depth <- 1L
+  for (index in seq.int(start, length(characters))) {
+    if (characters[index] == "{") depth <- depth + 1L
+    if (characters[index] == "}") depth <- depth - 1L
+    if (depth == 0L) return(str_sub(text, start, index - 1L))
+  }
+  stop("Unbalanced braces after marker: ", marker, call. = FALSE)
+}
+
+expand_indices <- function(specification) {
+  parts <- str_split(specification, fixed(","))[[1]] |> str_trim()
+  unlist(lapply(parts, function(part) {
+    if (str_detect(part, fixed("-"))) {
+      limits <- str_split(part, fixed("-"))[[1]] |> as.integer()
+      seq.int(limits[1], limits[2])
+    } else {
+      as.integer(part)
+    }
+  }))
+}
+
+parse_spans <- function(text) {
+  directives <- str_extract_all(
+    text,
+    "cell\\{[^}]+\\}\\{[^}]+\\}=\\{[^}]*c=\\d+[^}]*\\}"
+  )[[1]]
+  spans <- integer()
+  for (directive in directives) {
+    match <- str_match(
+      directive,
+      "cell\\{([^}]+)\\}\\{([^}]+)\\}=\\{[^}]*c=(\\d+)"
+    )
+    for (row in expand_indices(match[2])) {
+      for (column in expand_indices(match[3])) {
+        spans[paste(row, column, sep = ",")] <- as.integer(match[4])
+      }
+    }
+  }
+  spans
+}
+
+parse_table <- function(filename) {
+  path <- file.path(tables_dir, filename)
+  if (!file.exists(path)) stop("Missing table: ", path, call. = FALSE)
+
+  lines <- readLines(path, warn = FALSE)
+  text <- paste(lines, collapse = "\n")
+  caption <- str_match(text, regex("caption=\\{(.*?)\\},", dotall = TRUE))[, 2]
+  label <- str_match(text, "label=\\{(.*?)\\}")[, 2]
+  note <- extract_balanced_value(text, "note{}={")
+
+  body_lines <- lines[str_detect(lines, "\\\\\\\\\\s*$")]
+  body_lines <- str_remove(body_lines, "\\s*\\\\\\\\\\s*$")
+  body <- lapply(body_lines, function(line) {
+    str_split(line, "(?<!\\\\)&")[[1]]
+  })
+
+  list(
+    filename = filename,
+    caption = clean_note(caption),
+    label = label,
+    note = clean_note(note),
+    body = body,
+    ncols = max(lengths(body)),
+    spans = parse_spans(text)
+  )
+}
+
+span_at <- function(parsed, row, column) {
+  key <- paste(row, column, sep = ",")
+  value <- unname(parsed$spans[key])
+  if (!length(value) || is.na(value)) 1L else value
+}
+
+render_table <- function(parsed, measure) {
+  rows <- character()
+  previous_kind <- "header"
+
+  for (row_index in seq_along(parsed$body)) {
+    cells <- parsed$body[[row_index]]
+    is_header <- row_index <= 2L
+    label <- if (length(cells)) clean_cell(cells[1]) else ""
+    is_panel <- !is_header && span_at(parsed, row_index, 1L) >= 2L
+    is_stat <- !is_header && !is_panel && label %in% stat_labels
+
+    if (is_panel) {
+      rows <- c(rows, sprintf(
+        '<tr class="panel-row"><th class="panel-head" colspan="%s">%s</th></tr>',
+        parsed$ncols, label
+      ))
+      previous_kind <- "panel"
+      next
+    }
+
+    rendered <- character()
+    column <- 1L
+    while (column <= parsed$ncols) {
+      span <- span_at(parsed, row_index, column)
+      raw <- if (column <= length(cells)) cells[column] else ""
+      value <- clean_cell(raw)
+      colspan <- if (span > 1L) sprintf(' colspan="%s"', span) else ""
+
+      if (is_header) {
+        class <- if (span > 1L) ' class="spanner"' else ""
+        rendered <- c(rendered, sprintf(
+          '<th scope="col"%s%s>%s</th>', class, colspan, value
+        ))
+      } else if (column == 1L) {
+        rendered <- c(rendered, sprintf(
+          '<th scope="row" class="rowlab">%s</th>', value
+        ))
+      } else {
+        rendered <- c(rendered, sprintf("<td%s>%s</td>", colspan, value))
+      }
+      column <- column + span
+    }
+
+    classes <- character()
+    if (is_header) {
+      kind <- "header"
+    } else if (is_stat) {
+      classes <- "statrow"
+      if (!previous_kind %in% c("stat", "panel", "header")) {
+        classes <- c(classes, "block-top")
+      }
+      kind <- "stat"
+    } else {
+      kind <- "coef"
+    }
+    class_attribute <- if (length(classes)) {
+      sprintf(' class="%s"', paste(classes, collapse = " "))
+    } else {
+      ""
+    }
+    rows <- c(rows, sprintf(
+      "<tr%s>%s</tr>", class_attribute, paste(rendered, collapse = "")
+    ))
+    previous_kind <- kind
+  }
+
+  caption <- sprintf("%s — %s", measure, parsed$caption)
+  anchor <- str_replace_all(parsed$label, ":", "-")
+  paste0(
+    '<figure class="regression-table" id="', anchor, '">',
+    "<figcaption>", caption, "</figcaption>",
+    '<div class="table-wrap"><table><thead>',
+    paste(rows[1:2], collapse = "\n"),
+    "</thead><tbody>", paste(rows[-c(1:2)], collapse = "\n"),
+    "</tbody></table></div>",
+    '<p class="table-note">', parsed$note, "</p></figure>"
+  )
+}
+
+find_interaction_rows <- function(parsed, fragment) {
+  labels <- vapply(parsed$body, function(row) row[1], character(1))
+  index <- which(str_detect(labels, fixed("\\times")) & str_detect(labels, fixed(fragment)))[1]
+  if (is.na(index) || index == length(parsed$body)) {
+    stop("Could not find interaction row containing: ", fragment, call. = FALSE)
+  }
+  list(coefficient = parsed$body[[index]], standard_error = parsed$body[[index + 1L]])
+}
+
+summary_coefficient_cells <- function(files, fragment, fixed_effects) {
+  columns <- switch(
+    fixed_effects,
+    msoa = c(sales = 5L, rentals = 11L),
+    lsoa = c(sales = 7L, rentals = 13L)
+  )
+  parsed <- unname(parsed_tables[unname(files)])
+  rows <- lapply(parsed, find_interaction_rows, fragment = fragment)
+
+  coefficients <- unlist(lapply(names(columns), function(market) {
+    vapply(rows, function(item) clean_cell(item$coefficient[columns[[market]]]), character(1))
+  }))
+  standard_errors <- unlist(lapply(names(columns), function(market) {
+    vapply(rows, function(item) clean_cell(item$standard_error[columns[[market]]]), character(1))
+  }))
+  list(coefficients = coefficients, standard_errors = standard_errors)
+}
+
+format_effect <- function(value) {
+  output <- sprintf("%.2f", round(value, 2))
+  if (identical(output, "-0.00")) output <- "0.00"
+  str_replace(output, fixed("-"), "−")
+}
+
+stars_from_p_value <- function(p_value) {
+  stars <- ifelse(
+    p_value < 0.01, "***",
+    ifelse(p_value < 0.05, "**", ifelse(p_value < 0.1, "*", ""))
+  )
+  ifelse(stars == "", "", paste0('<sup class="stars">', stars, "</sup>"))
+}
+
+effect_cells <- function(effect_sizes, fixed_effects, estimate, standard_error) {
+  ordered <- do.call(rbind, lapply(c("sales", "rentals"), function(market) {
+    do.call(rbind, lapply(measures, function(measure) {
+      row <- effect_sizes[
+        effect_sizes$fixed_effects == fixed_effects &
+          effect_sizes$market == market &
+          effect_sizes$measure == measure,
+      ]
+      if (nrow(row) != 1L) {
+        stop(
+          "Expected one effect-size row for ", fixed_effects, ", ", market,
+          ", ", measure, call. = FALSE
+        )
+      }
+      row
+    }))
+  }))
+  list(
+    estimates = paste0(
+      vapply(ordered[[estimate]], format_effect, character(1)),
+      stars_from_p_value(ordered$p_value)
+    ),
+    standard_errors = paste0(
+      "(", vapply(ordered[[standard_error]], format_effect, character(1)), ")"
+    )
+  )
+}
+
+cells_html <- function(values) paste0("<td>", values, "</td>", collapse = "")
+
+render_summary_table <- function(kind, files, effect_sizes) {
+  intensive <- identical(kind, "intensive")
+  fragment <- if (intensive) "Spills per week (avg.)" else "Near bin"
+  coefficient_label <- if (intensive) {
+    "Weekly spill count<br>× log (Articles measure)"
+  } else {
+    "Near bin<br>× log (Articles measure)"
+  }
+  caption <- if (intensive) {
+    "Intensive margin: weekly spill count × article salience"
+  } else {
+    "Extensive margin: near bin × article salience"
+  }
+  effect_specs <- if (intensive) {
+    list(
+      c("effect_iqr_pct", "effect_iqr_se_pct", "IQR salience<br>× 1 SD spills (%)"),
+      c("effect_sd_pct", "effect_sd_se_pct", "1 SD salience<br>× 1 SD spills (%)")
+    )
+  } else {
+    list(
+      c("effect_iqr_pct", "effect_iqr_se_pct", "IQR salience (%)"),
+      c("effect_sd_pct", "effect_sd_se_pct", "1 SD salience (%)")
+    )
+  }
+
+  rows <- character()
+  for (fixed_effects in c("msoa", "lsoa")) {
+    fixed_effects_label <- if (fixed_effects == "msoa") {
+      "Property controls + MSOA FE"
+    } else {
+      "Property controls + LSOA FE"
+    }
+    coefficients <- summary_coefficient_cells(files, fragment, fixed_effects)
+    rows <- c(
+      rows,
+      sprintf(
+        '<tr class="panel-row"><th class="panel-head" colspan="9">%s</th></tr>',
+        fixed_effects_label
+      ),
+      paste0(
+        '<tr><th scope="row" class="rowlab">', coefficient_label, "</th>",
+        cells_html(coefficients$coefficients), "</tr>"
+      ),
+      paste0(
+        '<tr class="standard-error"><th scope="row" class="rowlab"></th>',
+        cells_html(coefficients$standard_errors), "</tr>"
+      )
+    )
+    for (specification in effect_specs) {
+      effects <- effect_cells(
+        effect_sizes, fixed_effects, specification[1], specification[2]
+      )
+      rows <- c(
+        rows,
+        paste0(
+          '<tr class="effect-row"><th scope="row" class="rowlab">',
+          specification[3], "</th>", cells_html(effects$estimates), "</tr>"
+        ),
+        paste0(
+          '<tr class="effect-standard-error"><th scope="row" class="rowlab"></th>',
+          cells_html(effects$standard_errors), "</tr>"
+        )
+      )
+    }
+  }
+
+  note <- if (intensive) {
+    paste(
+      "The coefficient row reports the coefficient of interest from the stated",
+      "fixed-effect specification; LSOA-clustered standard errors are in parentheses.",
+      "Effect rows transform the same coefficient into approximate percent changes",
+      "using transaction-sample contrasts: the IQR salience row uses the interquartile",
+      "range of the article measure, and the 1 SD salience row uses its standard",
+      "deviation; both intensive-margin rows also scale by one standard deviation of",
+      "weekly spill exposure. Scaled standard errors are in parentheses under each",
+      "effect row, and significance stars inherit the underlying interaction p-value.",
+      "Raw coefficients are not directly comparable across salience windows because",
+      "the article measures differ in empirical support. *** p&lt;0.01, ** p&lt;0.05,",
+      "* p&lt;0.1."
+    )
+  } else {
+    paste(
+      "The coefficient row reports the coefficient of interest from the stated",
+      "fixed-effect specification; LSOA-clustered standard errors are in parentheses.",
+      "Effect rows transform the same coefficient into approximate percent changes in",
+      "the near–far price or rent gap using transaction-sample contrasts: the IQR",
+      "salience row uses the interquartile range of the article measure, and the 1 SD",
+      "salience row uses its standard deviation. Scaled standard errors are in",
+      "parentheses under each effect row, and significance stars inherit the underlying",
+      "interaction p-value. Raw coefficients are not directly comparable across salience",
+      "windows because the article measures differ in empirical support. *** p&lt;0.01,",
+      "** p&lt;0.05, * p&lt;0.1."
+    )
+  }
+
+  measure_headers <- paste0("<th>", measures, "</th>", collapse = "")
+  paste0(
+    '<figure class="regression-table summary-table"><figcaption>', caption, "</figcaption>",
+    '<div class="table-wrap"><table><thead>',
+    '<tr><th></th><th class="spanner" colspan="4">House Sales</th>',
+    '<th class="spanner" colspan="4">House Rentals</th></tr>',
+    "<tr><th></th>", measure_headers, measure_headers, "</tr>",
+    "</thead><tbody>", paste(rows, collapse = "\n"), "</tbody></table></div>",
+    '<p class="table-note"><strong>Notes:</strong> ', note, "</p></figure>"
+  )
+}
+
+render_table_family <- function(files) {
+  html <- Map(function(measure, filename) {
+    render_table(parsed_tables[[filename]], measure)
+  }, names(files), unname(files))
+  paste(unlist(html), collapse = "\n")
+}
+
+validate_artifacts <- function() {
+  table_files <- c(unlist(intensive_tables), unlist(extensive_tables))
+  effect_files <- c(intensive_effect_size_paths, extensive_effect_size_paths)
+  expected_paths <- file.path(tables_dir, c(table_files, effect_files))
+  missing_paths <- expected_paths[!file.exists(expected_paths)]
+  if (length(missing_paths) > 0L) {
+    stop(
+      "The report is missing generated analysis artifacts:\n- ",
+      paste(missing_paths, collapse = "\n- "),
+      "\nRun both windowed article analysis scripts before rendering.",
+      call. = FALSE
+    )
+  }
+  if (anyDuplicated(table_files)) {
+    stop("The report configuration maps multiple panels to the same table.", call. = FALSE)
+  }
+}
+
+validate_effect_sizes <- function(data, margin, metadata) {
+  required_keys <- expand.grid(
+    fixed_effects = c("msoa", "lsoa"),
+    market = c("sales", "rentals"),
+    measure = measures,
+    stringsAsFactors = FALSE
+  )
+  observed_keys <- data[c("fixed_effects", "market", "measure")]
+  if (nrow(data) != 16L || anyDuplicated(observed_keys) ||
+      !setequal(do.call(paste, required_keys), do.call(paste, observed_keys))) {
+    stop("Effect-size summary is incomplete or duplicated for ", margin, call. = FALSE)
+  }
+  if (!all(data$margin == margin)) {
+    stop("Effect-size summary has the wrong margin label: ", margin, call. = FALSE)
+  }
+  expected_salience_cols <- unname(windowed_article_salience_cols[data$measure])
+  if (!all(data$salience_col == expected_salience_cols)) {
+    stop("Effect-size summary has a measure/salience-column mismatch for ", margin,
+         call. = FALSE)
+  }
+  for (field in names(metadata)) {
+    if (!field %in% names(data) || !all(data[[field]] == metadata[[field]])) {
+      stop("Effect-size metadata mismatch for `", field, "`.", call. = FALSE)
+    }
+  }
+  data
+}
+
+validate_artifacts()
+
+table_files <- unique(c(unlist(intensive_tables), unlist(extensive_tables)))
+parsed_tables <- setNames(lapply(table_files, parse_table), table_files)
+
+intensive_label_manifest <- do.call(c, unname(Map(function(radius, files) {
+  setNames(
+    paste0(
+      "tbl:did-articles-windowed-prior-", radius, "m-", measure_slugs
+    ),
+    unname(files)
+  )
+}, intensive_radii, intensive_tables)))
+extensive_label_manifest <- do.call(c, unname(Map(function(specification, files) {
+  setNames(
+    paste0(
+      "tbl:did-articles-windowed-prior-extensive-",
+      specification$comparison_id, "-", measure_slugs
+    ),
+    unname(files)
+  )
+}, extensive_specs, extensive_tables)))
+table_label_manifest <- c(intensive_label_manifest, extensive_label_manifest)
+
+observed_table_labels <- vapply(
+  parsed_tables[names(table_label_manifest)], `[[`, character(1), "label"
+)
+label_mismatches <- names(table_label_manifest)[
+  observed_table_labels != unname(table_label_manifest)
+]
+if (length(label_mismatches) > 0L) {
+  stop(
+    "Generated tables do not match their expected specification/measure labels:\n- ",
+    paste(label_mismatches, collapse = "\n- "),
+    "\nRerun both windowed article analysis scripts before rendering.",
+    call. = FALSE
+  )
+}
+
+intensive_effect_sizes <- Map(function(path, radius) {
+  read_csv(file.path(tables_dir, path), show_col_types = FALSE) |>
+    validate_effect_sizes("intensive", list(radius = radius))
+}, intensive_effect_size_paths, intensive_radii)
+
+extensive_effect_sizes <- Map(function(path, specification) {
+  read_csv(file.path(tables_dir, path), show_col_types = FALSE) |>
+    validate_effect_sizes("extensive", specification)
+}, extensive_effect_size_paths, extensive_specs)
+
+render_panel_tabset <- function(tabs, group) {
+  asis_output(paste0(
+    '::: {.panel-tabset group="', group, '"}\n\n',
+    paste(unlist(tabs), collapse = "\n\n"),
+    "\n\n:::"
+  ))
+}
+
+render_summary_tabset <- function(kind, tables, effect_sizes, group) {
+  Map(function(label, files, effects) {
+    paste0(
+      "### ", label, "\n\n",
+      render_summary_table(kind, files, effects)
+    )
+  }, names(tables), tables, effect_sizes) |>
+    render_panel_tabset(group)
+}
+
+render_detail_tabset <- function(tables, group) {
+  Map(function(label, files) {
+    paste0("## ", label, "\n\n", render_table_family(files))
+  }, names(tables), tables) |>
+    render_panel_tabset(group)
+}
+```
+
+<style>
+.quarto-title-banner { background: linear-gradient(180deg, #fff 0%, #f2f8f6 100%); }
+#quarto-content { max-width: 1180px; }
+h2 { border-top: 2px solid #d9ded5; padding-top: 1.4rem; margin-top: 2.7rem; }
+h3 { color: #245f73; }
+.equation-note { color: #5b675f; font-size: 0.86rem; }
+.regression-table { margin: 1.2rem 0 1.8rem; }
+.regression-table figcaption { font-weight: 650; margin-bottom: 0.55rem; }
+.table-wrap { overflow-x: auto; border: 1px solid #d9ded5; border-radius: 6px; }
+.regression-table table { border-collapse: collapse; width: 100%; margin: 0; font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.regression-table thead th { background: #f1f5f2; font-weight: 650; padding: 0.38rem 0.5rem; text-align: center; white-space: nowrap; }
+.regression-table thead th.spanner { border-bottom: 1px solid #c4ccc2; font-weight: 700; }
+.regression-table tbody th.rowlab { text-align: left; font-weight: 500; padding: 0.32rem 0.65rem; white-space: nowrap; }
+.regression-table tbody td { text-align: center; padding: 0.32rem 0.5rem; white-space: nowrap; }
+.regression-table tbody tr:nth-child(even) { background: #fafbf9; }
+.regression-table tbody tr.statrow th,
+.regression-table tbody tr.statrow td,
+.summary-table .standard-error th,
+.summary-table .standard-error td,
+.summary-table .effect-standard-error th,
+.summary-table .effect-standard-error td { color: #5b675f; background: #f4f7f7; }
+.regression-table tbody tr.block-top th,
+.regression-table tbody tr.block-top td { border-top: 1px solid #d9ded5; }
+.regression-table tbody tr.panel-row th.panel-head { text-align: left; background: #e2f0f3; color: #143b48; font-weight: 700; padding: 0.4rem 0.7rem; }
+.summary-table .effect-row th,
+.summary-table .effect-row td { color: #5b675f; background: #fbfcfc; font-size: 0.74rem; }
+.summary-table .effect-row th.rowlab { padding-left: 1.15rem; }
+.table-note { color: #5b675f; font-size: 0.74rem; line-height: 1.5; margin: 0.6rem 0.1rem 0; }
+sup.stars { font-size: 0.72em; }
+details.table-family { border-top: 1px dashed #d9ded5; margin-top: 1.1rem; }
+details.table-family summary { cursor: pointer; padding: 0.8rem 0.1rem 0.45rem; font-weight: 680; }
+.report-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; margin: 1rem 0 1.5rem; }
+.report-meta > div { border: 1px solid #d9ded5; border-radius: 6px; padding: 0.65rem 0.8rem; background: #fbfcfa; }
+.report-meta strong { display: block; color: #5b675f; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+@media (max-width: 760px) { .report-meta { grid-template-columns: 1fr; } }
+</style>
+
+<div class="report-meta">
+  <div><strong>Sample</strong>England, sales 2021–2024 / rentals 2021–2023</div>
+  <div><strong>Source tables</strong>28 regression tables and 7 effect-size summaries</div>
+</div>
+
+# Summary
+
+This section reports the coefficient of interest from each public-attention specification and comparable effect-size transformations. Full regression tables appear below; the model specifications are repeated here so the summary coefficients can be read directly.
+
+The scaled effect rows place the cumulative, three-month, six-month, and twelve-month salience measures on a common empirical scale:
+
+1. **Intensive margin:** the implied percentage change associated with an interquartile-range or one-standard-deviation increase in article salience, evaluated at a one-standard-deviation increase in weekly spill exposure.
+2. **Extensive margin:** the implied percentage change in the near–far price or rent gap associated with an interquartile-range or one-standard-deviation increase in article salience.
+
+## Intensive margin
+
+$$
+\log p_{it}=\alpha+\beta\,\overline{S}^{B}_{it}
++\kappa\left(\overline{S}^{B}_{it}\times A_t^a\right)
++\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\lambda_{m(t)}+\varepsilon_{it}.
+$$
+
+::: {.equation-note}
+Here, $p_{it}$ is the sale price or weekly asking rent; $\overline{S}^{B}_{it}$ is average weekly spill events across overflows within radius $B\in\{250,500,1000\}$ m from January 2021 to the transaction date; $\kappa$ is the coefficient of interest; and $\mathbf{X}_{i}$, $\delta_{\ell(i)}$, and $\lambda_{m(t)}$ denote property controls, location fixed effects, and transaction-month fixed effects. The salience main effect is included in no-FE columns and absorbed by transaction-month fixed effects.
+:::
+
+```{r summary-intensive, results="asis"}
+render_summary_tabset(
+  "intensive", intensive_tables, intensive_effect_sizes, "intensive-radius"
+)
+```
+
+## Extensive margin
+
+$$
+\log p_{it}=\alpha+\phi\,\mathrm{Near}_{i}
++\kappa\left(\mathrm{Near}_{i}\times A_t^a\right)
++\mathbf{X}_{i}'\gamma+\delta_{\ell(i)}+\lambda_{m(t)}+\varepsilon_{it}.
+$$
+
+::: {.equation-note}
+Here, $p_{it}$ is the sale price or weekly asking rent; $\mathrm{Near}_{i}$ equals one for properties in the near band named by the active tab and zero for properties in that tab's far band; $\kappa$ is the coefficient of interest; and the remaining controls and fixed effects are as above. The salience main effect is included in no-FE columns and absorbed by transaction-month fixed effects.
+:::
+
+```{r summary-extensive, results="asis"}
+render_summary_tabset(
+  "extensive", extensive_tables, extensive_effect_sizes, "extensive-comparison"
+)
+```
+
+# Article salience measures
+
+The comparison uses the cumulative LexisNexis article-count measure from the main public-attention specification and trailing 3-, 6-, and 12-month measures inclusive of the transaction month:
+
+$$
+\begin{aligned}
+A_t^{\mathrm{cum}} &= \log\left(\sum_{\tau=t_0}^{t}N_\tau\right), &
+A_t^{(w)} &= \log\left(\sum_{\tau=t-w+1}^{t}N_\tau\right),
+\quad w\in\{3,6,12\},\\
+A_t^a &\in \left\{A_t^{\mathrm{cum}},A_t^{(3)},A_t^{(6)},A_t^{(12)}\right\}.
+\end{aligned}
+$$
+
+::: {.equation-note}
+$N_\tau$ is the LexisNexis sewage-spill article count in month $\tau$. The cumulative measure starts in January 2021; each windowed measure covers months $t-w+1$ through $t$.
+:::
+
+# Intensive margin
+
+The intensive-margin models estimate how transaction prices vary with nearby spill intensity, allowing the spill-price gradient to shift with article salience.
+
+```{r intensive-tables, results="asis"}
+render_detail_tabset(intensive_tables, "intensive-radius")
+```
+
+# Extensive margin
+
+The extensive-margin models compare four near-versus-far definitions based on distance to the nearest mapped overflow, allowing each tab's near–far gap to shift with article salience.
+
+```{r extensive-tables, results="asis"}
+render_detail_tabset(extensive_tables, "extensive-comparison")
+```
+
+---
+
+This report is generated from `output/tables/*.tex` and `output/tables/*effect_sizes.csv` by this Quarto document. Re-run the windowed article analysis scripts and then render this document to refresh the report after the source tables are regenerated.

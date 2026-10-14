@@ -23,10 +23,21 @@
 # 1. Configuration
 # ==============================================================================
 PLOT_DPI <- 300           # Resolution
-START_YEAR <- 2018        # First year to display
-END_YEAR <- 2024.5          # Last year to display
+START_YEAR <- 2018L       # First year to display (inclusive)
+END_YEAR <- 2024L         # Last year to display (inclusive)
 FONT_FAMILY <- "libertinus"
 GG_TEXT_SIZE_PT <- 2.845276
+
+# Both year constants are used twice: to filter rows (`Year <= END_YEAR`) and to
+# build the x-axis limits (`<END_YEAR>-12-31`). A fractional year passes the
+# filter but yields an unparseable date string, which `as.Date` turns into NA
+# rather than an error, silently dropping the axis limit. Fail loudly instead.
+stopifnot(
+  is.numeric(START_YEAR), is.numeric(END_YEAR),
+  START_YEAR == as.integer(START_YEAR),
+  END_YEAR == as.integer(END_YEAR),
+  START_YEAR <= END_YEAR
+)
 
 PLOT_VARIANTS <- list(
   paper = list(
@@ -396,8 +407,8 @@ build_attention_plot <- function(data, scale_factor, settings) {
     scale_x_date(
       date_breaks = "1 year",
       date_labels = "%Y",
-      limits = as.Date(c(paste0(START_YEAR, "-01-01"),
-                         paste0(END_YEAR, "-12-31")))
+      limits = as.Date(c(sprintf("%d-01-01", START_YEAR),
+                         sprintf("%d-12-31", END_YEAR)))
     ) +
     # Dual Y-axis: left for Google Trends, right for article counts
     scale_y_continuous(

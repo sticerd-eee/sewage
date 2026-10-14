@@ -27,6 +27,10 @@ initialise_environment <- function() {
   }))
   
   source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
+
+  # data.table joins on arrow ALTREP character keys can silently drop rows; see
+  # docs/solutions/logic-errors/arrow-altrep-data-table-join-nondeterminism.md
+  options(arrow.use_altrep = FALSE)
 }
 
 #' Set up logging configuration
@@ -164,7 +168,7 @@ aggregate_indicator_spills <- function(indicator, spills_dt) {
   }
   
   # Prepare data for temporal aggregation (adds month/quarter columns)
-  prepared_data <- prepare_spill_data(dry_spills)
+  prepared_data <- prepare_spill_data(dry_spills, CONFIG$base_year)
   
   # Define aggregation parameters for each temporal period
   aggregations <- list(

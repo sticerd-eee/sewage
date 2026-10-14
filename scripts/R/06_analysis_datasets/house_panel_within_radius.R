@@ -12,6 +12,10 @@
 #' specified radius of sites. The final output is a partitioned parquet dataset
 #' containing all sales across all radii.
 
+source(here::here(
+  "scripts", "R", "utils", "duckdb_refresh_utils.R"
+))
+
 # Setup Functions
 ############################################################
 
@@ -69,6 +73,7 @@ connect_to_db <- function() {
   tryCatch(
     {
       con <- DBI::dbConnect(duckdb::duckdb(), dbdir = CONFIG$db_path)
+      configure_duckdb_temp_directory(con, CONFIG$db_path)
       dbExecute(con, "PRAGMA memory_limit='14GB'")
       dbExecute(con, "PRAGMA max_memory='13GB'")
       dbExecute(con, "PRAGMA max_temp_directory_size='500GiB'")
@@ -82,36 +87,23 @@ connect_to_db <- function() {
   )
 }
 
-#' Load house datasets into DuckDB if not already present
+#' Refresh house datasets in DuckDB from current parquet inputs
 #' @param con DuckDB connection
 #' @return NULL
 load_data_to_db <- function(con) {
-  # Check if tables already exist
-  existing_tables <- DBI::dbListTables(con)
+  logger::log_info("Refreshing house price data from parquet")
+  refresh_duckdb_parquet_view(
+    con,
+    "house_price_data",
+    file.path(CONFIG$processed_dir, "house_price.parquet")
+  )
 
-  # House prices
-  if (!"house_price_data" %in% existing_tables) {
-    logger::log_info("Loading house price data")
-    house_price_data <- import(
-      file.path(CONFIG$processed_dir, "house_price.parquet"),
-      trust = TRUE
-    )
-    copy_to(con, house_price_data, "house_price_data", temporary = FALSE)
-    rm(house_price_data)
-    logger::log_info("House price data loaded")
-  }
-
-  # Spill lookup
-  if (!"spill_lookup" %in% existing_tables) {
-    logger::log_info("Loading spill lookup data")
-    spill_lookup <- import(
-      file.path(CONFIG$processed_dir, "spill_house_lookup.parquet"),
-      trust = TRUE
-    )
-    copy_to(con, spill_lookup, "spill_lookup", temporary = FALSE)
-    rm(spill_lookup)
-    logger::log_info("Spill lookup data loaded")
-  }
+  logger::log_info("Refreshing spill lookup data from parquet")
+  refresh_duckdb_parquet_view(
+    con,
+    "spill_lookup",
+    file.path(CONFIG$processed_dir, "spill_house_lookup.parquet")
+  )
 }
 
 #' Prepare base house price and lookup tables with necessary columns
@@ -122,6 +114,7 @@ prepare_tables <- function(con) {
 
   house_tbl <- tbl(con, "house_price_data") %>%
     select(house_id, price, date_of_transfer) %>%
+    mutate(date_of_transfer = sql("CAST(date_of_transfer AS TIMESTAMP)")) %>%
     mutate(
       year = year(date_of_transfer),
       month = month(date_of_transfer),
@@ -260,9 +253,9 @@ export_house_panel <- function(duckdb_panels) {
 ############################################################
 
 #' Main execution function
-#' @param refresh_db Boolean indicating whether to refresh the database tables
+#' @param refresh_db Retained for compatibility; inputs refresh on every run
 #' @return NULL
-main <- function(refresh_db = FALSE) {
+main <- function(refresh_db = TRUE) {
   tryCatch({
     # Setup
     initialise_environment()
@@ -278,17 +271,7 @@ main <- function(refresh_db = FALSE) {
       add = TRUE
     ) # Ensure disconnection even on error
 
-    # Load data
-    if (refresh_db) {
-      log_info("Refresh requested – reloading data")
-      tables <- DBI::dbListTables(con)
-      for (table in c("house_price_data", "spill_lookup")) {
-        if (table %in% tables) {
-          logger::log_info("Dropping table: {table}")
-          DBI::dbRemoveTable(con, table)
-        }
-      }
-    }
+    # Load data. Parquet-backed relations refresh on every run.
     load_data_to_db(con)
 
     # Prepare data tables (lazy references)

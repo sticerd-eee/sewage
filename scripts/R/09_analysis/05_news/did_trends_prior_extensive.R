@@ -9,7 +9,7 @@
 #
 # Author: Jacopo Olivieri
 # Date: 2026-04-07
-# Date Modified: 2026-04-07
+# Date Modified: 2026-08-20
 #
 # Inputs:
 #   - data/raw/google_trends/google_trends_uk.xlsx
@@ -49,6 +49,9 @@ REQUIRED_PACKAGES <- c(
 
 check_required_packages(REQUIRED_PACKAGES)
 
+# Shared table formatting and inference helpers
+source(here::here("scripts", "R", "09_analysis", "utils_table_formatting.R"), local = TRUE)
+
 source(
   here::here("scripts", "R", "09_analysis", "05_news", "extensive_margin_news_utils.R"),
   local = TRUE
@@ -63,7 +66,8 @@ source(here::here("scripts", "R", "09_analysis", "utils_radius_robustness_table.
 # ==============================================================================
 CONFIG <- list(
   analysis_start_month_id = 1L,
-  analysis_end_month_id = 36L,
+  sales_end_month_id = 48L,
+  rental_end_month_id = 36L,
   base_year = 2021L,
   google_trends_sheet = "united_kingdom",
   comparison = list(
@@ -114,7 +118,7 @@ prepare_sales_analysis_data <- function(comparison, peak_info) {
     filter(
       !is.na(.data$month_id),
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$sales_end_month_id
     )
 
   sales_lookup <- load_nearest_distance_lookup(
@@ -178,7 +182,7 @@ prepare_rental_analysis_data <- function(comparison, peak_info) {
     filter(
       !is.na(.data$month_id),
       .data$month_id >= CONFIG$analysis_start_month_id,
-      .data$month_id <= CONFIG$analysis_end_month_id
+      .data$month_id <= CONFIG$rental_end_month_id
     )
 
   rental_lookup <- load_nearest_distance_lookup(
@@ -242,72 +246,72 @@ estimate_models <- function(dat, dat_rental) {
     model_sale_1 = fixest::feols(
       log_price ~ near_bin + post + near_bin:post,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_1b = fixest::feols(
       log_price ~ near_bin + post + near_bin:post +
         property_type + old_new + duration,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_2 = fixest::feols(
       log_price ~ near_bin + near_bin:post | msoa + month_id,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_3 = fixest::feols(
       log_price ~ near_bin + near_bin:post +
         property_type + old_new + duration | msoa + month_id,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_4 = fixest::feols(
       log_price ~ near_bin + near_bin:post | lsoa + month_id,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_5 = fixest::feols(
       log_price ~ near_bin + near_bin:post +
         property_type + old_new + duration | lsoa + month_id,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_1 = fixest::feols(
       log_price ~ near_bin + post + near_bin:post,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_1b = fixest::feols(
       log_price ~ near_bin + post + near_bin:post +
         property_type + bedrooms + bathrooms,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_2 = fixest::feols(
       log_price ~ near_bin + near_bin:post | msoa + month_id,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_3 = fixest::feols(
       log_price ~ near_bin + near_bin:post +
         property_type + bedrooms + bathrooms | msoa + month_id,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_4 = fixest::feols(
       log_price ~ near_bin + near_bin:post | lsoa + month_id,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_5 = fixest::feols(
       log_price ~ near_bin + near_bin:post +
         property_type + bedrooms + bathrooms | lsoa + month_id,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     )
   )
 
-  cat("  Using LSOA-clustered SEs\n")
+  cat("  Using Conley 1 km SEs\n")
 
   models
 }
@@ -354,6 +358,10 @@ export_table <- function(models, comparison) {
     "This table presents hedonic estimates of the relationship between proximity ",
     "to sewage overflows, public attention, and property values. ",
     comparison_note_text(comparison),
+    "The sample covers 2021--2024 for sales and 2021--2023 for rentals ",
+    "(no 2024 rental data are available). Treatment is proximity to a mapped ",
+    "overflow rather than measured spill activity, so annual reporting gaps do ",
+    "not affect treatment classification. ",
     "The dependent variable is the log transaction price for sales ",
     "(columns 1--6) or the log weekly asking rent for rentals ",
     "(columns 7--12). Near bin is an indicator equal to one for properties in the ",
@@ -365,8 +373,9 @@ export_table <- function(models, comparison) {
     "coverage of sewage spills. Property controls include type (flat, ",
     "semi-detached, terraced, other), new build status, and tenure for sales; ",
     "and type (bungalow, detached, semi-detached, terraced), bedrooms, and ",
-    "bathrooms for rentals. Standard errors clustered at the LSOA level are ",
-    "reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "bathrooms for rentals. ",
+    spatial_se_note(),
+    " *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   panels <- list(
@@ -461,7 +470,7 @@ run_radius_robustness <- function(peak_info) {
   names(models_by_radius) <- paste0(ROBUSTNESS_RADII, "m")
 
   custom_notes_summary <- paste0(
-    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the extensive-margin pre/post Google Trends peak estimates to how overflow exposure is defined. In each column the treated group is properties within the stated distance (250m, 500m, or 1000m) of a storm overflow and the control group is properties 1000--2000m away (England, 2021--2023). Each cell is the coefficient on the interaction between the near (exposed) indicator and the post-peak indicator (equal to one for transactions on or after August 2022, the peak month for Google Trends searches) from the fully-saturated specification including property controls, the stated location fixed effects, and month fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. Standard errors clustered at the LSOA level are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table summarises the robustness of the extensive-margin pre/post Google Trends peak estimates to how overflow proximity is defined. In each column the treated group is properties within the stated distance (250m, 500m, or 1000m) of a storm overflow and the control group is properties 1000--2000m away (England, 2021--2024 for sales and 2021--2023 for rentals; no 2024 rental data are available). Treatment is proximity to a mapped overflow rather than measured spill activity, so annual reporting gaps do not affect treatment classification. Each cell is the coefficient on the interaction between the near indicator and the post-peak indicator (equal to one for transactions on or after August 2022, the peak month for Google Trends searches) from the fully-saturated specification including property controls, the stated location fixed effects, and month fixed effects, estimated separately for house sale prices (log transaction price) and house rentals (log weekly asking rent). Property controls include type, new build status, and tenure for sales; and type, bedrooms, and bathrooms for rentals. ", spatial_se_note(), " *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   write_radius_robustness_table(

@@ -1,23 +1,23 @@
 # ==============================================================================
-# Create Unique Spill Sites
+# Create Canonical Spill-Site Inventory
 # ==============================================================================
 #
-# Purpose: Build the unique spill-site metadata table from the works crosswalk,
-#          annual-return lookup, and annual EDM datasets.
-#
-# Author: Jacopo Olivieri
-# Date: 2025-02-03
-# Date Modified: 2026-06-09
+# Purpose: Build one metadata row per Canonical Spill Site in the Annual Return
+#          Lookup and attach its containing Site Group ID.
 #
 # Inputs:
-#   - data/processed/matched_events_annual_data/site_works_crosswalk.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #   - data/processed/annual_return_edm.parquet
 #   - data/processed/annual_return_lookup.parquet
 #
 # Outputs:
 #   - data/processed/unique_spill_sites.parquet
 #   - data/processed/unique_spill_sites.xlsx
-#   - output/log/13_create_unique_spill_sites.log
+#   - output/log/create_unique_spill_sites.log
+#
+# Identity contract:
+#   - site_id_canonical is the unique key and canonical metadata grain.
+#   - site_id is the containing Site Group and may repeat.
 #
 # ==============================================================================
 
@@ -31,17 +31,15 @@ if (!requireNamespace("here", quietly = TRUE)) {
 
 source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
 source(here::here("scripts", "R", "utils", "ngr_utils.R"), local = TRUE)
+source(here::here("scripts", "R", "utils", "edm_commission_utils.R"), local = TRUE)
 
 REQUIRED_PACKAGES <- c(
   "arrow",
-  "conflicted",
   "dplyr",
-  "fs",
   "glue",
   "here",
   "logger",
   "purrr",
-  "readr",
   "rio",
   "rnrfa",
   "stringr",
@@ -49,938 +47,774 @@ REQUIRED_PACKAGES <- c(
   "tidyr"
 )
 
-LOG_FILE <- here::here("output", "log", "13_create_unique_spill_sites.log")
+LOG_FILE <- here::here("output", "log", "create_unique_spill_sites.log")
+
+CONFIG <- list(
+  site_group_crosswalk_path = here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  annual_data_path = here::here(
+    "data", "processed", "annual_return_edm.parquet"
+  ),
+  lookup_data_path = here::here(
+    "data", "processed", "annual_return_lookup.parquet"
+  ),
+  years = 2021:2024,
+  large_coordinate_movement_m = 1000,
+  unique_spills_parquet = here::here(
+    "data", "processed", "unique_spill_sites.parquet"
+  ),
+  unique_spills_xlsx = here::here(
+    "data", "processed", "unique_spill_sites.xlsx"
+  )
+)
 
 check_required_packages(REQUIRED_PACKAGES)
 
-# Set Up Functions
-############################################################
 
-#' Attach the packages used unqualified in this script
-#' @return NULL
+# Setup -----------------------------------------------------------------------
+
 initialise_environment <- function() {
-  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
-    library(pkg, character.only = TRUE)
-  }))
-
-  conflicted::conflict_prefer("filter", "dplyr")
-  conflicted::conflict_prefer("select", "dplyr")
+  invisible(lapply(REQUIRED_PACKAGES, library, character.only = TRUE))
 }
 
-#' Initialise logging for this script
-#' @return NULL
 initialise_logging <- function() {
   setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
   logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
 }
 
-
-# Configuration
-############################################################
-
-CONFIG <- list(
-  site_works_crosswalk_path = here::here(
-    "data", "processed", "matched_events_annual_data",
-    "site_works_crosswalk.parquet"),
-  annual_data_path = here::here(
-    "data", "processed", "annual_return_edm.parquet"),
-  lookup_data_path = here::here(
-    "data", "processed", "annual_return_lookup.parquet"),
-  availability_years = 2021:2024,
-  metadata_years = 2021:2024,
-  unique_spills_parquet = here::here(
-    "data", "processed", "unique_spill_sites.parquet"),
-  unique_spills_xlsx = here::here(
-    "data", "processed", "unique_spill_sites.xlsx")
-)
-
-
-# Functions
-############################################################
-
-#' Load data from disk
-#' @param file_path Input data path
-#' @param label Dataset label for logging
-#' @return A data frame containing input records
 load_data <- function(file_path, label = "dataset") {
-  file_path <- fs::path(file_path)
   logger::log_info("Loading {label}: {file_path}")
-  
   if (!file.exists(file_path)) {
-    stop(glue::glue("File not found: {file_path}"))
+    stop(glue::glue("File not found: {file_path}"), call. = FALSE)
   }
-  
+
   tryCatch(
     {
-      df <- if (tolower(fs::path_ext(file_path)) == "parquet") {
+      data <- if (tolower(tools::file_ext(file_path)) == "parquet") {
         arrow::read_parquet(file_path)
       } else {
         rio::import(file_path, trust = TRUE)
       }
-      logger::log_info("Loaded {label} ({nrow(df)} rows)")
-      return(df)
+      logger::log_info("Loaded {label} ({nrow(data)} rows)")
+      data
     },
-    error = function(e) {
-      error_msg <- glue::glue("Failed to load data: {e$message}")
-      logger::log_error(error_msg)
-      stop(error_msg)
+    error = function(error) {
+      stop(
+        glue::glue("Failed to load {label}: {conditionMessage(error)}"),
+        call. = FALSE
+      )
     }
   )
 }
 
-
-#' Convert blank/whitespace strings to NA_character_
-#' @param x Character-like vector
-#' @return Character vector with blank entries set to NA
 normalise_missing_character <- function(x) {
-  x <- as.character(x)
-  x <- trimws(x)
-  x[x == ""] <- NA_character_
-  x
+  value <- trimws(as.character(x))
+  value[value == ""] <- NA_character_
+  value
 }
 
-
-#' Return the first non-missing value from a vector
-#' @param x Vector
-#' @return First non-NA value or typed NA
-first_non_na <- function(x) {
-  idx <- which(!is.na(x))
-  if (length(idx) == 0) {
-    return(x[NA_integer_][1])
-  }
-  x[idx[1]]
+first_non_missing <- function(x) {
+  present <- which(!is.na(x))
+  if (length(present) == 0L) return(x[NA_integer_][1L])
+  x[present[1L]]
 }
 
-
-#' Parse EDM commission date text to Date object
-#' @param text Character string describing commission date
-#' @return Date object or NA_Date_
-parse_commission_date <- function(text) {
-  if (is.na(text) || text == "") {
-    return(as.Date(NA))
-  }
-
-  text <- trimws(text)
-
-  # Month-Year patterns: "Mar 2021", "June 2021", "December 2023"
-  month_year_pattern <- "(?i)\\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(\\d{4})\\b"
-  month_year_match <- stringr::str_match(text, month_year_pattern)
-
-  if (!is.na(month_year_match[1, 1])) {
-    month_str <- month_year_match[1, 2]
-    year_str <- month_year_match[1, 3]
-    date_str <- paste0("01 ", month_str, " ", year_str)
-    parsed <- as.Date(date_str, format = "%d %b %Y")
-    if (is.na(parsed)) {
-      parsed <- as.Date(date_str, format = "%d %B %Y")
-    }
-    if (!is.na(parsed)) return(parsed)
-  }
-
-  # "to be installed by [Month] [Year]" pattern
-  future_pattern <- "(?i)(?:to be installed|installed)\\s+(?:by\\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(\\d{4})"
-  future_match <- stringr::str_match(text, future_pattern)
-
-  if (!is.na(future_match[1, 1])) {
-    month_str <- future_match[1, 2]
-    year_str <- future_match[1, 3]
-    date_str <- paste0("01 ", month_str, " ", year_str)
-    parsed <- as.Date(date_str, format = "%d %b %Y")
-    if (is.na(parsed)) {
-      parsed <- as.Date(date_str, format = "%d %B %Y")
-    }
-    if (!is.na(parsed)) return(parsed)
-  }
-
-  # Pre-2016 pattern: use 2016-01-01 as conservative sentinel
-  if (stringr::str_detect(text, "(?i)pre[- ]?2016")) {
-    return(as.Date("2016-01-01"))
-  }
-
-  # "Commissioned in YYYY" pattern (with or without additional context)
-  commissioned_pattern <- "(?i)commissioned\\s+(?:in\\s+)?(\\d{4})"
-  commissioned_match <- stringr::str_match(text, commissioned_pattern)
-
-  if (!is.na(commissioned_match[1, 1])) {
-    year_str <- commissioned_match[1, 2]
-    return(as.Date(paste0(year_str, "-01-01")))
-  }
-
-  # Standalone year pattern: just a 4-digit year
-  year_only_pattern <- "^(\\d{4})$"
-  year_only_match <- stringr::str_match(text, year_only_pattern)
-
-  if (!is.na(year_only_match[1, 1])) {
-    return(as.Date(paste0(year_only_match[1, 2], "-01-01")))
-  }
-
-  # Fallback: extract any 4-digit year
-  any_year <- stringr::str_extract(text, "\\d{4}")
-  if (!is.na(any_year)) {
-    return(as.Date(paste0(any_year, "-01-01")))
-  }
-
-  as.Date(NA)
-}
-
-
-#' Get precision score for EDM commission date text
-#' @param text Character string describing commission date
-#' @return Integer precision score: 3=month-level, 2=year-level, 1=vague, 0=NA/unknown
-get_commission_date_precision <- function(text) {
-  if (is.na(text) || text == "") {
-    return(0L)
-  }
-
-  text <- trimws(text)
-
-  # Month-Year patterns get highest precision (3)
-  month_year_pattern <- "(?i)\\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(\\d{4})\\b"
-  if (stringr::str_detect(text, month_year_pattern)) {
-    return(3L)
-  }
-
-  # Year-level patterns (2): "Commissioned in YYYY" or standalone year
-  commissioned_pattern <- "(?i)commissioned\\s+(?:in\\s+)?\\d{4}"
-  year_only_pattern <- "^\\d{4}$"
-  if (stringr::str_detect(text, commissioned_pattern) ||
-      stringr::str_detect(text, year_only_pattern)) {
-    return(2L)
-  }
-
-  # Vague patterns (1): pre-2016
-  if (stringr::str_detect(text, "(?i)pre[- ]?2016")) {
-    return(1L)
-  }
-
-  # Any other year mention gets year-level
-  if (stringr::str_detect(text, "\\d{4}")) {
-    return(2L)
-  }
-
-  0L
-}
-
-
-#' Resolve conflicting EDM commission date values across years
-#' @param texts Character vector of commission date text values
-#' @param years Integer vector of reporting years
-#' @return Resolved Date directly
-resolve_commission_date <- function(texts, years) {
-  # Handle empty or all-NA input
-  keep <- !is.na(texts) & texts != ""
-  if (sum(keep) == 0) {
-    return(as.Date(NA))
-  }
-
-  texts <- texts[keep]
-  years <- years[keep]
-
-  # Parse dates and compute precision for each value
-  parsed_dates <- vapply(texts, parse_commission_date, FUN.VALUE = as.Date(NA))
-  parsed_dates <- as.Date(parsed_dates, origin = "1970-01-01")
-  precisions <- vapply(texts, get_commission_date_precision, FUN.VALUE = 0L)
-
-  # Identify future installation dates (text contains "to be installed")
-  is_future <- stringr::str_detect(texts, "(?i)to be installed")
-
-  # Create a data frame for resolution
-  candidates <- data.frame(
-    text = texts,
-    year = years,
-    parsed_date = parsed_dates,
-    precision = precisions,
-    is_future = is_future,
-    stringsAsFactors = FALSE
-  )
-
-  # Resolution rules:
-  # 0. Drop future installation-only values (not operational yet)
-  if (all(candidates$is_future)) {
-    return(as.Date(NA))
-  }
-  # 1. Prefer non-future dates when later data exists
-  #    If we have a future date from year Y and actual date from year Y+1, use actual
-  non_future <- candidates[!candidates$is_future, ]
-  if (nrow(non_future) > 0 && any(candidates$is_future)) {
-    max_future_year <- max(candidates$year[candidates$is_future])
-    if (any(non_future$year > max_future_year)) {
-      candidates <- non_future
-    }
-  }
-
-  # 2. Higher precision wins
-  max_precision <- max(candidates$precision, na.rm = TRUE)
-  candidates <- candidates[candidates$precision == max_precision, ]
-
-  # 3. Among same precision, most recent reporting year wins
-  if (nrow(candidates) > 1) {
-    max_year <- max(candidates$year, na.rm = TRUE)
-    candidates <- candidates[candidates$year == max_year, ]
-  }
-
-  # Return the first remaining candidate's date
-  as.Date(candidates$parsed_date[1], origin = "1970-01-01")
-}
-
-
-#' Build works-year site availability from the site works crosswalk
-#' @param crosswalk_data Site works crosswalk dataframe
-#' @param availability_years Integer vector of availability years
-#' @return One row per works site_id with availability flags and fallback fields
-build_matched_site_data <- function(crosswalk_data, availability_years = 2021:2024) {
-  required_cols <- c(
-    "site_id", "year", "annual_status", "water_company", "ngr",
-    "easting", "northing"
-  )
-  missing_cols <- setdiff(required_cols, names(crosswalk_data))
-  if (length(missing_cols) > 0) {
+assert_required_columns <- function(data, required, label) {
+  missing <- setdiff(required, names(data))
+  if (length(missing) > 0L) {
     stop(
       glue::glue(
-        "Crosswalk missing required columns: {paste(missing_cols, collapse = ', ')}"
-      )
+        "{label} missing required columns: {paste(missing, collapse = ', ')}"
+      ),
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
+}
+
+assert_years <- function(years) {
+  years <- as.integer(years)
+  if (length(years) == 0L || anyNA(years) || anyDuplicated(years)) {
+    stop("Configured metadata years must be unique and non-missing.", call. = FALSE)
+  }
+  sort(years)
+}
+
+
+# Identity boundaries ---------------------------------------------------------
+
+#' Build one fail-closed Canonical Spill Site to Site Group mapping
+#' @param crosswalk_data Site Group crosswalk at group-year grain
+#' @param lookup_data Annual Return Lookup defining the canonical universe
+#' @return One row per site_id_canonical with its repeated Site Group site_id
+build_canonical_membership <- function(crosswalk_data, lookup_data) {
+  assert_required_columns(
+    crosswalk_data,
+    c("site_id", "water_company", "site_id_canonical_members"),
+    "Site Group crosswalk"
+  )
+  assert_required_columns(lookup_data, "site_id", "Annual Return Lookup")
+
+  lookup_universe <- suppressWarnings(as.integer(lookup_data$site_id))
+  if (anyNA(lookup_universe) || anyDuplicated(lookup_universe)) {
+    stop(
+      "Annual Return Lookup site_id must be non-missing and unique.",
+      call. = FALSE
     )
   }
 
-  crosswalk_site_years <- crosswalk_data %>%
-    filter(!is.na(site_id), year %in% availability_years) %>%
-    mutate(
-      water_company = normalise_missing_character(water_company),
-      ngr = clean_ngr(ngr),
-      annual_status = normalise_missing_character(annual_status),
-      is_reporting_year = annual_status != "absent"
-    )
+  group_definitions <- crosswalk_data |>
+    dplyr::transmute(
+      site_id = suppressWarnings(as.integer(.data$site_id)),
+      water_company = normalise_missing_character(.data$water_company),
+      member_set = normalise_missing_character(.data$site_id_canonical_members)
+    ) |>
+    dplyr::distinct()
 
-  availability <- crosswalk_site_years %>%
-    group_by(site_id, year) %>%
-    summarise(available = any(is_reporting_year, na.rm = TRUE), .groups = "drop") %>%
-    pivot_wider(
-      id_cols = site_id,
-      names_from = year,
-      values_from = available,
-      names_prefix = "available_year_",
-      values_fill = FALSE
+  if (anyNA(group_definitions$site_id) || anyNA(group_definitions$water_company) ||
+      anyNA(group_definitions$member_set)) {
+    stop(
+      "Site Group membership contains missing group, company, or member values.",
+      call. = FALSE
     )
-
-  availability_cols <- paste0("available_year_", availability_years)
-  for (col_name in availability_cols) {
-    if (!col_name %in% names(availability)) {
-      availability[[col_name]] <- FALSE
-    }
   }
 
-  availability <- availability %>%
-    select(site_id, all_of(availability_cols))
+  inconsistent_groups <- group_definitions |>
+    dplyr::count(.data$site_id, name = "n_definitions") |>
+    dplyr::filter(.data$n_definitions != 1L)
+  if (nrow(inconsistent_groups) > 0L) {
+    stop(
+      "Site Group membership has inconsistent member sets or multiple companies.",
+      call. = FALSE
+    )
+  }
 
-  matched_site_fields <- crosswalk_site_years %>%
-    arrange(site_id, desc(is_reporting_year), desc(year)) %>%
-    group_by(site_id) %>%
-    summarise(
-      water_company_matched = first_non_na(water_company),
-      ngr_matched = first_non_na(ngr),
-      easting_crosswalk = first_non_na(easting),
-      northing_crosswalk = first_non_na(northing),
+  membership <- group_definitions |>
+    tidyr::separate_rows("member_set", sep = ";") |>
+    dplyr::mutate(
+      member_set = trimws(.data$member_set),
+      site_id_canonical = suppressWarnings(as.integer(.data$member_set))
+    )
+
+  if (anyNA(membership$site_id_canonical) ||
+      any(as.character(membership$site_id_canonical) != membership$member_set)) {
+    stop(
+      "Site Group membership contains a missing or non-integer canonical ID.",
+      call. = FALSE
+    )
+  }
+
+  membership <- membership |>
+    dplyr::select("site_id", "site_id_canonical", "water_company") |>
+    dplyr::distinct()
+
+  ambiguous_canonical <- membership |>
+    dplyr::group_by(.data$site_id_canonical) |>
+    dplyr::summarise(
+      n_site_groups = dplyr::n_distinct(.data$site_id),
+      n_companies = dplyr::n_distinct(.data$water_company),
+      .groups = "drop"
+    ) |>
+    dplyr::filter(.data$n_site_groups != 1L | .data$n_companies != 1L)
+  if (nrow(ambiguous_canonical) > 0L) {
+    stop(
+      "Canonical membership maps to multiple Site Groups or companies.",
+      call. = FALSE
+    )
+  }
+
+  group_contract <- membership |>
+    dplyr::group_by(.data$site_id) |>
+    dplyr::summarise(
+      n_companies = dplyr::n_distinct(.data$water_company),
+      smallest_member = min(.data$site_id_canonical),
       .groups = "drop"
     )
-
-  matched_coords <- parse_bng_coordinates(matched_site_fields$ngr_matched)
-  matched_site_fields <- bind_cols(
-    matched_site_fields,
-    matched_coords %>%
-      rename(
-        easting_matched = easting,
-        northing_matched = northing
-      )
-  ) %>%
-    mutate(
-      easting_matched = coalesce(easting_matched, easting_crosswalk),
-      northing_matched = coalesce(northing_matched, northing_crosswalk)
-    ) %>%
-    select(
-      site_id,
-      water_company_matched,
-      ngr_matched,
-      easting_matched,
-      northing_matched
-  )
-
-  availability %>%
-    full_join(matched_site_fields, by = "site_id")
-}
-
-#' Parse works membership from the site works crosswalk
-#' @param crosswalk_data Site works crosswalk dataframe
-#' @return Mapping from annual lookup member site IDs to works representative site IDs
-build_works_member_map <- function(crosswalk_data) {
-  required_cols <- c("site_id", "site_id_members")
-  missing_cols <- setdiff(required_cols, names(crosswalk_data))
-  if (length(missing_cols) > 0) {
+  if (any(group_contract$n_companies != 1L)) {
+    stop("A Site Group cannot span multiple companies.", call. = FALSE)
+  }
+  if (any(group_contract$site_id != group_contract$smallest_member)) {
     stop(
-      glue::glue(
-        "Crosswalk missing required columns: {paste(missing_cols, collapse = ', ')}"
-      )
+      "Each Site Group representative must be its smallest canonical member.",
+      call. = FALSE
     )
   }
 
-  crosswalk_data %>%
-    select(site_id, site_id_members) %>%
-    distinct() %>%
-    mutate(site_id_members = normalise_missing_character(site_id_members)) %>%
-    tidyr::separate_rows(site_id_members, sep = ";") %>%
-    mutate(
-      site_id = as.integer(site_id),
-      member_site_id = as.integer(site_id_members)
-    ) %>%
-    filter(!is.na(site_id), !is.na(member_site_id)) %>%
-    select(site_id, member_site_id) %>%
-    distinct()
+  missing_membership <- setdiff(lookup_universe, membership$site_id_canonical)
+  unexpected_membership <- setdiff(membership$site_id_canonical, lookup_universe)
+  if (length(missing_membership) > 0L || length(unexpected_membership) > 0L) {
+    stop(
+      glue::glue(
+        "Site Group membership coverage differs from lookup coverage: ",
+        "{length(missing_membership)} missing and ",
+        "{length(unexpected_membership)} unexpected canonical IDs."
+      ),
+      call. = FALSE
+    )
+  }
+
+  membership |>
+    dplyr::arrange(.data$site_id, .data$site_id_canonical)
 }
 
-#' Map annual-return rows to canonical site IDs from lookup
-#' @param annual_data Annual return EDM dataframe
-#' @param lookup_data Annual return lookup dataframe
-#' @param metadata_years Integer vector of metadata years
-#' @return Annual-return rows with canonical site_id
+#' Map Annual Return EDM rows to Canonical Spill Sites without fallback
+#' @param annual_data Raw combined Annual Return EDM rows
+#' @param lookup_data Annual Return Lookup
+#' @param metadata_years Configured years
+#' @return Annual rows with a non-missing site_id_canonical
 map_annual_to_canonical_sites <- function(
     annual_data,
     lookup_data,
-    metadata_years = 2021:2024
+    metadata_years = CONFIG$years
 ) {
-  id_cols <- paste0("site_id_", metadata_years)
+  years <- assert_years(metadata_years)
+  id_columns <- paste0("site_id_", years)
+  annual_fields <- c(
+    "year", "water_company", "outlet_discharge_ngr", "edm_commission_date",
+    "edm_operation_percent", "edm_operation_reason", "spill_hrs_ea",
+    "spill_count_ea", id_columns
+  )
+  assert_required_columns(annual_data, annual_fields, "Annual Return EDM")
+  assert_required_columns(lookup_data, c("site_id", id_columns), "Annual Return Lookup")
 
-  lookup_long <- lookup_data %>%
-    select(site_id, any_of(id_cols)) %>%
-    pivot_longer(
-      cols = any_of(id_cols),
-      names_to = "id_year_col",
-      values_to = "year_site_id"
-    ) %>%
-    mutate(year = as.integer(readr::parse_number(id_year_col))) %>%
-    filter(year %in% metadata_years, !is.na(year_site_id))
-
-  lookup_duplicates <- lookup_long %>%
-    count(year, year_site_id, name = "n") %>%
-    filter(n > 1)
-
-  if (nrow(lookup_duplicates) > 0) {
-    logger::log_warn(
-      "Lookup has duplicated year-site IDs for {nrow(lookup_duplicates)} entries; using first match"
-    )
+  lookup_ids <- suppressWarnings(as.integer(lookup_data$site_id))
+  if (anyNA(lookup_ids) || anyDuplicated(lookup_ids)) {
+    stop("Annual Return Lookup canonical IDs must be unique.", call. = FALSE)
   }
 
-  lookup_long <- lookup_long %>%
-    group_by(year, year_site_id) %>%
-    summarise(site_id = first_non_na(site_id), .groups = "drop")
+  mapped_by_year <- lapply(years, function(report_year) {
+    id_column <- paste0("site_id_", report_year)
+    lookup_year_id <- lookup_data[[id_column]]
+    lookup_present <- !is.na(lookup_year_id)
+    if (anyDuplicated(lookup_year_id[lookup_present])) {
+      stop(
+        glue::glue("Lookup has duplicated year-site IDs in {id_column}."),
+        call. = FALSE
+      )
+    }
 
-  annual_long <- annual_data %>%
-    filter(year %in% metadata_years) %>%
-    select(
-      year,
-      water_company,
-      outlet_discharge_ngr,
-      edm_commission_date,
-      edm_operation_percent,
-      edm_operation_reason,
-      any_of(id_cols)
-    ) %>%
-    pivot_longer(
-      cols = any_of(id_cols),
-      names_to = "id_year_col",
-      values_to = "year_site_id"
-    ) %>%
-    mutate(id_year = as.integer(readr::parse_number(id_year_col))) %>%
-    filter(year == id_year, !is.na(year_site_id)) %>%
-    select(-id_year_col, -id_year)
+    rows <- annual_data |>
+      dplyr::filter(as.integer(.data$year) == report_year)
+    if (nrow(rows) == 0L) return(NULL)
 
-  annual_long %>%
-    left_join(lookup_long, by = c("year", "year_site_id")) %>%
-    mutate(site_id = coalesce(as.integer(site_id), as.integer(year_site_id))) %>%
-    select(
-      site_id,
-      year,
-      water_company,
-      outlet_discharge_ngr,
-      edm_commission_date,
-      edm_operation_percent,
-      edm_operation_reason
+    year_site_id <- rows[[id_column]]
+    canonical_index <- match(year_site_id, lookup_year_id)
+    if (anyNA(year_site_id) || anyNA(canonical_index)) {
+      stop(
+        glue::glue(
+          "Annual Return rows for {report_year} exist without lookup coverage."
+        ),
+        call. = FALSE
+      )
+    }
+
+    rows |>
+      dplyr::transmute(
+        site_id_canonical = lookup_ids[canonical_index],
+        year = report_year,
+        water_company = .data$water_company,
+        outlet_discharge_ngr = .data$outlet_discharge_ngr,
+        edm_commission_date = .data$edm_commission_date,
+        edm_operation_percent = suppressWarnings(
+          as.numeric(.data$edm_operation_percent)
+        ),
+        edm_operation_reason = .data$edm_operation_reason,
+        spill_hrs_ea = suppressWarnings(as.numeric(.data$spill_hrs_ea)),
+        spill_count_ea = suppressWarnings(as.numeric(.data$spill_count_ea))
+      )
+  })
+
+  mapped <- dplyr::bind_rows(mapped_by_year)
+  if (nrow(mapped) == 0L) {
+    return(tibble::tibble(
+      site_id_canonical = integer(),
+      year = integer(),
+      water_company = character(),
+      outlet_discharge_ngr = character(),
+      edm_commission_date = character(),
+      edm_operation_percent = double(),
+      edm_operation_reason = character(),
+      spill_hrs_ea = double(),
+      spill_count_ea = double()
+    ))
+  }
+  if (anyNA(mapped$site_id_canonical)) {
+    stop("Mapped annual rows contain missing canonical IDs.", call. = FALSE)
+  }
+  mapped
+}
+
+
+# Canonical metadata ----------------------------------------------------------
+
+prepare_canonical_observations <- function(mapped_annual) {
+  observations <- mapped_annual |>
+    dplyr::mutate(
+      site_id_canonical = as.integer(.data$site_id_canonical),
+      year = as.integer(.data$year),
+      water_company = normalise_missing_character(.data$water_company),
+      ngr = clean_ngr(.data$outlet_discharge_ngr),
+      edm_commission_date = normalise_missing_character(.data$edm_commission_date),
+      edm_operation_reason = normalise_missing_character(.data$edm_operation_reason),
+      edm_operation_percent = suppressWarnings(
+        as.numeric(.data$edm_operation_percent)
+      )
+    )
+  coordinates <- parse_bng_coordinates(observations$ngr)
+  dplyr::bind_cols(observations, coordinates)
+}
+
+maximum_coordinate_movement <- function(easting, northing) {
+  present <- !is.na(easting) & !is.na(northing)
+  coordinates <- unique(cbind(easting[present], northing[present]))
+  if (nrow(coordinates) <= 1L) return(0)
+  as.numeric(max(stats::dist(coordinates)))
+}
+
+count_distinct_coordinates <- function(easting, northing) {
+  present <- !is.na(easting) & !is.na(northing)
+  nrow(unique(cbind(easting[present], northing[present])))
+}
+
+#' Build non-production validation evidence for canonical metadata histories
+#' @param mapped_annual Canonically mapped annual rows
+#' @param large_coordinate_movement_m Movement threshold in metres
+#' @return One validation row per observed Canonical Spill Site
+build_canonical_metadata_validation <- function(
+    mapped_annual,
+    large_coordinate_movement_m = CONFIG$large_coordinate_movement_m
+) {
+  observations <- prepare_canonical_observations(mapped_annual)
+  observations |>
+    dplyr::group_by(.data$site_id_canonical) |>
+    dplyr::summarise(
+      n_water_companies = dplyr::n_distinct(.data$water_company, na.rm = TRUE),
+      water_company_changed = .data$n_water_companies > 1L,
+      n_parseable_locations = count_distinct_coordinates(
+        .data$easting,
+        .data$northing
+      ),
+      max_coordinate_movement_m = maximum_coordinate_movement(
+        .data$easting,
+        .data$northing
+      ),
+      large_coordinate_movement =
+        .data$max_coordinate_movement_m >= large_coordinate_movement_m,
+      .groups = "drop"
     )
 }
 
-#' Summarise site metadata for EDM commissioning and operation status
-#' @param data Annual-return site-year dataframe with canonical site_id
-#' @param metadata_years Integer vector of metadata years
-#' @return One row per site_id with metadata columns used in unique_spill_sites
-summarise_site_metadata <- function(data, metadata_years = 2021:2024) {
-  site_year_meta <- data %>%
-    mutate(
-      water_company = normalise_missing_character(water_company),
-      ngr = clean_ngr(outlet_discharge_ngr),
-      edm_commission_date = normalise_missing_character(edm_commission_date),
-      edm_operation_reason = normalise_missing_character(edm_operation_reason)
-    ) %>%
-    select(
-      site_id,
-      year,
-      water_company,
-      ngr,
-      edm_commission_date,
-      edm_operation_percent,
-      edm_operation_reason
-    ) %>%
-    distinct()
+summarise_canonical_metadata <- function(
+    mapped_annual,
+    metadata_years = CONFIG$years
+) {
+  years <- assert_years(metadata_years)
+  observations <- prepare_canonical_observations(mapped_annual)
 
-  conflicts <- site_year_meta %>%
-    group_by(site_id, year) %>%
-    summarise(
-      n_water_company = n_distinct(water_company, na.rm = TRUE),
-      n_ngr = n_distinct(ngr, na.rm = TRUE),
-      n_commission = n_distinct(edm_commission_date, na.rm = TRUE),
-      n_operation = n_distinct(edm_operation_percent, na.rm = TRUE),
-      n_reason = n_distinct(edm_operation_reason, na.rm = TRUE),
+  company <- observations |>
+    dplyr::filter(!is.na(.data$water_company)) |>
+    dplyr::arrange(
+      .data$site_id_canonical,
+      dplyr::desc(.data$year),
+      .data$water_company
+    ) |>
+    dplyr::group_by(.data$site_id_canonical) |>
+    dplyr::summarise(
+      water_company = first_non_missing(.data$water_company),
       .groups = "drop"
     )
 
-  if (any(conflicts$n_operation > 1)) {
-    logger::log_warn(
-      "Multiple edm_operation_percent values for {sum(conflicts$n_operation > 1)} site-years"
-    )
-  }
-
-  if (any(conflicts$n_commission > 1)) {
-    logger::log_warn(
-      "Multiple edm_commission_date values for {sum(conflicts$n_commission > 1)} site-years"
-    )
-  }
-
-  if (any(conflicts$n_reason > 1)) {
-    logger::log_warn(
-      "Multiple edm_operation_reason values for {sum(conflicts$n_reason > 1)} site-years"
-    )
-  }
-
-  if (any(conflicts$n_water_company > 1)) {
-    logger::log_warn(
-      "Multiple water_company values for {sum(conflicts$n_water_company > 1)} site-years"
-    )
-  }
-
-  if (any(conflicts$n_ngr > 1)) {
-    logger::log_warn(
-      "Multiple NGR values for {sum(conflicts$n_ngr > 1)} site-years"
-    )
-  }
-
-  site_year_meta <- site_year_meta %>%
-    group_by(site_id, year) %>%
-    summarise(
-      water_company = first_non_na(water_company),
-      ngr = first_non_na(ngr),
-      edm_commission_date = first_non_na(edm_commission_date),
-      edm_operation_percent = first_non_na(edm_operation_percent),
-      edm_operation_reason = first_non_na(edm_operation_reason),
+  location <- observations |>
+    dplyr::filter(
+      !is.na(.data$ngr),
+      !is.na(.data$easting),
+      !is.na(.data$northing)
+    ) |>
+    dplyr::arrange(
+      .data$site_id_canonical,
+      dplyr::desc(.data$year),
+      .data$ngr
+    ) |>
+    dplyr::group_by(.data$site_id_canonical) |>
+    dplyr::summarise(
+      ngr = first_non_missing(.data$ngr),
+      easting = first_non_missing(.data$easting),
+      northing = first_non_missing(.data$northing),
       .groups = "drop"
     )
 
-  site_fields <- site_year_meta %>%
-    filter(year %in% metadata_years) %>%
-    arrange(site_id, desc(year)) %>%
-    group_by(site_id) %>%
-    summarise(
-      water_company = first_non_na(water_company),
-      ngr = first_non_na(ngr),
+  availability <- observations |>
+    dplyr::distinct(.data$site_id_canonical, .data$year) |>
+    dplyr::mutate(available = TRUE) |>
+    tidyr::complete(
+      site_id_canonical = unique(observations$site_id_canonical),
+      year = years,
+      fill = list(available = FALSE)
+    ) |>
+    tidyr::pivot_wider(
+      names_from = "year",
+      values_from = "available",
+      names_prefix = "available_year_"
+    )
+
+  no_longer_operational <- observations |>
+    dplyr::mutate(
+      explicit_nlo = !is.na(.data$edm_operation_reason) &
+        stringr::str_detect(
+          stringr::str_to_lower(.data$edm_operation_reason),
+          "no longer operational"
+        )
+    ) |>
+    dplyr::group_by(.data$site_id_canonical) |>
+    dplyr::summarise(
+      no_longer_operational_year = if (any(.data$explicit_nlo)) {
+        min(.data$year[.data$explicit_nlo])
+      } else {
+        NA_integer_
+      },
       .groups = "drop"
     )
 
-  commission_summary <- site_year_meta %>%
-    group_by(site_id) %>%
-    summarise(
-      edm_commission_date = resolve_commission_date(edm_commission_date, year),
+  site_year_operation <- observations |>
+    dplyr::filter(.data$year %in% years) |>
+    dplyr::group_by(.data$site_id_canonical, .data$year) |>
+    dplyr::summarise(
+      operation_percent_values = dplyr::n_distinct(
+        .data$edm_operation_percent,
+        na.rm = TRUE
+      ),
+      operation_reason_values = dplyr::n_distinct(
+        .data$edm_operation_reason,
+        na.rm = TRUE
+      ),
+      edm_operation_percent = if (.data$operation_percent_values == 1L) {
+        first_non_missing(.data$edm_operation_percent)
+      } else {
+        NA_real_
+      },
+      edm_operation_reason = if (.data$operation_reason_values == 1L) {
+        first_non_missing(.data$edm_operation_reason)
+      } else {
+        NA_character_
+      },
+      edm_operation_percent_conflict = .data$operation_percent_values > 1L,
+      edm_operation_reason_conflict = .data$operation_reason_values > 1L,
       .groups = "drop"
-    ) %>%
-    mutate(edm_commission_date = as.Date(edm_commission_date, origin = "1970-01-01"))
+    ) |>
+    dplyr::select(
+      "site_id_canonical",
+      "year",
+      "edm_operation_percent",
+      "edm_operation_reason",
+      "edm_operation_percent_conflict",
+      "edm_operation_reason_conflict"
+    ) |>
+    tidyr::complete(
+      site_id_canonical = unique(observations$site_id_canonical),
+      year = years,
+      fill = list(
+        edm_operation_percent_conflict = FALSE,
+        edm_operation_reason_conflict = FALSE
+      )
+    )
 
-  operation_wide <- site_year_meta %>%
-    filter(year %in% metadata_years) %>%
-    select(site_id, year, edm_operation_percent) %>%
-    tidyr::complete(site_id, year = metadata_years) %>%
-    pivot_wider(
-      names_from = year,
-      values_from = edm_operation_percent,
+  operation_percent <- site_year_operation |>
+    dplyr::select(
+      "site_id_canonical",
+      "year",
+      "edm_operation_percent"
+    ) |>
+    tidyr::pivot_wider(
+      names_from = "year",
+      values_from = "edm_operation_percent",
       names_prefix = "edm_operation_percent_"
     )
-
-  operation_reason_wide <- site_year_meta %>%
-    filter(year %in% metadata_years) %>%
-    select(site_id, year, edm_operation_reason) %>%
-    tidyr::complete(site_id, year = metadata_years) %>%
-    pivot_wider(
-      names_from = year,
-      values_from = edm_operation_reason,
+  operation_percent_conflict <- site_year_operation |>
+    dplyr::select(
+      "site_id_canonical",
+      "year",
+      "edm_operation_percent_conflict"
+    ) |>
+    tidyr::pivot_wider(
+      names_from = "year",
+      values_from = "edm_operation_percent_conflict",
+      names_prefix = "edm_operation_percent_conflict_"
+    )
+  operation_reason <- site_year_operation |>
+    dplyr::select(
+      "site_id_canonical",
+      "year",
+      "edm_operation_reason"
+    ) |>
+    tidyr::pivot_wider(
+      names_from = "year",
+      values_from = "edm_operation_reason",
       names_prefix = "edm_operation_reason_"
     )
+  operation_reason_conflict <- site_year_operation |>
+    dplyr::select(
+      "site_id_canonical",
+      "year",
+      "edm_operation_reason_conflict"
+    ) |>
+    tidyr::pivot_wider(
+      names_from = "year",
+      values_from = "edm_operation_reason_conflict",
+      names_prefix = "edm_operation_reason_conflict_"
+    )
 
-  site_fields %>%
-    left_join(commission_summary, by = "site_id") %>%
-    left_join(operation_wide, by = "site_id") %>%
-    left_join(operation_reason_wide, by = "site_id")
+  commission <- observations |>
+    dplyr::select(
+      "site_id_canonical",
+      "year",
+      "edm_commission_date"
+    ) |>
+    dplyr::group_by(.data$site_id_canonical) |>
+    dplyr::group_modify(~ resolve_commission_history(
+      texts = .x$edm_commission_date,
+      report_years = .x$year
+    )) |>
+    dplyr::ungroup()
+
+  purrr::reduce(
+    list(
+      company,
+      location,
+      availability,
+      no_longer_operational,
+      commission,
+      operation_percent,
+      operation_percent_conflict,
+      operation_reason,
+      operation_reason_conflict
+    ),
+    dplyr::full_join,
+    by = "site_id_canonical"
+  )
 }
 
-#' Apply "No longer operational" carryforward to availability flags
-#' @param unique_sites Candidate unique spill sites table
-#' @param crosswalk_data Site works crosswalk dataframe
-#' @param availability_years Integer vector of availability years
-#' @param metadata_years Integer vector of metadata years
-#' @return unique_sites with updated availability flags and nlo_carryforward_year
-apply_nlo_carryforward <- function(
-    unique_sites,
-    crosswalk_data,
-    availability_years = 2021:2024,
-    metadata_years = 2021:2024
+
+# Assembly and output ---------------------------------------------------------
+
+assemble_unique_sites <- function(
+    lookup_data,
+    membership,
+    annual_metadata,
+    years = CONFIG$years
 ) {
-  availability_cols <- paste0("available_year_", availability_years)
-  reason_cols <- paste0("edm_operation_reason_", metadata_years)
-  max_availability_year <- max(availability_years)
+  years <- assert_years(years)
+  availability_columns <- paste0("available_year_", years)
+  percent_columns <- paste0("edm_operation_percent_", years)
+  percent_conflict_columns <- paste0(
+    "edm_operation_percent_conflict_",
+    years
+  )
+  reason_columns <- paste0("edm_operation_reason_", years)
+  reason_conflict_columns <- paste0("edm_operation_reason_conflict_", years)
 
-  reasons_long <- unique_sites %>%
-    select(site_id, any_of(reason_cols)) %>%
-    pivot_longer(
-      cols = any_of(reason_cols),
-      names_to = "reason_col",
-      values_to = "reason_text"
-    ) %>%
-    mutate(
-      year = as.integer(readr::parse_number(reason_col)),
-      reason_text = normalise_missing_character(reason_text),
-      is_nlo = !is.na(reason_text) &
-        stringr::str_detect(stringr::str_to_lower(reason_text), "no longer operational")
-    ) %>%
-    filter(is_nlo) %>%
-    group_by(site_id) %>%
-    summarise(first_nlo_year = min(year, na.rm = TRUE), .groups = "drop")
-
-  required_cols <- c("site_id", "year", "annual_status", "spill_count_ea", "spill_hrs_ea")
-  missing_cols <- setdiff(required_cols, names(crosswalk_data))
-  if (length(missing_cols) > 0) {
-    stop(
-      glue::glue(
-        "Crosswalk missing required columns: {paste(missing_cols, collapse = ', ')}"
-      )
-    )
+  universe <- lookup_data |>
+    dplyr::transmute(site_id_canonical = suppressWarnings(as.integer(.data$site_id)))
+  if (anyNA(universe$site_id_canonical) || anyDuplicated(universe$site_id_canonical)) {
+    stop("Annual Return Lookup canonical universe is not unique.", call. = FALSE)
   }
 
-  positive_site_year <- crosswalk_data %>%
-    filter(!is.na(site_id), year %in% availability_years) %>%
-    mutate(
-      annual_status = normalise_missing_character(annual_status),
-      has_positive_works_year = annual_status == "reported_positive" |
-        (!is.na(spill_count_ea) & spill_count_ea > 0) |
-        (!is.na(spill_hrs_ea) & spill_hrs_ea > 0)
-    ) %>%
-    group_by(site_id, year) %>%
-    summarise(has_positive_works_year = any(has_positive_works_year), .groups = "drop") %>%
-    filter(has_positive_works_year)
+  sites <- universe |>
+    dplyr::left_join(
+      membership |>
+        dplyr::select("site_id", "site_id_canonical"),
+      by = "site_id_canonical"
+    ) |>
+    dplyr::left_join(annual_metadata, by = "site_id_canonical")
 
-  positive_years <- reasons_long %>%
-    select(site_id, first_nlo_year) %>%
-    inner_join(positive_site_year, by = "site_id") %>%
-    filter(year > first_nlo_year) %>%
-    group_by(site_id) %>%
-    summarise(first_post_nlo_positive_year = min(year, na.rm = TRUE), .groups = "drop")
+  if (anyNA(sites$site_id)) {
+    stop("Canonical output has missing Site Group membership.", call. = FALSE)
+  }
 
-  nlo_windows <- reasons_long %>%
-    left_join(positive_years, by = "site_id") %>%
-    mutate(
-      carryforward_end_year = dplyr::coalesce(
-        first_post_nlo_positive_year - 1L,
-        max_availability_year
+  if (!"water_company" %in% names(sites)) sites$water_company <- NA_character_
+  if (!"ngr" %in% names(sites)) sites$ngr <- NA_character_
+  if (!"easting" %in% names(sites)) sites$easting <- NA_real_
+  if (!"northing" %in% names(sites)) sites$northing <- NA_real_
+  if (!"no_longer_operational_year" %in% names(sites)) {
+    sites$no_longer_operational_year <- NA_integer_
+  }
+  if (!"edm_commission_date" %in% names(sites)) {
+    sites$edm_commission_date <- as.Date(NA)
+  }
+  if (!"edm_commission_date_precision" %in% names(sites)) {
+    sites$edm_commission_date_precision <- NA_character_
+  }
+  if (!"edm_commission_resolution_status" %in% names(sites)) {
+    sites$edm_commission_resolution_status <- NA_character_
+  }
+
+  for (column in availability_columns) {
+    if (!column %in% names(sites)) sites[[column]] <- FALSE
+  }
+  for (column in percent_columns) {
+    if (!column %in% names(sites)) sites[[column]] <- NA_real_
+  }
+  for (column in percent_conflict_columns) {
+    if (!column %in% names(sites)) sites[[column]] <- FALSE
+  }
+  for (column in reason_columns) {
+    if (!column %in% names(sites)) sites[[column]] <- NA_character_
+  }
+  for (column in reason_conflict_columns) {
+    if (!column %in% names(sites)) sites[[column]] <- FALSE
+  }
+
+  sites <- sites |>
+    dplyr::mutate(
+      site_id = as.integer(.data$site_id),
+      site_id_canonical = as.integer(.data$site_id_canonical),
+      water_company = normalise_missing_character(.data$water_company),
+      ngr = normalise_missing_character(.data$ngr),
+      no_longer_operational_year = as.integer(.data$no_longer_operational_year),
+      edm_commission_date = as.Date(.data$edm_commission_date),
+      edm_commission_date_precision = dplyr::coalesce(
+        .data$edm_commission_date_precision,
+        "unknown"
+      ),
+      edm_commission_resolution_status = dplyr::coalesce(
+        .data$edm_commission_resolution_status,
+        "missing"
+      ),
+      dplyr::across(
+        dplyr::all_of(c(
+          availability_columns,
+          percent_conflict_columns,
+          reason_conflict_columns
+        )),
+        ~ tidyr::replace_na(as.logical(.x), FALSE)
       )
-    ) %>%
-    select(site_id, first_nlo_year, first_post_nlo_positive_year, carryforward_end_year)
+    ) |>
+    dplyr::select(
+      "site_id",
+      "site_id_canonical",
+      "water_company",
+      "ngr",
+      dplyr::all_of(availability_columns),
+      "no_longer_operational_year",
+      "easting",
+      "northing",
+      "edm_commission_date",
+      "edm_commission_date_precision",
+      "edm_commission_resolution_status",
+      dplyr::all_of(percent_columns),
+      dplyr::all_of(percent_conflict_columns),
+      dplyr::all_of(reason_columns),
+      dplyr::all_of(reason_conflict_columns)
+    ) |>
+    dplyr::arrange(.data$site_id, .data$site_id_canonical)
 
-  availability_long <- unique_sites %>%
-    select(site_id, any_of(availability_cols)) %>%
-    pivot_longer(
-      cols = any_of(availability_cols),
-      names_to = "availability_col",
-      values_to = "available"
-    ) %>%
-    mutate(
-      year = as.integer(readr::parse_number(availability_col)),
-      available = replace_na(as.logical(available), FALSE)
-    ) %>%
-    left_join(nlo_windows, by = "site_id") %>%
-    mutate(
-      carryforward_applies = !is.na(first_nlo_year) &
-        year >= first_nlo_year &
-        year <= carryforward_end_year,
-      carryforward_added = carryforward_applies & !available,
-      available = available | carryforward_applies
-    )
-
-  carryforward_year <- availability_long %>%
-    filter(carryforward_added) %>%
-    group_by(site_id) %>%
-    summarise(nlo_carryforward_year = min(year, na.rm = TRUE), .groups = "drop")
-
-  availability_wide <- availability_long %>%
-    select(site_id, availability_col, available) %>%
-    pivot_wider(
-      names_from = availability_col,
-      values_from = available
-    )
-
-  sites_with_nlo <- nrow(reasons_long)
-  sites_with_post_nlo_positive <- nrow(positive_years)
-  sites_carryforwarded <- nrow(carryforward_year)
-  logger::log_info("Sites with NLO reason: {sites_with_nlo}")
-  logger::log_info("Sites with post-NLO positive evidence: {sites_with_post_nlo_positive}")
-  logger::log_info("Sites with availability carryforward applied: {sites_carryforwarded}")
-
-  unique_sites %>%
-    select(-any_of(availability_cols), -any_of("nlo_carryforward_year")) %>%
-    left_join(availability_wide, by = "site_id") %>%
-    left_join(carryforward_year, by = "site_id")
+  if (!identical(sort(sites$site_id_canonical), sort(universe$site_id_canonical)) ||
+      anyDuplicated(sites$site_id_canonical)) {
+    stop("Final canonical output does not exactly cover the lookup universe.", call. = FALSE)
+  }
+  validate_commission_resolution(sites)
+  sites
 }
 
-#' Assemble final unique_spill_sites output
-#' @param site_universe Distinct canonical site IDs
-#' @param annual_metadata Annual-return metadata summarised at site level
-#' @param matched_sites Matched-event availability and fallback site fields
-#' @param crosswalk_data Site works crosswalk dataframe
-#' @param availability_years Integer vector of availability years
-#' @param metadata_years Integer vector of metadata years
-#' @return Final unique site table with stable schema
-assemble_unique_sites <- function(
-    site_universe,
-    annual_metadata,
-    matched_sites,
+#' Build the complete canonical unique_spill_sites table
+#' @param annual_data Annual Return EDM rows
+#' @param lookup_data Annual Return Lookup
+#' @param crosswalk_data Site Group crosswalk
+#' @param years Configured reporting years
+#' @return One row per Canonical Spill Site
+build_unique_spill_sites <- function(
+    annual_data,
+    lookup_data,
     crosswalk_data,
-    availability_years = 2021:2024,
-    metadata_years = 2021:2024
+    years = CONFIG$years
 ) {
-  availability_cols <- paste0("available_year_", availability_years)
-  percent_cols <- paste0("edm_operation_percent_", metadata_years)
-  reason_cols <- paste0("edm_operation_reason_", metadata_years)
+  years <- assert_years(years)
+  membership <- build_canonical_membership(crosswalk_data, lookup_data)
+  mapped_annual <- map_annual_to_canonical_sites(annual_data, lookup_data, years)
 
-  unique_sites <- site_universe %>%
-    left_join(annual_metadata, by = "site_id") %>%
-    left_join(matched_sites, by = "site_id") %>%
-    mutate(
-      water_company = coalesce(water_company, water_company_matched),
-      ngr = coalesce(ngr, ngr_matched),
-      ngr = clean_ngr(ngr)
-    )
-
-  parsed_coords <- parse_bng_coordinates(unique_sites$ngr)
-  unique_sites <- bind_cols(unique_sites, parsed_coords) %>%
-    mutate(
-      easting = coalesce(easting, easting_matched),
-      northing = coalesce(northing, northing_matched)
-    ) %>%
-    select(-water_company_matched, -ngr_matched, -easting_matched, -northing_matched)
-
-  unique_sites <- apply_nlo_carryforward(
-    unique_sites = unique_sites,
-    crosswalk_data = crosswalk_data,
-    availability_years = availability_years,
-    metadata_years = metadata_years
+  validation <- build_canonical_metadata_validation(
+    mapped_annual,
+    CONFIG$large_coordinate_movement_m
+  )
+  company_changes <- sum(validation$water_company_changed)
+  coordinate_changes <- sum(validation$large_coordinate_movement)
+  logger::log_info(
+    "Canonical validation: {company_changes} company changes; ",
+    "{coordinate_changes} coordinate movements >= ",
+    "{CONFIG$large_coordinate_movement_m}m"
   )
 
-  if (!"edm_commission_date" %in% names(unique_sites)) {
-    unique_sites$edm_commission_date <- as.Date(NA)
-  }
-
-  for (col_name in availability_cols) {
-    if (!col_name %in% names(unique_sites)) {
-      unique_sites[[col_name]] <- FALSE
-    }
-  }
-
-  for (col_name in percent_cols) {
-    if (!col_name %in% names(unique_sites)) {
-      unique_sites[[col_name]] <- NA_real_
-    }
-  }
-
-  for (col_name in reason_cols) {
-    if (!col_name %in% names(unique_sites)) {
-      unique_sites[[col_name]] <- NA_character_
-    }
-  }
-
-  if (!"nlo_carryforward_year" %in% names(unique_sites)) {
-    unique_sites$nlo_carryforward_year <- NA_integer_
-  }
-
-  if (!"easting" %in% names(unique_sites)) {
-    unique_sites$easting <- NA_real_
-  }
-  if (!"northing" %in% names(unique_sites)) {
-    unique_sites$northing <- NA_real_
-  }
-
-  unique_sites %>%
-    mutate(
-      site_id = as.integer(site_id),
-      water_company = normalise_missing_character(water_company),
-      nlo_carryforward_year = as.integer(nlo_carryforward_year),
-      across(all_of(availability_cols), ~ replace_na(as.logical(.x), FALSE))
-    ) %>%
-    select(
-      site_id,
-      water_company,
-      ngr,
-      all_of(availability_cols),
-      nlo_carryforward_year,
-      easting,
-      northing,
-      edm_commission_date,
-      all_of(percent_cols),
-      all_of(reason_cols)
-    ) %>%
-    arrange(site_id)
+  annual_metadata <- summarise_canonical_metadata(mapped_annual, years)
+  assemble_unique_sites(lookup_data, membership, annual_metadata, years)
 }
 
-#' Log diagnostics for output coverage and completeness
-#' @param unique_sites Final unique sites dataframe
-#' @param availability_years Integer vector of availability years
-#' @param metadata_years Integer vector of metadata years
-#' @return NULL
-log_output_diagnostics <- function(
-    unique_sites,
-    availability_years = 2021:2024,
-    metadata_years = 2021:2024
-) {
-  availability_cols <- paste0("available_year_", availability_years)
-  reason_cols <- paste0("edm_operation_reason_", metadata_years)
-
-  availability_matrix <- unique_sites %>%
-    select(all_of(availability_cols)) %>%
-    mutate(across(everything(), ~ replace_na(.x, FALSE))) %>%
-    as.matrix()
-
-  annual_only_sites <- sum(rowSums(availability_matrix) == 0)
-  logger::log_info("Final unique sites: {nrow(unique_sites)}")
-  logger::log_info("Sites without matched-event availability (annual-only): {annual_only_sites}")
-
-  for (reason_col in reason_cols) {
-    non_missing <- sum(!is.na(unique_sites[[reason_col]]))
-    logger::log_info("{reason_col} non-missing values: {non_missing}")
+log_output_diagnostics <- function(unique_sites, years = CONFIG$years) {
+  availability_columns <- paste0("available_year_", assert_years(years))
+  logger::log_info("Final Canonical Spill Sites: {nrow(unique_sites)}")
+  logger::log_info(
+    "Distinct Site Groups: {dplyr::n_distinct(unique_sites$site_id)}"
+  )
+  logger::log_info(
+    "Multi-member canonical rows: ",
+    "{sum(duplicated(unique_sites$site_id) | duplicated(unique_sites$site_id, fromLast = TRUE))}"
+  )
+  for (column in availability_columns) {
+    logger::log_info("{column}: {sum(unique_sites[[column]])} available sites")
   }
-
-  if ("nlo_carryforward_year" %in% names(unique_sites)) {
-    n_carryforward <- sum(!is.na(unique_sites$nlo_carryforward_year))
-    logger::log_info("nlo_carryforward_year non-missing values: {n_carryforward}")
-  }
+  logger::log_info(
+    "Explicit no-longer-operational histories: ",
+    "{sum(!is.na(unique_sites$no_longer_operational_year))}"
+  )
 }
 
-
-#' Export unique spills data to parquet and Excel
-#' @param unique_spills_df The unique spills dataframe
-#' @param excel_output Path to Excel output file
-#' @param parquet_output Path to parquet output file
-#' @return NULL
 export_data <- function(
     unique_spills_df,
     excel_output = CONFIG$unique_spills_xlsx,
-    parquet_output = CONFIG$unique_spills_parquet) {
+    parquet_output = CONFIG$unique_spills_parquet
+) {
   tryCatch(
     {
-      
-      # Export to parquet files
       arrow::write_parquet(unique_spills_df, parquet_output)
-      logger::log_info("Exported to parquet: {parquet_output}")
-      
-      # Export to Excel 
+      logger::log_info("Exported parquet: {parquet_output}")
       rio::export(unique_spills_df, excel_output)
-      logger::log_info("Exported data to Excel file: {excel_output}")
+      logger::log_info("Exported Excel: {excel_output}")
+      invisible(TRUE)
     },
-    error = function(e) {
-      logger::log_error("Data export failed: {e$message}")
-      stop(glue::glue("Failed to export data: {e$message}"))
+    error = function(error) {
+      stop(
+        glue::glue("Failed to export data: {conditionMessage(error)}"),
+        call. = FALSE
+      )
     }
   )
 }
 
-# Main execution
-############################################################
+
+# Main ------------------------------------------------------------------------
 
 main <- function() {
-  tryCatch(
-    {
-      # Setup
-      initialise_environment()
-      initialise_logging()
-      
-      # Load source data
-      crosswalk_data <- load_data(CONFIG$site_works_crosswalk_path, "site works crosswalk")
-      annual_data <- load_data(CONFIG$annual_data_path, "annual return EDM data")
-      lookup_data <- load_data(CONFIG$lookup_data_path, "annual return lookup")
+  initialise_environment()
+  initialise_logging()
 
-      # Build site universe from the works crosswalk
-      site_universe <- crosswalk_data %>%
-        select(site_id) %>%
-        distinct() %>%
-        filter(!is.na(site_id)) %>%
-        mutate(site_id = as.integer(site_id))
-
-      logger::log_info("Works site universe size: {nrow(site_universe)}")
-
-      # Build crosswalk availability and fallback fields
-      logger::log_info("Building crosswalk availability flags")
-      matched_sites <- build_matched_site_data(
-        crosswalk_data,
-        availability_years = CONFIG$availability_years
-      )
-
-      # Build metadata from annual returns mapped to canonical site IDs
-      logger::log_info("Mapping annual-return rows to canonical site IDs")
-      annual_mapped <- map_annual_to_canonical_sites(
-        annual_data,
-        lookup_data,
-        metadata_years = CONFIG$metadata_years
-      ) %>%
-        left_join(build_works_member_map(crosswalk_data), by = c("site_id" = "member_site_id")) %>%
-        mutate(site_id = coalesce(site_id.y, site_id)) %>%
-        select(-site_id.y)
-
-      logger::log_info("Summarising annual metadata at site level")
-      annual_metadata <- summarise_site_metadata(
-        annual_mapped,
-        metadata_years = CONFIG$metadata_years
-      )
-
-      # Assemble final output table
-      logger::log_info("Assembling unique spill sites")
-      unique_sites <- assemble_unique_sites(
-        site_universe = site_universe,
-        annual_metadata = annual_metadata,
-        matched_sites = matched_sites,
-        crosswalk_data = crosswalk_data,
-        availability_years = CONFIG$availability_years,
-        metadata_years = CONFIG$metadata_years
-      )
-
-      log_output_diagnostics(
-        unique_sites,
-        availability_years = CONFIG$availability_years,
-        metadata_years = CONFIG$metadata_years
-      )
-      
-      # Export results
-      logger::log_info("Exporting unique spill sites")
-      export_data(unique_spills_df = unique_sites)
-      logger::log_info("Processing completed successfully")
-    },
-    error = function(e) {
-      logger::log_error("Fatal error: {e$message}")
-      stop(e)
-    }
+  crosswalk_data <- load_data(
+    CONFIG$site_group_crosswalk_path,
+    "Site Group crosswalk"
   )
+  annual_data <- load_data(CONFIG$annual_data_path, "Annual Return EDM")
+  lookup_data <- load_data(CONFIG$lookup_data_path, "Annual Return Lookup")
+
+  unique_sites <- build_unique_spill_sites(
+    annual_data,
+    lookup_data,
+    crosswalk_data,
+    CONFIG$years
+  )
+  log_output_diagnostics(unique_sites, CONFIG$years)
+  export_data(unique_sites)
+  logger::log_info("Processing completed successfully")
+  invisible(unique_sites)
 }
 
-# Execute main function if script is run directly
-if (sys.nframe() == 0) {
-  main()
-}
+if (sys.nframe() == 0L) main()

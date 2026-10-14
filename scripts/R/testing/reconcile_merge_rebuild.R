@@ -2,8 +2,8 @@
 # Reconcile merge_individ_annual_location Rebuild
 # ==============================================================================
 #
-# Purpose: Compare the CH6 works-register rebuild against the CH2 old-script
-#          baseline and write the CH7 gate-review evidence.
+# Purpose: Compare the Site Group register rebuild against the historical CH2
+#          baseline and write the merge gate-review evidence.
 #
 # Author: Jacopo Olivieri
 # Date: 2026-07-05
@@ -48,7 +48,11 @@ CONFIG <- list(
     "matched_events_annual_data_baseline_2026-07-05_ch2_current_inputs"
   ),
   new_dir = here::here("data", "processed", "matched_events_annual_data"),
-  output_dir = here::here("output", "merge_rebuild_reconciliation_2026-07-05"),
+  output_dir = {
+    override <- Sys.getenv("MERGE_REBUILD_EVIDENCE_DIR", unset = "")
+    if (nzchar(override)) override else
+      here::here("output", "merge_rebuild_reconciliation_2026-07-05")
+  },
   event_path = here::here("data", "processed", "combined_edm_data.parquet"),
   annual_path = here::here("data", "processed", "annual_return_edm.parquet"),
   lookup_path = here::here("data", "processed", "annual_return_lookup.parquet"),
@@ -185,6 +189,27 @@ assert_input_fingerprints <- function() {
   comparison
 }
 
+assert_site_group_crosswalk_schema <- function(crosswalk) {
+  required <- c(
+    "site_id", "year", "water_company", "site_id_canonical_members"
+  )
+  missing <- setdiff(required, names(crosswalk))
+  if (length(missing) > 0L) {
+    stop(
+      "Site Group crosswalk is missing required columns: ",
+      paste(missing, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  if ("site_id_members" %in% names(crosswalk)) {
+    stop(
+      "Site Group crosswalk retains the retired site_id_members field.",
+      call. = FALSE
+    )
+  }
+  invisible(crosswalk)
+}
+
 add_event_instances <- function(tbl, key_cols) {
   tbl %>%
     dplyr::group_by(dplyr::across(dplyr::all_of(key_cols))) %>%
@@ -296,7 +321,8 @@ old_site_metadata <- arrow::read_parquet(file.path(CONFIG$baseline_dir, "site_me
 
 new_matched <- arrow::read_parquet(file.path(CONFIG$new_dir, "matched_events_annual_data.parquet"))
 new_unmatched <- arrow::read_parquet(file.path(CONFIG$new_dir, "events_unmatched.parquet"))
-new_crosswalk <- arrow::read_parquet(file.path(CONFIG$new_dir, "site_works_crosswalk.parquet"))
+new_crosswalk <- arrow::read_parquet(file.path(CONFIG$new_dir, "site_group_crosswalk.parquet"))
+assert_site_group_crosswalk_schema(new_crosswalk)
 new_near_miss <- arrow::read_parquet(file.path(CONFIG$new_dir, "near_miss_report.parquet"))
 
 old_pseudo_rows <- old_matched %>%
@@ -385,23 +411,24 @@ write_csv(new_missing_event_ids, path_out("new_missing_event_ids.csv"))
 write_csv(new_duplicate_event_ids, path_out("new_duplicate_event_ids.csv"))
 write_csv(new_unmapped_rows, path_out("new_unmapped_output_rows.csv"))
 
-site_members <- new_crosswalk %>%
+site_group_membership <- new_crosswalk %>%
   dplyr::distinct(
     new_site_id = .data$site_id,
-    new_site_id_members = .data$site_id_members
+    new_site_id_canonical_members = .data$site_id_canonical_members
   ) %>%
-  tidyr::separate_rows(.data$new_site_id_members, sep = ";") %>%
-  dplyr::mutate(member_site_id = as.integer(.data$new_site_id_members)) %>%
+  tidyr::separate_rows(.data$new_site_id_canonical_members, sep = ";") %>%
+  dplyr::mutate(
+    site_id_canonical = as.integer(.data$new_site_id_canonical_members)
+  ) %>%
   dplyr::transmute(
     .data$new_site_id,
-    .data$member_site_id,
-    old_site_in_new_works = TRUE
+    .data$site_id_canonical
   )
 
-new_site_members <- new_crosswalk %>%
+new_site_group_membership <- new_crosswalk %>%
   dplyr::distinct(
     new_site_id = .data$site_id,
-    new_site_id_members = .data$site_id_members
+    new_site_id_canonical_members = .data$site_id_canonical_members
   )
 
 # ------------------------------------------------------------------------------
@@ -410,22 +437,25 @@ new_site_members <- new_crosswalk %>%
 # Both the baseline and the new outputs partition the same raw events, but
 # neither carries a shared row id, and batch-recorded CSO events duplicate the
 # (company, year, start, end) group key (up to 40 simultaneous events). Pairing
-# rows by file order inside those groups fabricates works changes between
+# rows by file order inside those groups fabricates Site Group changes between
 # unrelated simultaneous events. Instead: within each group, an old row is
-# first paired with a new row assigned to the SAME works as the old site (via
+# first paired with a new row assigned to the same Site Group as the old site (via
 # crosswalk membership); only the remainder pairs by within-group order.
 # ------------------------------------------------------------------------------
 
-member_to_works <- site_members %>%
-  dplyr::distinct(.data$member_site_id, works_of_member = .data$new_site_id)
+canonical_to_site_group <- site_group_membership %>%
+  dplyr::distinct(
+    .data$site_id_canonical,
+    site_group_of_member = .data$new_site_id
+  )
 
-member_multiplicity <- member_to_works %>%
-  dplyr::count(.data$member_site_id, name = "n") %>%
+membership_multiplicity <- canonical_to_site_group %>%
+  dplyr::count(.data$site_id_canonical, name = "n") %>%
   dplyr::filter(.data$n > 1)
-if (nrow(member_multiplicity) > 0) {
+if (nrow(membership_multiplicity) > 0) {
   stop(
-    "Crosswalk member site_ids map to more than one works; ",
-    "register components are not disjoint.",
+    "Canonical site IDs map to more than one Site Group; ",
+    "Site Group register components are not disjoint.",
     call. = FALSE
   )
 }
@@ -446,13 +476,16 @@ new_side <- new_outcomes %>%
   )
 
 old_side <- old_rows %>%
-  dplyr::left_join(member_to_works, by = c("old_site_id" = "member_site_id"))
+  dplyr::left_join(
+    canonical_to_site_group,
+    by = c("old_site_id" = "site_id_canonical")
+  )
 
 old_tier1 <- old_side %>%
-  dplyr::filter(!is.na(.data$works_of_member)) %>%
+  dplyr::filter(!is.na(.data$site_group_of_member)) %>%
   dplyr::group_by(
     dplyr::across(dplyr::all_of(EVENT_GROUP_KEY_COLS)),
-    .data$works_of_member
+    .data$site_group_of_member
   ) %>%
   dplyr::mutate(pair_rank = dplyr::row_number()) %>%
   dplyr::ungroup()
@@ -469,10 +502,14 @@ new_tier1 <- new_side %>%
 paired_tier1 <- old_tier1 %>%
   dplyr::inner_join(
     new_tier1,
-    by = c(EVENT_GROUP_KEY_COLS, "works_of_member" = "new_site_id", "pair_rank"),
+    by = c(
+      EVENT_GROUP_KEY_COLS,
+      "site_group_of_member" = "new_site_id",
+      "pair_rank"
+    ),
     na_matches = "na"
   ) %>%
-  dplyr::mutate(new_site_id = .data$works_of_member)
+  dplyr::mutate(new_site_id = .data$site_group_of_member)
 
 old_tier2 <- old_side %>%
   dplyr::anti_join(paired_tier1, by = "old_row_id") %>%
@@ -497,11 +534,11 @@ paired_tier2 <- old_tier2 %>%
   )
 
 old_new_compare <- dplyr::bind_rows(paired_tier1, paired_tier2) %>%
-  dplyr::left_join(new_site_members, by = "new_site_id") %>%
+  dplyr::left_join(new_site_group_membership, by = "new_site_id") %>%
   dplyr::mutate(
-    old_site_in_new_works = !is.na(.data$works_of_member) &
+    old_site_in_new_site_group = !is.na(.data$site_group_of_member) &
       !is.na(.data$new_site_id) &
-      .data$works_of_member == .data$new_site_id
+      .data$site_group_of_member == .data$new_site_id
   )
 
 if (nrow(old_new_compare) != nrow(old_rows)) {
@@ -603,7 +640,7 @@ old_max_fate <- old_new_compare %>%
       .data$new_outcome == "unmatched" ~ paste0("unmatched_", .data$new_reason),
       .data$new_annual_status == "absent" ~ "matched_to_absent",
       .data$new_match_method == "agreement" ~ "agreement_matched",
-      .data$old_site_in_new_works ~ "register_absorbed",
+      .data$old_site_in_new_site_group ~ "register_absorbed",
       TRUE ~ paste0("matched_", .data$new_match_method)
     )
   )
@@ -624,7 +661,7 @@ exact_changed_works <- old_new_compare %>%
   ) %>%
   dplyr::mutate(
     exception_explanation = dplyr::if_else(
-      .data$old_site_in_new_works,
+      .data$old_site_in_new_site_group,
       "register_collapse",
       "unexplained_works_change"
     )
@@ -668,7 +705,7 @@ write_parquet_safe(
       .data$old_unique_id,
       .data$old_site_id,
       .data$new_site_id,
-      .data$new_site_id_members,
+      .data$new_site_id_canonical_members,
       .data$old_match_method,
       .data$new_match_method,
       .data$new_annual_status,
@@ -702,8 +739,8 @@ coordinate_compare <- old_new_compare %>%
     dplyr::all_of(REPORT_EVENT_KEY_COLS),
     .data$old_site_id,
     .data$new_site_id,
-    .data$new_site_id_members,
-    .data$old_site_in_new_works,
+    .data$new_site_id_canonical_members,
+    .data$old_site_in_new_site_group,
     .data$new_annual_status,
     .data$old_ngr,
     .data$new_ngr
@@ -725,7 +762,7 @@ coordinate_compare <- old_new_compare %>%
     ),
     coordinate_attribution = dplyr::case_when(
       .data$old_site_id == .data$new_site_id ~ "same_representative_site_ktd10_location_rule",
-      .data$old_site_in_new_works ~ "register_collapse_ktd10_representative_location",
+      .data$old_site_in_new_site_group ~ "register_collapse_ktd10_representative_location",
       TRUE ~ "changed_works_not_register_collapse"
     )
   )
@@ -905,7 +942,7 @@ report_lines <- c(
     nrow(coordinate_gt1km),
     " (full list: `coordinate_churn_gt1km.parquet`)."
   ),
-  "- Attribution uses KTD-10: the new location is the representative works member's most recent non-NA NGR carried across absent years.",
+  "- Attribution uses the Site Group representative-location policy: the new location is the representative member's most recent non-NA NGR carried across absent years.",
   "",
   "## Old Exact-Tier Exceptions",
   "",

@@ -8,27 +8,28 @@ Shared domain vocabulary for this project - entities, named processes, and statu
 The yearly company-reported event-duration monitoring return for storm overflow assets, combining site identifiers, permit/activity references, location fields, and reporting-year metadata.
 
 ### Monitored Discharge Point
-A single monitored overflow asset at a wastewater works — a storm tank, inlet overflow, or network outfall — and the unit recorded by one Annual Return EDM row.
-
-One works can carry several Monitored Discharge Points that share every identifying field (names, permits, location) while reporting different spill behavior. Per-monitor unique identifiers exist only from the 2023 return onward (re-keyed each year, with a bridge to the prior year's identifiers); earlier returns carry no monitor-level key, so monitor-multiples in those years cannot be tracked individually across years.
+A single monitored overflow asset reported in an Annual Return EDM row. Several points can share names, permits, and locations while reporting different spill behaviour.
 
 ### Annual-Return Site
 A reporting-year-specific record of one Monitored Discharge Point in the Annual Return EDM. It is not automatically a stable cross-year entity, because identifiers and reporting structures can change between returns.
 
 ### Canonical Spill Site
-A stable project-level site identity used to connect records that refer to the same storm overflow asset across years and datasets.
+A stable project-level identity for one Monitored Discharge Point across reporting years. Canonical metadata, availability, and commissioning history belong to this entity.
 
 ### Annual-Return Lookup
 The cross-year mapping that assigns year-specific Annual-Return Sites to Canonical Spill Sites.
 
-### Works
-A wastewater works as observed by event data: the year-invariant collapse of all Monitored Discharge Points (outlets) that file annual returns under the same company and normalised site name with corroborating evidence (shared permit or near-identical location). Events name works; annual returns name outlets. Identified by the smallest member Canonical Spill Site id.
+### Site Group
+A project-created grouping of Canonical Spill Sites used to connect event, location, and annual-return evidence that cannot be assigned reliably to one member. A Site Group supports group-level spill summaries but is not evidence of a verified physical wastewater works.
 
-### Works Register
-The graph built on top of the Annual-Return Lookup whose connected components define each Works: nodes are Canonical Spill Sites, edges require same company + same normalised name + a corroborator (identical EA permit, or grid-reference distance within the configured threshold). Membership is year-invariant by construction.
+### Site Group Register
+The authoritative record of Site Group membership and reporting-year status. It links each Canonical Spill Site to exactly one Site Group and records group-level event and annual-return evidence.
 
 ### Annual Status
-The per-works-year classification that disambiguates the absence of events in the positives-only event feed: `reported_zero` (return filed, both metrics zero), `reported_positive`, `reported_na` (return filed, metrics missing), or `absent` (no return that year).
+The per-Site-Group-year classification that disambiguates the absence of events in the positives-only event feed: `reported_zero` (return filed, both metrics zero), `reported_positive`, `reported_na` (return filed, metrics missing), or `absent` (no return that year).
+
+### Annual-Return NA-Then-Absent Indicator
+A radius-level transaction flag equal to true when the same nearby Site Group has `reported_na` before the transaction and is later `absent` within the full annual-return horizon. The later horizon uses all years currently available in the crosswalk, so the flag may change when new monitoring years are added; it does not describe missing individual EDM event data.
 
 ### Record-Linkage Component
 A connected group of Annual-Return Sites implied by pairwise matching evidence. A component is only valid as one canonical track when it satisfies the project's site-identity invariants.
@@ -41,10 +42,103 @@ A Record-Linkage Component containing more than one Annual-Return Site from the 
 ### Near-Overflow Radius
 The straight-line distance threshold within which a property is treated as exposed to a storm overflow, used to build the near-property cross-sections. The main analyses are run at several such thresholds, with the others serving as robustness checks. In regression specifications it is written generically as the radius buffer **B**, which takes the values 250, 500, and 1000 m across the sweep; each individual result table still reports its specific radius.
 
-### Spill Exposure
-A property's continuous measure of nearby storm-overflow activity — spill count and spill hours at the overflows within its Near-Overflow Radius — expressed as a daily average over the exposure window.
+### Site Coast Distance
+The straight-line distance from a Site Group's representative overflow location to the tidal Mean High Water coastline, including estuarine and tidal-river banks. It describes geographic proximity to that shoreline, not receiving-water type or direct recreational use.
 
-The daily average is the stored canonical form; headline coefficients are reported in per-week units (one extra spill, or spill-hour, per week), the reporting contrast chosen because it sits near one standard deviation and is interpretable. Directional Spill Exposure and Nearest-Site Exposure are variants that split or restrict which overflows contribute.
+### Annual Designated-Water Status
+The reporting-year classification of a Site Group's bathing-water or shellfish-water association evidence as positive, no reported association, or unknown. These statuses describe annual-return evidence and do not establish a water's legal designation date or prove that an unreported association was absent.
+
+### Ever-Observed Designated-Water Indicator
+A Site Group indicator that positive bathing-water or shellfish-water association evidence appears in at least one Annual Return EDM from 2021 through 2024. It does not imply a continuous association throughout that period.
+
+For bathing salience, an observed positive establishes an ever-observed association even
+when other years have unknown evidence. Association evidence remains unresolved only
+when evidence is unknown or missing and no positive is observed; at property
+radius, any nearby Site Group with a positive association establishes bathing.
+
+### Ever-Observed Bathing-Water Association
+A reported association between a Site Group and a designated bathing water in at least one year during 2021–2024, used as a fixed characteristic of place. It can reflect a discharge affecting the bathing water from elsewhere and does not imply designation or association at the transaction date.
+
+### Property Designated-Water Proximity
+A property-radius classification derived from the Ever-Observed Designated-Water Indicators of every nearby Site Group. Its primary flag records whether any nearby Site Group has a positive association; composition measures distinguish all-positive, mixed, unknown evidence, and counts of associated sites.
+
+### Property Spill-Intensity Band
+A property-radius classification of total nearby Prior-to-Transaction Spill Exposure as unknown, zero, positive at or below the positive-exposure median, or positive above that median. It aggregates every Site Group within the property's Near-Overflow Radius and is defined separately by market and radius.
+
+### Local Salience
+A characteristic of place associated with how much local people notice and care about sewage pollution. Recreational use and the value of nearby water are hypothesised mechanisms; shoreline proximity, reported bathing-water association and spill intensity are proxies, not observations of individual recreational behaviour or proof of greater harm. It is fixed for a property in these analyses, unlike Public Attention, which varies over time and is common to all places.
+
+### Salience Stratum
+A mutually exclusive subsample of transactions defined by Local Salience, within which a property-price specification is re-estimated. Heterogeneity by salience compares the same specification across strata rather than adding interaction terms.
+
+The coast/bathing family crosses coastal location, defined strictly by the
+coast-distance threshold, with ever-observed bathing designation: coastal
+bathing, coastal not bathing, inland bathing, and inland not bathing.
+Designation does not determine coastal location.
+
+### Salience Group
+
+A subsample defined by one Local Salience characteristic, within which a
+property-price specification is re-estimated. Salience Groups can overlap and
+need not exhaust the transaction sample. **All Bathing** includes every
+location with an Ever-Observed Bathing-Water Association, coastal or inland.
+**All Coastal** includes every location within the coast-distance threshold,
+including bathing locations. **All Inland** includes every location beyond
+that threshold, including bathing locations. Missing evidence cannot establish
+membership in the corresponding group. Group counts must not be added to
+obtain a total sample size. Unlike the exclusive coast/bathing Salience Strata,
+these groups do not form a partition.
+
+### Spill Exposure
+A property's continuous measure of nearby storm-overflow activity — spill count and spill hours at the overflows within its Near-Overflow Radius — measured over a stated exposure window.
+
+Spill Exposure may be expressed as a Whole-Period Spill Exposure or an Average Daily Spill Exposure. Directional Spill Exposure and Nearest-Site Exposure are variants that split or restrict which overflows contribute.
+
+### Whole-Period Spill Exposure
+The total spill count or spill hours accumulated within a property's Near-Overflow Radius over the stated exposure window.
+
+### Study-Period Spill Exposure
+A Whole-Period Spill Exposure measured over a fixed study window rather than a per-transaction one — 2021–2024 for sales, 2021–2023 for rentals. It is a time-invariant property-area measure and may include spill activity after an individual sale or rental transaction; it is published as a whole-period total and as equivalent daily and weekly averages.
+
+It comes in two variants that share a schema, a grain, a window, and one shared evidence classification, and differ in where the exposure numbers come from and — following from that — in one clause of their missingness rule. Which variant is canonical for the paper is an open question; the comparison between them is reported by `scripts/R/testing/verify_study_period_exposure_sources.R`.
+
+### Event-Based Study-Period Spill Exposure
+The Study-Period Spill Exposure measured from matched individual EDM events clipped to the study window, with spill hours summed from the clipped durations and spill counts recomputed under the 12/24 counting rule. This is the same measurement the prior-to-transaction datasets use, so the two families differ only in window. It is what the unsuffixed `data/processed/cross_section/{sales,rentals}/study_period/` paths carry and what downstream analysis reads.
+
+### Annual-Returns (EA) Study-Period Spill Exposure
+The Study-Period Spill Exposure measured by summing the EA-revised annual-return totals (`spill_count_ea`, `spill_hrs_ea`) over the window years. "EA data" and "Annual Returns" name the same source throughout this project — the Environment Agency publishes the returns — and the `_ea` suffix marks it. It is published to the sibling `study_period_ea/` paths.
+
+Both variants take the Annual Status as their evidence oracle, because the event feed carries positives only and cannot distinguish a genuinely silent Site Group from an unmonitored one. A radius containing any Site Group with a `reported_na` or `absent` window year, or a window year missing from the crosswalk grid, therefore reports unknown exposure under both. One clause separates them: a `reported_positive` window year with no matched events indicts the event matching rather than the Annual Returns, so it makes the event-based variant unknown and leaves the Annual-Returns variant known. The event-based output's unknown rows are consequently a superset of the Annual-Returns output's, and the difference set is exactly the radii containing such an unverifiable positive and no gap shared by both variants.
+
+### Measurement Layer (`house_site_spills` / `rental_site_spills`)
+The pre-masking transaction-by-Site-Group record of clipped event measures and evidence flags from which the published prior-exposure datasets are derived. Each row is one eligible transaction paired with one nearby Site Group, carrying the pair's window-clipped spill hours, the 12/24-rule spill count, the pair's actual distance, and the four Atomic Evidence Flags — with no missingness masking applied. The published prior-exposure datasets are derivations over this layer: they replicate pairs per radius, rejoin transaction metadata, compute their evidence verdict as an OR of atomic flags, and mask exposure to NA where the verdict says the evidence is unknown.
+
+### Atomic Evidence Flags
+The four boolean flags carried by the Measurement Layer, from which every evidence verdict is computed as an OR in the derivation layer; no composite verdict is ever stored.
+
+- **`annual_returns_absent`** — true when, in at least one year of the transaction's lookback window, the Site Group filed no annual return (Annual Status `absent`) or has no site-year row in the crosswalk at all. Published in the site-grain schemas under its frozen public name `site_missing`.
+- **`annual_returns_na`** — true when at least one window year has Annual Status `reported_na`: a return was filed but the spill metrics are missing.
+- **`reported_positive_without_matched_events`** — true when at least one window year has Annual Status `reported_positive` but zero matched EDM events. This indicts the event matching rather than the Annual Returns, so it enters the event-evidence verdict only.
+- **`annual_returns_na_then_absent`** — the sequence flag, unchanged from the Annual-Return NA-Then-Absent Indicator's definition: a `reported_na` year within the window, no `absent` year within the window, and an `absent` year after it over the full crosswalk horizon. Its defining absent year lies outside the lookback window by construction.
+
+### NA-Propagation Convention
+Missing evidence stays NA all the way into the regression sample. When a contributing Site Group has unknown evidence under a dataset's verdict, the derivation publishes NA exposure, and every downstream consumer must propagate that NA rather than remove it: re-reducing published exposure with `na.rm = TRUE`, or coercing missing evidence to zero exposure (e.g. `replace_na(..., 0)`), is nonconforming.
+
+Event-based derivations have no opt-out from this rule: the missing-evidence rule is baked into the shared reduction, and any event-based dataset's total is NA whenever a contributing site has unknown evidence. `study_period_ea`'s two-flag verdict is a per-source rule rather than an opt-out: it is a different data source whose verdict omits only `reported_positive_without_matched_events`, because that flag indicts the event matching and not the Annual Returns its measures are read from — the classification it draws the other two flags from is the same shared one.
+
+### Spatially Eligible Transaction
+A sale or rental transaction with usable property coordinates, for which nearby Site Groups can be evaluated. A spatially eligible transaction with no Site Group inside its Near-Overflow Radius has zero Spill Exposure; a transaction without usable coordinates has unknown, not zero, exposure.
+
+### Average Daily Spill Exposure
+Spill Exposure divided by the number of days in its stated exposure window. Headline coefficients may be reported in per-week units for interpretability.
+
+All exposure datasets publish these averages under the same column names: `spill_count_daily_avg`, `spill_hrs_daily_avg`, `spill_count_weekly_avg`, `spill_hrs_weekly_avg`. The window differs by family. The prior-to-transaction datasets average over each transaction's own lookback window; the study-period datasets average over the fixed study window. Each row records its window length in `n_days_in_window`. When joining datasets from the two families, rename these columns first.
+
+### Average Weekly Spill Exposure
+Average Daily Spill Exposure multiplied by seven, used as the principal reporting scale in the project's analyses.
+
+### Inverse-Distance-Weighted Spill Exposure
+The sum, over the overflows within a property's Near-Overflow Radius, of each overflow's Average Weekly Spill Exposure divided by its straight-line distance to the property in units of 100 m. The sum is unnormalised rather than a weighted mean, so two overflows at a given distance contribute twice the exposure of one. Directional Spill Exposure's inverse-river-distance-weighted variant is the along-river analogue of this measure.
 
 ### Directional Spill Exposure
 Spill exposure split by whether the contributing overflow lies upstream or downstream of the property along the river network — used to separate same-river pollution transport from generic proximity. Estimated unweighted and in an inverse-river-distance-weighted variant.
@@ -61,7 +155,44 @@ The effect of sewage-spill *intensity* — a continuous exposure measure such as
 ### Extensive Margin
 The effect of *proximity itself* — being near versus far from an overflow — on property values, and how the near-versus-far price gap responds to public attention. Contrasts with the Intensive Margin, which varies realized spill intensity rather than proximity.
 
+### Property-Level Inference
+The single standard-error convention for every estimate on individual transactions with coordinates: the hedonic cross-sections (continuous, bins, quarter FE, inverse-distance-weighted, salience, radius robustness), upstream/downstream, long differences, repeat sales, and the public-attention difference-in-differences, event-study, windowed-article, lagged-attention and salience tables, together with the confidence bands in their coefficient plots. So far only the hedonic and public-attention estimates use it; upstream/downstream, long differences and repeat sales still report their earlier standard errors until they are switched. It is Conley spatial standard errors with a 1 km distance cutoff and fixest's uniform kernel, under which every pair of transactions within 1 km gets full weight and pairs farther apart are treated as independent. It allows correlation among properties that share overflows and local shocks, which fades with distance rather than stopping at an administrative boundary. Because the dependence comes from geography, not from the regressor, the same convention applies regardless of how exposure is measured. The public-attention regressions are estimated on the same transactions as the hedonic cross-sections, so the house-to-overflow dependence is the same; adding an interaction with a time-varying attention measure does not change the estimator, and month fixed effects absorb shocks common to all properties.
+
+Exceptions: the dry-spill logit is a site-day model, not a transaction model, and clusters by overflow site (`site_id`). LSOA clustering, the earlier convention for the difference-in-differences tables, is now a comparison estimator only, not a primary one.
+
+## Repeat-Transactions Area
+
+### Content-Stable Transaction ID
+The identity of one cleaned sale or rental transaction, derived from the transaction's own recorded values rather than from its position in the file. Regenerating an input cannot silently re-label transactions: identifiers across artifact generations either match exactly or fail loudly.
+
+### Address Key
+The normalised composite of postcode and address components that identifies one property unit for repeat matching. A transaction missing its postcode or its primary address component carries no Address Key and cannot participate in repeat identification.
+
+### Keyable Transaction
+A transaction that carries an Address Key. Only keyable transactions can be assigned to a Repeat Group.
+
+### Repeat Group
+All Keyable Transactions in one dataset that share an Address Key — the project's operational notion of "the same property transacting repeatedly". A group of size one is a single; singles still belong to a Repeat Group. Group identity derives from the Address Key itself, so it is stable across runs; distinct Address Keys are asserted to map to distinct group identifiers at build time, and a group identifier is meaningful only within its own market's mapping.
+
+### Repeat-Transactions Mapping
+The transaction-grain artifact assigning every Keyable Transaction to its Repeat Group, singles included, with the group size recorded. It is a census of keyable transactions — exclusions are auditable by subtraction — and the sole bridge between cleaned transactions and repeat-based analyses. Group membership and group size are defined over the Long-Run Transaction History; a consumer restricting to a narrower window must regroup rather than trust the recorded size.
+
+### Long-Run Transaction History
+The maximal retained span of cleaned transactions, defined by market: sales from January 1995 (the start of the Land Registry Price Paid record, extended on 20 September 2026 from the earlier 2014 start) and rentals from 2014 (the earliest rental coverage). Both are wider than the spill study window. Repeat identification runs over each market's long-run history; the study-window transaction tables are derived from it by filtering, never built independently, so both views agree row-for-row where they overlap. Analyses choose their own windows within the history and regroup after restricting: the long-run repeat-property attention regression keeps sales from January 1995 and rentals from January 2014, and the sales Annual Near–Far Price Profiles use the full 1995–2024 history.
+
+### Long-Run Nearest Site Lookup
+The distance from every unique property coordinate in the Long-Run Transaction History to the nearest usable Site Group, where a Site Group is usable if it has a latest-valid location over 2021–2024. It is keyed on the coordinate pair rather than on transactions, so every transaction at the same coordinates shares one distance, and it lets analyses on the long-run history measure proximity to overflows outside the spill study window.
+
 ## Public Attention Area
+
+### Annual Near–Far Price Profile
+A descriptive path of the conditional price gap between properties near and farther from storm overflows, expressed relative to a stated reference year. It describes longer-run relative price changes without assigning them to a single intervention or identifying a causal effect of monitoring or public attention.
+
+### Price-Profile Reference Year
+The calendar year against which an Annual Near–Far Price Profile is expressed, with its contrast normalised to zero. Choosing another reference year changes the comparison benchmark, not the treatment date or the underlying fitted price path when the sample and specification are unchanged.
+
+### Near–Far Distance Bands
+The two proximity groups used to contrast properties near and far from storm overflows on the Extensive Margin. A property is near when its nearest overflow lies within 0–500 m inclusive, and far when its nearest overflow lies more than 1,000 m and at most 2,000 m away. Properties in neither band are excluded, so the intermediate ring does not blur the contrast. The near band's outer edge matches the 500 m Near-Overflow Radius.
 
 ### Public Attention
 The project-level construct for how salient sewage spills are to the public over time, proxied by search interest and media coverage rather than by physical spill activity itself.
@@ -74,3 +205,9 @@ A time-series proxy for media coverage of sewage spills, used alongside Google T
 
 ### Windowed Article Count
 A trailing-window salience measure: the UK Media Article Count summed over the past 3, 6, or 12 months up to and including a transaction's month. Contrasts with the cumulative article count (summed from the start of the sample), which rises mechanically over time; windowed counts fluctuate, capturing recent rather than accumulated attention. Built on a gap-filled monthly grid because the source stores only months with at least one article.
+
+### Cumulative Article Stock
+The natural log of the cumulative UK Media Article Count for LexisNexis search 1, summed from the first month of the series (March 1989) through the observation month. It measures accumulated rather than recent attention, in contrast to the Windowed Article Count. Its origin is the start of the series rather than of any estimation window, so the same stock serves the 1995 sales and 2014 rentals windows of the long-run repeat-property regression; the study-window scripts instead accumulate from January 2021, so the two stocks are not interchangeable.
+
+### Attention Event Indicators
+Two indicators marking months after discrete public-attention events, used in the long-run repeat-property regression: one switches on from March 2021 inclusive and the other from August 2022 inclusive. Each enters its own regression as an alternative to the Cumulative Article Stock, dating the shift in Public Attention to a single event rather than tracing it continuously.

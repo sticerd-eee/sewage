@@ -394,7 +394,7 @@ sales_controls <- arrow::read_parquet(
   root_path("data", "processed", "house_price.parquet")
 ) |>
   dplyr::select(
-    house_id, transaction_id, price, month_id, qtr_id,
+    house_id, price, month_id, qtr_id,
     latitude, longitude, lsoa, msoa, property_type, old_new, duration
   ) |>
   dplyr::mutate(
@@ -551,7 +551,7 @@ build_repeat_pairs <- function(market) {
     )
 
     transactions <- sales_controls |>
-      dplyr::select(house_id, transaction_id, price, qtr_id, latitude, longitude)
+      dplyr::select(house_id, price, qtr_id, latitude, longitude)
 
     lookup <- arrow::read_parquet(
       root_path("data", "processed", "spill_house_lookup.parquet")
@@ -567,7 +567,7 @@ build_repeat_pairs <- function(market) {
       dplyr::semi_join(lookup, by = "house_id") |>
       dplyr::inner_join(lookup, by = "house_id", relationship = "many-to-many") |>
       dplyr::inner_join(agg_spill, by = c("site_id", "qtr_id")) |>
-      dplyr::group_by(house_id, transaction_id, repeat_id, qtr_id, price, latitude, longitude) |>
+      dplyr::group_by(house_id, repeat_id, qtr_id, price, latitude, longitude) |>
       dplyr::summarise(
         spill_count_roll = sum(spill_count_roll, na.rm = TRUE),
         .groups = "drop"

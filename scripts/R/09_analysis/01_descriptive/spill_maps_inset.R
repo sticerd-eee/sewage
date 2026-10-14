@@ -3,7 +3,7 @@
 # ==============================================================================
 #
 # Purpose: Generate static PDF maps showing average annual spill counts by MSOA
-#          for 2021-2023 with a London inset panel.
+#          for 2021-2024 with a London inset panel.
 #          Produces two maps: all spills and dry spills.
 #
 # Author: Jacopo Olivieri
@@ -12,16 +12,16 @@
 # Inputs:
 #   - data/processed/agg_spill_stats/agg_spill_yr.parquet - Yearly spill data
 #   - data/processed/agg_spill_stats/agg_spill_dry_yr.parquet - Dry spill data
-#   - data/processed/unique_spill_sites.parquet - Site coordinates
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
 #   - data/raw/shapefiles/msoa_bcg_2021/ - MSOA boundary shapefiles
 #   - data/raw/shapefiles/msoa_population_2021/sapemsoasyoatablefinal.xlsx
 #   - data/raw/shapefiles/local_authorities_uk_buc/ - London LAD boundaries
 #
 # Outputs:
-#   - output/figures/maps/spill_avg_annual_count_2021_2023_london_inset.pdf
-#   - output/figures/maps/dry_spill_avg_annual_count_2021_2023_london_inset.pdf
-#   - output/figures/maps/spill_avg_annual_count_2021_2023_london_inset_slides.pdf
-#   - output/figures/maps/dry_spill_avg_annual_count_2021_2023_london_inset_slides.pdf
+#   - output/figures/maps/spill_avg_annual_count_2021_2024_london_inset.pdf
+#   - output/figures/maps/dry_spill_avg_annual_count_2021_2024_london_inset.pdf
+#   - output/figures/maps/spill_avg_annual_count_2021_2024_london_inset_slides.pdf
+#   - output/figures/maps/dry_spill_avg_annual_count_2021_2024_london_inset_slides.pdf
 #
 # ==============================================================================
 
@@ -37,10 +37,11 @@ PLOT_DPI <- 300
 SLIDE_PLOT_WIDTH <- 7.0
 SLIDE_PLOT_HEIGHT <- 5.6
 SLIDE_PLOT_DPI <- 300
-TARGET_YEARS <- 2021:2023
+TARGET_YEARS <- 2021:2024
 YEAR_RANGE_LABEL <- paste0(min(TARGET_YEARS), "-", max(TARGET_YEARS))
 YEAR_FILENAME_LABEL <- paste(min(TARGET_YEARS), max(TARGET_YEARS), sep = "_")
 NO_SPILL_COLOR <- "grey90"
+NO_DATA_COLOR <- "grey60"
 VIRIDIS_PALETTE <- "magma"
 RAW_COUNT_LEGEND_BREAKS <- c(1, 10, 100, 2000)
 LOG_COUNT_LEGEND_BREAKS <- log(RAW_COUNT_LEGEND_BREAKS)
@@ -79,6 +80,8 @@ install_if_missing <- function(packages) {
   invisible(sapply(packages, library, character.only = TRUE))
 }
 install_if_missing(required_packages)
+source(here::here("scripts", "R", "utils", "site_group_utils.R"))
+source(here::here("scripts", "R", "utils", "spill_missing_utils.R"))
 
 
 # ==============================================================================
@@ -117,26 +120,30 @@ map_variant_style <- function(variant = c("paper", "slides")) {
 
   if (variant == "slides") {
     return(list(
-      legend_title_size = 8.8,
+      legend_title_size = 7.8,
       legend_text_size = 8.3,
       legend_key_width = 2.0,
       legend_key_height = 0.30,
-      legend_bar_width = 4.8,
+      legend_bar_width = 4.3,
       legend_bar_height = 0.20,
       legend_margin = margin(t = 0, b = 0),
-      plot_margin = margin(t = 1, r = 2, b = 1, l = 2)
+      plot_margin = margin(t = 1, r = 2, b = 1, l = 2),
+      no_data_key_size = 0.30,
+      no_data_text_size = 7.8
     ))
   }
 
   list(
-    legend_title_size = 8,
+    legend_title_size = 7.6,
     legend_text_size = 7,
     legend_key_width = 2.5,
     legend_key_height = 0.4,
-    legend_bar_width = 5.0,
+    legend_bar_width = 4.6,
     legend_bar_height = 0.2,
     legend_margin = margin(t = 6, b = 0),
-    plot_margin = margin(t = 2, r = 8, b = 4, l = 3)
+    plot_margin = margin(t = 2, r = 8, b = 4, l = 3),
+    no_data_key_size = 0.35,
+    no_data_text_size = 7
   )
 }
 
@@ -158,6 +165,8 @@ theme_map_publication <- function(variant = c("paper", "slides")) {
       legend.key.width = unit(style$legend_key_width, "cm"),
       legend.key.height = unit(style$legend_key_height, "cm"),
       legend.margin = style$legend_margin,
+      legend.box.spacing = unit(0.2, "cm"),
+      legend.spacing.x = unit(0.15, "cm"),
       plot.margin = style$plot_margin
     )
 }
@@ -185,21 +194,26 @@ dat_dry_yr <- rio::import(
 )
 
 # Spill sites (coordinates)
-spill_sites <- rio::import(
-  here::here("data", "processed", "unique_spill_sites.parquet"),
-  trust = TRUE
+spill_sites <- read_site_group_projection(
+  here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
+  years = 2021:2024
 )
 
 # MSOA boundaries (England only)
-msoa_boundaries <- sf::st_read(
+msoa_boundaries_raw <- sf::st_read(
   here::here("data", "raw", "shapefiles", "msoa_bcg_2021"),
   quiet = TRUE
 ) %>%
   filter(str_detect(MSOA21CD, "^E")) %>%
-  st_simplify(dTolerance = 200) %>%
   select(MSOA21CD, MSOA21NM, geometry) %>%
   rename(msoa_code = MSOA21CD, msoa_name = MSOA21NM) %>%
   mutate(msoa_area_km2 = as.numeric(st_area(.)) / 1000000)
+
+msoa_boundaries <- msoa_boundaries_raw %>%
+  st_simplify(dTolerance = 200)
 
 # MSOA population data
 msoa_population <- readxl::read_excel(
@@ -236,44 +250,78 @@ cat("  Data loaded successfully\n")
 # 5. Helper Functions
 # ==============================================================================
 
-# Aggregate regular spills to MSOA level
-aggregate_spills_to_msoa <- function(data, spill_sites, years) {
-  n_years <- length(years)
+# Average each overflow over its non-missing years (rule in
+# spill_missing_utils.R) and sum within each MSOA. Yearly values are
+# winsorised before averaging.
+aggregate_overflow_averages <- function(
+  data,
+  years,
+  count_col,
+  hrs_col,
+  avg_count_name,
+  avg_hrs_name
+) {
+  value_cols <- c(count_col, hrs_col)
 
-  # Join spill data with site coordinates
-  dat_clean <- left_join(
-    select(data, -any_of("ngr")),
-    spill_sites,
-    by = join_by(water_company, site_id)
-  )
-
-  # Convert to sf and filter for year range
-  spill_sites_sf <- dat_clean %>%
-    filter(year %in% !!years) %>%
+  site_year_values <- data %>%
+    filter(
+      year %in% !!years,
+      is.finite(easting),
+      is.finite(northing)
+    ) %>%
     mutate(
       across(
-        c(spill_count_yr, spill_hrs_yr),
+        all_of(value_cols),
+        ~ if_else(is_missing_group_year, NA_real_, as.numeric(.x))
+      )
+    ) %>%
+    mutate(
+      across(
+        all_of(value_cols),
         ~ DescTools::Winsorize(
           .x,
           val = stats::quantile(.x, probs = c(0.00, 0.99), na.rm = TRUE)
         )
       )
+    )
+
+  # One row per overflow
+  site_averages <- site_year_values %>%
+    summarise_overflow_annual_averages(value_cols) %>%
+    left_join(
+      site_year_values %>% distinct(site_id, easting, northing),
+      by = "site_id"
     ) %>%
     st_as_sf(coords = c("easting", "northing"), crs = 27700)
 
   # Spatial join with MSOA boundaries
-  sites_with_msoa <- st_join(spill_sites_sf, msoa_boundaries, join = st_within)
+  sites_with_msoa <- st_join(
+    site_averages,
+    msoa_boundaries_raw %>% select(msoa_code, msoa_name),
+    join = st_within
+  )
+  if (anyDuplicated(sites_with_msoa$site_id)) {
+    stop("Some overflows were assigned to more than one MSOA.")
+  }
 
-  # Aggregate to MSOA
+  # Aggregate to MSOA (reclassified below once empty MSOAs are filled in)
   msoa_aggregated <- sites_with_msoa %>%
     st_drop_geometry() %>%
-    filter(!is.na(msoa_code)) %>%
-    group_by(msoa_code, msoa_name) %>%
-    summarise(
-      spill_count_yr = sum(spill_count_yr, na.rm = TRUE),
-      spill_hrs_yr = sum(spill_hrs_yr, na.rm = TRUE),
-      site_count = n(),
-      .groups = "drop"
+    aggregate_overflow_averages_to_msoa(value_col = count_col) %>%
+    select(-spill_class) %>%
+    left_join(
+      sites_with_msoa %>%
+        st_drop_geometry() %>%
+        filter(!is.na(msoa_code)) %>%
+        group_by(msoa_code) %>%
+        summarise(
+          summed_average_hrs = sum(
+            .data[[paste0("avg_annual_", hrs_col)]],
+            na.rm = TRUE
+          ),
+          .groups = "drop"
+        ),
+      by = "msoa_code"
     )
 
   # Join to boundaries and compute derived metrics
@@ -281,93 +329,73 @@ aggregate_spills_to_msoa <- function(data, spill_sites, years) {
     left_join(msoa_population, by = "msoa_code") %>%
     left_join(msoa_aggregated, by = c("msoa_code", "msoa_name")) %>%
     mutate(
-      spill_count_yr = replace_na(spill_count_yr, 0),
-      spill_hrs_yr = replace_na(spill_hrs_yr, 0),
-      site_count = replace_na(site_count, 0)
+      site_count = replace_na(site_count, 0L),
+      sites_with_data = replace_na(sites_with_data, 0L),
+      spill_class = classify_msoa_spill_status(
+        site_count, sites_with_data, summed_average
+      ),
+      "{avg_count_name}" := replace_na(summed_average, 0),
+      "{avg_hrs_name}" := replace_na(summed_average_hrs, 0)
     ) %>%
-    mutate(
-      avg_annual_spill_count = spill_count_yr / n_years,
-      avg_annual_spill_hrs = spill_hrs_yr / n_years
-    ) %>%
+    select(-summed_average, -summed_average_hrs) %>%
     mutate(
       across(
-        c(avg_annual_spill_count, avg_annual_spill_hrs),
+        all_of(c(avg_count_name, avg_hrs_name)),
         ~ if_else(.x > 0, log(.x), NA_real_),
         .names = "log_{.col}"
       )
     )
 }
 
-# Aggregate dry spills to MSOA level
-aggregate_dry_spills_to_msoa <- function(data, spill_sites, years) {
-  n_years <- length(years)
+# Aggregate regular spills to MSOA level
+aggregate_spills_to_msoa <- function(data, spill_sites, years) {
+  missing_flags <- flag_missing_group_years(data)
 
   # Join spill data with site coordinates
-  dat_clean <- left_join(
+  dat_clean <- left_join_site_group_projection(
     select(data, -any_of("ngr")),
-    spill_sites,
-    by = join_by(water_company, site_id)
-  )
+    select(spill_sites, site_id, easting, northing),
+    context = "Inset regular map Site Group coordinate join"
+  ) %>%
+    attach_missing_group_year_flag(missing_flags)
 
-  # Convert to sf and filter for year range
-  dry_spill_sites_sf <- dat_clean %>%
-    filter(year %in% !!years) %>%
+  aggregate_overflow_averages(
+    dat_clean,
+    years = years,
+    count_col = "spill_count_yr",
+    hrs_col = "spill_hrs_yr",
+    avg_count_name = "avg_annual_spill_count",
+    avg_hrs_name = "avg_annual_spill_hrs"
+  )
+}
+
+# Aggregate dry spills to MSOA level (missing flag taken from the main
+# yearly aggregates, since the dry columns are zero-filled upstream)
+aggregate_dry_spills_to_msoa <- function(data, main_data, spill_sites, years) {
+  missing_flags <- flag_missing_group_years(main_data)
+
+  # Join spill data with site coordinates
+  dat_clean <- left_join_site_group_projection(
+    select(data, -any_of("ngr")),
+    select(spill_sites, site_id, easting, northing),
+    context = "Inset dry map Site Group coordinate join"
+  ) %>%
+    attach_missing_group_year_flag(missing_flags) %>%
     select(
-      water_company, site_id, easting, northing,
+      water_company, site_id, year, easting, northing,
+      is_missing_group_year,
       dry_spill_count_yr = dry_spill_count_yr_r1_d01_weak,
       dry_spill_hrs_yr = dry_spill_hrs_yr_r1_d01_weak
-    ) %>%
-    filter(!is.na(dry_spill_count_yr), !is.na(dry_spill_hrs_yr)) %>%
-    mutate(
-      across(
-        c(dry_spill_count_yr, dry_spill_hrs_yr),
-        ~ DescTools::Winsorize(
-          .x,
-          val = stats::quantile(.x, probs = c(0.00, 0.99), na.rm = TRUE)
-        )
-      )
-    ) %>%
-    st_as_sf(coords = c("easting", "northing"), crs = 27700)
+    )
 
-  # Spatial join with MSOA boundaries
-  sites_with_msoa <- st_join(
-    dry_spill_sites_sf,
-    msoa_boundaries,
-    join = st_within
+  aggregate_overflow_averages(
+    dat_clean,
+    years = years,
+    count_col = "dry_spill_count_yr",
+    hrs_col = "dry_spill_hrs_yr",
+    avg_count_name = "avg_annual_dry_spill_count",
+    avg_hrs_name = "avg_annual_dry_spill_hrs"
   )
-
-  # Aggregate to MSOA
-  msoa_aggregated <- sites_with_msoa %>%
-    st_drop_geometry() %>%
-    filter(!is.na(msoa_code)) %>%
-    group_by(msoa_code, msoa_name) %>%
-    summarise(
-      dry_spill_count_yr = sum(dry_spill_count_yr, na.rm = TRUE),
-      dry_spill_hrs_yr = sum(dry_spill_hrs_yr, na.rm = TRUE),
-      site_count = n(),
-      .groups = "drop"
-    )
-
-  # Join to boundaries and compute derived metrics
-  msoa_boundaries %>%
-    left_join(msoa_population, by = "msoa_code") %>%
-    left_join(msoa_aggregated, by = c("msoa_code", "msoa_name")) %>%
-    mutate(
-      dry_spill_count_yr = replace_na(dry_spill_count_yr, 0),
-      dry_spill_hrs_yr = replace_na(dry_spill_hrs_yr, 0),
-      site_count = replace_na(site_count, 0)
-    ) %>%
-    mutate(
-      avg_annual_dry_spill_count = dry_spill_count_yr / n_years,
-      avg_annual_dry_spill_hrs = dry_spill_hrs_yr / n_years
-    ) %>%
-    mutate(
-      across(
-        c(avg_annual_dry_spill_count, avg_annual_dry_spill_hrs),
-        ~ if_else(.x > 0, log(.x), NA_real_),
-        .names = "log_{.col}"
-      )
-    )
 }
 
 create_london_inset_config <- function(
@@ -457,10 +485,13 @@ plot_static_map_with_inset <- function(
   style <- map_variant_style(variant)
 
   # Zeros are already represented as NA in the positive-only log columns.
+  # No-data MSOAs are drawn as a separate layer with its own legend key.
   data_for_map <- data %>%
     mutate(
       plot_value = .data[[value_col]]
     )
+  data_no_data <- data_for_map %>%
+    filter(spill_class == "no_data")
 
   ggplot() +
     ggmapinset::geom_sf_inset(
@@ -468,6 +499,27 @@ plot_static_map_with_inset <- function(
       aes(fill = plot_value),
       color = NA,
       linewidth = 0.0001
+    ) +
+    ggmapinset::geom_sf_inset(
+      data = data_no_data,
+      aes(alpha = "No data"),
+      fill = NO_DATA_COLOR,
+      color = NA,
+      linewidth = 0.0001
+    ) +
+    scale_alpha_manual(
+      name = NULL,
+      values = c("No data" = 1),
+      guide = guide_legend(
+        order = 2,
+        override.aes = list(fill = NO_DATA_COLOR, colour = NA),
+        theme = theme(
+          legend.text = element_text(size = style$no_data_text_size),
+          legend.key.width = unit(style$no_data_key_size, "cm"),
+          legend.key.height = unit(style$no_data_key_size, "cm"),
+          legend.key.spacing.x = unit(0.15, "cm")
+        )
+      )
     ) +
     ggmapinset::geom_inset_frame(
       inset = inset_config,
@@ -485,6 +537,7 @@ plot_static_map_with_inset <- function(
       na.value = NO_SPILL_COLOR,
       name = legend_title,
       guide = guide_colorbar(
+        order = 1,
         title.position = "top",
         title.hjust = 0.5,
         barwidth = unit(style$legend_bar_width, "cm"),
@@ -515,10 +568,21 @@ cat("  Regular spills aggregated\n")
 # Aggregate dry spills
 msoa_dry_spills <- aggregate_dry_spills_to_msoa(
   dat_dry_yr,
+  dat_yr,
   spill_sites,
   TARGET_YEARS
 )
 cat("  Dry spills aggregated\n")
+
+print_msoa_class_counts <- function(map_data, label) {
+  counts <- map_data %>%
+    st_drop_geometry() %>%
+    count(spill_class, .drop = FALSE)
+  cat("  MSOA classes (", label, "): ", sep = "")
+  cat(paste0(counts$spill_class, " = ", counts$n, collapse = "; "), "\n")
+}
+print_msoa_class_counts(msoa_spills, "all spills")
+print_msoa_class_counts(msoa_dry_spills, "dry spills")
 
 # Build shared inset configuration
 london_inset_config <- create_london_inset_config(
@@ -533,6 +597,27 @@ cat("  London inset configuration prepared\n")
 # ==============================================================================
 cat("Generating maps with London inset...\n")
 
+# cairo_pdf can fail to open silently, so probe it before writing any map.
+cairo_pdf_available <- function() {
+  tmp <- tempfile(fileext = ".pdf")
+  on.exit(unlink(tmp), add = TRUE)
+  n_before <- length(grDevices::dev.list())
+  ok <- tryCatch(
+    {
+      suppressWarnings(grDevices::cairo_pdf(tmp))
+      opened <- length(grDevices::dev.list()) > n_before
+      if (opened) grDevices::dev.off()
+      opened && file.exists(tmp)
+    },
+    error = function(e) FALSE
+  )
+  isTRUE(ok)
+}
+
+if (!cairo_pdf_available()) {
+  stop("cairo_pdf is unavailable (on macOS, install XQuartz).")
+}
+
 save_map_pdf <- function(plot, file_name, width, height, dpi = PLOT_DPI) {
   ggsave(
     filename = file.path(output_dir, file_name),
@@ -541,7 +626,7 @@ save_map_pdf <- function(plot, file_name, width, height, dpi = PLOT_DPI) {
     height = height,
     units = "cm",
     dpi = dpi,
-    device = cairo_pdf
+    device = grDevices::cairo_pdf
   )
   cat("  Saved:", file_name, "\n")
 }
@@ -550,7 +635,7 @@ save_map_pdf <- function(plot, file_name, width, height, dpi = PLOT_DPI) {
 map_spills <- plot_static_map_with_inset(
   msoa_spills,
   "log_avg_annual_spill_count",
-  "Average annual spill count (log)",
+  "Average annual spill count (log-scale)",
   london_inset_config,
   variant = "paper"
 )
@@ -570,7 +655,7 @@ save_map_pdf(
 map_spills_slides <- plot_static_map_with_inset(
   msoa_spills,
   "log_avg_annual_spill_count",
-  "Average annual spill count (log)",
+  "Average annual spill count (log-scale)",
   london_inset_config,
   variant = "slides"
 )
@@ -592,7 +677,7 @@ save_map_pdf(
 map_dry_spills <- plot_static_map_with_inset(
   msoa_dry_spills,
   "log_avg_annual_dry_spill_count",
-  "Average annual dry spill count (log)",
+  "Average annual dry spill count (log-scale)",
   london_inset_config,
   variant = "paper"
 )
@@ -612,7 +697,7 @@ save_map_pdf(
 map_dry_spills_slides <- plot_static_map_with_inset(
   msoa_dry_spills,
   "log_avg_annual_dry_spill_count",
-  "Average annual dry spill count (log)",
+  "Average annual dry spill count (log-scale)",
   london_inset_config,
   variant = "slides"
 )

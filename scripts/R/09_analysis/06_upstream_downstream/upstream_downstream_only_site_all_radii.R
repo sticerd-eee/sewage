@@ -89,7 +89,6 @@ sales <- import(
   trust = TRUE
 ) |>
   select(
-    -transaction_id,
     -date_of_transfer,
     -quality,
     -paon,

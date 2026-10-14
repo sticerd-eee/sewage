@@ -7,6 +7,7 @@
 #
 # Author: Jacopo Olivieri
 # Date: 2026-04-07
+# Date Modified: 2026-08-20
 #
 # ==============================================================================
 
@@ -18,8 +19,10 @@ if (!exists("fit_tblr_latex", mode = "function")) {
 #'
 #' @param comparison Named list with `near_min`, `near_max`, `far_min`,
 #'   `far_max`, and optional `comparison_id` and `comparison_label`.
+#' @param allow_adjacent Whether the far band may begin exactly where the near
+#'   band ends.
 #' @return Validated comparison list with added display labels.
-validate_comparison_config <- function(comparison) {
+validate_comparison_config <- function(comparison, allow_adjacent = FALSE) {
   required_fields <- c("near_min", "near_max", "far_min", "far_max")
   missing_fields <- setdiff(required_fields, names(comparison))
 
@@ -43,8 +46,11 @@ validate_comparison_config <- function(comparison) {
   if (out$near_min > out$near_max) {
     stop("`near_min` must be less than or equal to `near_max`.", call. = FALSE)
   }
-  if (out$far_min <= out$near_max) {
-    stop("`far_min` must be strictly greater than `near_max`.", call. = FALSE)
+  bands_overlap <- out$far_min < out$near_max ||
+    (!allow_adjacent && out$far_min == out$near_max)
+  if (bands_overlap) {
+    relation <- if (allow_adjacent) "greater than or equal to" else "strictly greater than"
+    stop("`far_min` must be ", relation, " `near_max`.", call. = FALSE)
   }
   if (out$far_min > out$far_max) {
     stop("`far_min` must be less than or equal to `far_max`.", call. = FALSE)
@@ -242,7 +248,7 @@ load_google_trends_peak <- function(
   google_trends <- readxl::read_excel(path, sheet = sheet) |>
     dplyr::filter(
       .data$Year >= base_year,
-      .data$Year <= base_year + 2L
+      .data$Year <= base_year + 3L
     )
 
   peak_row <- google_trends |>

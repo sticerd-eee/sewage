@@ -21,14 +21,16 @@ knitr:
 # Load required packages
 required_packages <- c("rmarkdown", "rio", "tidyverse", "purrr", "here",
                        "janitor", "data.table", "lubridate")
-install_if_missing <- function(packages) {
-  new_packages <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
-  if (length(new_packages) > 0) {
-    install.packages(new_packages)
+load_required_packages <- function(packages) {
+  missing_packages <- packages[!vapply(
+    packages, requireNamespace, quietly = TRUE, FUN.VALUE = logical(1)
+  )]
+  if (length(missing_packages) > 0) {
+    stop("Missing required packages. Run `rv sync` first.", call. = FALSE)
   }
-  invisible(sapply(packages, library, character.only = TRUE))
+  invisible(lapply(packages, library, character.only = TRUE))
 }
-install_if_missing(required_packages)
+load_required_packages(required_packages)
 
 
 # Initialize logging
@@ -37,7 +39,7 @@ if (!dir.exists(dirname(log_path))) {
   dir.create(dirname(log_path), recursive = TRUE)
 }
 logger::log_appender(logger::appender_file(log_path))
-logger::log_layout(logger::layout_glue_colors)
+logger::log_layout(logger::layout_glue)
 ```
 
 ## Aggregation
@@ -68,10 +70,10 @@ initialise_environment <- function() {
     "data.table"
   )
 
-  # Install and load packages
+  # Load packages after the project-level dependency check
   invisible(sapply(required_packages, function(pkg) {
     if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
+      stop("Missing required package. Run `rv sync` first.", call. = FALSE)
     }
     library(pkg, character.only = TRUE)
   }))
@@ -81,12 +83,12 @@ initialise_environment <- function() {
 #' @return NULL
 setup_logging <- function() {
   log_path <- here::here(
-    "output", "log", "12_aggregate_spill_stats.log"
+    "output", "log", "aggregate_spill_stats.log"
   )
   dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
 
   logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
+  logger::log_layout(logger::layout_glue)
   logger::log_threshold(logger::DEBUG)
   logger::log_info("Script started at {Sys.time()}")
 }
@@ -569,4 +571,3 @@ main <- function() {
   )
 }
 ```
-

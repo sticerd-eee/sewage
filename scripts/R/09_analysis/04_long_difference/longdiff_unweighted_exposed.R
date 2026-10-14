@@ -3,15 +3,16 @@
 # ==============================================================================
 #
 # Purpose: Estimate the relationship between changes in property values and
-#          changes in sewage spill exposure between 2021 and 2023 using
+#          changes in sewage spill exposure between 2021 and 2024 for sales
+#          and between 2021 and 2023 for rentals using
 #          250m x 250m grid-level aggregated data.
 #
-# Methodology: Long difference approach where each grid cell's 2023 value is
-#              differenced from its 2021 value, removing time-invariant
+# Methodology: Long difference approach where each grid cell's endpoint value
+#              is differenced from its 2021 value, removing time-invariant
 #              unobserved characteristics of locations.
 #
 #              This version restricts the sample to grid cells with at least
-#              one nearby spill site in at least one year (2021 or 2023).
+#              one nearby spill site in at least one endpoint year.
 #
 # Author: Jacopo Olivieri
 # Date: 2026-01-06
@@ -30,7 +31,8 @@
 # 1. Configuration
 # ==============================================================================
 YEAR_START <- 2021L
-YEAR_END <- 2023L
+YEAR_END_SALES <- 2024L
+YEAR_END_RENTALS <- 2023L
 
 
 # ==============================================================================
@@ -103,7 +105,7 @@ dat_sales_start <- dat_sales_grid |>
   )
 
 dat_sales_end <- dat_sales_grid |>
-  dplyr::filter(year == YEAR_END) |>
+  dplyr::filter(year == YEAR_END_SALES) |>
   dplyr::select(
     grid_cell_id,
     mean_log_price_end = mean_log_price,
@@ -151,7 +153,7 @@ dat_rental_start <- dat_rental_grid |>
   )
 
 dat_rental_end <- dat_rental_grid |>
-  dplyr::filter(year == YEAR_END) |>
+  dplyr::filter(year == YEAR_END_RENTALS) |>
   dplyr::select(
     grid_cell_id,
     mean_log_price_end = mean_log_price,
@@ -322,7 +324,7 @@ panels <- list(
 
 # Notes
 custom_notes <- paste0(
-  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents long-difference estimates of the relationship between changes in sewage spill exposure and changes in property values in England between 2021 and 2023. The sample includes all 250m $\\\\times$ 250m grid cells that (i) have at least one property transaction in both 2021 and 2023 and (ii) contain at least one property located within 250m of a storm overflow in either year. The dependent variable is the change in mean log transaction price for sales (columns 1--2) or the change in mean log weekly asking rent for rentals (columns 3--4), computed at the grid-cell level. Spill exposure is constructed by summing annual spill counts (12/24 count) or total spill hours across all storm overflows within 250m of each transacted property, averaging these property-level totals within the grid cell, and then taking the 2023--2021 difference. No additional covariates are included. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table presents long-difference estimates of the relationship between changes in sewage spill exposure and changes in property values in England over 2021--2024 (sales) / 2021--2023 (rentals). The sample includes all 250m $\\\\times$ 250m grid cells that (i) have at least one property transaction in both endpoint years and (ii) contain at least one property located within 250m of a storm overflow in either endpoint year. The dependent variable is the change in mean log transaction price for sales (columns 1--2) or the change in mean log weekly asking rent for rentals (columns 3--4), computed at the grid-cell level. Spill exposure is constructed from canonical Site Group annual aggregates by summing annual spill counts (12/24 count) or total spill hours across all storm overflows within 250m of each transacted property, averaging these property-level totals within the grid cell, and then taking the 2024--2021 difference for sales or 2023--2021 difference for rentals. Incomplete annual evidence, including the standard annual_returns_na_then_absent reporting-gap exclusion, remains missing and affected grid cells are excluded. No additional covariates are included. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
 )
 
 # Export table

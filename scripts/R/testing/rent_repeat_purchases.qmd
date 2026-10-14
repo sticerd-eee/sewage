@@ -129,44 +129,21 @@ repeat_summary_exact <- as_tibble(repeat_summary_exact)
 repeat_summary_exact
 ```
 
-## Export Rental Data (Repeated and Single)
+## Load the Canonical Mapping for the Study Window
 
 ```{r}
-# Prepare repeated rentals (rental_count > 1)
-repeated_rentals_output <- repeat_rentals_exact %>%
-  group_by(simple_key) %>%
-  mutate(
-    repeat_id = cur_group_id(),
-    group_size = n()
-  ) %>%
-  ungroup() %>%
-  arrange(desc(group_size)) %>%
-  select(rental_id, repeat_id)
-
-# Prepare single rentals (rental_count == 1)
-max_repeat_id <- max(repeated_rentals_output$repeat_id)
-single_rentals_output <- rent_dt[!is.na(simple_key) & rental_count == 1] %>%
-  as_tibble() %>%
-  mutate(repeat_id = max_repeat_id + row_number()) %>%
-  select(rental_id, repeat_id)
-
-# Combine both into single output
-all_rentals_output <- bind_rows(repeated_rentals_output, single_rentals_output)
-
-# Create output directory if it doesn't exist
-output_dir <- here::here("data", "processed", "repeated_transactions")
-if (!dir.exists(output_dir)) {
-  dir.create(output_dir, recursive = TRUE)
-}
-
-# Export to parquet
-output_path <- here::here(
-  "data",
-  "processed",
-  "repeated_transactions",
-  "repeated_rentals.parquet"
-)
-arrow::write_parquet(all_rentals_output, output_path)
+# The persisted repeat_count covers the 2014-2023 long-run input. Recompute it
+# after joining to this notebook's 2021-2023 study-window data.
+all_rentals_output <- import(
+  here::here(
+    "data", "processed", "repeated_transactions", "repeated_rentals.parquet"
+  ),
+  trust = TRUE
+) %>%
+  inner_join(rent_og %>% select(rental_id), by = "rental_id") %>%
+  group_by(repeat_id) %>%
+  mutate(repeat_count = n()) %>%
+  ungroup()
 ```
 
 ## Summary Table
@@ -236,12 +213,6 @@ repeat_rental_summary <- rentals_dt[
 ] %>%
   as_tibble()
 
-# Export to parquet
-output_path_sum <- here::here(
-  "data",
-  "processed",
-  "repeated_transactions",
-  "repeated_rentals_summary.parquet"
-)
-arrow::write_parquet(repeat_rental_summary, output_path_sum)
+# Diagnostic only: the retired summary artifact is no longer recreated.
+repeat_rental_summary
 ```

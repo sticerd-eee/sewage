@@ -242,38 +242,38 @@ estimate_models <- function(dat, dat_rental) {
     model_sale_1 = fixest::feols(
       log_price ~ near_bin + post + near_bin:post,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_2 = fixest::feols(
       log_price ~ near_bin + near_bin:post | lsoa + qtr_id,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_3 = fixest::feols(
       log_price ~ near_bin + near_bin:post +
         property_type + old_new + duration | lsoa + qtr_id,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_1 = fixest::feols(
       log_price ~ near_bin + post + near_bin:post,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_2 = fixest::feols(
       log_price ~ near_bin + near_bin:post | lsoa + qtr_id,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_3 = fixest::feols(
       log_price ~ near_bin + near_bin:post +
         property_type + bedrooms + bathrooms | lsoa + qtr_id,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     )
   )
 
-  cat("  Using LSOA-clustered SEs\n")
+  cat("  Using Conley 1 km SEs\n")
 
   models
 }
@@ -326,8 +326,9 @@ export_table <- function(models, comparison) {
     "after August 2022, the peak month for Google Trends searches about sewage ",
     "spills. Property controls include type (flat, semi-detached, terraced, other), ",
     "new build status, and tenure for sales; and type (bungalow, detached, ",
-    "semi-detached, terraced), bedrooms, and bathrooms for rentals. Standard errors ",
-    "clustered at the LSOA level are reported in parentheses. *** p<0.01, ",
+    "semi-detached, terraced), bedrooms, and bathrooms for rentals. ",
+    spatial_se_note(),
+    " *** p<0.01, ",
     "** p<0.05, * p<0.1.}},"
   )
 

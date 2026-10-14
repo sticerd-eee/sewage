@@ -4,7 +4,7 @@
 ############################################################
 
 MERGE_OUTPUT_FILES <- c(
-  site_works_crosswalk = "site_works_crosswalk.parquet",
+  site_group_crosswalk = "site_group_crosswalk.parquet",
   matched_events = "matched_events_annual_data.parquet",
   events_unmatched = "events_unmatched.parquet",
   annual_unmatched = "annual_unmatched.parquet",
@@ -20,11 +20,11 @@ MERGE_TUPLE_COLS <- c(
   "unique_id"
 )
 
-SITE_WORKS_CROSSWALK_PROTOTYPE <- tibble::tibble(
+SITE_GROUP_CROSSWALK_PROTOTYPE <- tibble::tibble(
   site_id = integer(),
   year = integer(),
   water_company = character(),
-  site_id_members = character(),
+  site_id_canonical_members = character(),
   n_outlets = integer(),
   n_outlets_reporting = integer(),
   annual_status = character(),
@@ -33,9 +33,6 @@ SITE_WORKS_CROSSWALK_PROTOTYPE <- tibble::tibble(
   ngr = character(),
   easting = double(),
   northing = double(),
-  edm_operation_percent = double(),
-  no_full_years_edm_data = double(),
-  edm_commission_date = as.Date(character()),
   matched_event_count = integer(),
   match_methods = character()
 )
@@ -86,7 +83,7 @@ EVENTS_UNMATCHED_PROTOTYPE <- tibble::tibble(
   reason = character()
 )
 
-ANNUAL_UNMATCHED_PROTOTYPE <- SITE_WORKS_CROSSWALK_PROTOTYPE
+ANNUAL_UNMATCHED_PROTOTYPE <- SITE_GROUP_CROSSWALK_PROTOTYPE
 
 NEAR_MISS_REPORT_PROTOTYPE <- tibble::tibble(
   report_type = character(),
@@ -122,7 +119,7 @@ conform_merge_output <- function(tbl, prototype) {
 
 empty_merge_outputs <- function() {
   list(
-    site_works_crosswalk = SITE_WORKS_CROSSWALK_PROTOTYPE,
+    site_group_crosswalk = SITE_GROUP_CROSSWALK_PROTOTYPE,
     matched_events = MATCHED_EVENTS_PROTOTYPE,
     events_unmatched = EVENTS_UNMATCHED_PROTOTYPE,
     annual_unmatched = ANNUAL_UNMATCHED_PROTOTYPE,
@@ -141,18 +138,18 @@ annual_status_from_metrics <- function(has_return, spill_hrs, spill_count) {
 }
 
 most_recent_representative_location <- function(resolver, site_id, year) {
-  # KTD-10 carry-forward. Preference order:
+  # Representative-location preference order:
   # 1. Rows whose NGR actually parsed to easting/northing (the resolver derives
-  #    both in prepare_works_register_annual_rows via parse_bng_coordinates on
+  #    both in prepare_site_group_register_annual_rows via parse_bng_coordinates on
   #    the cleaned NGR, so NA coordinates here mean the NGR text is
   #    unparseable); an unparseable NGR must not shadow a parseable one.
   # 2. Rows at or before the target year over rows after it.
   # 3. Within the past group, the most recent year; within the future group
-  #    (years before the works' first return), the NEAREST future year.
+  #    (years before the Site Group's first return), the NEAREST future year.
   candidates <- resolver %>%
     dplyr::filter(
       .data$site_id == !!site_id,
-      .data$member_site_id == !!site_id,
+      .data$site_id_canonical == !!site_id,
       !is.na(.data$ngr)
     ) %>%
     dplyr::mutate(
@@ -177,26 +174,19 @@ most_recent_representative_location <- function(resolver, site_id, year) {
   candidates[1, c("ngr", "easting", "northing")]
 }
 
-build_site_works_crosswalk <- function(membership, resolver, decisions, years) {
+build_site_group_crosswalk <- function(membership, resolver, decisions, years) {
   if (nrow(membership) == 0) {
-    return(SITE_WORKS_CROSSWALK_PROTOTYPE)
+    return(SITE_GROUP_CROSSWALK_PROTOTYPE)
   }
 
   if (!"ngr" %in% names(resolver) && "ngr_clean" %in% names(resolver)) {
     resolver$ngr <- resolver$ngr_clean
   }
-  for (col in c("edm_operation_percent", "no_full_years_edm_data")) {
-    if (!col %in% names(resolver)) resolver[[col]] <- NA_real_
-  }
-  if (!"edm_commission_date" %in% names(resolver)) {
-    resolver$edm_commission_date <- as.Date(NA)
-  }
-
-  works <- membership %>%
+  site_groups <- membership %>%
     dplyr::group_by(.data$site_id, .data$water_company) %>%
     dplyr::summarise(
-      site_id_members = paste(sort(.data$member_site_id), collapse = ";"),
-      n_outlets = dplyr::n_distinct(.data$member_site_id),
+      site_id_canonical_members = paste(sort(.data$site_id_canonical), collapse = ";"),
+      n_outlets = dplyr::n_distinct(.data$site_id_canonical),
       .groups = "drop"
     )
 
@@ -204,7 +194,7 @@ build_site_works_crosswalk <- function(membership, resolver, decisions, years) {
     dplyr::group_by(.data$site_id, .data$year) %>%
     dplyr::summarise(
       has_return = TRUE,
-      n_outlets_reporting = dplyr::n_distinct(.data$member_site_id),
+      n_outlets_reporting = dplyr::n_distinct(.data$site_id_canonical),
       spill_hrs_ea = if (all(is.na(.data$spill_hrs_ea))) {
         NA_real_
       } else {
@@ -214,23 +204,6 @@ build_site_works_crosswalk <- function(membership, resolver, decisions, years) {
         NA_real_
       } else {
         sum(.data$spill_count_ea, na.rm = TRUE)
-      },
-      edm_operation_percent = if (all(is.na(.data$edm_operation_percent))) {
-        NA_real_
-      } else {
-        mean(.data$edm_operation_percent, na.rm = TRUE)
-      },
-      no_full_years_edm_data = if (all(is.na(.data$no_full_years_edm_data))) {
-        NA_real_
-      } else {
-        max(.data$no_full_years_edm_data, na.rm = TRUE)
-      },
-      # min(..., na.rm = TRUE) on an all-NA group yields Inf (as a Date);
-      # keep all-NA groups NA instead, typed as Date.
-      edm_commission_date = if (all(is.na(.data$edm_commission_date))) {
-        as.Date(NA)
-      } else {
-        min(.data$edm_commission_date, na.rm = TRUE)
       },
       .groups = "drop"
     )
@@ -244,8 +217,8 @@ build_site_works_crosswalk <- function(membership, resolver, decisions, years) {
       .groups = "drop"
     )
 
-  grid <- tidyr::expand_grid(site_id = works$site_id, year = as.integer(years)) %>%
-    dplyr::left_join(works, by = "site_id") %>%
+  grid <- tidyr::expand_grid(site_id = site_groups$site_id, year = as.integer(years)) %>%
+    dplyr::left_join(site_groups, by = "site_id") %>%
     dplyr::left_join(annual_summary, by = c("site_id", "year")) %>%
     dplyr::mutate(
       has_return = dplyr::coalesce(.data$has_return, FALSE),
@@ -274,7 +247,7 @@ build_site_works_crosswalk <- function(membership, resolver, decisions, years) {
       match_methods = dplyr::coalesce(.data$match_methods, NA_character_)
     ) %>%
     dplyr::arrange(.data$site_id, .data$year) %>%
-    conform_merge_output(SITE_WORKS_CROSSWALK_PROTOTYPE)
+    conform_merge_output(SITE_GROUP_CROSSWALK_PROTOTYPE)
 }
 
 join_events_to_decisions <- function(events, decisions) {
@@ -317,7 +290,7 @@ assemble_annual_unmatched <- function(crosswalk, matched_events) {
     conform_merge_output(ANNUAL_UNMATCHED_PROTOTYPE)
 }
 
-# Mirrors normalise_match_value()/normalise_works_text(); duplicated locally so
+# Mirrors normalise_match_value()/normalise_site_group_text(); duplicated locally so
 # merge_outputs_utils.R stays sourceable standalone (its contract-test module
 # does not source the matching or register utils).
 normalise_near_miss_name <- function(x) {
@@ -350,15 +323,15 @@ near_miss_names_long <- function(data, value_prefix) {
     )
 }
 
-# String-near name pass among unmatched tuples (plan D7 output 5, third
-# component): each distinct unmatched event-side normalised name is compared
+# String-near name pass among unmatched tuples: each distinct unmatched
+# event-side normalised name is compared
 # against the distinct normalised annual-side names of the SAME water company
 # (both name fields on both sides) with base utils::adist, and pairs within
 # `max_edit_distance` are reported. Names shorter than `min_name_chars` are
 # skipped to avoid junk pairs. Exact-equal pairs (distance 0) are reported only
 # when the annual name lives in the OTHER field than the event name: a
 # same-field exact equal was already visible to that field's ladder rung, so
-# the tuple is unmatched for candidate-domain reasons (name_spans_works,
+# the tuple is unmatched for candidate-domain reasons (name_spans_site_groups,
 # agreement_failed, key_conflict) already covered by the agreement evidence,
 # whereas a cross-field exact equal is new information the ladder never
 # compares.
@@ -509,7 +482,7 @@ assemble_merge_outputs <- function(events, membership, resolver, decisions,
                                    years = sort(unique(events$year)),
                                    name_near_miss_max_edit_distance = 2,
                                    name_near_miss_min_chars = 6) {
-  crosswalk <- build_site_works_crosswalk(membership, resolver, decisions, years)
+  crosswalk <- build_site_group_crosswalk(membership, resolver, decisions, years)
   matched_events <- assemble_matched_events(events, decisions, crosswalk)
   events_unmatched <- assemble_events_unmatched(events, decisions)
 
@@ -519,11 +492,17 @@ assemble_merge_outputs <- function(events, membership, resolver, decisions,
 
   expected_crosswalk_rows <- dplyr::n_distinct(membership$site_id) * length(years)
   if (nrow(crosswalk) != expected_crosswalk_rows) {
-    stop("Row-accounting failure: crosswalk is not full works x years.", call. = FALSE)
+    stop("Row-accounting failure: crosswalk is not full Site Group x years.", call. = FALSE)
+  }
+  if (anyDuplicated(crosswalk[c("site_id", "year", "water_company")])) {
+    stop(
+      "Site Group crosswalk must be unique on: site_id, year, water_company",
+      call. = FALSE
+    )
   }
 
   list(
-    site_works_crosswalk = crosswalk,
+    site_group_crosswalk = crosswalk,
     matched_events = matched_events,
     events_unmatched = events_unmatched,
     annual_unmatched = assemble_annual_unmatched(crosswalk, matched_events),
@@ -567,7 +546,7 @@ validate_publishable_merge_outputs <- function(outputs) {
     }
   }
 
-  if (nrow(outputs$site_works_crosswalk) == 0 || nrow(outputs$matched_events) == 0) {
+  if (nrow(outputs$site_group_crosswalk) == 0 || nrow(outputs$matched_events) == 0) {
     stop("Cannot publish empty crosswalk or matched-events output.", call. = FALSE)
   }
 

@@ -7,7 +7,7 @@
 
 #' This script creates a 250m x 250m grid-level dataset for long-difference
 #' analysis of house prices and sewage spill exposure. Each row represents
-#' a grid cell x year observation (2021, 2022, 2023).
+#' a grid cell x year observation (2021, 2022, 2023, 2024).
 
 
 # Setup Functions
@@ -34,6 +34,12 @@ initialise_environment <- function() {
     }
     library(pkg, character.only = TRUE)
   }))
+
+  # data.table joins on arrow ALTREP character keys can silently drop rows; see
+  # docs/solutions/logic-errors/arrow-altrep-data-table-join-nondeterminism.md
+  options(arrow.use_altrep = FALSE)
+
+  source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 }
 
 #' Set up logging configuration
@@ -57,6 +63,10 @@ CONFIG <- list(
   house_price_path = here::here("data", "processed", "house_price.parquet"),
   spill_lookup_path = here::here("data", "processed", "spill_house_lookup.parquet"),
   agg_spill_yr_path = here::here("data", "processed", "agg_spill_stats", "agg_spill_yr.parquet"),
+  site_group_crosswalk_path = here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"
+  ),
 
 
   # Output paths
@@ -68,7 +78,7 @@ CONFIG <- list(
   # Parameters
   grid_size = 250L,
   spill_radius = 250L,
-  years = c(2021L, 2022L, 2023L),
+  years = 2021L:2024L,
 
   # England bounding box (CRS 27700)
   bbox = list(
@@ -82,6 +92,46 @@ CONFIG <- list(
 
 # Data Loading Functions
 ############################################################
+
+#' Load the house-site lookup within a radius without materialising all rows
+#' @param path Path to the spill lookup parquet dataset
+#' @param radius_m Maximum house-site distance in metres
+#' @param open_dataset_fn Injectable Arrow dataset opener for contract tests
+#' @param collect_fn Injectable collector for contract tests
+#' @return data.table with house_id, site_id, and distance_m
+load_spill_lookup_within_radius <- function(
+  path,
+  radius_m,
+  open_dataset_fn = arrow::open_dataset,
+  collect_fn = dplyr::collect
+) {
+  lookup_query <- open_dataset_fn(path) |>
+    dplyr::select(house_id, site_id, distance_m) |>
+    dplyr::filter(distance_m <= radius_m)
+
+  # as.data.frame() materializes arrow's chunked columns before data.table
+  # sees them; the arrow.use_altrep option does NOT protect this path. See
+  # docs/solutions/logic-errors/arrow-altrep-data-table-join-nondeterminism.md
+  collect_fn(lookup_query) |>
+    as.data.frame() |>
+    as.data.table()
+}
+
+#' Identify Site Groups covered by the standard reporting-gap exclusion
+#' @param path Path to the canonical Site Group crosswalk
+#' @return Integer Site Group IDs with an NA-then-absent sequence
+load_reporting_gap_site_groups <- function(path) {
+  crosswalk <- rio::import(path, trust = TRUE)
+  derive_site_group_prefix_missing_flags(
+    crosswalk,
+    base_year = min(crosswalk$year),
+    cutoff_years = sort(unique(crosswalk$year)),
+    include_annual_return_sequence = TRUE
+  ) |>
+    dplyr::filter(annual_returns_na_then_absent) |>
+    dplyr::distinct(site_id) |>
+    dplyr::pull(site_id)
+}
 
 #' Load all required datasets
 #' @return List containing house_dt, spill_lookup_dt, agg_spill_dt
@@ -114,9 +164,10 @@ load_data <- function() {
 
   spill_lookup_dt <- tryCatch(
     {
-      dt <- arrow::read_parquet(CONFIG$spill_lookup_path)
-      dt <- as.data.table(dt)
-      dt[distance_m <= CONFIG$spill_radius, .(house_id, site_id, distance_m)]
+      load_spill_lookup_within_radius(
+        CONFIG$spill_lookup_path,
+        CONFIG$spill_radius
+      )
     },
     error = function(e) {
       log_error("Failed to load spill lookup: {e$message}")
@@ -125,7 +176,18 @@ load_data <- function() {
   )
   log_info("Loaded {nrow(spill_lookup_dt)} house-site pairs within {CONFIG$spill_radius}m")
 
-  # Load annual spill statistics
+  # Load the canonical Site Group reporting-gap flags before the annual data.
+  if (!file.exists(CONFIG$site_group_crosswalk_path)) {
+    log_error("Site Group crosswalk not found: {CONFIG$site_group_crosswalk_path}")
+    stop(glue("Missing input file: {CONFIG$site_group_crosswalk_path}"))
+  }
+
+  gap_site_ids <- load_reporting_gap_site_groups(CONFIG$site_group_crosswalk_path)
+  log_info("Excluding {length(gap_site_ids)} Site Groups with annual_returns_na_then_absent")
+
+  # Load annual spill statistics. The annual aggregate is already at canonical
+  # Site Group-year grain; this mask applies the Stage-2 evidence convention
+  # before any property or grid-level reduction.
   if (!file.exists(CONFIG$agg_spill_yr_path)) {
     log_error("Annual spill file not found: {CONFIG$agg_spill_yr_path}")
     stop(glue("Missing input file: {CONFIG$agg_spill_yr_path}"))
@@ -135,7 +197,20 @@ load_data <- function() {
     {
       dt <- rio::import(CONFIG$agg_spill_yr_path, trust = TRUE)
       dt <- as.data.table(dt)
-      dt[, .(site_id, year, spill_count_yr, spill_hrs_yr)]
+      dt <- dt[, .(
+        site_id, year, annual_status, spill_count_yr, spill_hrs_yr
+      )]
+      evidence_complete <- !is.na(dt$annual_status) &
+        dt$annual_status %in% c("reported_zero", "reported_positive") &
+        is.finite(dt$spill_count_yr) & is.finite(dt$spill_hrs_yr)
+      reporting_gap <- !is.na(dt$site_id) & dt$site_id %in% gap_site_ids
+      invalid_evidence <- !evidence_complete | reporting_gap
+      dt[invalid_evidence, `:=`(
+        spill_count_yr = NA_real_,
+        spill_hrs_yr = NA_real_
+      )]
+      log_info("Masked {sum(invalid_evidence)} annual Site Group rows as unknown evidence")
+      dt
     },
     error = function(e) {
       log_error("Failed to load annual spill data: {e$message}")
@@ -147,7 +222,8 @@ load_data <- function() {
   list(
     house_dt = house_dt,
     spill_lookup_dt = spill_lookup_dt,
-    agg_spill_dt = agg_spill_dt
+    agg_spill_dt = agg_spill_dt,
+    gap_site_ids = gap_site_ids
   )
 }
 
@@ -242,7 +318,8 @@ compute_house_spill_exposure <- function(house_dt, spill_lookup_dt, agg_spill_dt
       all.x = TRUE
     )
 
-    # Aggregate: sum spills across all sites within radius for each house-year
+    # Aggregate across canonical Site Groups. Plain sum() deliberately
+    # propagates unknown evidence instead of treating it as zero.
     house_spill_near <- house_near[, .(
       spill_count = sum(spill_count_yr),
       spill_hrs = sum(spill_hrs_yr),

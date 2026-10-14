@@ -28,6 +28,7 @@ initialise_environment <- function() {
     }
     library(pkg, character.only = TRUE)
   }))
+  source(here::here("scripts", "R", "utils", "site_group_utils.R"))
 }
 
 #' Configure Logging for Data Processing Pipeline
@@ -50,8 +51,10 @@ setup_logging <- function() {
 
 CONFIG <- list(
   # Input file paths
-  spill_sites_path = here::here(
-    "data", "processed", "unique_spill_sites.parquet"),
+  site_group_crosswalk_path = here::here(
+    "data", "processed", "matched_events_annual_data",
+    "site_group_crosswalk.parquet"),
+  site_group_years = 2021:2024,
   rainfall_dir = here::here("data", "raw", "haduk_rainfall_data"),
   
   # Output file paths
@@ -67,7 +70,11 @@ CONFIG <- list(
   end_date = as.Date("2023-12-31"),
   
   # Parallel processing settings optimized for M1 MacBook Pro (8 cores, 16GB RAM)
-  n_cores = min(6, parallel::detectCores() - 2)  # Use 6 cores, leave 2 free for system
+  n_cores = max(
+    1L,
+    min(6L, parallel::detectCores() - 2L),
+    na.rm = TRUE
+  )  # Use up to 6 cores; fall back to 1 when detection is unavailable
 )
 
 # Functions
@@ -77,12 +84,14 @@ CONFIG <- list(
 #'
 #' @param file_path Character. Path to parquet file containing spill site data.
 #' @return data.table with columns: site_id, ngr, easting, northing.
-load_spill_sites <- function(file_path = CONFIG$spill_sites_path) {
+load_spill_sites <- function(file_path = CONFIG$site_group_crosswalk_path,
+                             years = CONFIG$site_group_years) {
   
   logger::log_info("Loading spill data from: {basename(file_path)}")
-  spill_sites <- arrow::read_parquet(file_path) |>
-    select(site_id, ngr, easting, northing) |>
+  spill_sites <- read_site_group_projection(file_path, years) |>
+    dplyr::select("site_id", "ngr", "easting", "northing") |>
     as.data.table()
+  assert_unique_site_groups(spill_sites, "Rainfall-grid Site Group projection")
 
   missing_spatial_key <- spill_sites[
     is.na(ngr) | is.na(easting) | is.na(northing)
@@ -290,6 +299,7 @@ process_files_parallel <- function(rainfall_files, required_indices, n_cores) {
 #' @return data.table with columns: site_id, ngr, easting, northing, x_idx, y_idx, is_center.
 create_spill_site_lookup <- function(spill_sites_dt, grid_bounds, radius = 1) {
   log_info("Creating lookup table for {nrow(spill_sites_dt)} spill sites")
+  assert_unique_site_groups(spill_sites_dt, "Rainfall-grid Site Group projection")
   
   # Create break vectors for spatial indexing (grid cell boundaries)
   x_breaks <- c(grid_bounds$xbound[1, ], grid_bounds$xbound[2, ncol(grid_bounds$xbound)])
@@ -322,6 +332,9 @@ create_spill_site_lookup <- function(spill_sites_dt, grid_bounds, radius = 1) {
   
   # Combine all site neighborhoods into single lookup table
   lookup_table <- data.table::rbindlist(lookup_list)
+  if (anyDuplicated(lookup_table[, .(site_id, x_idx, y_idx)])) {
+    stop("Rainfall-grid lookup must be unique on site_id, x_idx, y_idx.", call. = FALSE)
+  }
   
   # Order by NGR then by grid position for consistent results
   data.table::setorder(lookup_table, ngr, x_idx, y_idx)

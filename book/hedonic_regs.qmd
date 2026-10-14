@@ -96,7 +96,6 @@ spill_qtr <- import(path_spill, trust = TRUE) %>%
 house_controls <- open_dataset(path_house_controls) %>%
   collect() %>%
   select(
-    -transaction_id,
     -date_of_transfer,
     -postcode,
     -saon,
@@ -825,4 +824,3 @@ modelsummary(
 :::
 
 :::
-

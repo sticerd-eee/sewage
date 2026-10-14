@@ -17,18 +17,58 @@ required_packages <- c(
   "data.table", "lubridate", "dplyr", "tidyr"
 )
 
-# Load required packages if not already loaded
-for(pkg in required_packages) {
-  if(!requireNamespace(pkg, quietly = TRUE)) {
-    install.packages(pkg)
-  }
-  if(!paste0("package:", pkg) %in% search()) {
+# Fail before attaching anything when the project environment is incomplete
+missing_packages <- required_packages[!vapply(
+  required_packages,
+  requireNamespace,
+  quietly = TRUE,
+  FUN.VALUE = logical(1)
+)]
+if (length(missing_packages) > 0L) {
+  stop(
+    "Missing required packages: ",
+    paste(missing_packages, collapse = ", "),
+    ". Install project dependencies first with `rv sync`.",
+    call. = FALSE
+  )
+}
+
+# Preserve the utility's established package-attachment behavior
+for (pkg in required_packages) {
+  if (!paste0("package:", pkg) %in% search()) {
     library(pkg, character.only = TRUE)
   }
 }
 
 # Functions
 ############################################################
+
+#' Clamp spill records to their labelled calendar year
+#'
+#' Uses explicit UTC year boundaries so results do not depend on the machine
+#' timezone.
+#'
+#' @param df Data frame containing year, start_time, and end_time
+#' @return data.table with start_time and end_time clamped to the labelled year
+#' @export
+clamp_spill_records_to_year <- function(df) {
+  dt <- as.data.table(df)
+
+  dt[, c("year_start", "year_end") := {
+    list(
+      ISOdatetime(year, 1, 1, 0, 0, 0, tz = "UTC"),
+      ISOdatetime(year + 1, 1, 1, 0, 0, 0, tz = "UTC")
+    )
+  }, by = year]
+
+  dt[, `:=`(
+    start_time = pmax(start_time, year_start),
+    end_time = pmin(end_time, year_end)
+  )]
+  dt[, c("year_start", "year_end") := NULL]
+
+  dt[]
+}
 
 #' Split records that cross month boundaries into separate monthly records
 #'
@@ -48,8 +88,8 @@ split_monthly_records <- function(df) {
     by = "month"
   )
   cal <- data.table(
-    month_start = as.POSIXct(all_months,               tz = "UTC"),
-    month_end   = as.POSIXct(all_months + months(1), tz = "UTC") - 1
+    month_start = as.POSIXct(all_months, tz = "UTC"),
+    month_end = as.POSIXct(all_months + months(1), tz = "UTC")
   )
   
   # 2. Key both tables for an interval‐overlap join
@@ -65,8 +105,10 @@ split_monthly_records <- function(df) {
       .SD[, setdiff(names(dt), c("start_time","end_time")), with = FALSE]
     )
   ]
-  
-  # 4. Return as a data.frame (or data.table)
+
+  # Closed interval joins also match records that only touch a boundary.
+  out <- out[end_time > start_time]
+
   return(out[])
 }
 
@@ -124,29 +166,19 @@ split_daily_records <- function(df) {
 #' year boundaries and creating separate datasets for yearly and monthly analysis.
 #'
 #' @param data Input dataframe containing spill data with start_time, end_time, year
+#' @param base_year Integer base year used to construct sequential month and quarter IDs
 #' @return List of data tables prepared for yearly and monthly aggregation
 #'   \itemize{
 #'     \item yearly: Data table with year boundary handling
 #'     \item monthly: Data table with month splits and added month/quarter columns
 #'   }
 #' @export
-prepare_spill_data <- function(data) {
+prepare_spill_data <- function(data, base_year) {
   # Initial data prep and year boundary handling
   dt <- as.data.table(data) 
   ## Remove key NAs
   dt <- dt[!is.na(site_id) & !is.na(start_time)]
-  ## Truncate start/end times that cross year boundaries
-  dt[, c("lower", "upper") := {
-    lr <- as.POSIXct(ISOdatetime(year, 1, 1, 0, 0, 0), tz = "UTC")
-    ur <- as.POSIXct(ISOdatetime(year + 1, 1, 1, 0, 0, 0), tz = "UTC")
-    list(lr, ur)
-  }, by = year]
-  
-  dt[, `:=`(
-    start_time = pmax(start_time, lower),
-    end_time   = pmin(end_time,   upper)
-  )]
-  dt[, c("lower", "upper") := NULL]
+  dt <- clamp_spill_records_to_year(dt)
   data.table::setkey(dt, site_id, start_time)
   
   # Prepare yearly dataset
@@ -156,7 +188,6 @@ prepare_spill_data <- function(data) {
   dt_monthly <- split_monthly_records(dt)
   dt_monthly[, month := data.table::month(start_time)]
   dt_monthly[, quarter := ceiling(month/3)] 
-  base_year <- 2021
   dt_monthly[, month_id := (year - base_year) * 12 + month]
   dt_monthly[, qtr_id := (year - base_year) * 4 + quarter]
   
@@ -170,7 +201,7 @@ prepare_spill_data <- function(data) {
 #'
 #' This function implements the Environment Agency's 12/24 hour counting methodology
 #' for aggregating overlapping or consecutive spill events:
-#' - First spill or spills with >0 hour gap: Creates 12-hour block (counts as 1)
+#' - First spill or a spill at/after the active block end: Creates a 12-hour block
 #' - Subsequent spills within blocks: Creates 24-hour blocks
 #' - Long spills: Generate additional 24-hour blocks if duration exceeds block size
 #'
@@ -205,13 +236,9 @@ count_spills <- function(start_times, end_times) {
     current_start <- start_times[i]
     current_end <- end_times[i]
     
-    # Calculate difference between spill start and current block end
-    if (!is.na(block_end)) {
-      gap <- (current_start - block_end) / 3600
-    }
-    
-    # 12-hour block (first spill or >24h gap)
-    if (is.na(block_end) || gap > 0) {
+    # Block endpoints are excluded: a spill beginning at or after the current
+    # endpoint starts a new 12-hour counting block.
+    if (is.na(block_end) || current_start >= block_end) {
       block_start <- current_start
       block_end <- current_start + dur12
       
@@ -224,7 +251,7 @@ count_spills <- function(start_times, end_times) {
       block_start <- block_end + (dur24 * spill_over_12h)
       block_end <- block_start + dur24
     } else {
-      # 24 hour block
+      # A spill inside the active sequence advances through 24-hour blocks.
       # Update spill count
       diff_current <- (current_end - block_start) / 3600
       spill_over_24h <- ceiling(pmax(0, diff_current) / 24)
@@ -252,6 +279,128 @@ calculate_spill_hours <- function(start_times, end_times) {
     as.numeric(difftime(end_times, start_times, units = "hours")), 
     na.rm = TRUE
   )
+}
+
+# Shared Measurement Core: spill arithmetic
+############################################################
+
+# data.table may replace grouped sum/cumsum calls with optimizer-specific
+# implementations. These wrappers, combined with a fixed row order at every
+# aggregation boundary, keep published floating values reproducible. Both
+# exposure engines route every sum and cumulative sum through them (R12).
+
+#' Sum a numeric vector without data.table's grouped optimiser
+#'
+#' @param value Numeric vector to sum.
+#' @param na.rm Whether to drop missing values.
+#' @return The sum, computed by `base::sum()`.
+#' @export
+spill_stable_sum <- function(value, na.rm = FALSE) {
+  base::sum(value, na.rm = na.rm)
+}
+
+#' Accumulate a numeric vector without data.table's grouped optimiser
+#'
+#' @param value Numeric vector to accumulate.
+#' @return The cumulative sum, computed by `base::cumsum()`.
+#' @export
+spill_stable_cumsum <- function(value) {
+  base::cumsum(value)
+}
+
+#' Clip spill events to an exposure window
+#'
+#' The single implementation of the overlap filter, the clamping, and the
+#' positive-duration filter that both exposure engines apply. `window_start`
+#' and `window_end` accept either one scalar bound shared by every row or a
+#' per-row vector: the study engine passes its two window constants, and the
+#' prior engine passes each transaction's own endpoint.
+#'
+#' An event enters the window when it starts strictly before `window_end` and
+#' has not already ended before `window_start`. Surviving events are clamped to
+#' the window and those left with no positive duration are dropped, so a caller
+#' never has to remember the `event_hours > 0` filter separately.
+#'
+#' Carries no validation, per R14: correctness lives in the unit fixtures and
+#' the publication gate.
+#'
+#' @param events Event table with POSIXct `start_time` and `end_time`.
+#' @param window_start Window opening, scalar or one value per event row.
+#' @param window_end Window closing, scalar or one value per event row.
+#' @return A new data.table of the surviving events, carrying every input
+#'   column plus `clipped_start`, `clipped_end`, and `event_hours`. The
+#'   caller's table is never modified.
+#' @export
+clip_events_to_window <- function(events, window_start, window_end) {
+  dt <- as.data.table(events)
+  window_start <- rep(window_start, length.out = nrow(dt))
+  window_end <- rep(window_end, length.out = nrow(dt))
+
+  # Subset the bounds alongside the rows so a per-row window stays aligned
+  # with its own event once the overlap filter has dropped rows.
+  overlaps <- dt$start_time < window_end & dt$end_time >= window_start
+  dt <- dt[overlaps]
+  window_start <- window_start[overlaps]
+  window_end <- window_end[overlaps]
+
+  dt[, `:=`(
+    clipped_start = pmax(start_time, window_start),
+    clipped_end = pmin(end_time, window_end)
+  )]
+  dt[, event_hours := as.numeric(difftime(
+    clipped_end, clipped_start, units = "hours"
+  ))]
+  dt[event_hours > 0]
+}
+
+#' Collapse clipped events to spill totals per group
+#'
+#' The single per-group reduction behind both engines: the prior engine groups
+#' by transaction and site, the study engine by site alone. Rows are ordered
+#' explicitly before the reduction so the floating sum is reproducible (R12),
+#' and `count_spills()` stays the only 12/24 implementation.
+#'
+#' Carries no validation, per R14.
+#'
+#' @param clipped_events Output of `clip_events_to_window()`.
+#' @param by Character vector of grouping key columns.
+#' @param order_by Character vector of tie-breaking sort columns applied after
+#'   the grouping keys. Defaults to the clipped start alone; the prior engine
+#'   adds the clipped end and both unclipped endpoints so that events sharing a
+#'   start still sort deterministically. Changing this changes which order the
+#'   floating sum accumulates in, so each engine passes its own established key.
+#' @param na.rm Whether to drop missing event hours from the sum. Defaults to
+#'   `FALSE`, which lets an unexpected NA reach the caller's own guard rather
+#'   than being silently absorbed; the prior engine passes `TRUE`.
+#' @return A data.table with one row per group carrying `spill_hrs` and
+#'   `spill_count`.
+#' @export
+collapse_events_by_group <- function(clipped_events, by,
+                                     order_by = "clipped_start",
+                                     na.rm = FALSE) {
+  events <- as.data.table(clipped_events)
+  setorderv(events, c(by, order_by))
+  events[, .(
+    spill_hrs = spill_stable_sum(event_hours, na.rm = na.rm),
+    spill_count = as.numeric(count_spills(clipped_start, clipped_end))
+  ), by = by]
+}
+
+#' Convert a window total into daily and weekly averages
+#'
+#' The single owner of both rate formulas. The weekly average is the daily
+#' average times seven rather than an independent expression, so the two can
+#' never drift apart.
+#'
+#' Carries no validation, per R14.
+#'
+#' @param total Numeric window total, such as spill hours or spill counts.
+#' @param n_days_in_window Length of the window in days, scalar or per-row.
+#' @return A list with numeric `daily_avg` and `weekly_avg`.
+#' @export
+spill_window_rates <- function(total, n_days_in_window) {
+  daily_avg <- total / n_days_in_window
+  list(daily_avg = daily_avg, weekly_avg = daily_avg * 7)
 }
 
 #' Return standard rainfall offset column names

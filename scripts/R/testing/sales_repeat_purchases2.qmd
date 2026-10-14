@@ -77,7 +77,7 @@ rent_dt[grepl("^(NA\\|)*NA$", simple_key), simple_key := NA_character_]
 ### Exact Repeat Transactions
 
 ```{r}
-setorder(rent_dt, simple_key, date_of_transfer, transaction_id)
+setorder(rent_dt, simple_key, date_of_transfer, house_id)
 
 rent_dt[
   !is.na(simple_key),
@@ -144,7 +144,6 @@ rent_dt[,
 
 sales_linkage_dt <- rent_dt[, .(
   house_id,
-  transaction_id,
   date_of_transfer,
   price,
   postcode_clean,
@@ -293,7 +292,7 @@ rent_dt[,
 
 fuzzy_edges <- linked_data_set[
   mpost >= threshold_fuzzy,
-  .(from = transaction_id.x, to = transaction_id.y, mpost)
+  .(from = house_id.x, to = house_id.y, mpost)
 ]
 
 if (nrow(fuzzy_edges) > 0) {
@@ -304,14 +303,14 @@ if (nrow(fuzzy_edges) > 0) {
   comps <- igraph::components(g)
 
   component_map <- data.table(
-    transaction_id = names(comps$membership),
+    house_id = names(comps$membership),
     fuzzy_component = comps$membership
   )
 
   component_ids <- merge(
     component_map,
-    rent_dt[, .(transaction_id, property_id)],
-    by = "transaction_id",
+    rent_dt[, .(house_id, property_id)],
+    by = "house_id",
     all.x = TRUE
   )
 
@@ -343,11 +342,11 @@ if (nrow(fuzzy_edges) > 0) {
   rent_dt <- merge(
     rent_dt,
     component_map[, .(
-      transaction_id,
+      house_id,
       property_id_fuzzy = property_id,
       needs_review
     )],
-    by = "transaction_id",
+    by = "house_id",
     all.x = TRUE
   )
 
@@ -364,7 +363,7 @@ if (nrow(fuzzy_edges) > 0) {
   rent_dt[, c("property_id_fuzzy", "needs_review") := NULL]
 }
 
-setorder(rent_dt, property_id, date_of_transfer, transaction_id)
+setorder(rent_dt, property_id, date_of_transfer, house_id)
 
 panel_dt <- rent_dt[!is.na(property_id)]
 

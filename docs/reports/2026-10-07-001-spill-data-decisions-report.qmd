@@ -1,0 +1,373 @@
+---
+title: "Sewage Data Pipeline Summary"
+format:
+  typst:
+    papersize: a4
+    margin:
+      x: 2.2cm
+      y: 2.4cm
+    fontsize: 10.5pt
+    number-sections: true
+    toc: false
+    keep-typ: false
+    include-in-header: 2026-10-07-001-spill-data-decisions-report/preamble.typ
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    theme: cosmo
+    number-sections: true
+    include-in-header:
+      text: |
+        <style>a, a:visited { color: #1F3A93; }</style>
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: false
+fig-dpi: 300
+fig-format: png
+fig-cap-location: top
+knitr:
+  opts_chunk:
+    dev: "ragg_png"
+    fig.align: "center"
+---
+
+```{r}
+#| label: setup
+source(here::here(
+  "docs", "reports", "2026-10-07-001-spill-data-decisions-report", "report_objects.R"
+))
+```
+
+## Sewage Spill Data Sources {.unnumbered}
+
+Two sources of sewage spill data are available for England. Both are produced by water and sewerage companies using event duration monitoring (EDM) devices installed at storm overflows:
+
+1. **EDM event-level records (EA, via EIR):** Individual discharge records obtained from the Environment Agency (EA) through requests under the Environmental Information Regulations (EIR).
+2. **EDM annual returns (EA):** Annual summaries of spill counts and duration, compiled by the companies from the same EDM records and submitted to the EA.
+
+```{r}
+#| label: tbl-sources
+#| tbl-cap: "EDM Datasets"
+#| tbl-colwidths: [10, 45, 45]
+tbl_sources
+```
+
+The two datasets serve complementary purposes in our analysis. We use the event-level records to measure spill exposure at the time of each property sale or rental, given their minute-level timing (@fig-sources, panel a). We use the annual returns to (i) distinguish zero spills from missing data in the event-level records (@fig-sources, panel b) and (ii) obtain site characteristics, particularly overflow locations, to link spills to nearby properties.
+
+[Appendix A](#sec-data-extracts) shows examples from both datasets, with all variables included and the main fields highlighted.
+
+```{r}
+#| label: fig-sources
+#| fig-cap: "Illustration of the two EDM datasets"
+#| fig-subcap:
+#|   - "EDM event-level records (discharge-event level)"
+#|   - "EDM annual returns (overflow-year level)"
+#| layout-ncol: 2
+#| fig-width: 5.2
+#| fig-height: 3.0
+fig_sources$events
+fig_sources$returns
+```
+
+## Constructing Property-Level Spill Exposure {.unnumbered}
+
+We combine the two EDM datasets in four steps to measure spill exposure at the time of each property sale or rental:
+
+1. **Define spill sites and spill site groups (@sec-sites).** Link spill site-years across the EDM annual returns to identify spill sites, then group spill sites that cannot be uniquely distinguished.
+2. **Match discharge events to spill site groups (@sec-matching-events-sites).** Use identifying fields to match discharge events to these groups, assigning each matched discharge event a location and a consistent spill site group identifier.
+3. **Distinguish zero spills from missing data (@sec-zeros).** Use the EDM annual returns and event-matching results to classify each spill site group-year as non-missing or missing.
+4. **Aggregate spill exposure to properties (@sec-dropped).** Sum spill hours and spill counts across nearby spill site groups from January 2021 to each transaction date. Treat exposure as missing if any group-year within the relevant radius and exposure window is missing.
+
+## Defining a Spill Site in the EDM Annual Returns Data {#sec-sites}
+
+The first step is to define a **spill site** consistently across the four years of the Environment Agency's EDM annual returns, so that individual spill sites can be tracked over time.
+
+### Problem {.unnumbered}
+
+Unique spill-site identifiers were introduced in 2023. For 2021 and 2022, spill sites must instead be matched across years using the other identifying fields: water company, site name, permit reference, activity code and grid reference. This presents two challenges (@fig-problems):
+
+1. **Spill-site identifiers can change across years.** Spill-site identifiers can differ across years, making it difficult to identify and link individual spill sites across annual returns. For example, between 2023 and 2024, when unique identifiers allow us to identify the same spill site across years, 1.7% of spill sites changed name, 3.4% changed permit reference and 3.5% changed grid reference.
+
+2. **Spill sites cannot always be uniquely identified.** When multiple spill sites have the same values for all identifying fields, they cannot be distinguished or individually tracked across years. This occurs particularly at sewage treatment works, where several monitored outlets of the same type (e.g. storm tanks) may share the same site name, permit reference and grid reference.
+
+```{r}
+#| label: fig-problems
+#| fig-cap: "Challenges to linking spill sites across years (Examples from the data)"
+#| fig-subcap:
+#|   - "Spill-site identifiers can change across years"
+#|   - "Spill sites cannot always be uniquely identified"
+#| layout-ncol: 2
+#| fig-width: 4.6
+#| fig-height: 2.5
+fig_problems$ids_change
+fig_problems$not_unique
+```
+
+::: {style="font-size: 85%;"}
+*Notes:* The figure illustrates the two challenges using examples from the EDM annual returns. Green indicates matching fields, while amber indicates differences. Panel (a) shows a spill site whose name changes between 2023 and 2024, but whose unique identifier confirms that it is the same site. Panel (b) shows two distinct spill sites that share identical identifying fields in 2021.
+:::
+
+### Approach {.unnumbered}
+
+#### Stage 1: Match spill sites across years {.unnumbered}
+
+We link each spill site-year to its counterparts in other years by comparing it with every spill site-year reported by the same water company in each other year. Linked spill site-years form one spill site. The matching rule depends on the years being compared:
+
+- **2023 and 2024.** Spill site-years are matched on their unique identifier.
+- **Pairs involving 2021 or 2022.** Spill site-years are matched on their identifying fields. Matching proceeds in rounds, from strictest to loosest. In each round, two spill site-years are matched if they have identical values on that round’s fields and no other unmatched spill site-year in either year shares those values. Matched spill site-years are removed before the next round. For example:^[These rounds are a simplified illustration. In practice, matching uses six fields: EA site name (the site name as recorded by the Environment Agency), company site name (the site name as recorded by the water company), EA permit reference (the permit reference as recorded by the Environment Agency), company permit reference (the permit reference as recorded by the water company), activity code (the code for the discharge activity under the permit), and grid reference (the grid reference of the discharge outlet).]
+  - **Round 1:** Site name, permit reference, activity code and grid reference.
+  - **Round 2:** Permit reference, activity code and grid reference (allowing for changes in site name).
+  - **Round 3:** Site name, activity code and grid reference (allowing for changes in permit reference).
+  - **Subsequent rounds:** Other combinations of identifying fields, always requiring agreement on water company.
+- **Unmatched spill site-years.** Spill site-years that cannot be uniquely matched in any round remain unmatched at the end of this stage. Each forms a spill site observed in a single year.
+
+@tbl-links summarises the results of this stage. Of all spill sites, `r n$share_strong` are linked across years through strong matches only, meaning a unique identifier or at least three agreeing fields. A further `r n$share_weak` rely on at least one weak match, where two or fewer fields agree. The remaining `r n$unmatched_sites` spill site-years are unmatched.
+
+Manual spot checks suggest that weak matches can be inaccurate. Because the sites that rely on them are a small share of the total, we have kept them in the exposure sample for now to save time, but we later may want to drop them or clean them further.
+
+```{r}
+#| label: tbl-links
+#| tbl-cap: "Matches across years, by matching round"
+tbl_links
+```
+
+#### Stage 2: Build the Spill Site Panel {.unnumbered}
+
+Stage 1 produces pairwise matches between spill site-years in different years. With four years of data, each spill site-year can have up to three matches, one in each of the other years. It may have fewer if the spill site was not reported in some years or no unique match was found.
+
+Stage 2 uses a graph-based approach to combine these pairwise matches and identify distinct spill sites across years. Each spill site-year is represented as a node, with edges connecting pairs matched in Stage 1. Connected nodes are then grouped into spill sites, as illustrated in @fig-chaining:
+
+- **Direct and indirect matches.** Spill site-years are assigned to the same spill site if they are connected directly by an edge (row 1) or indirectly through other nodes (row 2). Because Stage 1 compares every pair of years, spill site-years can still be matched even when the spill site is not reported in an intermediate year (row 3).
+- **Unmatched spill site-years.** A node with no edges forms a separate spill site observed in a single year (row 4). This may be because the spill site was reported in only one year or because Stage 1 could not establish a unique match with other years.
+- **Conflicting matches.** Each spill site can contain at most one spill site-year per year. Because Stage 1 matches each pair of years separately, combining matches can occasionally violate this rule. For example, a 2021 spill site-year may be matched to two different 2022 spill site-years, one directly and one through 2023 (row 5). To resolve these conflicts, edges are added in order of match strength, prioritising unique identifiers and then the number of agreeing fields. Any edge that would introduce a second spill site-year from the same year is discarded. This affects 0.4% of spill site-years.
+
+```{r}
+#| label: fig-chaining
+#| fig-cap: "From pairwise matches to a spill site panel"
+#| fig-subcap:
+#|   - "Pairwise matches from Stage 1"
+#|   - "Spill sites after Stage 2"
+#| layout-ncol: 2
+#| fig-width: 4.6
+#| fig-height: 3.5
+fig_chaining$matches
+fig_chaining$sites
+```
+
+
+
+This procedure identifies `r n$spill_sites` spill sites (@fig-site-patterns).^[The Environment Agency reports between `r n$overflows_year_min` and `r n$overflows_year_max` storm overflows annually over 2021–2024. Our count is higher for two reasons. First, it covers all four years, so it includes overflows that opened or closed during the period and therefore appear in some years' lists but not others. Second, some overflows are counted more than once because Stage 1 could not link their spill site-years across years, leaving them as separate spill sites. Stage 3 aims to reduce this duplication by grouping spill sites that likely refer to the same overflow or works.] Most (`r n$share_4_years`) are observed in all four years, while `r n$share_3_years` are observed in three years and `r n$share_2_years` in two. Spill figures within the returns are more often missing in 2021 and 2022, partly because EDM monitors were not installed at all spill sites until the end of 2023.^[The share of storm overflows in England fitted with an event duration monitor rose from 89% in 2021 to 91% in 2022, reaching 100% by the end of 2023 ([Environment Agency, 2024](https://www.gov.uk/government/news/environment-agency-publishes-storm-overflow-spill-data-for-2023); [Environment Agency, 2023](https://www.gov.uk/government/news/environment-agency-publishes-event-duration-monitoring-data-for-2022)).] The remaining `r n$single_year` spill sites (`r n$share_1_year`) are observed in only one year, most often `r n$single_year_modal`. Some of these were reported only once, while others are the same overflow split across two spill sites because Stage 1 found no unique match. Stage 3 merges `r n$single_regrouped` of them into larger groups.
+
+```{r}
+#| label: fig-site-patterns
+#| fig-cap: "Spill sites after Stage 2, by the years in which they are observed"
+#| fig-width: 9
+#| fig-height: 3.9
+fig_site_patterns
+```
+
+#### Stage 3: Group spill sites that may not be uniquely identified {.unnumbered}
+
+Together, Stages 1 and 2 link spill site-years across years, even when some identifying fields differ between years. The second challenge remains: in 2021 and 2022, before unique identifiers were introduced, multiple spill sites can share identical values for all identifying fields, making it impossible to distinguish them. This is particularly common where several overflows are located close together, such as at sewage treatment works, which may have both inlet and storm tank overflows.^[For example, the 2024 annual return lists one inlet overflow and three storm tank overflows at Oldham Wastewater Treatment Works under the same site name, permit reference and grid reference.] This has two consequences:
+
+1. **Discharge events cannot always be assigned to a spill site.** In 2021 and 2022, discharge events in the EDM event-level records can be matched to spill sites mostly only by site name.^[In 2021 and 2022, the EDM event-level records contain neither Environment Agency unique identifiers nor grid references (which are absent in all years). Permit references are available only for Anglian Water, which accounts for about 4% of discharge events.] When multiple spill sites share identical values for all identifying fields, we cannot determine which spill site a discharge event belongs to. Consequently, the event cannot be assigned a specific overflow location or used to measure spill exposure for nearby properties. This is the main consequence of the identification problem and is discussed further in @sec-matching-events-sites.
+2. **One overflow can be split across multiple spill sites.** When multiple spill site-years in the same year share identical values for all identifying fields, Stage 1 cannot always match them uniquely to other years. For example, three of an overflow’s spill site-years may be linked into one spill site, while the fourth remains unmatched because it is indistinguishable from another overflow’s spill site-year. The unmatched spill site-year then forms a separate, single-year spill site. Although the overflow is observed in all four years, this split creates artificial gaps in the spill site panel. Because we use the EDM annual returns to distinguish zero spills from missing data in the EDM event-level records, these gaps can prevent us from measuring spill exposure for nearby properties.
+
+To address these problems, Stage 3 combines spill sites that cannot be uniquely distinguished into **spill site groups**. We use these groups to match discharge events in the EDM event-level records to the spill site panel and to measure spill exposure. Two spill sites are paired if they meet all three conditions:
+
+1. They belong to the same water company.
+2. They share an Environment Agency site name recorded during 2021–2024.
+3. They share an Environment Agency permit reference, or their grid references are within 250 m of each other. This condition reduces the risk of grouping unrelated overflows that happen to share a common name, such as a street name, while allowing nearby outlets to be grouped even when their permit references differ or are missing.
+
+As in Stage 2, spill sites connected directly or indirectly through these pairs form one spill site group, so two spill sites can belong to the same group because each is paired with a third. Spill sites that are not paired with any other form groups of their own. Group membership is fixed across years to maintain a consistent definition of each group throughout the panel.
+
+Stage 3 combines the `r n$spill_sites` spill sites identified in Stage 2 into `r n$site_groups` spill site groups (@tbl-grouping). Of these, `r fmt(grouping_counts$groups[grouping_counts$sites_per_group == 1])` (`r pct(grouping_counts$groups[grouping_counts$sites_per_group == 1] / n_site_groups)`) contain one spill site, while `r fmt(grouping_multi$groups)` (`r pct(grouping_multi$groups / n_site_groups)`) contain two or more. The resulting total is close to the 14,285 storm overflows listed in the EA's 2024 annual returns for England.^[Source: [Environment Agency, EDM annual returns](https://www.data.gov.uk/dataset/19f6064d-7356-466f-844e-d20ea10ae9fd/event-duration-monitoring-storm-overflows-annual-returns), 2024 summary.]
+
+```{r}
+#| label: tbl-grouping
+#| tbl-cap: "Spill site groups after Stage 3, by number of spill sites"
+tbl_grouping
+```
+
+The grouping of spill sites comes at two costs:
+
+1. **Missing data within a group cannot always be detected.** Because discharge events are matched to spill site groups rather than individual spill sites, we cannot assess the completeness of the EDM event-level records for each spill site separately. We therefore treat a spill site group-year as reported if the EDM annual returns contain spill figures for at least one spill site in the group.
+
+   As a result, a group-year may be treated as reported even when some spill sites in the group have missing spill figures. This occurs in `r n$masked_group_years` spill site group-years across `r n$masked_groups` groups, mostly in 2021 and 2022.^[This count excludes spill sites reported as no longer operational and one group that incorrectly combines unrelated spill sites.] The alternative would be to treat these group-years as missing. The affected groups lie within 250 m of `r n$masked_houses_250` of properties with a spill site group within that radius, and within 1,000 m of `r n$masked_houses_1000` of properties with a spill site group within that radius.
+
+2. **Each spill site group is assigned a single location.** We assign each spill site group the most recent usable grid reference of its first-observed spill site (2024 for most groups) and measure all distances to properties from this location. The choice of spill site is arbitrary, and the grid references of other spill sites in the group are ignored.^[One potential improvement is to use the grid reference of the spill site with the highest spill count in the group.] Among groups containing multiple spill sites, `r n$share_multi_same_ngr` have identical grid references, and in `r n$share_multi_within_250` all spill sites lie within 250 m of one another.
+
+## Matching EDM Event Records to Spill Site Groups {#sec-matching-events-sites}
+
+The second step matches discharge events in the EDM event-level records (EA, via EIR) to the spill site groups constructed in @sec-sites. This assigns each matched discharge event a location and a consistent spill site group identifier, allowing us to measure spill exposure over time.
+
+### Problem {.unnumbered}
+
+As discussed in Stage 3 of @sec-sites, multiple spill sites can share identical identifying information, making it impossible to assign discharge events to individual spill sites in those cases. We therefore match discharge events to spill site groups instead. The challenge is to identify the corresponding group using the information available in the EDM event-level records.
+
+In 2023 and 2024, unique identifiers allow us to link discharge events directly to spill site-years in the EDM annual returns (EA), and hence to their spill site groups. In 2021 and 2022, these identifiers are absent, so matching relies primarily on site names within each water company. Permit references provide additional information but are available for only about 4% of discharge events in those years.
+
+### Approach {.unnumbered}
+
+For each discharge event, we compare its identifying fields with those of spill site-years reported by the same water company in the EDM annual returns. Unique identifiers are compared within the same year; other fields are compared across all four years.
+
+We consider the fields in the order listed below. For each field, we find all spill site-years with the same value. If they all belong to one spill site group, the field identifies that group. If there are no matches, or the matching spill site-years belong to multiple groups, we proceed to the next field.
+
+We provisionally assign each discharge event to the first spill site group identified in this way. We then check whether any other field identifies a different group and review cases where the fields give conflicting matches.
+
+The matching order is as follows:
+
+1. **Unique identifier (2023 and 2024 only).**
+2. **EA permit reference and activity code.** The permit reference (identifying the discharge permit) and activity code (identifying the discharge activity under that permit) together provide a more specific basis for matching than site names. If no spill site-year matches both fields, we check the permit reference alone.
+3. **EA site name.** The site name recorded by the Environment Agency.
+4. **Company site name.** The site name recorded by the water company.
+
+This matching process leaves two cases that need further checks: a site name may be shared by several spill site groups, so that no field identifies a single group, or different fields may identify different groups.
+
+1. **Shared site names.** When several spill site groups share a site name and the other identifying fields cannot distinguish between them, we use annual spill hours to resolve the match. We sum the annual spill hours of the discharge events being matched, then compare this total with each candidate group’s total in the EDM annual returns for the same year. We assign the discharge events to the group with the smallest relative difference, provided that this difference is (i) no greater than 25% and (ii) at most half that of the next-closest group.
+2. **Conflicting matches.** In five cases, different identifying fields pointed to different spill site groups. All five were reviewed and resolved manually.
+
+Discharge events that cannot be assigned to a spill site group after these checks remain unmatched, with the reason recorded.
+
+@fig-ladder summarises the matching results. Of the `r n$events` discharge events, `r n$events_matched` (`r n$share_events_matched`) are matched to a spill site group. Most matches rely on EA site names in 2021 and 2022, whereas almost all rely on unique identifiers in 2023 and 2024. Across all four years, `r n$share_events_group` of all discharge events are matched to spill site groups containing two or more spill sites.
+
+Of the `r n$events_unmatched` unmatched discharge events, `r n$unmatched_no_key` have no matching spill site-year on any identifying field. A further `r n$unmatched_hours_disagree` share a site name with several spill site groups, but comparing annual spill hours does not resolve the match. For the remaining `r n$unmatched_other` discharge events, spill hours are unavailable or too low to distinguish between candidate groups reliably.
+
+```{r}
+#| label: fig-ladder
+#| fig-cap: "Discharge events matched to spill site groups, by year"
+#| fig-width: 9
+#| fig-height: 4.1
+fig_ladder
+```
+
+
+
+
+## Distinguishing Zero Spills from Missing Data {#sec-zeros}
+
+The third step uses the EDM annual returns to distinguish zero spills from missing data in the EDM event-level records. This determines whether spill exposure can be measured for properties near each spill site group.
+
+### Problem {.unnumbered}
+
+When no discharge events are matched to a spill site group during an exposure window, there are two possible explanations (@fig-sources):
+
+1. **Zero spills.** No spills occurred during the exposure window.
+2. **Missing data.** Spills may have occurred, but the discharge events are either missing from the EDM event-level records or could not be matched to the spill site group (@sec-matching-events-sites).
+
+The EDM event-level records alone cannot distinguish between these cases. We therefore use the EDM annual returns to determine when the absence of matched discharge events can be treated as zero spills.
+
+### Approach {.unnumbered}
+
+Using the EDM annual returns and the matching results from @sec-matching-events-sites, we classify a **spill site group-year** as **non-missing** if either of the following conditions holds:
+
+1. **The EDM annual returns report zero spills.** We set spill exposure from that group-year to zero.
+2. **The EDM annual returns report spills, and discharge events are matched to the group in that year.** We measure spill exposure from the matched discharge events. Exposure windows with no matched discharge events are treated as zero spills.
+
+Otherwise, we treat the spill site group-year as **missing**. This occurs when the EDM annual returns contain no spill figures for the group, or when they report spills but no discharge events are matched to the group in that year. In both cases, the absence of matched discharge events cannot reliably be interpreted as zero spills.
+
+@fig-verified summarises the classification of spill site group-years by year. The share classified as non-missing increases from `r pct(status_non_missing_share[["2021"]])` in 2021 to `r pct(status_non_missing_share[["2024"]])` in 2024, primarily reflecting a decline in missing spill figures in the EDM annual returns. In 2021 and 2022, most spill sites with missing spill figures were recorded as awaiting EDM installation.
+
+```{r}
+#| label: fig-verified
+#| fig-cap: "Spill site group-years, by reporting and matching status"
+#| fig-subcap:
+#|   - "All spill site group-years"
+#|   - "Breakdown of missing spill site group-years"
+#| layout-ncol: 2
+#| fig-width: 5.4
+#| fig-height: 4.2
+fig_verified$status
+fig_verified$missing
+```
+
+## Aggregating Spill Exposure to Properties {#sec-dropped}
+
+The fourth step aggregates spill hours and spill counts across nearby spill site groups to measure property-level spill exposure.
+
+### Approach {.unnumbered}
+
+For both sales and rentals, we measure spill exposure within 250, 500 and 1,000 m over the period from January 2021 to each transaction date.
+
+We apply the following procedure separately to each transaction and radius:
+
+1. **Identify nearby spill site groups.** We select all spill site groups whose assigned location lies within the radius of the property, using the group locations defined in @sec-sites.
+2. **Check data availability.** For each nearby spill site group, we check every spill site group-year covered by the exposure window. If any is classified as missing under @sec-zeros, we treat the transaction's spill exposure at that radius as missing.
+3. **Aggregate spills.** Otherwise, we sum spill hours and spill counts across the nearby groups during the exposure window. Within these non-missing group-years, periods with no matched discharge events are treated as zero spills, as described in @sec-zeros.
+
+Transactions with missing exposure are excluded from regressions using that radius.
+
+@fig-cost shows the share of transactions excluded from the hedonic regressions because of missing spill exposure. At each radius, this share is calculated among transactions with at least one spill site group within that radius. At 250 m, `r n$drop_sales_250` of sales and `r n$drop_rentals_250` of rentals are excluded. These shares rise with the radius because including more spill site groups increases the likelihood that at least one spill site group-year in the exposure window is missing.
+
+Of the missing-data cases described in @sec-zeros, missing spill figures in the EDM annual returns are the most common single reason for exclusion. These gaps primarily reflect incomplete monitoring coverage in 2021 and 2022.
+
+```{r}
+#| label: fig-cost
+#| fig-cap: "Transactions with non-missing and missing spill exposure, by radius"
+#| fig-width: 9
+#| fig-height: 4.5
+fig_cost
+```
+
+::: {style="font-size: 85%;"}
+*Notes:* The sample includes transactions with at least 30 days of potential exposure and is measured before exclusions for missing regression covariates.
+:::
+
+{{< pagebreak >}}
+
+## Appendix A. Extracts from the EDM Datasets {#sec-data-extracts .unnumbered}
+
+The tables show examples from United Utilities’ EDM annual returns for 2024 and EDM event-level records for 2024 and 2021. Each column contains one record, with variables listed down the rows. The 2024 records cover the same three spill sites. The 2021 records show three discharge events at Hassall Road, when unique identifiers were not available in the EDM event-level records.
+
+All source variables are included, with the main fields shaded and some headings shortened for readability. A dash denotes a blank source cell; “Not Applicable” is retained as recorded in the source.
+
+### Annual returns, 2024 {.unnumbered}
+
+```{r}
+#| label: tbl-extract-annual-identity
+#| tbl-cap: "Annual returns, 2024: site details"
+tbl_extract_annual_identity
+```
+
+{{< pagebreak >}}
+
+### Annual returns, 2024 (continued) {.unnumbered}
+
+```{r}
+#| label: tbl-extract-annual-monitoring
+#| tbl-cap: "Annual returns, 2024: spills and monitoring"
+tbl_extract_annual_monitoring
+```
+
+::: {style="font-size: 85%;"}
+*Source:* EA EDM annual returns, 2024, “United Utilities 2024” worksheet.
+:::
+
+{{< pagebreak >}}
+
+### Event-level records, 2024 {.unnumbered}
+
+```{r}
+#| label: tbl-extract-events
+#| tbl-cap: "Individual discharge events, 2024"
+tbl_extract_events
+```
+
+::: {style="font-size: 85%;"}
+*Source:* United Utilities' 2024 EDM event-level records, supplied by the EA via EIR.
+:::
+
+### Event-level records, 2021 {.unnumbered}
+
+```{r}
+#| label: tbl-extract-events-2021
+#| tbl-cap: "Individual discharge events, 2021"
+tbl_extract_events_2021
+```
+
+::: {style="font-size: 85%;"}
+*Source:* United Utilities' 2021 EDM event-level records, supplied by the EA via EIR.
+:::

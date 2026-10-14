@@ -369,9 +369,10 @@ annual_lookup <- arrow::read_parquet(
   here::here("data", "processed", "annual_return_lookup.parquet")
 )
 
-unique_sites <- arrow::read_parquet(
+canonical_sites <- arrow::read_parquet(
   here::here("data", "processed", "unique_spill_sites.parquet")
 )
+stopifnot(!anyDuplicated(canonical_sites$site_id_canonical))
 
 lookup_long <- annual_lookup %>%
   select(site_id, starts_with("site_id_")) %>%
@@ -895,7 +896,7 @@ write_plot(
   "asset_type_group_share_by_year.png"
 )
 
-n_canonical_sites <- nrow(unique_sites)
+n_canonical_sites <- nrow(canonical_sites)
 n_site_year_rows <- nrow(site_year_meta)
 unique_id_complete_years <- site_panel_diagnostics %>%
   filter(unique_id_populated > 0.95) %>%

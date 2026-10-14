@@ -17,7 +17,8 @@
 #   - output/figures/spill_hours_persistence.pdf
 #   - output/figures/spill_hours_persistence_slides.pdf
 #
-# Note: Years are hardcoded to 2021-2023 period
+# Note: Uses all consecutive year pairs present in the input (currently
+#       2021-2024, i.e. transitions 2021->22, 2022->23, 2023->24)
 #
 # ==============================================================================
 

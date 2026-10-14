@@ -308,7 +308,6 @@ sales <- rio::import(
   add_month_id("date_of_transfer") |>
   dplyr::select(
     -dplyr::any_of(c(
-      "transaction_id",
       "date_of_transfer",
       "quality",
       "paon",

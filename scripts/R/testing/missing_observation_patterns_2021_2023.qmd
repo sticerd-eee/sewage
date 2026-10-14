@@ -39,6 +39,10 @@ invisible(lapply(required_packages, function(pkg) {
   library(pkg, character.only = TRUE)
 }))
 
+source(here::here(
+  "scripts", "R", "utils", "annual_return_mapping_utils.R"
+))
+
 set.seed(params$seed)
 
 options(dplyr.summarise.inform = FALSE)
@@ -53,12 +57,15 @@ dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
 ```{r}
 years <- 2021:2023
 
-first_non_na <- function(x) {
-  idx <- which(!is.na(x))
-  if (length(idx) == 0) {
+single_non_missing <- function(x) {
+  values <- unique(stats::na.omit(x))
+  if (length(values) == 0L) {
     return(x[NA_integer_][1])
   }
-  x[idx[1]]
+  if (length(values) > 1L) {
+    stop("Conflicting values at Canonical Spill Site-year grain.")
+  }
+  values[[1]]
 }
 
 commission_bucket <- function(x) {
@@ -74,8 +81,8 @@ commission_bucket <- function(x) {
 }
 
 stratified_sample_sites <- function(data, n_target, seed = 123) {
-  stopifnot(all(c("site_id", "pattern", "water_company") %in% names(data)))
-  data <- data %>% distinct(site_id, pattern, water_company)
+  stopifnot(all(c("site_id_canonical", "pattern", "water_company") %in% names(data)))
+  stopifnot(!anyDuplicated(data$site_id_canonical))
 
   n_total <- nrow(data)
   if (n_total <= n_target) {
@@ -127,11 +134,11 @@ stratified_sample_sites <- function(data, n_target, seed = 123) {
     left_join(data, by = c("pattern", "water_company")) %>%
     group_by(pattern, water_company, alloc) %>%
     mutate(rand = runif(n())) %>%
-    arrange(rand, site_id, .by_group = TRUE) %>%
+    arrange(rand, site_id_canonical, .by_group = TRUE) %>%
     mutate(rn = row_number()) %>%
     filter(rn <= alloc) %>%
     ungroup() %>%
-    select(site_id, pattern, water_company) %>%
+    select(site_id_canonical, pattern, water_company) %>%
     mutate(sampled = TRUE)
 
   sampled
@@ -141,7 +148,7 @@ map_annual_to_canonical_sites <- function(annual_data, lookup_data, years = 2021
   id_cols <- paste0("site_id_", years)
 
   lookup_long <- lookup_data %>%
-    select(site_id, any_of(id_cols)) %>%
+    select(site_id_canonical = site_id, any_of(id_cols)) %>%
     pivot_longer(
       cols = any_of(id_cols),
       names_to = "id_year_col",
@@ -150,7 +157,10 @@ map_annual_to_canonical_sites <- function(annual_data, lookup_data, years = 2021
     mutate(year = as.integer(readr::parse_number(id_year_col))) %>%
     filter(year %in% years, !is.na(year_site_id)) %>%
     group_by(year, year_site_id) %>%
-    summarise(site_id = first_non_na(site_id), .groups = "drop")
+    summarise(
+      site_id_canonical = single_non_missing(site_id_canonical),
+      .groups = "drop"
+    )
 
   annual_long <- annual_data %>%
     filter(year %in% years) %>%
@@ -169,14 +179,14 @@ map_annual_to_canonical_sites <- function(annual_data, lookup_data, years = 2021
       values_to = "year_site_id"
     ) %>%
     mutate(id_year = as.integer(readr::parse_number(id_year_col))) %>%
-    filter(year == id_year, !is.na(year_site_id)) %>%
+    filter(year == id_year) %>%
     select(-id_year_col, -id_year) %>%
     left_join(lookup_long, by = c("year", "year_site_id")) %>%
-    mutate(site_id = coalesce(as.integer(site_id), as.integer(year_site_id)))
+    finalise_annual_lookup_mapping()
 
   annual_long %>%
     select(
-      site_id,
+      site_id_canonical,
       year,
       water_company,
       spill_hrs_ea,
@@ -184,13 +194,13 @@ map_annual_to_canonical_sites <- function(annual_data, lookup_data, years = 2021
       edm_operation_reason,
       edm_operation_percent
     ) %>%
-    group_by(site_id, year) %>%
+    group_by(site_id_canonical, year) %>%
     summarise(
-      water_company_annual = first_non_na(water_company),
-      spill_hrs_ea = first_non_na(spill_hrs_ea),
-      spill_count_ea = first_non_na(spill_count_ea),
-      annual_reason = first_non_na(edm_operation_reason),
-      annual_operation_percent = first_non_na(edm_operation_percent),
+      water_company_annual = single_non_missing(water_company),
+      spill_hrs_ea = single_non_missing(spill_hrs_ea),
+      spill_count_ea = single_non_missing(spill_count_ea),
+      annual_reason = single_non_missing(edm_operation_reason),
+      annual_operation_percent = single_non_missing(edm_operation_percent),
       annual_rows = n(),
       .groups = "drop"
     )
@@ -202,7 +212,10 @@ map_annual_to_canonical_sites <- function(annual_data, lookup_data, years = 2021
 ```{r}
 unique_sites <- arrow::read_parquet(
   here::here("data", "processed", "unique_spill_sites.parquet")
-)
+) |>
+  # This notebook deliberately studies Canonical Spill Site histories.
+  dplyr::select(-"site_id")
+stopifnot(!anyDuplicated(unique_sites$site_id_canonical))
 
 annual_return <- arrow::read_parquet(
   here::here("data", "processed", "annual_return_edm.parquet")
@@ -213,7 +226,7 @@ annual_lookup <- arrow::read_parquet(
 )
 
 required_unique_cols <- c(
-  "site_id",
+  "site_id_canonical",
   "water_company",
   "edm_commission_date",
   "available_year_2021",
@@ -260,13 +273,17 @@ mixed_sites_all <- site_status %>% filter(cohort == "mixed")
 
 if (params$sample_mode) {
   sampled_sites <- stratified_sample_sites(
-    data = mixed_sites_all %>% select(site_id, pattern, water_company),
+    data = mixed_sites_all %>%
+      select(site_id_canonical, pattern, water_company),
     n_target = params$sample_n_sites,
     seed = params$seed
   )
 
   mixed_sites <- mixed_sites_all %>%
-    inner_join(sampled_sites %>% select(site_id), by = "site_id")
+    inner_join(
+      sampled_sites %>% select(site_id_canonical),
+      by = "site_id_canonical"
+    )
 } else {
   mixed_sites <- mixed_sites_all
 }
@@ -292,7 +309,9 @@ stopifnot(
 
 if (params$sample_mode) {
   stopifnot(nrow(mixed_sites) <= params$sample_n_sites)
-  stopifnot(all(mixed_sites$site_id %in% mixed_sites_all$site_id))
+  stopifnot(
+    all(mixed_sites$site_id_canonical %in% mixed_sites_all$site_id_canonical)
+  )
 
   strata_all <- mixed_sites_all %>%
     count(pattern, water_company, name = "n_all")
@@ -325,7 +344,7 @@ tibble(
 ```{r}
 missing_panel <- mixed_sites %>%
   select(
-    site_id,
+    site_id_canonical,
     water_company,
     commission_bucket,
     n_obs,
@@ -370,7 +389,7 @@ missing_panel <- mixed_sites %>%
     op_pct_y_minus1_present = !is.na(op_pct_y_minus1)
   ) %>%
   select(
-    site_id,
+    site_id_canonical,
     year,
     water_company,
     commission_bucket,
@@ -395,7 +414,7 @@ annual_context <- map_annual_to_canonical_sites(
 missing_panel <- missing_panel %>%
   left_join(
     annual_context,
-    by = c("site_id", "year")
+    by = c("site_id_canonical", "year")
   ) %>%
   mutate(
     spill_hrs_ea_missing = is.na(spill_hrs_ea),
@@ -412,7 +431,10 @@ expected_rows <- mixed_sites %>%
   pull(n)
 
 stopifnot(nrow(missing_panel) == expected_rows)
-stopifnot(nrow(missing_panel) == nrow(distinct(missing_panel, site_id, year)))
+stopifnot(
+  nrow(missing_panel) ==
+    nrow(distinct(missing_panel, site_id_canonical, year))
+)
 stopifnot(all(is.na(missing_panel$reason_y_minus1[missing_panel$year == 2021])))
 ```
 

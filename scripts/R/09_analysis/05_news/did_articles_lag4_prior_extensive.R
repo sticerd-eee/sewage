@@ -242,43 +242,43 @@ estimate_models <- function(dat, dat_rental) {
       log_price ~ near_bin + log_cumulative_articles +
         near_bin:log_cumulative_articles,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_2 = fixest::feols(
       log_price ~ near_bin + log_cumulative_articles +
         near_bin:log_cumulative_articles | lsoa + qtr_id,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_sale_3 = fixest::feols(
       log_price ~ near_bin + log_cumulative_articles +
         near_bin:log_cumulative_articles + property_type + old_new + duration |
         lsoa + qtr_id,
       data = dat,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_1 = fixest::feols(
       log_price ~ near_bin + log_cumulative_articles +
         near_bin:log_cumulative_articles,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_2 = fixest::feols(
       log_price ~ near_bin + log_cumulative_articles +
         near_bin:log_cumulative_articles | lsoa + qtr_id,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     ),
     model_rent_3 = fixest::feols(
       log_price ~ near_bin + log_cumulative_articles +
         near_bin:log_cumulative_articles + property_type + bedrooms + bathrooms |
         lsoa + qtr_id,
       data = dat_rental,
-      vcov = ~lsoa
+      vcov = spatial_vcov()
     )
   )
 
-  cat("  Using LSOA-clustered SEs\n")
+  cat("  Using Conley 1 km SEs\n")
 
   models
 }
@@ -327,8 +327,9 @@ export_table <- function(models, comparison) {
     comparison$far_band_label,
     " band. Log cumulative articles (4-month lag) is the natural log of total UK ",
     "news coverage of sewage from January 2021 to four months before the transaction ",
-    "(LexisNexis). Standard errors clustered at the LSOA level are reported in ",
-    "parentheses. Property controls include type (flat, semi-detached, terraced, ",
+    "(LexisNexis). ",
+    spatial_se_note(),
+    " Property controls include type (flat, semi-detached, terraced, ",
     "other), new build status, and tenure for sales; and type (bungalow, detached, ",
     "semi-detached, terraced), bedrooms, and bathrooms for rentals. *** p<0.01, ",
     "** p<0.05, * p<0.1.}},"

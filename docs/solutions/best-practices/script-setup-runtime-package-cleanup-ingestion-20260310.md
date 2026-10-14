@@ -5,19 +5,19 @@ problem_type: best_practice
 component: tooling
 symptoms:
   - "Ingestion entry scripts duplicated dependency checks and logger setup."
-  - "Startup code in the ingestion layer had drifted away from the repo's `renv::restore()` contract."
+  - "Startup code in the ingestion layer had drifted away from the repo's `rv sync` contract."
   - "The API downloader depended on an implicit `%||%` helper that was not defined locally."
   - "There was no shared, approved bootstrap pattern for new R scripts."
 root_cause: missing_tooling
 resolution_type: tooling_addition
 severity: medium
-tags: [r, ingestion, tooling, script-setup, renv, logging, dependency-management]
+tags: [r, ingestion, tooling, script-setup, rv, logging, dependency-management]
 ---
 
 # Troubleshooting: Centralising R script setup for ingestion scripts without runtime installs
 
 ## Problem
-The ingestion layer had started to accumulate duplicated startup logic across entry scripts. `scripts/R/01_data_ingestion/fetch_edm_api_data_2024_onwards.R` and `scripts/R/01_data_ingestion/edm_individ_data_standardisation_2021-2023.R` each managed dependency checks and logging separately, and the broader cleanup goal was to move the repository toward a single fail-fast setup pattern based on `renv::restore()`.
+The ingestion layer had started to accumulate duplicated startup logic across entry scripts. `scripts/R/01_data_ingestion/fetch_edm_api_data_2024_onwards.R` and `scripts/R/01_data_ingestion/edm_individ_data_standardisation_2021-2023.R` each managed dependency checks and logging separately, and the broader cleanup goal was to move the repository toward a single fail-fast setup pattern based on `rv sync`.
 
 ## Environment
 - Module: EDM Ingestion
@@ -30,7 +30,7 @@ The ingestion layer had started to accumulate duplicated startup logic across en
 
 ## Symptoms
 - The two ingestion entry scripts duplicated startup concerns such as dependency checks and logger initialization.
-- The repository already documented `renv::restore()` as the intended dependency bootstrap path, but scripts still needed manual cleanup to fully align with that contract.
+- The repository documents `rv sync` as the dependency bootstrap path, but scripts still needed manual cleanup to fully align with that contract.
 - `fetch_edm_api_data_2024_onwards.R` relied on an implicit `%||%`-style null-coalescing behavior that was not defined locally.
 - There was no reusable helper to standardize startup when migrating the rest of `scripts/R/`.
 
@@ -45,7 +45,7 @@ The ingestion layer had started to accumulate duplicated startup logic across en
 The working fix was to split generic startup from script-specific logic.
 
 - Added `scripts/R/utils/script_setup.R` as the single shared helper for startup concerns.
-- Implemented `check_required_packages(required_packages)` to fail fast with a `renv::restore()` instruction instead of mutating the environment at runtime.
+- Implemented `check_required_packages(required_packages)` to fail fast with an `rv sync` instruction instead of mutating the environment at runtime.
 - Implemented `setup_logging(log_file, console = interactive(), threshold = "DEBUG")` to centralize logger initialization while keeping the existing log-file contract.
 - Refactored both ingestion scripts to:
   - require `here` up front so project-root sourcing is explicit
@@ -73,7 +73,7 @@ check_required_packages <- function(required_packages) {
       paste0(
         "Missing required packages: ",
         paste(missing_packages, collapse = ", "),
-        ". Install project dependencies first, e.g. `renv::restore()`."
+        ". Install project dependencies first with `rv sync`."
       ),
       call. = FALSE
     )
@@ -88,7 +88,7 @@ check_required_packages <- function(required_packages) {
 if (!requireNamespace("here", quietly = TRUE)) {
   stop(
     "Package `here` is required to run this script. ",
-    "Install project dependencies first, e.g. `renv::restore()`.",
+    "Install project dependencies first with `rv sync`.",
     call. = FALSE
   )
 }
@@ -127,14 +127,14 @@ The underlying problem was missing shared tooling. Each script had started to so
 This fix works because it restores one explicit contract:
 
 1. Generic startup lives in one helper rather than drifting across entry scripts.
-2. Missing dependencies now fail clearly and immediately, which matches the repository's documented `renv::restore()` workflow.
+2. Missing dependencies now fail clearly and immediately, which matches the repository's documented `rv sync` workflow.
 3. Logging is initialized consistently without changing the scripts' existing log file paths.
 4. The downloader no longer relies on an implicit operator from an attached package environment.
 5. The pattern is reusable for later migration across `scripts/R/` without changing script-specific business logic.
 
 ## Prevention
 - Treat `scripts/R/utils/script_setup.R` as the only approved place for generic dependency checks and logger initialization.
-- Do not use `install.packages()`, `renv::init()`, or broad `library()` calls inside production pipeline scripts.
+- Do not use `install.packages()`, mutate the project lockfile at runtime, or use broad `library()` calls inside production pipeline scripts.
 - Standardize on explicit `pkg::fn` usage in production scripts so dependencies remain visible and stable.
 - Keep utility files side-effect-light: sourcing a utility file should define helpers, not install packages or start work.
 - Start each production script with:
@@ -143,7 +143,7 @@ This fix works because it restores one explicit contract:
   - a `REQUIRED_PACKAGES` vector
   - `check_required_packages(REQUIRED_PACKAGES)`
   - a `LOG_FILE` constant when the script logs
-- Add a lightweight repository check such as `rg -n "install\\.packages\\(|renv::init\\(" scripts/R` during future cleanup passes.
+- Add a lightweight repository check such as `rg -n "install\\.packages\\(" scripts/R` during future cleanup passes.
 - Migrate the rest of `scripts/R/` in batches, starting with remaining `01_data_ingestion` and `02_data_cleaning` scripts before moving deeper into the pipeline.
 
 ## Related Issues

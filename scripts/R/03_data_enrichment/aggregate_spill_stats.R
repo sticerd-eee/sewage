@@ -1,52 +1,76 @@
-############################################################
+# ==============================================================================
 # Aggregate Spill Statistics
-# Project: Sewage
-# Date: 28/12/2024
+# ==============================================================================
+#
+# Purpose: Aggregate matched event-level discharges to completed yearly, monthly,
+#          and quarterly Site Group panels using the Environment Agency 12/24 method.
+#
 # Author: Jacopo Olivieri
-############################################################
+# Date: 2024-12-28
+# Date Modified: 2026-08-10
+#
+# Inputs:
+#   - data/processed/matched_events_annual_data/matched_events_annual_data.parquet
+#   - data/processed/matched_events_annual_data/site_group_crosswalk.parquet
+#
+# Outputs:
+#   - data/processed/agg_spill_stats/agg_spill_yr.parquet
+#   - data/processed/agg_spill_stats/agg_spill_mo.parquet
+#   - data/processed/agg_spill_stats/agg_spill_qtr.parquet
+#   - output/log/aggregate_spill_stats.log
+#
+# ==============================================================================
 
-#' This script individual sewage overflow spills into total spill counts and
-#' durations based on data affecting the same catchment area.
-
-# Set Up Functions
-############################################################
-
-# Initialise packages from the rv-managed project library
-#' Initialize the R environment with required packages and settings
-#' @return NULL
-initialise_environment <- function() {
-  # Package management is handled by rv
-  
-  # Define required packages
-  required_packages <- c(
-    "rmarkdown", "arrow", "tidyverse", "purrr", "here", "logger", "glue", "fs",
-    "data.table"
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first with `rv sync`.",
+    call. = FALSE
   )
-  
-  # Install and load packages
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
-    }
-    library(pkg, character.only = TRUE)
-  }))
-  
-  # Source shared utilities
-  source(here::here("scripts", "R", "utils", "spill_aggregation_utils.R"))
 }
 
-#' Set up logging configuration
-#' @return NULL
-setup_logging <- function() {
-  log_path <- here::here(
-    "output", "log", "12_aggregate_spill_stats.log"
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow",
+  "data.table",
+  "dplyr",
+  "fs",
+  "glue",
+  "here",
+  "logger",
+  "lubridate",
+  "tibble",
+  "tidyr"
+)
+
+LOG_FILE <- here::here("output", "log", "aggregate_spill_stats.log")
+
+check_required_packages(REQUIRED_PACKAGES)
+
+# Setup Functions
+############################################################
+
+#' Attach packages used unqualified by the aggregation functions
+#' @return NULL invisibly
+initialise_environment <- function() {
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
+    library(pkg, character.only = TRUE)
+  }))
+  source(
+    here::here("scripts", "R", "utils", "spill_aggregation_utils.R"),
+    local = environment(initialise_environment)
   )
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-  
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
+  invisible(NULL)
+}
+
+#' Initialise persistent logging for this script
+#' @return NULL invisibly
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
+  logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
+  invisible(NULL)
 }
 
 
@@ -59,51 +83,139 @@ CONFIG <- list(
     "matched_events_annual_data.parquet"),
   crosswalk_path = here::here(
     "data", "processed", "matched_events_annual_data",
-    "site_works_crosswalk.parquet"),
-  data_path_annual = here::here(
-    "data", "processed", "annual_return_edm.parquet"
-  ),
+    "site_group_crosswalk.parquet"),
   output_dir = here::here("data", "processed", "agg_spill_stats"),
   years = 2021:2024,
   base_year = 2021
 )
 
+INPUT_CONTRACT <- list(
+  events = c(
+    "site_id", "year", "water_company", "start_time", "end_time"
+  ),
+  crosswalk = c(
+    "site_id", "year", "water_company", "annual_status",
+    "spill_hrs_ea", "spill_count_ea"
+  )
+)
+
 # Functions
 ############################################################
 
-#' Load merged individual sewage spill data
+#' Return the column names stored in a Parquet file
+#' @param path Path to a Parquet file
+#' @return Character vector of column names
+parquet_names <- function(path) {
+  arrow::open_dataset(path, format = "parquet")$schema$names
+}
+
+#' Validate a Parquet input against its required columns
+#' @param path Path to a Parquet file
+#' @param required_columns Character vector of required columns
+#' @param label Human-readable input label used in errors
+#' @return TRUE invisibly
+assert_parquet_contract <- function(path, required_columns, label) {
+  if (!file.exists(path)) {
+    stop(glue::glue("{label} input not found: {path}"), call. = FALSE)
+  }
+
+  missing_columns <- setdiff(required_columns, parquet_names(path))
+  if (length(missing_columns) > 0) {
+    stop(
+      glue::glue(
+        "{label} input is missing required columns: ",
+        "{paste(missing_columns, collapse = ', ')}"
+      ),
+      call. = FALSE
+    )
+  }
+
+  invisible(TRUE)
+}
+
+#' Validate both aggregation inputs before loading full data
+#' @param config Aggregation configuration containing both input paths
+#' @return TRUE invisibly
+preflight_inputs <- function(config = CONFIG) {
+  assert_parquet_contract(
+    config$merged_data_path,
+    INPUT_CONTRACT$events,
+    "Event"
+  )
+  assert_parquet_contract(
+    config$crosswalk_path,
+    INPUT_CONTRACT$crosswalk,
+    "Site Group-year crosswalk"
+  )
+  invisible(TRUE)
+}
+
+#' Assert that a data frame contains one row per declared key
+#' @param data Data frame to validate
+#' @param keys Character vector naming the key columns
+#' @param label Human-readable dataset label used in errors
+#' @return TRUE invisibly
+assert_unique_keys <- function(data, keys, label) {
+  missing_keys <- setdiff(keys, names(data))
+  if (length(missing_keys) > 0) {
+    stop(
+      glue::glue(
+        "{label} is missing key columns: ",
+        "{paste(missing_keys, collapse = ', ')}"
+      ),
+      call. = FALSE
+    )
+  }
+
+  if (anyDuplicated(data[keys]) > 0L) {
+    stop(
+      glue::glue("{label} must be unique on: {paste(keys, collapse = ', ')}"),
+      call. = FALSE
+    )
+  }
+
+  invisible(TRUE)
+}
+
+#' Load event-level discharges and Site Group-year metadata
+#'
+#' Reads only the declared input-contract columns. Event rows retain
+#' `site_id`, `year`, `water_company`, `start_time`, and `end_time`; metadata
+#' retains the Site Group-year Annual Status and EA outlet totals.
+#'
 #' @return A list with two elements:
 #' \describe{
-#'   \item{spill_data}{A data frame with site_id, start_time, and end_time}
-#'   \item{metadata}{Works-year crosswalk metadata with EA fallback totals}
+#'   \item{spill_data}{Event-level discharge rows assigned to Site Group.}
+#'   \item{metadata}{Unique Site Group-year-company metadata with Annual Status and EA totals.}
 #' }
 load_data <- function() {
   file_path <- CONFIG$merged_data_path
   crosswalk_path <- CONFIG$crosswalk_path
   logger::log_info("Loading data: {file_path}")
-  logger::log_info("Loading works-year crosswalk: {crosswalk_path}")
-  
-  if (!file.exists(file_path)) {
-    stop(glue::glue("File not found: {file_path}"))
-  }
-  if (!file.exists(crosswalk_path)) {
-    stop(glue::glue("File not found: {crosswalk_path}"))
-  }
+  logger::log_info("Loading Site Group-year crosswalk: {crosswalk_path}")
   
   tryCatch(
     {
-      data <- arrow::read_parquet(file_path) %>%
-        select(site_id, year, water_company, start_time, end_time)
-      crosswalk <- arrow::read_parquet(crosswalk_path) %>%
-        select(
-          site_id, year, water_company, annual_status,
-          spill_hrs_ea, spill_count_ea
-        ) %>%
+      preflight_inputs()
+
+      # Upstream, every monitored outlet is mapped to a Site Group. Outlets with the
+      # same company and normalised EA site name are grouped when corroborated by either
+      # a shared permit or locations within 250 m. A Site Group-level site_id may therefore
+      # cover several outlets. spill_hrs sums outlet durations (outlet-hours), even when
+      # timestamps match; spill_count applies the 12/24 method once to the combined
+      # Site Group-level event stream.
+      data <- arrow::read_parquet(
+        file_path,
+        col_select = dplyr::all_of(INPUT_CONTRACT$events)
+      )
+      crosswalk <- arrow::read_parquet(
+        crosswalk_path,
+        col_select = dplyr::all_of(INPUT_CONTRACT$crosswalk)
+      ) %>%
         rename(
           spill_hrs_ea_crosswalk = spill_hrs_ea,
           spill_count_ea_crosswalk = spill_count_ea
-        ) %>%
-        distinct()
+        )
 
       list(
         spill_data = data,
@@ -119,15 +231,17 @@ load_data <- function() {
   )
 }
 
-#' Aggregate spill data by water company and year/month
-#' @param data Input dataframe containing individual spill data
-#' @return List with aggregated yearly and monthly spill statistics
+#' Aggregate event-level discharges to Site Group-period statistics
+#'
+#' Spill counts apply the 12/24 method once to each combined Site Group event stream.
+#' Spill hours remain additive outlet-hours, including simultaneous outlets.
+#'
+#' @param data Event-level discharge data assigned to Site Group
+#' @return List with yearly, monthly, and quarterly Site Group-period statistics
 aggregate_spills <- function(data) {
-  prepared_data <- prepare_spill_data(data)
+  prepared_data <- prepare_spill_data(data, CONFIG$base_year)
   dt_yearly    <- prepared_data$yearly
   dt_monthly   <- prepared_data$monthly
-  dt_monthly[, month_id := (year - CONFIG$base_year) * 12 + month]
-  dt_monthly[, qtr_id := (year - CONFIG$base_year) * 4 + quarter]
   
   # ---- Yearly ----------------------------------------------------
   yearly_result <- dt_yearly[
@@ -149,7 +263,7 @@ aggregate_spills <- function(data) {
     by = .(water_company, site_id, year, month, month_id)
   ]
 
-  # ---- Quarterly (D13: uses quarter-split data) ----------------
+  # ---- Quarterly (month slices grouped into calendar quarters) --
   quarterly_result <- dt_monthly[
     ,
     .(
@@ -166,26 +280,32 @@ aggregate_spills <- function(data) {
   )
 }
 
-#' Complete and align spill data across time
+#' Complete Site Group observations across yearly, monthly, and quarterly grids
 #' @param data List with components:
 #'   \itemize{
-#'     \item yearly: annual spill data (columns: water_company, site_id, year, spill_count_yr, spill_hrs_yr).
-#'     \item monthly: monthly spill data (columns: water_company, site_id, year, month, spill_count_mo, spill_hrs_mo).
+#'     \item yearly: Site Group-year spill counts and outlet-hours.
+#'     \item monthly: Site Group-month spill counts and outlet-hours.
+#'     \item quarterly: Site Group-quarter spill counts and outlet-hours.
 #'   }
-#' @param metadata site metadata with annual spill totals
+#' @param metadata Unique Site Group-year metadata with Annual Status and EA totals
 #' @return List with:
 #'   \itemize{
-#'     \item yearly: completed yearly data.
-#'     \item monthly: completed monthly data.
+#'     \item yearly: completed Site Group-year observations.
+#'     \item monthly: completed Site Group-month observations with calendar columns and month_id.
+#'     \item quarterly: completed Site Group-quarter observations with calendar columns and qtr_id.
 #'   }
-complete_data_observations <- function(
-    data, metadata = data$metadata) {
+complete_data_observations <- function(data, metadata) {
   metadata <- metadata %>%
     select(
       site_id, year, water_company, annual_status,
       spill_count_ea_crosswalk, spill_hrs_ea_crosswalk
-    ) %>%
-    distinct()
+    )
+
+  assert_unique_keys(
+    metadata,
+    c("site_id", "year", "water_company"),
+    "Site Group-year metadata"
+  )
 
   reporting_sites <- metadata %>%
     filter(.data$annual_status != "absent") %>%
@@ -196,6 +316,10 @@ complete_data_observations <- function(
     distinct(data$monthly, site_id, water_company),
     distinct(data$quarterly, site_id, water_company)
   )
+
+  event_site_years <- data$yearly %>%
+    distinct(site_id, year, water_company) %>%
+    mutate(has_event_data = TRUE)
 
   all_sites <- bind_rows(reporting_sites, event_sites) %>%
     filter(!is.na(.data$site_id), !is.na(.data$water_company)) %>%
@@ -215,9 +339,10 @@ complete_data_observations <- function(
       by = c("site_id", "year", "water_company")
     ) %>%
     mutate(
-      spill_count_yr = dplyr::coalesce(
-        as.numeric(.data$spill_count_yr),
-        .data$spill_count_ea_crosswalk
+      spill_count_yr = dplyr::case_when(
+        !is.na(.data$spill_count_yr) ~ as.numeric(.data$spill_count_yr),
+        .data$annual_status == "reported_zero" ~ 0,
+        TRUE ~ NA_real_
       ),
       spill_hrs_yr = dplyr::coalesce(
         as.numeric(.data$spill_hrs_yr),
@@ -245,18 +370,29 @@ complete_data_observations <- function(
       metadata,
       by = c("site_id", "year", "water_company")
     ) %>%
+    left_join(
+      event_site_years,
+      by = c("site_id", "year", "water_company")
+    ) %>%
     mutate(
-      spill_count_mo = dplyr::coalesce(
-        as.numeric(.data$spill_count_mo),
-        .data$spill_count_ea_crosswalk
+      can_zero_fill = dplyr::coalesce(
+        .data$annual_status == "reported_zero" |
+          (.data$annual_status == "reported_positive" & .data$has_event_data),
+        FALSE
       ),
-      spill_hrs_mo = dplyr::coalesce(
-        as.numeric(.data$spill_hrs_mo),
-        .data$spill_hrs_ea_crosswalk
+      spill_count_mo = dplyr::if_else(
+        is.na(.data$spill_count_mo) & .data$can_zero_fill,
+        0,
+        as.numeric(.data$spill_count_mo)
+      ),
+      spill_hrs_mo = dplyr::if_else(
+        is.na(.data$spill_hrs_mo) & .data$can_zero_fill,
+        0,
+        as.numeric(.data$spill_hrs_mo)
       )
     ) %>%
     select(
-      site_id, water_company, month_id, annual_status,
+      site_id, water_company, year, month, month_id, annual_status,
       spill_count_mo, spill_hrs_mo,
       spill_count_ea_crosswalk, spill_hrs_ea_crosswalk
     )
@@ -277,21 +413,48 @@ complete_data_observations <- function(
       metadata,
       by = c("site_id", "year", "water_company")
     ) %>%
+    left_join(
+      event_site_years,
+      by = c("site_id", "year", "water_company")
+    ) %>%
     mutate(
-      spill_count_qt = dplyr::coalesce(
-        as.numeric(.data$spill_count_qt),
-        .data$spill_count_ea_crosswalk
+      can_zero_fill = dplyr::coalesce(
+        .data$annual_status == "reported_zero" |
+          (.data$annual_status == "reported_positive" & .data$has_event_data),
+        FALSE
       ),
-      spill_hrs_qt = dplyr::coalesce(
-        as.numeric(.data$spill_hrs_qt),
-        .data$spill_hrs_ea_crosswalk
+      spill_count_qt = dplyr::if_else(
+        is.na(.data$spill_count_qt) & .data$can_zero_fill,
+        0,
+        as.numeric(.data$spill_count_qt)
+      ),
+      spill_hrs_qt = dplyr::if_else(
+        is.na(.data$spill_hrs_qt) & .data$can_zero_fill,
+        0,
+        as.numeric(.data$spill_hrs_qt)
       )
     ) %>%
     select(
-      site_id, water_company, qtr_id, annual_status,
+      site_id, water_company, year, quarter, qtr_id, annual_status,
       spill_count_qt, spill_hrs_qt,
       spill_count_ea_crosswalk, spill_hrs_ea_crosswalk
     )
+
+  assert_unique_keys(
+    completed_yearly,
+    c("site_id", "water_company", "year"),
+    "Completed yearly output"
+  )
+  assert_unique_keys(
+    completed_monthly,
+    c("site_id", "water_company", "month_id"),
+    "Completed monthly output"
+  )
+  assert_unique_keys(
+    completed_quarterly,
+    c("site_id", "water_company", "qtr_id"),
+    "Completed quarterly output"
+  )
   
   list(
     yearly    = completed_yearly,
@@ -300,11 +463,27 @@ complete_data_observations <- function(
   )
 }
 
-#' Export function to save aggregated results
-#' @param final_results List containing components $yearly and $monthly
+#' Export the completed Site Group-period aggregates
+#' @param final_results List containing yearly, monthly, and quarterly components
 #' @return NULL (invisibly)
 export_results <- function(final_results) {
   output_dir <- CONFIG$output_dir
+
+  assert_unique_keys(
+    final_results$yearly,
+    c("site_id", "water_company", "year"),
+    "Yearly export"
+  )
+  assert_unique_keys(
+    final_results$monthly,
+    c("site_id", "water_company", "month_id"),
+    "Monthly export"
+  )
+  assert_unique_keys(
+    final_results$quarterly,
+    c("site_id", "water_company", "qtr_id"),
+    "Quarterly export"
+  )
   
   if (!dir.exists(output_dir)) {
     fs::dir_create(output_dir, recurse = TRUE)
@@ -335,14 +514,10 @@ export_results <- function(final_results) {
 # Main execution
 ############################################################
 
-# Note: split_monthly_records() function is imported from shared utilities
-# Note: prepare_spill_data() function is imported from shared utilities
-# Note: count_spills() function is imported from shared utilities
-
 main <- function() {
   # Setup
   initialise_environment()
-  setup_logging()
+  initialise_logging()
   
   # Load and process data
   logger::log_info("Starting data processing pipeline")
