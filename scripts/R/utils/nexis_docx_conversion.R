@@ -5,9 +5,8 @@
 # Author: Ana Werneck
 ############################################################
 
-#this script provides a function to convert Nexis .docx output to tabular data
-#(counterpart to nexis_pdf_conversion.R, for use when LexisNexis is exported as
-#one article per .docx file rather than as combined PDFs)
+#this script provides a function to convert Nexis .docx output to tabular data,
+#for LexisNexis exports with one article per .docx file
 
 #  extract_nexis_zips()  - unzip the downloaded .docx exports under collision-safe
 #                          names (needed because macOS is case-insensitive)
@@ -32,8 +31,8 @@ extract_nexis_zips <- function(zip_paths, dest_dir) {
 }
  
 #reading .docx nexis output, and converting it to clean dataframe
-#(note: unlike the PDF version this takes a FOLDER, since each article is its
-#own file; the files themselves give the article boundaries)
+#(note: this takes a FOLDER, since each article is its own file; the files
+#themselves give the article boundaries)
 nexis_docx_to_table <- function(docx_folder_path){
  
   #initiate an empty dataframe

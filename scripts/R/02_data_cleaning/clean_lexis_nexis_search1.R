@@ -1,116 +1,148 @@
-############################################################
-# Clean LexisNexis Search_1 PDF Data
-# Project: Sewage
-# Date: 09/01/2026
-# Author: Jacopo Olivieri
-############################################################
+# ==============================================================================
+# LexisNexis Search_1 DOCX Article Cleaner
+# ==============================================================================
+#
+# Purpose: Convert LexisNexis search_1 DOCX exports (one article per file) into
+#          an article-level dataset, apply within-body de-duplication, and
+#          aggregate to monthly counts for the `05_news` analysis.
+#
+# Author: Ana Werneck
+# Date: 2026-07-16
+# Date Modified: 2026-10-14
+#
+# Inputs:
+#   - data/raw/lexis_nexis/search_1_zip/*.zip
+#   - scripts/R/utils/nexis_docx_conversion.R
+#
+# Outputs:
+#   - data/processed/lexis_nexis/search1_articles.parquet
+#   - data/processed/lexis_nexis/search1_monthly.parquet
+#   - output/figures/search1_monthly.png
+#   - output/log/clean_lexis_nexis_search1.log
+#
+# Source:
+#   - LexisNexis Academic database
+#   - search_1: hlead(sewage) AND incident AND hlead(leak OR overflow); UK sources
+#
+# ==============================================================================
 
-#' This script converts LexisNexis search_1 PDF files to article-level data
-#' and aggregates to monthly counts for merging with main analysis datasets.
-#' The search_1 PDFs are pre-filtered to UK sources only.
-#' @source LexisNexis Academic database
+if (!requireNamespace("here", quietly = TRUE)) {
+  stop(
+    "Package `here` is required to run this script. ",
+    "Install project dependencies first with `rv sync`.",
+    call. = FALSE
+  )
+}
+
+source(here::here("scripts", "R", "utils", "script_setup.R"), local = TRUE)
+
+REQUIRED_PACKAGES <- c(
+  "arrow", 
+  "dplyr", 
+  "ggplot2", 
+  "glue",
+  "logger", 
+  "lubridate", 
+  "officer", 
+  "stringr"
+)
+
+LOG_FILE <- here::here("output", "log", "clean_lexis_nexis_search1.log")
+
+check_required_packages(REQUIRED_PACKAGES)
 
 # Configuration
 ############################################################
 
 CONFIG <- list(
   base_year = 2021,
-  input_dir = here::here("data", "raw", "lexis_nexis", "search_1"),
+  zip_dir = here::here("data", "raw", "lexis_nexis", "search_1_zip"),
+  # Extracted .docx files go to a session temp folder, never under data/raw
+  input_dir = file.path(tempdir(), "nexis_search_1_docx"),
   output_dir = here::here("data", "processed", "lexis_nexis"),
-  pdf_converter_path = here::here("scripts", "R", "02_data_cleaning", "nexis_pdf_conversion.R"),
-  pdf_files = c(
-    "search_1_1.PDF",
-    "search_1_2.PDF",
-    "search_1_3.PDF"
-  )
+  figure_dir = here::here("output", "figures"),
+  docx_converter_path = here::here("scripts", "R", "utils", "nexis_docx_conversion.R")
 )
-
+ 
 # Setup Functions
 ############################################################
-
+ 
 #' Initialize the R environment with required packages and settings
 #' @return NULL
 initialise_environment <- function() {
-  required_packages <- c(
-    "dplyr",      # Data manipulation
-    "tidyr",      # Data reshaping
-    "stringr",    # String operations
-    "lubridate",  # Date handling
-    "here",       # Project-rooted paths
-    "logger",     # Structured logging
-    "glue",       # String interpolation
-    "arrow",      # Parquet I/O
-    "pdftools"    # PDF text extraction (required by nexis_pdf_conversion.R)
-  )
-
-  # Install and load packages
-  invisible(sapply(required_packages, function(pkg) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg)
-    }
+  invisible(lapply(REQUIRED_PACKAGES, function(pkg) {
     library(pkg, character.only = TRUE)
   }))
 }
-
-#' Set up logging configuration
+ 
+#' Initialise logging for this script
 #' @return NULL
-setup_logging <- function() {
-  log_path <- here::here("output", "log", "clean_lexis_nexis_search1.log")
-  dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
-
-  logger::log_appender(logger::appender_file(log_path))
-  logger::log_layout(logger::layout_glue_colors)
-  logger::log_threshold(logger::DEBUG)
+initialise_logging <- function() {
+  setup_logging(log_file = LOG_FILE, console = interactive(), threshold = "DEBUG")
+  logger::log_info("Logging to {LOG_FILE}")
   logger::log_info("Script started at {Sys.time()}")
-}
+} 
 
 # Data Loading Functions
 ############################################################
-
-#' Source the PDF conversion function from the co-located conversion helper
+ 
+#' Source the DOCX helper functions (extractor + converter) from the 
+#' co-located conversion helper
 #' @return NULL
-load_pdf_converter <- function() {
-  if (!file.exists(CONFIG$pdf_converter_path)) {
-    err_msg <- glue::glue("PDF converter script not found: {CONFIG$pdf_converter_path}")
+load_docx_converter <- function() {
+  if (!file.exists(CONFIG$docx_converter_path)) {
+    err_msg <- glue::glue("DOCX converter script not found: {CONFIG$docx_converter_path}")
     logger::log_error(err_msg)
     stop(err_msg)
   }
-
-  source(CONFIG$pdf_converter_path)
-  logger::log_info("PDF converter function loaded from {CONFIG$pdf_converter_path}")
+ 
+  source(CONFIG$docx_converter_path)
+  logger::log_info("DOCX converter function loaded from {CONFIG$docx_converter_path}")
 }
-
-#' Load and convert all search_1 PDF files to article-level data
-#' @return Data frame of articles with columns: search_term, date, source, heading, article, text
-load_pdf_data <- function() {
-  pdf_paths <- file.path(CONFIG$input_dir, CONFIG$pdf_files)
-
-  # Check all files exist
-  missing_files <- pdf_paths[!file.exists(pdf_paths)]
-  if (length(missing_files) > 0) {
-    err_msg <- glue::glue("PDF files not found: {paste(missing_files, collapse = ', ')}")
+ 
+#' Load and convert all search_1 DOCX files to article-level data
+#' @return Data frame of articles with columns: file, source, date, heading, body
+load_docx_data <- function() {
+  if (!dir.exists(CONFIG$input_dir)) {
+    err_msg <- glue::glue("Input folder not found: {CONFIG$input_dir}")
     logger::log_error(err_msg)
     stop(err_msg)
   }
-
-  logger::log_info("Converting {length(pdf_paths)} PDF files to article data")
-
-  # Use the nexis_pdf_to_table function (loaded via source())
-  articles <- nexis_pdf_to_table(pdf_paths)
-
-  logger::log_info("Extracted {nrow(articles)} articles from PDFs")
+ 
+  n_files <- length(list.files(CONFIG$input_dir, pattern = "\\.docx$", ignore.case = TRUE))
+  logger::log_info("Converting {n_files} DOCX files from {CONFIG$input_dir}")
+ 
+  # Use the nexis_docx_to_table function (loaded via source())
+  articles <- nexis_docx_to_table(CONFIG$input_dir)
+ 
+  logger::log_info("Extracted {nrow(articles)} articles from DOCX files")
   return(articles)
 }
-
+ 
 # Data Processing Functions
 ############################################################
-
+ 
+#' Remove duplicated text within each article body.
+#' Splits each body into sentences, drops exact repeats, rejoins. Website
+#' furniture is NOT touched here.
+#' @param df Article-level data frame with a `body` column
+#' @return Data frame with de-duplicated bodies
+dedup_article_bodies <- function(df) {
+  dedup_one <- function(body) {
+    sentences <- stringr::str_split(body, "(?<=\\.)\\s+")[[1]]
+    sentences <- sentences[!duplicated(sentences)]
+    stringr::str_squish(paste(sentences, collapse = " "))
+  }
+  df %>%
+    mutate(body = vapply(body, dedup_one, character(1)))
+}
+ 
 #' Add time identifiers to article data
 #' @param df Data frame with date column
 #' @return Data frame with year, month, month_id, qtr_id columns added
 add_time_identifiers <- function(df) {
   base_year <- CONFIG$base_year
-
+ 
   df %>%
     mutate(
       year = lubridate::year(date),
@@ -119,8 +151,8 @@ add_time_identifiers <- function(df) {
       qtr_id = (year - base_year) * 4 + lubridate::quarter(date)
     )
 }
-
-#' Aggregate articles to monthly counts
+ 
+#' Aggregate articles to national monthly counts
 #' @param df Data frame with time identifiers
 #' @return Data frame with monthly article counts
 aggregate_monthly <- function(df) {
@@ -132,20 +164,68 @@ aggregate_monthly <- function(df) {
     ) %>%
     arrange(year, month)
 }
-
+ 
+# Plotting Functions
+############################################################
+ 
+#' Plot the monthly coverage series and save it to output/figures
+#' @param monthly_df Monthly aggregated data frame
+#' @return NULL
+plot_monthly_counts <- function(monthly_df) {
+  dir.create(CONFIG$figure_dir, recursive = TRUE, showWarnings = FALSE)
+ 
+  # Build a date column for the x-axis (first of each month)
+  monthly_df <- monthly_df %>%
+    mutate(date = as.Date(paste(year, month, "01", sep = "-")))
+ 
+  p <- ggplot(monthly_df, aes(x = date, y = article_count)) +
+    geom_line() +
+    geom_point(size = 0.8) +
+    labs(
+      x = "Date",
+      y = "Article Count",
+      title = "UK Media Coverage of Sewage Over Time",
+      subtitle = "LexisNexis search_1 monthly article counts"
+    ) +
+    theme_minimal() +
+    theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+ 
+  fig_path <- file.path(CONFIG$figure_dir, "search1_monthly.png")
+  ggsave(fig_path, plot = p, width = 9, height = 5, dpi = 150)
+  logger::log_info("Monthly time-series plot saved to {fig_path}")
+ 
+  # Return the plot object so it also displays in interactive use
+  invisible(p)
+}
+ 
 # Export Functions
 ############################################################
-
+ 
 #' Export processed data to Parquet files
-#' @param articles_df Article-level data frame
+#' @param articles_df Cleaned article-level data frame
 #' @param monthly_df Monthly aggregated data frame
 #' @return NULL
 export_data <- function(articles_df, monthly_df) {
   # Create output directory if needed
   dir.create(CONFIG$output_dir, recursive = TRUE, showWarnings = FALSE)
 
+  articles_path <- file.path(CONFIG$output_dir, "search1_articles.parquet")
+  monthly_path  <- file.path(CONFIG$output_dir, "search1_monthly.parquet")
+
+  # Export cleaned article-level data
+  tryCatch(
+    {
+      arrow::write_parquet(articles_df, articles_path)
+      logger::log_info("Cleaned article-level data exported to {articles_path}")
+    },
+    error = function(e) {
+      err_msg <- glue::glue("Failed to export article data: {e$message}")
+      logger::log_error(err_msg)
+      stop(err_msg)
+    }
+  )
+ 
   # Export monthly aggregates
-  monthly_path <- file.path(CONFIG$output_dir, "search1_monthly.parquet")
   tryCatch(
     {
       arrow::write_parquet(monthly_df, monthly_path)
@@ -157,82 +237,58 @@ export_data <- function(articles_df, monthly_df) {
       stop(err_msg)
     }
   )
-
-  # Export article-level data
-  articles_path <- file.path(CONFIG$output_dir, "search1_articles.parquet")
-  tryCatch(
-    {
-      arrow::write_parquet(articles_df, articles_path)
-      logger::log_info("Article-level data exported to {articles_path}")
-    },
-    error = function(e) {
-      err_msg <- glue::glue("Failed to export article data: {e$message}")
-      logger::log_error(err_msg)
-      stop(err_msg)
-    }
-  )
 }
-
+ 
 # Main Execution
 ############################################################
-
+ 
 #' Main execution function
 #' @return NULL
 main <- function() {
   # Setup
   initialise_environment()
-  setup_logging()
+  initialise_logging()
+ 
+  # Load DOCX converter function
+  load_docx_converter()
 
-  # Load PDF converter function
-  load_pdf_converter()
-
-  # Load and convert PDFs
-  articles_raw <- load_pdf_data()
-
+  # Extract the downloaded .zip exports into an emptied input_dir under
+  # collision-safe names, so files from an earlier export never linger
+  unlink(CONFIG$input_dir, recursive = TRUE)
+  zip_paths <- list.files(CONFIG$zip_dir, pattern = "\\.zip$",
+                          full.names = TRUE, ignore.case = TRUE)
+  extract_nexis_zips(zip_paths, CONFIG$input_dir)
+  logger::log_info("Extracted {length(zip_paths)} zip(s) into {CONFIG$input_dir}")
+ 
+  # Load and convert DOCX files
+  articles_raw <- load_docx_data()
+ 
+  # Remove within-body duplicated text
+  articles <- dedup_article_bodies(articles_raw)
+ 
   # Add time identifiers
-  articles <- add_time_identifiers(articles_raw)
-
+  articles <- add_time_identifiers(articles)
+ 
   # Log date range
   date_range <- range(articles$date, na.rm = TRUE)
   logger::log_info("Article date range: {date_range[1]} to {date_range[2]}")
-
+ 
   # Aggregate to monthly
   monthly <- aggregate_monthly(articles)
-  logger::log_info("Created monthly aggregates: {nrow(monthly)} months")
 
   # Export results
   export_data(articles, monthly)
-
+ 
+  # Plot the monthly series
+  plot_monthly_counts(monthly)
+ 
   logger::log_info("Script finished at {Sys.time()}")
-
-  # Return monthly data invisibly for interactive use
-  invisible(monthly)
+ 
+  # Return articles invisibly for interactive use
+  invisible(articles)
 }
-
+ 
 # Execute main function if script is run directly
 if (sys.nframe() == 0) {
   main()
 }
-
-library(tidyverse)
-library(ggplot2)
-library(here)
-
-# Load the monthly data
-news <- import(here("data", "processed", "lexis_nexis", "search1_monthly.parquet"))
-
-# Create date column for plotting
-news$date <- as.Date(paste(news$year, news$month, "01", sep = "-"))
-
-# Plot time series
-ggplot(news, aes(x = date, y = article_count)) +
-  geom_line() +
-  geom_point(size = 0.8) +
-  labs(
-    x = "Date",
-    y = "Article Count",
-    title = "UK Media Coverage of Sewage Over Time",
-    subtitle = "LexisNexis search_1 monthly article counts"
-  ) +
-  theme_minimal() +
-  theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
