@@ -40,7 +40,7 @@ The main analysis scripts live separately in `scripts/R/09_analysis/`, while val
 - `combine_individ_edm_data.R`: combines cleaned historical EDM parquet files.
 - `combine_api_edm_data_2024_onwards.R`: combines cleaned API parquet files.
 - `clean_rainfall_data.R`: prepares rainfall inputs and site-grid lookup files.
-- `clean_lexis_nexis_search1.R`: converts LexisNexis search_1 PDFs to article-level data and aggregates to monthly counts (`search1_monthly.parquet`), consumed by the `05_news` analysis. Sources the helper `nexis_pdf_conversion.R`, which is not run standalone.
+- `clean_lexis_nexis_search1.R`: converts the LexisNexis search_1 DOCX exports (one article per file, in `data/raw/lexis_nexis/search_1_zip/`) to article-level data (`search1_articles.parquet`) and aggregates to monthly counts (`search1_monthly.parquet`), consumed by the `05_news` analysis. Sources the helper `scripts/R/utils/nexis_docx_conversion.R`, which is not run standalone.
 
 ### 03_data_enrichment
 
@@ -303,7 +303,7 @@ model grid.
 8. `process_edm_api_json_to_parquet_2024_onwards.R` — process raw API JSON snapshots into parquet.
 9. `combine_individ_edm_data.R` — combine the 2021–2024 individual EDM parquet files.
 10. `combine_api_edm_data_2024_onwards.R` — combine the 2024+ API parquet files.
-11. `clean_lexis_nexis_search1.R` — convert LexisNexis search_1 PDFs to article-level data and monthly counts (sources the `nexis_pdf_conversion.R` helper); feeds the `05_news` analysis.
+11. `clean_lexis_nexis_search1.R` — convert the LexisNexis search_1 DOCX exports to article-level data and monthly counts (sources the `nexis_docx_conversion.R` helper); feeds the `05_news` analysis.
 
 ### Layer 03: Data Enrichment
 

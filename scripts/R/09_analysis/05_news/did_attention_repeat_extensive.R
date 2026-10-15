@@ -71,9 +71,6 @@ CONFIG <- list(
   ),
   event_months = c(post_march_2021 = "2021-03-01", post_august_2022 = "2022-08-01"),
   fixed_effects = "repeat_id + month_index + msoa^year",
-  # Conley spatial standard errors, uniform kernel (fixest default); the
-  # panel carries latitude/longitude, which conley() detects by name.
-  conley_cutoff_km = 1,
   fixef_rm = "perfect_fit"
 )
 
@@ -176,8 +173,7 @@ prepare_analysis_data <- function(market, attention, lookup, comparison) {
 fit_attention <- function(data, market, measure) {
   term <- paste0("near_bin:", measure)
   formula <- stats::as.formula(paste("log_price ~", term, "|", CONFIG$fixed_effects))
-  vcov <- fixest::conley(cutoff = CONFIG$conley_cutoff_km)
-  model <- fixest::feols(formula, data = data, vcov = vcov, fixef.rm = CONFIG$fixef_rm)
+  model <- fixest::feols(formula, data = data, vcov = spatial_vcov(), fixef.rm = CONFIG$fixef_rm)
   if (!is.finite(stats::coef(model)[term]) || !is.finite(fixest::se(model)[term])) {
     stop("Unidentified attention effect: ", market, " / ", term, call. = FALSE)
   }
@@ -263,8 +259,8 @@ export_table <- function(models, comparison) {
     "March 2021 and from August 2022 inclusive. All regressions include property, ",
     "calendar-month and MSOA-by-year fixed effects, which absorb the $\\\\mathrm{Near}_i$ ",
     "and $A_t$ main effects, and no property controls. Observations exclude singletons ",
-    "removed by the estimator. Conley standard errors with a ", CONFIG$conley_cutoff_km,
-    " km cutoff are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+    "removed by the estimator. ", spatial_se_note(),
+    " *** p<0.01, ** p<0.05, * p<0.1.}},"
   )
 
   table <- modelsummary::modelsummary(

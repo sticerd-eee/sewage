@@ -1867,6 +1867,23 @@ force_source = false
 dependencies = []
 
 [[packages]]
+name = "officer"
+version = "0.7.4"
+source = { repository = "https://packagemanager.posit.co/cran/2026-05-12" }
+force_source = false
+dependencies = [
+    "cli",
+    "dplyr",
+    "openssl",
+    "R6",
+    "ragg",
+    "tidyr",
+    "uuid",
+    { name = "xml2", requirement = "(>= 1.1.0)" },
+    { name = "zip", requirement = "(>= 2.1.0)" },
+]
+
+[[packages]]
 name = "openssl"
 version = "2.4.0"
 source = { repository = "https://packagemanager.posit.co/cran/2026-05-12" }
