@@ -4,6 +4,8 @@ The search 1 article data now come from the DOCX exports cleaned by `scripts/R/0
 
 The DOCX corpus has 1,399 articles, against 1,322 from the PDFs, and runs to July 2026 rather than July 2025. Every analysis stops in 2024, so the extension never enters an estimate. Over 2014–2024 the two monthly series have a correlation of 0.993. The new series is 5–9 per cent lower in 2021–2024 (for example, 246 rather than 260 articles in 2023). The August 2022 peak falls from 54 to 46 articles.
 
+Both corpora contain repeated articles, mostly the same story carried by several local papers. These are kept on purpose (sticerd-eee/sewage#24). In the DOCX data, 179 rows repeat another article's headline, date and body exactly. On headline and date alone, 266 rows repeat another article, against 229 in the PDF data.
+
 ## Method
 
 Every script that reads the article counts was run twice with the same code: once on the PDF-era data and once on the DOCX-era data. The code was `main` after #41 and #42, plus this branch's switch of `did_attention_repeat_extensive.R` to `spatial_vcov()`. The windowed scripts ran before their "prior" twins, as in the 27 September Overleaf sync, because both write four of the same table files.
@@ -33,14 +35,14 @@ Scripts run (16):
 | `did_articles_prior_radius_robustness` | Decks | One cell changes stars: sales, 1,000 m, LSOA FE, 0.001* → 0.001**. |
 | `did_articles_prior_extensive_radius_robustness` | Decks | Identical. |
 | `did_articles_prior_extensive_salience_groups` | Short deck | One cell changes stars: rentals, Inland, Near × log(Articles), 0.0018 (p = 0.099) → 0.0018 (p = 0.105), so 0.002* → 0.002. |
-| `did_articles_windowed_prior_extensive_slide` | Short deck | All coefficients round to the same values. Three SEs rise by 0.001, and there are no star changes. The implied rental effects grow slightly (IQR, 6m window: −0.16 → −0.23 per cent with MSOA FE). |
+| `did_articles_windowed_prior_extensive_slide` | Short deck | One coefficient changes: rentals, 3-month window, MSOA FE, −0.001 → −0.002. Three SEs rise by 0.001, and there are no star changes. The implied rental effects grow slightly (IQR, 3-month window: −0.16 → −0.23 per cent with MSOA FE). |
 | `did_attention_repeat_extensive` | Short deck | Identical to three decimals. Rentals log(Articles): −0.0080 (0.0042) → −0.0084 (0.0044), still significant at 10 per cent. |
 | `extensive_margin_news_coefficients_{lsoa,msoa}` and their slide versions | Decks | Visually identical. |
 | `lagged_attention_extensive_response_slides` | Short deck | Visually identical. The cumulative-coverage points move by about 0.01 to 0.02 pp. |
 
 ## All tables
 
-There are 47 tables. Three are identical. In the other 44, 460 of 1,176 coefficient cells move in at least one printed digit of the estimate or its SE, and 37 cells change significance level.
+There are 49 tables. Three are identical and 46 differ. Two of them, `did_articles_lagged_sales_grid` and `did_articles_windowed_prior_comparison`, use a layout that cannot be compared cell by cell. Across the other 47, 460 of 1,176 coefficient cells move in at least one printed digit of the estimate or its SE, and 37 cells change significance level.
 - **Windowed-article tables:** 33 of the 37 star changes are here, with 422 of 968 cells changed. Windowed counts sum only the most recent 3 to 12 months, where the two series differ most. Apart from the slide table, none of these is used in the paper or decks.
 - **The other tables:** 38 of 208 cells change and 4 change stars. Two of those are listed above. The other two are `did_articles_lag4_prior` (rentals column 6, log articles at a four-month lag, 0.020*** → 0.020**) and `did_articles_prior_1000m` (column 6, the same cell as the radius-robustness change).
 
@@ -54,7 +56,10 @@ The note to the paper figure `fig:news-desc` (`02_background_context.tex`) says 
 
 - Snapshots of every affected output, from before the reruns, the PDF-era run and the DOCX-era run, are in `output/_lexisnexis_switch_2026-10-14/`.
 - The PDF-era data files are in `data/processed/lexis_nexis/_pdf_backup/`.
-- Both folders will be deleted once this switch is merged.
+- Both folders will be deleted once this switch is merged. So will these files left over from the RA's earlier runs:
+  - `articles_clean.parquet` and `articles_clean_monthly.parquet` in `data/processed/lexis_nexis/`, which are identical to the new files
+  - the extracted files in `data/raw/lexis_nexis/search_1_docx/`
+  - the empty `extraction` file in `data/raw/lexis_nexis/search_1_zip/`
 
 ## Appendix: cell-level comparison
 
