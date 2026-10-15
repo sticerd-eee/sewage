@@ -53,7 +53,6 @@ nexis_docx_to_table <- function(docx_folder_path){
                                     full.names = TRUE, ignore.case = TRUE)
  
   for (i in docx_file_path_list) {
-
     #wrap each file so one bad file doesn't abort the whole run
     tryCatch({
  

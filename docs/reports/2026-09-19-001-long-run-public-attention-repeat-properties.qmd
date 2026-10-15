@@ -2164,7 +2164,7 @@ export_zip_listing_hash <- function(zip_dir) {
 }
 
 # Provenance rows for the article corpus: the article-level parquet (tolerant of
-# absence), the listing row and one row per zip (hashed from the bytes, not listed).
+# absence), the listing row and one row per zip (hashed from the bytes).
 export_zip_provenance <- function(
   zip_dir,
   articles_path,

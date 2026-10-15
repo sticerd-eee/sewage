@@ -57,7 +57,6 @@ check_required_packages(REQUIRED_PACKAGES)
 CONFIG <- list(
   base_year = 2021,
   zip_dir = here::here("data", "raw", "lexis_nexis", "search_1_zip"),
-  # Extracted .docx files go to a session temp folder, never under data/raw
   input_dir = file.path(tempdir(), "nexis_search_1_docx"),
   output_dir = here::here("data", "processed", "lexis_nexis"),
   figure_dir = here::here("output", "figures"),
@@ -252,8 +251,7 @@ main <- function() {
   # Load DOCX converter function
   load_docx_converter()
 
-  # Extract the downloaded .zip exports into an emptied input_dir under
-  # collision-safe names, so files from an earlier export never linger
+  # Extract the downloaded .zip exports into a fresh input_dir under collision-safe names
   unlink(CONFIG$input_dir, recursive = TRUE)
   zip_paths <- list.files(CONFIG$zip_dir, pattern = "\\.zip$",
                           full.names = TRUE, ignore.case = TRUE)
