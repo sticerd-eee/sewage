@@ -257,12 +257,25 @@ main <- function() {
   unlink(CONFIG$input_dir, recursive = TRUE)
   zip_paths <- list.files(CONFIG$zip_dir, pattern = "\\.zip$",
                           full.names = TRUE, ignore.case = TRUE)
-  extract_nexis_zips(zip_paths, CONFIG$input_dir)
+  if (length(zip_paths) == 0) {
+    err_msg <- glue::glue("No .zip exports found in {CONFIG$zip_dir}")
+    logger::log_error(err_msg)
+    stop(err_msg)
+  }
+  n_docx <- extract_nexis_zips(zip_paths, CONFIG$input_dir)
   logger::log_info("Extracted {length(zip_paths)} zip(s) into {CONFIG$input_dir}")
- 
+
   # Load and convert DOCX files
   articles_raw <- load_docx_data()
- 
+  if (NROW(articles_raw) != n_docx || anyNA(articles_raw$date)) {
+    err_msg <- glue::glue(
+      "Parsed {NROW(articles_raw)} articles ({sum(is.na(articles_raw$date))} undated) ",
+      "from {n_docx} DOCX files; nothing exported"
+    )
+    logger::log_error(err_msg)
+    stop(err_msg)
+  }
+
   # Remove within-body duplicated text
   articles <- dedup_article_bodies(articles_raw)
  

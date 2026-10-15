@@ -26,8 +26,10 @@ extract_nexis_zips <- function(zip_paths, dest_dir) {
       utils::unzip(zip_path, files = entry, exdir = tmp)
       file.copy(file.path(tmp, entry),
                 file.path(dest_dir, sprintf("%04d.docx", k)), overwrite = TRUE)
+      unlink(tmp, recursive = TRUE)
     }
   }
+  k
 }
  
 #reading .docx nexis output, and converting it to clean dataframe
@@ -37,10 +39,7 @@ nexis_docx_to_table <- function(docx_folder_path){
  
   #initiate an empty dataframe
   news <- NULL
- 
-  #a counter to print progress (useful for long lists)
-  counter <- 0
- 
+
   #a date paragraph starts with a month name, has an optional day, then a year.
   #matches all the formats seen in the data:
   #  "November 28, 2010"  "March 12 1989, Sunday"  "July 2024"
@@ -54,10 +53,7 @@ nexis_docx_to_table <- function(docx_folder_path){
                                     full.names = TRUE, ignore.case = TRUE)
  
   for (i in docx_file_path_list) {
- 
-    #counter update
-    counter <- counter + 1
- 
+
     #wrap each file so one bad file doesn't abort the whole run
     tryCatch({
  
@@ -122,8 +118,6 @@ nexis_docx_to_table <- function(docx_folder_path){
     }, error = function(e) {
       message(paste("FAILED:", basename(i), "-", conditionMessage(e)))
     })
- 
-    print(paste("processed", counter, "file[s]", sep = " "))
   }
  
   return(news)
