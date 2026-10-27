@@ -101,6 +101,10 @@ docs/ideas/
 lma/
 _old/
 
+# Retired analysis scripts, kept locally only
+/scripts/R/09_analysis/06_upstream_downstream/Archive/
+/scripts/R/09_analysis/08_rainfall_hydraulic_iv/archive/
+
 # Embedded subprojects blocked entirely
 RiverNetworks/
 upstream_downstream/
