@@ -8,7 +8,9 @@
 #          each overflow weighted by the inverse of its along-river distance.
 #          Panel A: Sales (log house prices), Panel B: Rentals (log rental
 #          prices). Each panel includes OLS, Controls, MSOA FE, MSOA FE +
-#          Controls, LSOA FE, and LSOA FE + Controls.
+#          Controls, LSOA FE, and LSOA FE + Controls. For each coefficient
+#          table, a second table reports t-tests that the upstream and
+#          downstream coefficients are equal.
 #
 #          The analysis is run for every radius in RADII (see Configuration);
 #          each radius writes its own radius-suffixed tables.
@@ -26,7 +28,9 @@
 #
 # Outputs (one per radius in RADII):
 #   - output/tables/ud_full_count_weighted_<RAD>m.tex
+#   - output/tables/ud_full_count_weighted_<RAD>m_ttest.tex
 #   - output/tables/ud_full_hrs_weighted_<RAD>m.tex
+#   - output/tables/ud_full_hrs_weighted_<RAD>m_ttest.tex
 #
 # ==============================================================================
 
@@ -53,7 +57,8 @@ required_packages <- c(
   "janitor",
   "modelsummary",
   "sandwich",
-  "fixest"
+  "fixest",
+  "marginaleffects"
 )
 
 install_if_missing <- function(packages) {
@@ -136,11 +141,17 @@ ud_rentals_raw <- import(
   here::here("upstream_downstream", "output", "spill_rental_signed.csv")
 )
 
-# Goodness of fit map
+# Goodness of fit map (radius-independent)
 gof_map <- tibble::tribble(
   ~raw           , ~clean          , ~fmt ,
   "nobs"         , "Observations"  ,    0 ,
   "adj.r.squared", "Adj. R-squared",    3
+)
+
+# Goodness of fit map for t-test tables (radius-independent)
+gof_map_ttest <- tibble::tribble(
+  ~raw   , ~clean         , ~fmt ,
+  "nobs" , "Observations" ,    0
 )
 
 
@@ -533,6 +544,89 @@ run_for_radius <- function(RAD) {
 
 
   # ============================================================================
+  # Export Tables: t-test, Spill Count Weekly Average
+  # ============================================================================
+  cat("Exporting spill count t-test table...\n")
+
+  # Null hypothesis: equal upstream and downstream coefficients
+  null_hypothesis <- "upstream_count_exposure - downstream_count_exposure = 0"
+
+  # Combined t-tests for joint table
+  panels <- list(
+    "House Sales" = list(
+      "(1)" = marginaleffects::hypotheses(model_sales_count_1, hypothesis = null_hypothesis),
+      "(2)" = marginaleffects::hypotheses(model_sales_count_1b, hypothesis = null_hypothesis),
+      "(3)" = marginaleffects::hypotheses(model_sales_count_2b, hypothesis = null_hypothesis),
+      "(4)" = marginaleffects::hypotheses(model_sales_count_3b, hypothesis = null_hypothesis),
+      "(5)" = marginaleffects::hypotheses(model_sales_count_2, hypothesis = null_hypothesis),
+      "(6)" = marginaleffects::hypotheses(model_sales_count_3, hypothesis = null_hypothesis)
+    ),
+    "House Rentals" = list(
+      "(7)" = marginaleffects::hypotheses(model_rentals_count_1, hypothesis = null_hypothesis),
+      "(8)" = marginaleffects::hypotheses(model_rentals_count_1b, hypothesis = null_hypothesis),
+      "(9)" = marginaleffects::hypotheses(model_rentals_count_2b, hypothesis = null_hypothesis),
+      "(10)" = marginaleffects::hypotheses(model_rentals_count_3b, hypothesis = null_hypothesis),
+      "(11)" = marginaleffects::hypotheses(model_rentals_count_2, hypothesis = null_hypothesis),
+      "(12)" = marginaleffects::hypotheses(model_rentals_count_3, hypothesis = null_hypothesis)
+    )
+  )
+
+  # p-values, with those below 0.001 shown as <0.001
+  p_values <- sapply(unlist(panels, recursive = FALSE), function(test) test$p.value)
+  p_cells <- ifelse(
+    p_values < 0.001,
+    "$<$\\num{0.001}",
+    paste0("\\num{", fmt_table(p_values), "}")
+  )
+
+  # Coefficient labels
+  coef_labels <- c(
+    "upstream_count_exposure-downstream_count_exposure=0" = "Upstream $-$ downstream"
+  )
+
+  # Add rows for p-values, fixed effects and controls
+  add_rows <- tibble::tribble(
+    ~term                                , ~`(1)`     , ~`(2)`     , ~`(3)`     , ~`(4)`     , ~`(5)`     , ~`(6)`     , ~`(7)`     , ~`(8)`     , ~`(9)`     , ~`(10)`     , ~`(11)`     , ~`(12)`    ,
+    "$p$-value, upstream $=$ downstream" , p_cells[1] , p_cells[2] , p_cells[3] , p_cells[4] , p_cells[5] , p_cells[6] , p_cells[7] , p_cells[8] , p_cells[9] , p_cells[10] , p_cells[11] , p_cells[12],
+    "Property controls"                  , "No"       , "Yes"      , "No"       , "Yes"      , "No"       , "Yes"      , "No"       , "Yes"      , "No"       , "Yes"       , "No"        , "Yes"      ,
+    "Location FE"                        , "No"       , "No"       , "MSOA"     , "MSOA"     , "LSOA"     , "LSOA"     , "No"       , "No"       , "MSOA"     , "MSOA"      , "LSOA"      , "LSOA"
+  )
+  attr(add_rows, "position") <- c(3, 4, 5)
+
+  # Notes
+  custom_notes <- paste0(
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table tests whether spills summed over upstream overflows and over downstream overflows have equal effects on property values, for each specification of the corresponding coefficient table (radius ", RAD, "m), with the same sample, controls and fixed effects. ", na_note, "Spill exposure is the average number of spill events per week (12/24 count) recorded at each overflow from January 2021 to the transaction date, weighted by the inverse of its along-river distance to the property in meters and summed separately over upstream and downstream overflows. Upstream $-$ downstream is the difference between the two spill coefficients, both estimated in the same regression; its standard error uses the full variance matrix, including the covariance between the two coefficients. The $p$-value is from a two-sided t-test that the two coefficients are equal. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  )
+
+  # Export table
+  table_latex <- modelsummary::modelsummary(
+    panels,
+    shape = "cbind",
+    output = "latex",
+    estimate = "{estimate}{stars}",
+    statistic = "({std.error})",
+    stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+    fmt = fmt_table,
+    coef_map = coef_labels,
+    gof_map = gof_map_ttest,
+    add_rows = add_rows,
+    notes = " ",
+    escape = FALSE,
+    title = "t-test of Equal Upstream and Downstream Effects of Sewage Spills (Weighted Count) on Property Values"
+  )
+
+  table_latex <- fit_tblr_latex(
+    table_latex,
+    label = paste0("tbl:ud-full-count-weighted-", RAD, "m-ttest"),
+    notes = custom_notes
+  )
+
+  output_path <- file.path(output_dir, paste0("ud_full_count_weighted_", RAD, "m_ttest.tex"))
+  writeLines(table_latex, output_path)
+  record_export(output_path)
+
+
+  # ============================================================================
   # Export Tables: Spill Hours Weekly Average
   # ============================================================================
   cat("Exporting spill hours table...\n")
@@ -602,6 +696,89 @@ run_for_radius <- function(RAD) {
   )
 
   output_path <- file.path(output_dir, paste0("ud_full_hrs_weighted_", RAD, "m.tex"))
+  writeLines(table_latex, output_path)
+  record_export(output_path)
+
+
+  # ============================================================================
+  # Export Tables: t-test, Spill Hours Weekly Average
+  # ============================================================================
+  cat("Exporting spill hours t-test table...\n")
+
+  # Null hypothesis: equal upstream and downstream coefficients
+  null_hypothesis <- "upstream_hrs_exposure - downstream_hrs_exposure = 0"
+
+  # Combined t-tests for joint table
+  panels <- list(
+    "House Sales" = list(
+      "(1)" = marginaleffects::hypotheses(model_sales_hrs_1, hypothesis = null_hypothesis),
+      "(2)" = marginaleffects::hypotheses(model_sales_hrs_1b, hypothesis = null_hypothesis),
+      "(3)" = marginaleffects::hypotheses(model_sales_hrs_2b, hypothesis = null_hypothesis),
+      "(4)" = marginaleffects::hypotheses(model_sales_hrs_3b, hypothesis = null_hypothesis),
+      "(5)" = marginaleffects::hypotheses(model_sales_hrs_2, hypothesis = null_hypothesis),
+      "(6)" = marginaleffects::hypotheses(model_sales_hrs_3, hypothesis = null_hypothesis)
+    ),
+    "House Rentals" = list(
+      "(7)" = marginaleffects::hypotheses(model_rentals_hrs_1, hypothesis = null_hypothesis),
+      "(8)" = marginaleffects::hypotheses(model_rentals_hrs_1b, hypothesis = null_hypothesis),
+      "(9)" = marginaleffects::hypotheses(model_rentals_hrs_2b, hypothesis = null_hypothesis),
+      "(10)" = marginaleffects::hypotheses(model_rentals_hrs_3b, hypothesis = null_hypothesis),
+      "(11)" = marginaleffects::hypotheses(model_rentals_hrs_2, hypothesis = null_hypothesis),
+      "(12)" = marginaleffects::hypotheses(model_rentals_hrs_3, hypothesis = null_hypothesis)
+    )
+  )
+
+  # p-values, with those below 0.001 shown as <0.001
+  p_values <- sapply(unlist(panels, recursive = FALSE), function(test) test$p.value)
+  p_cells <- ifelse(
+    p_values < 0.001,
+    "$<$\\num{0.001}",
+    paste0("\\num{", fmt_table(p_values), "}")
+  )
+
+  # Coefficient labels
+  coef_labels <- c(
+    "upstream_hrs_exposure-downstream_hrs_exposure=0" = "Upstream $-$ downstream"
+  )
+
+  # Add rows for p-values, fixed effects and controls
+  add_rows <- tibble::tribble(
+    ~term                                , ~`(1)`     , ~`(2)`     , ~`(3)`     , ~`(4)`     , ~`(5)`     , ~`(6)`     , ~`(7)`     , ~`(8)`     , ~`(9)`     , ~`(10)`     , ~`(11)`     , ~`(12)`    ,
+    "$p$-value, upstream $=$ downstream" , p_cells[1] , p_cells[2] , p_cells[3] , p_cells[4] , p_cells[5] , p_cells[6] , p_cells[7] , p_cells[8] , p_cells[9] , p_cells[10] , p_cells[11] , p_cells[12],
+    "Property controls"                  , "No"       , "Yes"      , "No"       , "Yes"      , "No"       , "Yes"      , "No"       , "Yes"      , "No"       , "Yes"       , "No"        , "Yes"      ,
+    "Location FE"                        , "No"       , "No"       , "MSOA"     , "MSOA"     , "LSOA"     , "LSOA"     , "No"       , "No"       , "MSOA"     , "MSOA"      , "LSOA"      , "LSOA"
+  )
+  attr(add_rows, "position") <- c(3, 4, 5)
+
+  # Notes
+  custom_notes <- paste0(
+    "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table tests whether spills summed over upstream overflows and over downstream overflows have equal effects on property values, for each specification of the corresponding coefficient table (radius ", RAD, "m), with the same sample, controls and fixed effects. ", na_note, "Spill exposure is the average total number of spill hours per week recorded at each overflow from January 2021 to the transaction date, weighted by the inverse of its along-river distance to the property in meters and summed separately over upstream and downstream overflows. Upstream $-$ downstream is the difference between the two spill coefficients, both estimated in the same regression; its standard error uses the full variance matrix, including the covariance between the two coefficients. The $p$-value is from a two-sided t-test that the two coefficients are equal. Heteroskedasticity-robust standard errors are reported in parentheses. *** p<0.01, ** p<0.05, * p<0.1.}},"
+  )
+
+  # Export table
+  table_latex <- modelsummary::modelsummary(
+    panels,
+    shape = "cbind",
+    output = "latex",
+    estimate = "{estimate}{stars}",
+    statistic = "({std.error})",
+    stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+    fmt = fmt_table,
+    coef_map = coef_labels,
+    gof_map = gof_map_ttest,
+    add_rows = add_rows,
+    notes = " ",
+    escape = FALSE,
+    title = "t-test of Equal Upstream and Downstream Effects of Sewage Spills (Weighted Hours) on Property Values"
+  )
+
+  table_latex <- fit_tblr_latex(
+    table_latex,
+    label = paste0("tbl:ud-full-hrs-weighted-", RAD, "m-ttest"),
+    notes = custom_notes
+  )
+
+  output_path <- file.path(output_dir, paste0("ud_full_hrs_weighted_", RAD, "m_ttest.tex"))
   writeLines(table_latex, output_path)
   record_export(output_path)
 }

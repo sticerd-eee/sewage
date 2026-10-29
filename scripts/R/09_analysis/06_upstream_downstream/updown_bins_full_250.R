@@ -8,7 +8,9 @@
 #          150-250m), with all eight terms in one regression. Panel A: Sales
 #          (log house prices), Panel B: Rentals (log rental prices). Each panel
 #          includes OLS, Controls, MSOA FE, MSOA FE + Controls, LSOA FE, and
-#          LSOA FE + Controls.
+#          LSOA FE + Controls. For each coefficient table, a second table
+#          reports t-tests that the upstream and downstream coefficients are
+#          equal in each bin, with a joint F-test across the four bins.
 #
 # Author: Alina Zeltikova
 # Date: 2026-10-06
@@ -23,7 +25,9 @@
 #
 # Outputs:
 #   - output/tables/ud_full_bins_count_250m.tex
+#   - output/tables/ud_full_bins_count_250m_ttest.tex
 #   - output/tables/ud_full_bins_hrs_250m.tex
+#   - output/tables/ud_full_bins_hrs_250m_ttest.tex
 #
 # ==============================================================================
 
@@ -51,7 +55,8 @@ required_packages <- c(
   "janitor",
   "modelsummary",
   "sandwich",
-  "fixest"
+  "fixest",
+  "marginaleffects"
 )
 
 install_if_missing <- function(packages) {
@@ -140,13 +145,6 @@ ud_sales_raw <- import(
 )
 ud_rentals_raw <- import(
   here::here("upstream_downstream", "output", "spill_rental_signed.csv")
-)
-
-# Goodness of fit map
-gof_map <- tibble::tribble(
-  ~raw           , ~clean          , ~fmt ,
-  "nobs"         , "Observations"  ,    0 ,
-  "adj.r.squared", "Adj. R-squared",    3
 )
 
 
@@ -520,6 +518,13 @@ coef_labels <- c(
   "down_count_150_250" = "\\quad Downstream 150--250m"
 )
 
+# Goodness of fit map
+gof_map <- tibble::tribble(
+  ~raw           , ~clean          , ~fmt ,
+  "nobs"         , "Observations"  ,    0 ,
+  "adj.r.squared", "Adj. R-squared",    3
+)
+
 # Combined models for joint table
 panels <- list(
   "House Sales" = list(
@@ -579,6 +584,107 @@ table_latex <- fit_tblr_latex(
 table_latex <- make_longtblr(table_latex)
 
 output_path <- file.path(output_dir, paste0("ud_full_bins_count_", RAD, "m.tex"))
+writeLines(table_latex, output_path)
+record_export(output_path)
+
+
+# ==============================================================================
+# Export Tables: t-test, Spill Count Weekly Average
+# ==============================================================================
+cat("Exporting spill count t-test table...\n")
+
+# Null hypotheses: equal upstream and downstream coefficients in each bin
+null_hypotheses <- c(
+  "up_count_0_50 - down_count_0_50 = 0",
+  "up_count_50_100 - down_count_50_100 = 0",
+  "up_count_100_150 - down_count_100_150 = 0",
+  "up_count_150_250 - down_count_150_250 = 0"
+)
+
+# Combined t-tests for joint table
+panels <- list(
+  "House Sales" = list(
+    "(1)" = marginaleffects::hypotheses(model_sales_count_1, hypothesis = null_hypotheses),
+    "(2)" = marginaleffects::hypotheses(model_sales_count_1b, hypothesis = null_hypotheses),
+    "(3)" = marginaleffects::hypotheses(model_sales_count_2b, hypothesis = null_hypotheses),
+    "(4)" = marginaleffects::hypotheses(model_sales_count_3b, hypothesis = null_hypotheses),
+    "(5)" = marginaleffects::hypotheses(model_sales_count_2, hypothesis = null_hypotheses),
+    "(6)" = marginaleffects::hypotheses(model_sales_count_3, hypothesis = null_hypotheses)
+  ),
+  "House Rentals" = list(
+    "(7)" = marginaleffects::hypotheses(model_rentals_count_1, hypothesis = null_hypotheses),
+    "(8)" = marginaleffects::hypotheses(model_rentals_count_1b, hypothesis = null_hypotheses),
+    "(9)" = marginaleffects::hypotheses(model_rentals_count_2b, hypothesis = null_hypotheses),
+    "(10)" = marginaleffects::hypotheses(model_rentals_count_3b, hypothesis = null_hypotheses),
+    "(11)" = marginaleffects::hypotheses(model_rentals_count_2, hypothesis = null_hypotheses),
+    "(12)" = marginaleffects::hypotheses(model_rentals_count_3, hypothesis = null_hypotheses)
+  )
+)
+
+# Joint F-test that all four differences are zero; below 0.001 shown as <0.001
+joint_p_values <- sapply(
+  unlist(panels, recursive = FALSE),
+  function(test) marginaleffects::hypotheses(test, joint = TRUE)$p.value
+)
+joint_p_cells <- ifelse(
+  joint_p_values < 0.001,
+  "$<$\\num{0.001}",
+  paste0("\\num{", fmt_table(joint_p_values), "}")
+)
+
+# Coefficient labels
+coef_labels <- c(
+  "up_count_0_50-down_count_0_50=0" = "\\quad 0--50m",
+  "up_count_50_100-down_count_50_100=0" = "\\quad 50--100m",
+  "up_count_100_150-down_count_100_150=0" = "\\quad 100--150m",
+  "up_count_150_250-down_count_150_250=0" = "\\quad 150--250m"
+)
+
+# Goodness of fit map for t-test tables
+gof_map_ttest <- tibble::tribble(
+  ~raw   , ~clean         , ~fmt ,
+  "nobs" , "Observations" ,    0
+)
+
+# Add rows for the joint test, fixed effects and controls
+add_rows <- tibble::tribble(
+  ~term                                             , ~`(1)`           , ~`(2)`           , ~`(3)`           , ~`(4)`           , ~`(5)`           , ~`(6)`           , ~`(7)`           , ~`(8)`           , ~`(9)`           , ~`(10)`           , ~`(11)`           , ~`(12)`          ,
+  "Upstream $-$ downstream, spills per week (avg.)" , ""               , ""               , ""               , ""               , ""               , ""               , ""               , ""               , ""               , ""                , ""                , ""               ,
+  "Joint test, all four bins ($p$-value)"           , joint_p_cells[1] , joint_p_cells[2] , joint_p_cells[3] , joint_p_cells[4] , joint_p_cells[5] , joint_p_cells[6] , joint_p_cells[7] , joint_p_cells[8] , joint_p_cells[9] , joint_p_cells[10] , joint_p_cells[11] , joint_p_cells[12],
+  "Property controls"                               , "No"             , "Yes"            , "No"             , "Yes"            , "No"             , "Yes"            , "No"             , "Yes"            , "No"             , "Yes"             , "No"              , "Yes"            ,
+  "Location FE"                                     , "No"             , "No"             , "MSOA"           , "MSOA"           , "LSOA"           , "LSOA"           , "No"             , "No"             , "MSOA"           , "MSOA"            , "LSOA"            , "LSOA"
+)
+attr(add_rows, "position") <- c(1, 10, 11, 12)
+
+# Notes
+custom_notes <- paste0(
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table tests whether spills at upstream and at downstream overflows in the same along-river distance bin have equal effects on property values, for each specification of the corresponding coefficient table, with the same sample, controls and fixed effects. ", na_note, "Spill exposure is the average number of spill events per week (12/24 count) recorded across all overflows within ", RAD, "m from January 2021 to the transaction date, summed separately for upstream and downstream overflows within each along-river distance bin. Each row is the difference between the upstream and downstream coefficients for one bin, both estimated in the same regression; its standard error uses the full variance matrix, including the covariance between the two coefficients. Stars are from two-sided t-tests that the two coefficients are equal. The joint test is an F-test that all four differences are zero. ", spatial_se_note(), " *** p<0.01, ** p<0.05, * p<0.1.}},"
+)
+
+# Export table
+table_latex <- modelsummary::modelsummary(
+  panels,
+  shape = "cbind",
+  output = "latex",
+  estimate = "{estimate}{stars}",
+  statistic = "({std.error})",
+  stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+  fmt = fmt_table,
+  coef_map = coef_labels,
+  gof_map = gof_map_ttest,
+  add_rows = add_rows,
+  notes = " ",
+  escape = FALSE,
+  title = "t-test of Equal Upstream and Downstream Effects of Sewage Spills (Count) on Property Values by River Distance Bin"
+)
+
+table_latex <- fit_tblr_latex(
+  table_latex,
+  label = paste0("tbl:ud-full-bins-count-", RAD, "m-ttest"),
+  notes = custom_notes
+)
+
+output_path <- file.path(output_dir, paste0("ud_full_bins_count_", RAD, "m_ttest.tex"))
 writeLines(table_latex, output_path)
 record_export(output_path)
 
@@ -660,6 +766,101 @@ table_latex <- fit_tblr_latex(
 table_latex <- make_longtblr(table_latex)
 
 output_path <- file.path(output_dir, paste0("ud_full_bins_hrs_", RAD, "m.tex"))
+writeLines(table_latex, output_path)
+record_export(output_path)
+
+
+# ==============================================================================
+# Export Tables: t-test, Spill Hours Weekly Average
+# ==============================================================================
+cat("Exporting spill hours t-test table...\n")
+
+# Null hypotheses: equal upstream and downstream coefficients in each bin
+null_hypotheses <- c(
+  "up_hrs_0_50 - down_hrs_0_50 = 0",
+  "up_hrs_50_100 - down_hrs_50_100 = 0",
+  "up_hrs_100_150 - down_hrs_100_150 = 0",
+  "up_hrs_150_250 - down_hrs_150_250 = 0"
+)
+
+# Combined t-tests for joint table
+panels <- list(
+  "House Sales" = list(
+    "(1)" = marginaleffects::hypotheses(model_sales_hrs_1, hypothesis = null_hypotheses),
+    "(2)" = marginaleffects::hypotheses(model_sales_hrs_1b, hypothesis = null_hypotheses),
+    "(3)" = marginaleffects::hypotheses(model_sales_hrs_2b, hypothesis = null_hypotheses),
+    "(4)" = marginaleffects::hypotheses(model_sales_hrs_3b, hypothesis = null_hypotheses),
+    "(5)" = marginaleffects::hypotheses(model_sales_hrs_2, hypothesis = null_hypotheses),
+    "(6)" = marginaleffects::hypotheses(model_sales_hrs_3, hypothesis = null_hypotheses)
+  ),
+  "House Rentals" = list(
+    "(7)" = marginaleffects::hypotheses(model_rentals_hrs_1, hypothesis = null_hypotheses),
+    "(8)" = marginaleffects::hypotheses(model_rentals_hrs_1b, hypothesis = null_hypotheses),
+    "(9)" = marginaleffects::hypotheses(model_rentals_hrs_2b, hypothesis = null_hypotheses),
+    "(10)" = marginaleffects::hypotheses(model_rentals_hrs_3b, hypothesis = null_hypotheses),
+    "(11)" = marginaleffects::hypotheses(model_rentals_hrs_2, hypothesis = null_hypotheses),
+    "(12)" = marginaleffects::hypotheses(model_rentals_hrs_3, hypothesis = null_hypotheses)
+  )
+)
+
+# Joint F-test that all four differences are zero; below 0.001 shown as <0.001
+joint_p_values <- sapply(
+  unlist(panels, recursive = FALSE),
+  function(test) marginaleffects::hypotheses(test, joint = TRUE)$p.value
+)
+joint_p_cells <- ifelse(
+  joint_p_values < 0.001,
+  "$<$\\num{0.001}",
+  paste0("\\num{", fmt_table(joint_p_values), "}")
+)
+
+# Coefficient labels
+coef_labels <- c(
+  "up_hrs_0_50-down_hrs_0_50=0" = "\\quad 0--50m",
+  "up_hrs_50_100-down_hrs_50_100=0" = "\\quad 50--100m",
+  "up_hrs_100_150-down_hrs_100_150=0" = "\\quad 100--150m",
+  "up_hrs_150_250-down_hrs_150_250=0" = "\\quad 150--250m"
+)
+
+# Add rows for the joint test, fixed effects and controls
+add_rows <- tibble::tribble(
+  ~term                                                  , ~`(1)`           , ~`(2)`           , ~`(3)`           , ~`(4)`           , ~`(5)`           , ~`(6)`           , ~`(7)`           , ~`(8)`           , ~`(9)`           , ~`(10)`           , ~`(11)`           , ~`(12)`          ,
+  "Upstream $-$ downstream, spill hours per week (avg.)" , ""               , ""               , ""               , ""               , ""               , ""               , ""               , ""               , ""               , ""                , ""                , ""               ,
+  "Joint test, all four bins ($p$-value)"                , joint_p_cells[1] , joint_p_cells[2] , joint_p_cells[3] , joint_p_cells[4] , joint_p_cells[5] , joint_p_cells[6] , joint_p_cells[7] , joint_p_cells[8] , joint_p_cells[9] , joint_p_cells[10] , joint_p_cells[11] , joint_p_cells[12],
+  "Property controls"                                    , "No"             , "Yes"            , "No"             , "Yes"            , "No"             , "Yes"            , "No"             , "Yes"            , "No"             , "Yes"             , "No"              , "Yes"            ,
+  "Location FE"                                          , "No"             , "No"             , "MSOA"           , "MSOA"           , "LSOA"           , "LSOA"           , "No"             , "No"             , "MSOA"           , "MSOA"            , "LSOA"            , "LSOA"
+)
+attr(add_rows, "position") <- c(1, 10, 11, 12)
+
+# Notes
+custom_notes <- paste0(
+  "note{}={\\\\footnotesize{\\\\textbf{Notes:} This table tests whether spills at upstream and at downstream overflows in the same along-river distance bin have equal effects on property values, for each specification of the corresponding coefficient table, with the same sample, controls and fixed effects. ", na_note, "Spill exposure is the average total number of spill hours per week recorded across all overflows within ", RAD, "m from January 2021 to the transaction date, summed separately for upstream and downstream overflows within each along-river distance bin. Each row is the difference between the upstream and downstream coefficients for one bin, both estimated in the same regression; its standard error uses the full variance matrix, including the covariance between the two coefficients. Stars are from two-sided t-tests that the two coefficients are equal. The joint test is an F-test that all four differences are zero. ", spatial_se_note(), " *** p<0.01, ** p<0.05, * p<0.1.}},"
+)
+
+# Export table
+table_latex <- modelsummary::modelsummary(
+  panels,
+  shape = "cbind",
+  output = "latex",
+  estimate = "{estimate}{stars}",
+  statistic = "({std.error})",
+  stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+  fmt = fmt_table,
+  coef_map = coef_labels,
+  gof_map = gof_map_ttest,
+  add_rows = add_rows,
+  notes = " ",
+  escape = FALSE,
+  title = "t-test of Equal Upstream and Downstream Effects of Sewage Spills (Hours) on Property Values by River Distance Bin"
+)
+
+table_latex <- fit_tblr_latex(
+  table_latex,
+  label = paste0("tbl:ud-full-bins-hrs-", RAD, "m-ttest"),
+  notes = custom_notes
+)
+
+output_path <- file.path(output_dir, paste0("ud_full_bins_hrs_", RAD, "m_ttest.tex"))
 writeLines(table_latex, output_path)
 record_export(output_path)
 
