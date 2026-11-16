@@ -140,8 +140,8 @@ const DATA = {json.dumps(grid)};
 const LOCS = ["None", "LAD", "MSOA", "LSOA"];
 const TIMES = [
   ["None", "None"], ["Year", "Year"], ["Year-quarter", "Year-quarter"], ["Year-month", "Year-month"],
-  ["LAD x year", "District × year"], ["LAD x year-quarter", "District × year-quarter"], ["LAD x year-month", "District × year-month"],
-  ["MSOA x year-quarter", "MSOA × year-quarter"]
+  ["LAD x year", "District +<br>District × year"], ["LAD x year-quarter", "District +<br>District × year-quarter"], ["LAD x year-month", "District +<br>District × year-month"],
+  ["MSOA x year-quarter", "MSOA +<br>MSOA × year-quarter"]
 ];
 const SEP = new Set(["Year", "LAD x year"]);
 let se = "conley", ctl = true;
@@ -156,7 +156,9 @@ function render() {{
     for (const [t, label] of TIMES) {{
       h += `<tr${{SEP.has(t) ? ' class="sep"' : ""}}><th scope="row">${{label}}</th>`;
       for (const l of LOCS) {{
-        const r = find(panel, l, t);
+        // District x time already absorbs district FE, so the no-location-FE run is shown under District FE.
+        const lad = t.startsWith("LAD x");
+        const r = lad && l === "None" ? null : find(panel, lad && l === "LAD" ? "None" : l, t);
         if (!r) {{ h += `<td class="na">—</td>`; continue; }}
         const head = ctl && l === "LSOA" && t === "None" ? " head" : "";
         h += `<td class="k${{head}}" data-k="${{l}}|${{t}}" title="N = ${{r.n.toLocaleString("en-GB")}}">` +

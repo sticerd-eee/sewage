@@ -58,4 +58,6 @@ to display them.
   sample.
 - Conley standard errors use a 1km cutoff (`spatial_vcov()`). Robust standard
   errors are HC1. Location-by-time fixed effects that absorb the column's
-  location fixed effects are not estimated and show as empty cells.
+  location fixed effects are not estimated. District-by-time fixed effects
+  already absorb district fixed effects, so the page shows those runs under
+  District FE and leaves No location FE empty in those rows.
