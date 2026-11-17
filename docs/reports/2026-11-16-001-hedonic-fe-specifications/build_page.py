@@ -140,7 +140,10 @@ const DATA = {json.dumps(grid)};
 const LOCS = ["None", "LAD", "MSOA", "LSOA"];
 const TIMES = [
   ["None", "None"], ["Year", "Year"], ["Year-quarter", "Year-quarter"], ["Year-month", "Year-month"],
+  ["Year + calendar quarter", "Year +<br>calendar quarter"], ["Year + calendar month", "Year +<br>calendar month"],
   ["LAD x year", "District +<br>District × year"], ["LAD x year-quarter", "District +<br>District × year-quarter"], ["LAD x year-month", "District +<br>District × year-month"],
+  ["LAD x year + LAD x calendar quarter", "District +<br>District × year +<br>District × calendar quarter"],
+  ["LAD x year + LAD x calendar month", "District +<br>District × year +<br>District × calendar month"],
   ["MSOA x year-quarter", "MSOA +<br>MSOA × year-quarter"]
 ];
 const SEP = new Set(["Year", "LAD x year"]);

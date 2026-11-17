@@ -10,8 +10,8 @@ within 250m, from January 2021 to the transaction date.
 - `../2026-11-16-001-hedonic-fe-specifications.html` is the results page. It
   shows sales and rentals estimates for every combination of location fixed
   effects (none, district, MSOA, and LSOA) and time fixed effects (none, year,
-  year-quarter, year-month, district by each of these, and MSOA by
-  year-quarter). Buttons switch between four standard errors and toggle the
+  year-quarter, year-month, year plus calendar quarter, year plus calendar
+  month, district by each of these, and MSOA by year-quarter). Buttons switch between four standard errors and toggle the
   property characteristics. It is gitignored.
 - `../2026-11-16-001-hedonic-fe-specifications-qtr-fe-tables.pdf` has four
   pages. Page 1 is the February 2026 quarter fixed effects table, compiled
@@ -34,7 +34,7 @@ python3 docs/reports/2026-11-16-001-hedonic-fe-specifications/build_page.py
 python3 docs/reports/2026-11-16-001-hedonic-fe-specifications/build_tables_pdf.py
 ```
 
-The grid script runs 108 regressions and takes a few minutes. The page loads
+The grid script runs 164 regressions and takes a few minutes. The page loads
 KaTeX from a CDN to typeset the equations, so it needs a network connection
 to display them.
 
@@ -53,6 +53,8 @@ to display them.
 ## Definitions
 
 - District is the local authority district, taken from the LSOA name.
+- Calendar quarter and calendar month are the quarter (1 to 4) and month (1 to
+  12) of the year, which capture seasonality separately from the year.
 - The within-variation share is the variance of spill exposure after
   absorbing a cell's fixed effects, divided by its total variance in the same
   sample.

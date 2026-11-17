@@ -32,7 +32,8 @@ prep <- function(d) {
   mutate(d,
     lad = sub(" [0-9]{3}[A-Z]$", "", lsoa),
     year = 2021L + (qtr_id - 1L) %/% 4L,
-    yq = qtr_id, ym = month_id
+    yq = qtr_id, ym = month_id,
+    cq = (qtr_id - 1L) %% 4L + 1L, cm = (month_id - 1L) %% 12L + 1L
   )
 }
 ds <- ps |>
@@ -50,7 +51,10 @@ dr <- pr |>
 
 time_fe <- c(
   "None" = "", "Year" = "year", "Year-quarter" = "yq", "Year-month" = "ym",
+  "Year + calendar quarter" = "year + cq", "Year + calendar month" = "year + cm",
   "LAD x year" = "lad^year", "LAD x year-quarter" = "lad^yq", "LAD x year-month" = "lad^ym",
+  "LAD x year + LAD x calendar quarter" = "lad^year + lad^cq",
+  "LAD x year + LAD x calendar month" = "lad^year + lad^cm",
   "MSOA x year-quarter" = "msoa^yq"
 )
 loc_fe <- c("None" = "", "LAD" = "lad", "MSOA" = "msoa", "LSOA" = "lsoa")
